@@ -3,8 +3,8 @@ FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
 # Install system dependencies. Need to specify -y for poppler to get it to install
 RUN apt-get update \
     && apt-get install -y \
-        tesseract-ocr \
-        libtesseract-dev \
+        tesseract-ocr -y \
+        #libtesseract-dev -y \
         poppler-utils -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
