@@ -1,0 +1,11 @@
+*.csv
+*.pdf
+*.url
+*.jpg
+*.png
+*.ipynb
+examples/*
+processing/*
+output/*
+tools/__pycache__/*
+old_code/*

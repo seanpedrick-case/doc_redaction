@@ -1,0 +1,11 @@
+pdfminer.six==20231228
+pdf2image==1.17.0
+#img2pdf==0.5.1
+presidio_analyzer==2.2.351
+presidio_anonymizer==2.2.351
+presidio-image-redactor==0.0.52
+pikepdf==8.15.1
+pandas==2.2.2
+spacy==3.7.4
+en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.7.1/en_core_web_lg-3.7.1.tar.gz
+gradio==4.27.0
