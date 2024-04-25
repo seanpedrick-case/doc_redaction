@@ -1,6 +1,6 @@
 from tools.file_redaction import redact_text_pdf, redact_image_pdf
 from tools.helper_functions import get_file_path_end
-from tools.file_conversion import process_file, is_pdf
+from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
 from tools.aws_functions import load_data_from_aws
 
 from typing import List
@@ -18,9 +18,6 @@ def choose_and_run_redactor(file_path:str, language:str, chosen_redact_entities:
 
     tic = time.perf_counter()
 
-    if is_pdf(file_path) == False:
-        return "Please upload a PDF file.", None
-
     out_message = ''
     out_file_paths = []
 
@@ -34,7 +31,10 @@ def choose_and_run_redactor(file_path:str, language:str, chosen_redact_entities:
         return out_message, out_file_paths
 
     if in_redact_method == "Image analysis":
-        # Analyse image-based pdf
+        # Analyse and redact image-based pdf or image
+        if is_pdf_or_image(file_path) == False:
+            return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
+
         pdf_images = redact_image_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
         out_image_file_path = "output/" + file_path_without_ext + "_result_as_img.pdf"
         pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
@@ -43,6 +43,9 @@ def choose_and_run_redactor(file_path:str, language:str, chosen_redact_entities:
         out_message = "Image-based PDF successfully redacted and saved to file."
 
     elif in_redact_method == "Text analysis":
+        if is_pdf(file_path) == False:
+            return "Please upload a PDF file for text analysis.", None
+
         # Analyse text-based pdf
         pdf_text = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
         out_text_file_path = "output/" + file_path_without_ext + "_result_as_text.pdf"
@@ -87,9 +90,11 @@ with block:
     gr.Markdown(
     """
     # Document redaction
-    Take an image-based or text-based PDF document and redact any personal information. 'Image analysis' will convert PDF pages to image and the identify text via OCR methods before redaction. 'Text analysis' will analyse only selectable text that exists in the original PDF before redaction. Choose 'Image analysis' if you are not sure of the type of PDF document you are working with.
+    Take an image-based PDF or image file, or text-based PDF document and redact any personal information. 'Image analysis' will convert PDF pages to image and the identify text via OCR methods before redaction, and also works with JPG or PNG files. 'Text analysis' will analyse only selectable text that exists in the original PDF before redaction. Choose 'Image analysis' if you are not sure of the type of PDF document you are working with.
 
     WARNING: This is a beta product. It is not 100% accurate, and it will miss some personal information. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed.
+
+    Other redaction entities are possible to include in this app easily, especially country-specific entities. If you want to use these, clone the repo locally and add entity names from [this link](https://microsoft.github.io/presidio/supported_entities/) to the 'full_entity_list' variable in app.py.
     """)
 
     with gr.Tab("Redact document"):
