@@ -108,7 +108,7 @@ with block:
             output_file = gr.File(label="Output file")
 
     with gr.Tab(label="Advanced options"):
-        with gr.Accordion(label = "AWS data access", open = False):
+        with gr.Accordion(label = "AWS data access", open = True):
                 aws_password_box = gr.Textbox(label="Password for AWS data access (ask the Data team if you don't have this)")
                 with gr.Row():
                     in_aws_file = gr.Dropdown(label="Choose keyword file to load from AWS (only valid for API Gateway app)", choices=["None", "Lambeth borough plan"])
