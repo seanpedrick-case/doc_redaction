@@ -8,7 +8,7 @@ import pandas as pd
 import gradio as gr
 import time
 
-file_path = "examples/Lambeth_2030-Our_Future_Our_Lambeth_foreword.pdf" #"examples/skills-based-cv-example.pdf" # "examples/graduate-job-example-cover-letter.pdf" #
+#file_path = "examples/Lambeth_2030-Our_Future_Our_Lambeth_foreword.pdf" #"examples/skills-based-cv-example.pdf" # "examples/graduate-job-example-cover-letter.pdf" #
 
 chosen_redact_entities = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE"] 
 full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE", 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS']
@@ -75,24 +75,18 @@ def choose_and_run_redactor(file_path:str, language:str, chosen_redact_entities:
 
     return out_message, out_file_paths
 
-
 # Create the gradio interface
 
 block = gr.Blocks(theme = gr.themes.Base())
 
 with block:
 
-    data_state = gr.State(pd.DataFrame())
-    ref_data_state = gr.State(pd.DataFrame())
-    results_data_state = gr.State(pd.DataFrame())
-    ref_results_data_state =gr.State(pd.DataFrame())
-
     gr.Markdown(
     """
     # Document redaction
     Take an image-based PDF or image file, or text-based PDF document and redact any personal information. 'Image analysis' will convert PDF pages to image and the identify text via OCR methods before redaction, and also works with JPG or PNG files. 'Text analysis' will analyse only selectable text that exists in the original PDF before redaction. Choose 'Image analysis' if you are not sure of the type of PDF document you are working with.
 
-    WARNING: This is a beta product. It is not 100% accurate, and it will miss some personal information. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed.
+    WARNING: This is a beta product. It is not 100% accurate, and it will miss some personal information. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed. Also, the output from the Text analysis ending 'as_text.pdf' is an annotated pdf, which is a layer on top of the text that can be removed. So the text has not truly been redacted. Use the '...as_img.pdf' versions instead for safer redaction.
 
     Other redaction entities are possible to include in this app easily, especially country-specific entities. If you want to use these, clone the repo locally and add entity names from [this link](https://microsoft.github.io/presidio/supported_entities/) to the 'full_entity_list' variable in app.py.
     """)
@@ -120,16 +114,10 @@ with block:
                     load_aws_data_button = gr.Button(value="Load keyword data from AWS", variant="secondary")
                     
                 aws_log_box = gr.Textbox(label="AWS data load status")
-
     
     ### Loading AWS data ###
     load_aws_data_button.click(fn=load_data_from_aws, inputs=[in_aws_file, aws_password_box], outputs=[in_file, aws_log_box])
     
-
-    # Updates to components
-    #in_file.change(fn = initial_data_load, inputs=[in_file], outputs=[output_summary, in_redact_entities, in_existing, data_state, results_data_state])
-    #in_ref.change(fn = initial_data_load, inputs=[in_ref], outputs=[output_summary, in_refcol, in_joincol, ref_data_state, ref_results_data_state])      
-
     redact_btn.click(fn = choose_and_run_redactor, inputs=[in_file, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list],
                     outputs=[output_summary, output_file], api_name="redact")
     
