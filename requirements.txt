@@ -8,7 +8,7 @@ pikepdf==8.15.1
 pandas==2.2.2
 spacy # Not specified as latest versions create a conflict with latest versions of gradio
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.7.1/en_core_web_lg-3.7.1.tar.gz
-gradio==4.31.0
+gradio # Not specified as latest versions create a conflict with latest versions of spacy
 boto3==1.34.103
 # Following are not currently necessary for the app, may be added for improved pdf parsing in future
 #unstructured
