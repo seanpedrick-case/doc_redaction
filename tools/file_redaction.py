@@ -15,7 +15,9 @@ def redact_image_pdf(file_path:str, language:str, chosen_redact_entities:List[st
     take an path for an image of a document, then run this image through the Presidio ImageAnalyzer to get a redacted page back
     '''
 
-    progress(0, desc="Converting pages to image")
+    out_message = "Converting pages to image"
+    print(out_message)
+    progress(0, desc=out_message)
 
     image_paths = process_file(file_path)
 
@@ -25,9 +27,13 @@ def redact_image_pdf(file_path:str, language:str, chosen_redact_entities:List[st
     images = []
     number_of_pages = len(image_paths)
 
-    progress(0.1, desc="Redacting pages")
+    out_message = "Redacting pages"
+    print(out_message)
+    progress(0.1, desc=out_message)
 
     for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
+
+        print("Redacting page ", str(i + 1))
 
         # Get the image to redact using PIL lib (pillow)
         image = image_paths[i] #Image.open(image_paths[i])

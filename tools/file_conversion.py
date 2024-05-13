@@ -38,12 +38,15 @@ def convert_pdf_to_images(pdf_path, progress=Progress(track_tqdm=True)):
 
     # Get the number of pages in the PDF
     page_count = pdfinfo_from_path(pdf_path)['Pages']
+    print("Number of pages in PDF: ", str(page_count))
 
     images = []
 
     # Open the PDF file
     for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
         
+        print("Current page: ", str(page_num))
+
         # Convert one page to image
         image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1)
         
