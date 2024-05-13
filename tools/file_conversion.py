@@ -1,6 +1,7 @@
-from pdf2image import convert_from_path
+from pdf2image import convert_from_path, pdfinfo_from_path
 from PIL import Image
 import os
+from gradio import Progress
 
 def is_pdf_or_image(filename):
     """
@@ -33,10 +34,29 @@ def is_pdf(filename):
 # %%
 ## Convert pdf to image if necessary
 
-def convert_pdf_to_images(pdf_path):   
+def convert_pdf_to_images(pdf_path, progress=Progress(track_tqdm=True)):
 
-    # Convert PDF to a list of images
-    images = convert_from_path(pdf_path)
+    # Get the number of pages in the PDF
+    page_count = pdfinfo_from_path(pdf_path)['Pages']
+
+    images = []
+
+    # Open the PDF file
+    for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
+        
+        # Convert one page to image
+        image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1)
+        
+        # If no images are returned, break the loop
+        if not image:
+            break
+
+        # # Convert PDF to a list of images
+        # images = convert_from_path(pdf_path)
+
+        # images = []
+
+        images.extend(image)
 
     # Save each image as a separate file - deprecated
     #image_paths = []

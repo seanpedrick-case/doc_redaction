@@ -79,7 +79,7 @@ def redact_image_pdf(file_path:str, language:str, chosen_redact_entities:List[st
 
     return images
 
-def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress()):
+def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
     '''
     Redact chosen entities from a pdf that is made up of multiple pages that are not images.
     '''

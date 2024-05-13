@@ -30,7 +30,7 @@ RUN mkdir -p /home/user/app/output && chown -R user:user /home/user/app/output
 # Switch to the "user" user
 USER user
 
-# Set home to the user's home directory
+# Set environmental variables
 ENV HOME=/home/user \
 	PATH=/home/user/.local/bin:$PATH \
     PYTHONPATH=$HOME/app \
@@ -42,6 +42,8 @@ ENV HOME=/home/user \
 	GRADIO_THEME=huggingface \
 	#GRADIO_TEMP_DIR=$HOME/tmp \
 	#GRADIO_ROOT_PATH=/address-match \
+	# gunicorn keep alive timeout limit extended for GUI-based work - https://github.com/tiangolo/uvicorn-gunicorn-fastapi-docker?tab=readme-ov-file#timeout
+	KEEP_ALIVE=60 \
 	SYSTEM=spaces
  
 # Set the working directory to the user's home directory
