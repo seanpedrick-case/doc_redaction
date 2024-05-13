@@ -14,9 +14,9 @@ WORKDIR /src
 
 COPY requirements.txt .
 
-RUN pip install -r requirements.txt --no_cache_dir
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install gradio==4.31.0 --no_cache_dir
+RUN pip install --no-cache-dir gradio==4.31.0 
 
 # Set up a new user named "user" with user ID 1000
 RUN useradd -m -u 1000 user
