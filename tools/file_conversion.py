@@ -1,7 +1,9 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
+from tools.helper_functions import get_file_path_end
 from PIL import Image
 import os
 from gradio import Progress
+from typing import List
 
 def is_pdf_or_image(filename):
     """
@@ -13,7 +15,7 @@ def is_pdf_or_image(filename):
     Returns:
         bool: True if the file name ends with ".pdf", ".jpg", or ".png", False otherwise.
     """
-    if filename.lower().endswith(".pdf") or filename.lower().endswith(".jpg") or filename.lower().endswith(".png"):
+    if filename.lower().endswith(".pdf") or filename.lower().endswith(".jpg") or filename.lower().endswith(".jpeg") or filename.lower().endswith(".png"):
         output = True
     else:
         output = False
@@ -34,7 +36,7 @@ def is_pdf(filename):
 # %%
 ## Convert pdf to image if necessary
 
-def convert_pdf_to_images(pdf_path, progress=Progress(track_tqdm=True)):
+def convert_pdf_to_images(pdf_path:str, progress=Progress(track_tqdm=True)):
 
     # Get the number of pages in the PDF
     page_count = pdfinfo_from_path(pdf_path)['Pages']
@@ -54,25 +56,14 @@ def convert_pdf_to_images(pdf_path, progress=Progress(track_tqdm=True)):
         if not image:
             break
 
-        # # Convert PDF to a list of images
-        # images = convert_from_path(pdf_path)
-
-        # images = []
-
         images.extend(image)
-
-    # Save each image as a separate file - deprecated
-    #image_paths = []
-    # for i, image in enumerate(images):
-    #     page_path = f"processing/page_{i+1}.png"
-    #     image.save(page_path, "PNG")
-    #     image_paths.append(page_path)
 
     print("PDF has been converted to images.")
 
     return images
 
-# %%
+
+# %% Function to take in a file path, decide if it is an image or pdf, then process appropriately.
 def process_file(file_path):
     # Get the file extension
     file_extension = os.path.splitext(file_path)[1].lower()
@@ -94,4 +85,56 @@ def process_file(file_path):
         out_path = ['']
 
     return out_path
+
+def prepare_image_or_text_pdf(file_path:str, language:str, in_redact_method:str, in_allow_list:List[List[str]]=None, progress=Progress(track_tqdm=True)):
+
+    out_message = ''
+    out_file_paths = []
+
+    in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
+
+    if file_path:
+        file_path_without_ext = get_file_path_end(file_path)
+    else:
+        out_message = "No file selected"
+        print(out_message)
+        return out_message, out_file_paths
+
+    if in_redact_method == "Image analysis":
+        # Analyse and redact image-based pdf or image
+        if is_pdf_or_image(file_path) == False:
+            return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
+        
+        out_file_path = process_file(file_path)
+
+    elif in_redact_method == "Text analysis":
+        if is_pdf(file_path) == False:
+            return "Please upload a PDF file for text analysis.", None
+        
+        out_file_path = file_path
+    
+    return out_message, out_file_path
+
+
+def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
+    file_path_without_ext = get_file_path_end(in_file_path)
+
+    out_file_paths = []
+
+    # Convert annotated text pdf back to image to give genuine redactions
+    print("Creating image version of results")
+    pdf_text_image_paths = process_file(out_text_file_path)
+    out_text_image_file_path = "output/" + file_path_without_ext + "_result_as_text_back_to_img.pdf"
+    pdf_text_image_paths[0].save(out_text_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_text_image_paths[1:])
+
+    out_file_paths.append(out_text_image_file_path)
+
+    out_message = "Image-based PDF successfully redacted and saved to text-based annotated file, and image-based file."
+
+    return out_message, out_file_paths
+
+        
+
+        
+    
 

@@ -6,10 +6,10 @@ import os
 
 PandasDataFrame = Type[pd.DataFrame]
 
-bucket_name = 'doc-redaction-data'
+bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
 
 try:
-    session = boto3.Session(profile_name="default")
+    session = boto3.Session() # profile_name="default"
 except Exception as e:
     print(e)
 
@@ -24,7 +24,7 @@ except Exception as e:
 
 
 def get_assumed_role_info():
-    sts = boto3.client('sts')
+    sts = boto3.client('sts', region_name='us-west-2')
     response = sts.get_caller_identity()
 
     # Extract ARN of the assumed role

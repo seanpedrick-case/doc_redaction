@@ -1,12 +1,9 @@
-from tools.file_redaction import redact_text_pdf, redact_image_pdf
-from tools.helper_functions import get_file_path_end
-from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
+from tools.file_redaction import choose_and_run_redactor
+from tools.file_conversion import prepare_image_or_text_pdf, convert_text_pdf_to_img_pdf
 from tools.aws_functions import load_data_from_aws
-
 from typing import List
 import pandas as pd
 import gradio as gr
-import time
 
 #file_path = "examples/Lambeth_2030-Our_Future_Our_Lambeth_foreword.pdf" #"examples/skills-based-cv-example.pdf" # "examples/graduate-job-example-cover-letter.pdf" #
 
@@ -14,72 +11,15 @@ chosen_redact_entities = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "
 full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE", 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS']
 language = 'en'
 
-def choose_and_run_redactor(file_path:str, language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, progress=gr.Progress(track_tqdm=True)):
-
-    tic = time.perf_counter()
-
-    out_message = ''
-    out_file_paths = []
-
-    in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
-
-    if file_path:
-        file_path_without_ext = get_file_path_end(file_path)
-    else:
-        out_message = "No file selected"
-        print(out_message)
-        return out_message, out_file_paths
-
-    if in_redact_method == "Image analysis":
-        # Analyse and redact image-based pdf or image
-        if is_pdf_or_image(file_path) == False:
-            return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
-
-        pdf_images = redact_image_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
-        out_image_file_path = "output/" + file_path_without_ext + "_result_as_img.pdf"
-        pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
-
-        out_file_paths.append(out_image_file_path)
-        out_message = "Image-based PDF successfully redacted and saved to file."
-
-    elif in_redact_method == "Text analysis":
-        if is_pdf(file_path) == False:
-            return "Please upload a PDF file for text analysis.", None
-
-        # Analyse text-based pdf
-        pdf_text = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
-        out_text_file_path = "output/" + file_path_without_ext + "_result_as_text.pdf"
-        pdf_text.save(out_text_file_path)
-
-        out_file_paths.append(out_text_file_path)
-
-        # Convert annotated text pdf back to image to give genuine redactions
-        pdf_text_image_paths = process_file(out_text_file_path)
-        out_text_image_file_path = "output/" + file_path_without_ext + "_result_as_text_back_to_img.pdf"
-        pdf_text_image_paths[0].save(out_text_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_text_image_paths[1:])
-
-        out_file_paths.append(out_text_image_file_path)
-
-        out_message = "Image-based PDF successfully redacted and saved to text-based annotated file, and image-based file."
-
-    else:
-        out_message = "No redaction method selected"
-        print(out_message)
-        return out_message, out_file_paths
-    
-    toc = time.perf_counter()
-    out_time = f"Time taken: {toc - tic:0.1f} seconds."
-    print(out_time)
-
-    out_message = out_message + "\n\n" + out_time
-
-    return out_message, out_file_paths
 
 # Create the gradio interface
 
 block = gr.Blocks(theme = gr.themes.Base())
 
 with block:
+
+    prepared_pdf_state = gr.State([])
+    output_image_files_state = gr.State([])
 
     gr.Markdown(
     """
@@ -106,6 +46,9 @@ with block:
             output_summary = gr.Textbox(label="Output summary")
             output_file = gr.File(label="Output file")
 
+        with gr.Row():
+            convert_text_pdf_to_img_btn = gr.Button(value="Convert pdf to image-based pdf to apply redactions", variant="secondary")
+
     with gr.Tab(label="Advanced options"):
         with gr.Accordion(label = "AWS data access", open = True):
                 aws_password_box = gr.Textbox(label="Password for AWS data access (ask the Data team if you don't have this)")
@@ -118,7 +61,12 @@ with block:
     ### Loading AWS data ###
     load_aws_data_button.click(fn=load_data_from_aws, inputs=[in_aws_file, aws_password_box], outputs=[in_file, aws_log_box])
     
-    redact_btn.click(fn = choose_and_run_redactor, inputs=[in_file, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list],
+    redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list],
+                    outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list],
+                    outputs=[output_summary, output_file], api_name="redact")
+    
+    convert_text_pdf_to_img_btn.click(fn = convert_text_pdf_to_img_pdf, inputs=[in_file, output_file],
                     outputs=[output_summary, output_file], api_name="redact")
     
 # Simple run for HF spaces or local on your computer

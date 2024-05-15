@@ -7,8 +7,68 @@ from tools.file_conversion import process_file
 from pdfminer.layout import LTTextContainer, LTChar, LTTextLine, LTAnno
 from pikepdf import Pdf, Dictionary, Name
 from gradio import Progress
+import time
 
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
+from tools.helper_functions import get_file_path_end
+from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
+import gradio as gr
+
+def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, progress=gr.Progress(track_tqdm=True)):
+
+    tic = time.perf_counter()
+
+    out_message = ''
+    out_file_paths = []
+
+    in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
+
+    if file_path:
+         file_path_without_ext = get_file_path_end(file_path)
+    else:
+         out_message = "No file selected"
+         print(out_message)
+         return out_message, out_file_paths
+
+    if in_redact_method == "Image analysis":
+        # Analyse and redact image-based pdf or image
+        # if is_pdf_or_image(file_path) == False:
+        #     return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
+
+        pdf_images = redact_image_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
+        out_image_file_path = "output/" + file_path_without_ext + "_result_as_img.pdf"
+        pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
+
+        out_file_paths.append(out_image_file_path)
+        out_message = "Image-based PDF successfully redacted and saved to file."
+
+    elif in_redact_method == "Text analysis":
+        if is_pdf(file_path) == False:
+            return "Please upload a PDF file for text analysis.", None
+
+        # Analyse text-based pdf
+        pdf_text = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
+        out_text_file_path = "output/" + file_path_without_ext + "_result_as_text.pdf"
+        pdf_text.save(out_text_file_path)
+
+        out_file_paths.append(out_text_file_path)
+
+
+        
+
+    else:
+        out_message = "No redaction method selected"
+        print(out_message)
+        return out_message, out_file_paths
+    
+    toc = time.perf_counter()
+    out_time = f"Time taken: {toc - tic:0.1f} seconds."
+    print(out_time)
+
+    out_message = out_message + "\n\n" + out_time
+
+    return out_message, out_file_paths
+
 
 def redact_image_pdf(file_path:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
     '''
@@ -42,7 +102,6 @@ def redact_image_pdf(file_path:str, language:str, chosen_redact_entities:List[st
         image_analyser = ImageAnalyzerEngine(nlp_analyser)
         engine = ImageRedactorEngine(image_analyser)
 
-
         if language == 'en':
             ocr_lang = 'eng'
         else: ocr_lang = language
@@ -62,26 +121,6 @@ def redact_image_pdf(file_path:str, language:str, chosen_redact_entities:List[st
             )
         
         images.append(redacted_image)
-                
-        # multiple inputs (variant 2)
-        # with open("name.pdf","wb") as f:
-	    # f.write(img2pdf.convert(["test1.jpg", "test2.png"]))
-        
-        # # Create page from image
-        # pdf.add_blank_page(page_size=(redacted_image.width, redacted_image.height)) 
-        # page = pdf.pages[-1]
-        # page.add_image(redacted_image, 0, 0)
-
-        # %%
-        # Get descriptive output of results for checks - not necessary except for debugging
-        # bboxes = image_analyser.analyze(image)
-
-        # # %%
-        # check_df = pd.DataFrame(bboxes)[0].astype(str).str.split(",",expand=True).replace(".*: ", "", regex=True)
-
-        # check_df.columns = ["type", "start", "end", "score", "left", "top", "width", "height"]
-
-        # check_df.to_csv("check_df.csv")
 
     return images
 
