@@ -21,7 +21,8 @@ def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, 
     out_message = ''
     out_file_paths = []
 
-    in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
+    if in_allow_list:
+        in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
     if file_path:
          file_path_without_ext = get_file_path_end(file_path)
@@ -35,7 +36,7 @@ def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, 
         # if is_pdf_or_image(file_path) == False:
         #     return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
 
-        pdf_images = redact_image_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
+        pdf_images = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat)
         out_image_file_path = "output/" + file_path_without_ext + "_result_as_img.pdf"
         pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
 
@@ -53,9 +54,8 @@ def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, 
 
         out_file_paths.append(out_text_file_path)
 
-
+        out_message = "Text-based PDF successfully redacted and saved to file."
         
-
     else:
         out_message = "No redaction method selected"
         print(out_message)
@@ -67,19 +67,21 @@ def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, 
 
     out_message = out_message + "\n\n" + out_time
 
-    return out_message, out_file_paths
+    return out_message, out_file_paths, out_file_paths
 
 
-def redact_image_pdf(file_path:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
+def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
     '''
     take an path for an image of a document, then run this image through the Presidio ImageAnalyzer to get a redacted page back
     '''
 
-    out_message = "Converting pages to image"
-    print(out_message)
-    progress(0, desc=out_message)
+    if not image_paths:
 
-    image_paths = process_file(file_path)
+        out_message = "PDF does not exist as images. Converting pages to image"
+        print(out_message)
+        progress(0, desc=out_message)
+
+        image_paths = process_file(file_path)
 
     # Create a new PDF
     #pdf = pikepdf.new()
@@ -136,7 +138,10 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
 
     pdf = Pdf.open(filename)
 
-    for page_num, page in progress.tqdm(enumerate(pdf.pages), total=len(pdf.pages), unit="pages", desc="Redacting pages"):
+    page_num = 0
+
+    for page in progress.tqdm(pdf.pages, total=len(pdf.pages), unit="pages", desc="Redacting pages"):
+
 
         print("Page number is: ", page_num)
 
@@ -169,25 +174,6 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
                             if isinstance(line, LTTextLine)    # Check if the line is an instance of LTTextLine
                             for char in line]                   # Loop through each character in the line
                             #if isinstance(char, LTChar)]  # Check if the character is not an instance of LTAnno #isinstance(char, LTChar) or
-
-
-                    #print(characters)
-
-                    # Collect unique types
-                    # unique_types = set()
-
-                    # for line in text_container:
-                    #     if isinstance(line, LTTextLine):
-                    #         print("Line: ", line)
-                    #         for char in line:
-                    #             unique_types.add(type(char))
-                    #             if isinstance(char, LTAnno):
-                    #                 print(char)
-
-                    # # Print the unique types
-                    # print("Unique types in text_container:")
-                    # for t in unique_types:
-                    #     print(t)
                     
                     # If any results found
                     print(analyzer_results)
@@ -216,12 +202,14 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
                     CA=1, # Transparency
                     T=analyzed_bounding_box["result"].entity_type
                 )
-                annotations_on_page.append(annotation)
+                annotations_on_page.append(annotation)           
 
             annotations_all_pages.extend([annotations_on_page])
-   
+ 
             print("For page number: ", page_num, " there are ", len(annotations_all_pages[page_num]), " annotations")
             page.Annots = pdf.make_indirect(annotations_on_page)
+
+            page_num += 1
 
         # Extracting data from dictionaries
         # extracted_data = []

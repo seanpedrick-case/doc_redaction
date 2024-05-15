@@ -20,6 +20,7 @@ with block:
 
     prepared_pdf_state = gr.State([])
     output_image_files_state = gr.State([])
+    output_file_list_state = gr.State([])
 
     gr.Markdown(
     """
@@ -61,13 +62,13 @@ with block:
     ### Loading AWS data ###
     load_aws_data_button.click(fn=load_data_from_aws, inputs=[in_aws_file, aws_password_box], outputs=[in_file, aws_log_box])
     
-    redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list],
+    redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list],
                     outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
     then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list],
-                    outputs=[output_summary, output_file], api_name="redact")
+                    outputs=[output_summary, output_file, output_file_list_state], api_name="redact")
     
-    convert_text_pdf_to_img_btn.click(fn = convert_text_pdf_to_img_pdf, inputs=[in_file, output_file],
-                    outputs=[output_summary, output_file], api_name="redact")
+    convert_text_pdf_to_img_btn.click(fn = convert_text_pdf_to_img_pdf, inputs=[in_file, output_file_list_state],
+                    outputs=[output_summary, output_file])
     
 # Simple run for HF spaces or local on your computer
 #block.queue().launch(debug=True) # root_path="/address-match", debug=True, server_name="0.0.0.0",

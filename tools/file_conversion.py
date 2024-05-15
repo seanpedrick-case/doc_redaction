@@ -86,7 +86,7 @@ def process_file(file_path):
 
     return out_path
 
-def prepare_image_or_text_pdf(file_path:str, language:str, in_redact_method:str, in_allow_list:List[List[str]]=None, progress=Progress(track_tqdm=True)):
+def prepare_image_or_text_pdf(file_path:str, in_redact_method:str, in_allow_list:List[List[str]]=None):
 
     out_message = ''
     out_file_paths = []
@@ -119,11 +119,11 @@ def prepare_image_or_text_pdf(file_path:str, language:str, in_redact_method:str,
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     file_path_without_ext = get_file_path_end(in_file_path)
 
-    out_file_paths = []
+    out_file_paths = out_text_file_path
 
     # Convert annotated text pdf back to image to give genuine redactions
     print("Creating image version of results")
-    pdf_text_image_paths = process_file(out_text_file_path)
+    pdf_text_image_paths = process_file(out_text_file_path[0])
     out_text_image_file_path = "output/" + file_path_without_ext + "_result_as_text_back_to_img.pdf"
     pdf_text_image_paths[0].save(out_text_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_text_image_paths[1:])
 
