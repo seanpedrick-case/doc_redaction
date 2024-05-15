@@ -24,7 +24,7 @@ except Exception as e:
 
 
 def get_assumed_role_info():
-    sts = boto3.client('sts', region_name='us-west-2')
+    sts = boto3.client('sts', region_name='eu-west-2')
     response = sts.get_caller_identity()
 
     # Extract ARN of the assumed role
