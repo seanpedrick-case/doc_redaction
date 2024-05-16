@@ -36,7 +36,7 @@ with block:
     
         with gr.Accordion("Input document", open = True):
             in_file = gr.File(label="Choose document file", file_count= "single")
-            in_redaction_method = gr.Radio(label="Redaction method", value = "Image analysis", choices=["Image analysis", "Text analysis"])
+            in_redaction_method = gr.Radio(label="Redaction method - text analysis is faster but will fail on images or image-based PDFs.", value = "Text analysis", choices=["Text analysis", "Image analysis"])
             in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact (click close to down arrow for full list)")
             in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language", multiselect=False)
             in_allow_list = gr.Dataframe(label="Allow list - enter a new term to ignore for redaction on each row e.g. Lambeth -> add new row -> Lambeth 2030", headers=["Allow list"], row_count=1, col_count=1, value=[[""]], type="array", column_widths=["50%"])
