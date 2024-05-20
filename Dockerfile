@@ -26,6 +26,7 @@ RUN useradd -m -u 1000 user
 
 # Make output folder
 RUN mkdir -p /home/user/app/output && chown -R user:user /home/user/app/output
+RUN mkdir -p /home/user/app/tld && chown -R user:user /home/user/app/tld
 
 # Switch to the "user" user
 USER user
@@ -40,6 +41,7 @@ ENV HOME=/home/user \
 	GRADIO_SERVER_NAME=0.0.0.0 \
 	GRADIO_SERVER_PORT=7860 \
 	GRADIO_THEME=huggingface \
+	TLDEXTRACT_CACHE=$HOME/app/tld/.tld_set_snapshot \
 	#GRADIO_TEMP_DIR=$HOME/tmp \
 	#GRADIO_ROOT_PATH=/address-match \
 	# gunicorn keep alive timeout limit extended for GUI-based work - https://github.com/tiangolo/uvicorn-gunicorn-fastapi-docker?tab=readme-ov-file#timeout

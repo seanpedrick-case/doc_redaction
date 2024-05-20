@@ -1,8 +1,11 @@
+import os
+
+# By default TLDExtract will try to pull files from the internet. I have instead downloaded this file locally to avoid the requirement for an internet connection.
+os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
+
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_text_pdf, convert_text_pdf_to_img_pdf
 from tools.aws_functions import load_data_from_aws
-from typing import List
-import pandas as pd
 import gradio as gr
 
 #file_path = "examples/Lambeth_2030-Our_Future_Our_Lambeth_foreword.pdf" #"examples/skills-based-cv-example.pdf" # "examples/graduate-job-example-cover-letter.pdf" #
