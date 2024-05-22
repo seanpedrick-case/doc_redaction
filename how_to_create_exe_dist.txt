@@ -1,0 +1,38 @@
+1. Create minimal environment to run the app in conda. E.g. 'conda create --name new_env'
+
+2. Activate the environment 'conda activate new_env'
+
+3. cd to this folder. Install packages from requirements.txt using 'pip install -r requirements.txt' 
+
+NOTE: for ensuring that spaCy models are loaded into the program correctly in requirements.txt, follow this guide: https://spacy.io/usage/models#models-download
+
+6. If necessary, create hook- files to tell pyinstaller to include specific packages in the exe build. Examples are provided for en_core_web_sm (a spaCy model). Put these in the build_deps\ subfolder
+
+7. pip install pyinstaller
+
+8. In command line, cd to the folder that contains app.py. 
+
+9.Run the following, assuming you want to make one single .exe file (This helped me: https://github.com/pyinstaller/pyinstaller/issues/8108):
+
+a) In command line: pyi-makespec --additional-hooks-dir="build_deps" --add-data "tesseract/:tesseract/" --add-data "poppler/poppler-24.02.0/:poppler/poppler-24.02.0/" --collect-data=gradio_client  --collect-data=gradio  --hidden-import pyarrow.vendored.version --hidden-import pydicom.encoders  --name DocRedactApp_0.1 app.py 
+
+# Add --onefile  to the above if you would like everything packaged as a single exe, although this will need to be extracted upon starting the app, slowing down initialisation time significantly.
+
+
+b) Open the created spec file in Notepad. Add the following to the end of the Analysis section then save:
+
+a = Analysis(
+    ...
+    module_collection_mode={
+        'gradio': 'py',  # Collect gradio package as source .py files
+    }
+)
+
+c) Back in command line, run this: pyinstaller --clean --noconfirm DocRedactApp_0.1.spec
+
+
+9. A 'dist' folder will be created with the executable inside along with all dependencies('dist\data_text_search'). 
+
+10. In 'dist\data_text_search' try double clicking on the .exe file. After a short delay, the command prompt should inform you about the IP address of the app that is now running. Copy the IP address. **Do not close this window!**
+
+11. In an Internet browser, navigate to the indicated IP address. The app should now be running in your browser window.

@@ -3,6 +3,8 @@ from typing import List
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, EntityRecognizer, Pattern, RecognizerResult
 from presidio_analyzer.nlp_engine import SpacyNlpEngine, NlpArtifacts
 import spacy
+spacy.prefer_gpu()
+from spacy.cli.download import download
 import re
 
 # %%
@@ -136,8 +138,16 @@ class LoadedSpacyNlpEngine(SpacyNlpEngine):
         self.nlp = {"en": loaded_spacy_model}
 
 # %%
-# Load a model a-priori
-nlp = spacy.load(model_name)
+# Load spacy model
+try:
+	import en_core_web_lg
+	nlp = en_core_web_lg.load()
+	print("Successfully imported spaCy model")
+
+except:
+	download("en_core_web_lg")
+	nlp = spacy.load("en_core_web_lg")
+	print("Successfully downloaded and imported spaCy model")
 
 # Pass the loaded model to the new LoadedSpacyNlpEngine
 loaded_nlp_engine = LoadedSpacyNlpEngine(loaded_spacy_model = nlp)

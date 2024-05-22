@@ -9,3 +9,8 @@ processing/*
 output/*
 tools/__pycache__/*
 old_code/*
+tesseract/*
+poppler/*
+build/*
+dist/*
+build_deps/*

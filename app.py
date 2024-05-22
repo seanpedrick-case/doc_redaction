@@ -3,12 +3,16 @@ import os
 # By default TLDExtract will try to pull files from the internet. I have instead downloaded this file locally to avoid the requirement for an internet connection.
 os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
 
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_text_pdf, convert_text_pdf_to_img_pdf
 from tools.aws_functions import load_data_from_aws
 import gradio as gr
 
-#file_path = "examples/Lambeth_2030-Our_Future_Our_Lambeth_foreword.pdf" #"examples/skills-based-cv-example.pdf" # "examples/graduate-job-example-cover-letter.pdf" #
+add_folder_to_path("_internal/tesseract/")
+add_folder_to_path("_internal/poppler/poppler-24.02.0/Library/bin/")
+
+ensure_output_folder_exists()
 
 chosen_redact_entities = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE"] 
 full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE", 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS']
@@ -57,8 +61,8 @@ with block:
         with gr.Accordion(label = "AWS data access", open = True):
                 aws_password_box = gr.Textbox(label="Password for AWS data access (ask the Data team if you don't have this)")
                 with gr.Row():
-                    in_aws_file = gr.Dropdown(label="Choose keyword file to load from AWS (only valid for API Gateway app)", choices=["None", "Lambeth borough plan"])
-                    load_aws_data_button = gr.Button(value="Load keyword data from AWS", variant="secondary")
+                    in_aws_file = gr.Dropdown(label="Choose file to load from AWS (only valid for API Gateway app)", choices=["None", "Lambeth borough plan"])
+                    load_aws_data_button = gr.Button(value="Load data from AWS", variant="secondary")
                     
                 aws_log_box = gr.Textbox(label="AWS data load status")
     
