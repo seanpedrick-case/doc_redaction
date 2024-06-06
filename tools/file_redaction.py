@@ -2,17 +2,20 @@ from PIL import Image
 from typing import List
 import pandas as pd
 from presidio_image_redactor import ImageRedactorEngine, ImageAnalyzerEngine
+from presidio_image_redactor.entities import ImageRecognizerResult
 from pdfminer.high_level import extract_pages
 from tools.file_conversion import process_file
 from pdfminer.layout import LTTextContainer, LTChar, LTTextLine, LTAnno
 from pikepdf import Pdf, Dictionary, Name
 from gradio import Progress
 import time
+from collections import defaultdict  # For efficient grouping
 
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
-from tools.helper_functions import get_file_path_end
+from tools.helper_functions import get_file_path_end, output_folder
 from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
 import gradio as gr
+
 
 def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, progress=gr.Progress(track_tqdm=True)):
 
@@ -37,7 +40,7 @@ def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, 
         #     return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
 
         pdf_images = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat)
-        out_image_file_path = "output/" + file_path_without_ext + "_result_as_img.pdf"
+        out_image_file_path = output_folder + file_path_without_ext + "_result_as_img.pdf"
         pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
 
         out_file_paths.append(out_image_file_path)
@@ -49,7 +52,7 @@ def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, 
 
         # Analyse text-based pdf
         pdf_text = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
-        out_text_file_path = "output/" + file_path_without_ext + "_result_as_text.pdf"
+        out_text_file_path = output_folder + file_path_without_ext + "_result_as_text.pdf"
         pdf_text.save(out_text_file_path)
 
         out_file_paths.append(out_text_file_path)
@@ -69,11 +72,44 @@ def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, 
 
     return out_message, out_file_paths, out_file_paths
 
+def merge_img_bboxes(bboxes, horizontal_threshold=150, vertical_threshold=25):
+            merged_bboxes = []
+            grouped_bboxes = defaultdict(list)
+
+            # 1. Group by approximate vertical proximity
+            for box in bboxes:
+                grouped_bboxes[round(box.top / vertical_threshold)].append(box)
+
+            # 2. Merge within each group
+            for _, group in grouped_bboxes.items():
+                group.sort(key=lambda box: box.left)
+
+                merged_box = group[0]
+                for next_box in group[1:]:
+                    if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
+                        print("Merging a box")
+                        # Calculate new dimensions for the merged box
+                        new_left = min(merged_box.left, next_box.left)
+                        new_top = min(merged_box.top, next_box.top)
+                        new_width = max(merged_box.left + merged_box.width, next_box.left + next_box.width) - new_left
+                        new_height = max(merged_box.top + merged_box.height, next_box.top + next_box.height) - new_top
+                        merged_box = ImageRecognizerResult(
+                            merged_box.entity_type, merged_box.start, merged_box.end, merged_box.score, new_left, new_top, new_width, new_height
+                        )
+                    else:
+                        merged_bboxes.append(merged_box)
+                        merged_box = next_box  
+
+                merged_bboxes.append(merged_box) 
+            return merged_bboxes
 
 def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
     '''
-    take an path for an image of a document, then run this image through the Presidio ImageAnalyzer to get a redacted page back
+    Take an path for an image of a document, then run this image through the Presidio ImageAnalyzer and PIL to get a redacted page back. Adapted from Presidio ImageRedactorEngine.
     '''
+    from PIL import Image, ImageChops, ImageDraw
+
+    fill = (0, 0, 0)
 
     if not image_paths:
 
@@ -82,9 +118,6 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
         progress(0, desc=out_message)
 
         image_paths = process_file(file_path)
-
-    # Create a new PDF
-    #pdf = pikepdf.new()
 
     images = []
     number_of_pages = len(image_paths)
@@ -100,6 +133,8 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
         # Get the image to redact using PIL lib (pillow)
         image = image_paths[i] #Image.open(image_paths[i])
 
+        image = ImageChops.duplicate(image)
+
         # %%
         image_analyser = ImageAnalyzerEngine(nlp_analyser)
         engine = ImageRedactorEngine(image_analyser)
@@ -108,23 +143,34 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
             ocr_lang = 'eng'
         else: ocr_lang = language
 
-        # %%
-        # Redact the image with pink color
-        redacted_image = engine.redact(image,
-            fill=(0, 0, 0),
-            ocr_kwargs={"lang": ocr_lang},
-            allow_list=allow_list,
-            ad_hoc_recognizers= None,
-            **{
+        bboxes = image_analyser.analyze(image,ocr_kwargs={"lang": ocr_lang},
+                **{
+                "allow_list": allow_list,
                 "language": language,
                 "entities": chosen_redact_entities,
                 "score_threshold": score_threshold
-            },
-            )
+            })
         
-        images.append(redacted_image)
+        #print("For page: ", str(i), "Bounding boxes: ", bboxes)
+
+        draw = ImageDraw.Draw(image)
+               
+        merged_bboxes = merge_img_bboxes(bboxes)
+
+        print("For page: ", str(i), "Merged bounding boxes: ", merged_bboxes)
+
+        # 3. Draw the merged boxes (unchanged)
+        for box in merged_bboxes:
+            x0 = box.left
+            y0 = box.top
+            x1 = x0 + box.width
+            y1 = y0 + box.height
+            draw.rectangle([x0, y0, x1, y1], fill=fill)
+
+        images.append(image)
 
     return images
+
 
 def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
     '''
@@ -136,12 +182,14 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
     annotations_all_pages = []
     analyzed_bounding_boxes_df = pd.DataFrame()
 
+    # Horizontal distance between PII bounding boxes under/equal they are combined into one
+    combine_pixel_dist = 100
+
     pdf = Pdf.open(filename)
 
     page_num = 0
 
     for page in progress.tqdm(pdf.pages, total=len(pdf.pages), unit="pages", desc="Redacting pages"):
-
 
         print("Page number is: ", page_num)
 
@@ -165,21 +213,63 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
                                                             return_decision_process=False,
                                                             allow_list=allow_list)
 
-                        #if analyzer_results:
-                        #    pass
-                        #explanation = analyzer_results[0].analysis_explanation.to_dict()
-                        #analyser_explanations.append(explanation)
                     characters = [char                    # This is what we want to include in the list
                             for line in text_container          # Loop through each line in text_container
                             if isinstance(line, LTTextLine)    # Check if the line is an instance of LTTextLine
                             for char in line]                   # Loop through each character in the line
                             #if isinstance(char, LTChar)]  # Check if the character is not an instance of LTAnno #isinstance(char, LTChar) or
                     
-                    # If any results found
-                    print(analyzer_results)
 
+                    # if len(analyzer_results) > 0 and len(characters) > 0:
+                    #     analyzed_bounding_boxes.extend({"boundingBox": char.bbox, "result": result} for result in analyzer_results for char in characters[result.start:result.end] if isinstance(char, LTChar))
+                    #     combined_analyzer_results.extend(analyzer_results)
+
+                    # Inside the loop where you process analyzer_results:
                     if len(analyzer_results) > 0 and len(characters) > 0:
-                        analyzed_bounding_boxes.extend({"boundingBox": char.bbox, "result": result} for result in analyzer_results for char in characters[result.start:result.end] if isinstance(char, LTChar))
+                        merged_bounding_boxes = []
+                        current_box = None
+                        current_y = None
+
+                        for result in analyzer_results:
+                            for char in characters[result.start : result.end]:
+                                if isinstance(char, LTChar):
+                                    char_box = list(char.bbox)
+
+                                    # Fix: Check if either current_y or current_box are None
+                                    if current_y is None or current_box is None:
+                                        # This is the first character, so initialize current_box and current_y
+                                        current_box = char_box
+                                        current_y = char_box[1]
+                                    else:  # Now we have previous values to compare
+                                        print("Comparing values")
+                                        vertical_diff_bboxes = abs(char_box[1] - current_y)
+                                        horizontal_diff_bboxes = abs(char_box[0] - current_box[2])
+                                        #print("Vertical distance with last bbox: ", str(vertical_diff_bboxes), "Horizontal distance: ", str(horizontal_diff_bboxes), "For result: ", result)
+
+                                        if (
+                                            vertical_diff_bboxes <= 5
+                                            and horizontal_diff_bboxes <= combine_pixel_dist
+                                        ):
+                                            old_right_pos = current_box[2]
+                                            current_box[2] = char_box[2]
+
+                                            print("Old right pos: ", str(old_right_pos), "has been replaced with: ", str(current_box[2]), "for result: ", result)
+
+                                        else:
+                                            merged_bounding_boxes.append(
+                                                {"boundingBox": current_box, "result": result})
+
+                                            current_box = char_box
+                                            current_y = char_box[1]
+                            # Add the last box
+                            if current_box:
+                                merged_bounding_boxes.append({"boundingBox": current_box, "result": result})
+
+                        if not merged_bounding_boxes:
+                            analyzed_bounding_boxes.extend({"boundingBox": char.bbox, "result": result} for result in analyzer_results for char in characters[result.start:result.end] if isinstance(char, LTChar))
+                        else:
+                            analyzed_bounding_boxes.extend(merged_bounding_boxes)
+                            
                         combined_analyzer_results.extend(analyzer_results)
 
             if len(analyzer_results) > 0:
@@ -195,14 +285,19 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
                 bounding_box = analyzed_bounding_box["boundingBox"]
                 annotation = Dictionary(
                     Type=Name.Annot,
-                    Subtype=Name.Highlight,
+                    Subtype=Name.Square, #Name.Highlight,
                     QuadPoints=[bounding_box[0], bounding_box[3], bounding_box[2], bounding_box[3], bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[1]],
                     Rect=[bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3]],
                     C=[0, 0, 0],
+                    IC=[0, 0, 0],
                     CA=1, # Transparency
-                    T=analyzed_bounding_box["result"].entity_type
+                    T=analyzed_bounding_box["result"].entity_type,
+                    BS=Dictionary(
+                        W=0,                     # Border width: 1 point
+                        S=Name.S                # Border style: solid
+                    )
                 )
-                annotations_on_page.append(annotation)           
+                annotations_on_page.append(annotation)     
 
             annotations_all_pages.extend([annotations_on_page])
  
@@ -210,27 +305,92 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
             page.Annots = pdf.make_indirect(annotations_on_page)
 
             page_num += 1
-
-        # Extracting data from dictionaries
-        # extracted_data = []
-        # for item in annotations_all_pages:
-        #     temp_dict = {}
-        #     #print(item)
-        #     for key, value in item.items():
-        #         if isinstance(value, Decimal):
-        #             temp_dict[key] = float(value)
-        #         elif isinstance(value, list):
-        #             temp_dict[key] = [float(v) if isinstance(v, Decimal) else v for v in value]
-        #         else:
-        #             temp_dict[key] = value
-        #     extracted_data.append(temp_dict)
-
-        # Creating DataFrame
-        # annotations_out = pd.DataFrame(extracted_data)
-        #print(df)
-
-        #annotations_out.to_csv("examples/annotations.csv")
     
-    analyzed_bounding_boxes_df.to_csv("output/annotations_made.csv")
+    analyzed_bounding_boxes_df.to_csv(output_folder + "annotations_made.csv")
 
     return pdf
+
+
+# for page_num, annotations_on_page in enumerate(annotations_all_pages):
+            #     # 2. Normalize annotation heights on the same line:
+            #     line_heights = {}  # {y_coordinate: max_height}
+
+            #     # Get line heights for every annotation
+            #     for annotation in annotations_on_page:
+            #         if 'Rect' in annotation:
+            #             y = annotation['Rect'][1]
+            #             height = annotation['Rect'][3] - annotation['Rect'][1]
+            #             line_heights[y] = max(line_heights.get(y, 0), height)
+
+            #     # Update line heights for annotations
+            #     for annotation in annotations_on_page:
+            #         if 'Rect' in annotation:
+            #             y = annotation['Rect'][1]
+            #             annotation['Rect'][3] = y + line_heights[y]
+
+            #             # Update QuadPoints to match the new Rect coordinates
+            #             x1, y1, x2, y2 = annotation['Rect']  # Extract coordinates from Rect
+            #             annotation['QuadPoints'] = [
+            #                 x1, y2,  # Top left
+            #                 x2, y2,  # Top right
+            #                 x1, y1,  # Bottom left
+            #                 x2, y1   # Bottom right
+            #             ]
+
+
+# def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
+#     '''
+#     take an path for an image of a document, then run this image through the Presidio ImageAnalyzer to get a redacted page back
+#     '''
+
+#     if not image_paths:
+
+#         out_message = "PDF does not exist as images. Converting pages to image"
+#         print(out_message)
+#         progress(0, desc=out_message)
+
+#         image_paths = process_file(file_path)
+
+#     # Create a new PDF
+#     #pdf = pikepdf.new()
+
+#     images = []
+#     number_of_pages = len(image_paths)
+
+#     out_message = "Redacting pages"
+#     print(out_message)
+#     progress(0.1, desc=out_message)
+
+#     for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
+
+#         print("Redacting page ", str(i + 1))
+
+#         # Get the image to redact using PIL lib (pillow)
+#         image = image_paths[i] #Image.open(image_paths[i])
+
+#         # %%
+#         image_analyser = ImageAnalyzerEngine(nlp_analyser)
+#         engine = ImageRedactorEngine(image_analyser)
+
+#         if language == 'en':
+#             ocr_lang = 'eng'
+#         else: ocr_lang = language
+
+#         # %%
+#         # Redact the image with pink color
+#         redacted_image = engine.redact(image,
+#             fill=(0, 0, 0),
+#             ocr_kwargs={"lang": ocr_lang},
+#             allow_list=allow_list,
+#             ad_hoc_recognizers= None,
+#             **{
+#                 "language": language,
+#                 "entities": chosen_redact_entities,
+#                 "score_threshold": score_threshold
+#             },
+#             )
+        
+#         images.append(redacted_image)
+       
+
+#     return images

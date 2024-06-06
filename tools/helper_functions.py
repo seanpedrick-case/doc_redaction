@@ -1,5 +1,23 @@
 import os
 
+def get_or_create_env_var(var_name, default_value):
+    # Get the environment variable if it exists
+    value = os.environ.get(var_name)
+    
+    # If it doesn't exist, set it to the default value
+    if value is None:
+        os.environ[var_name] = default_value
+        value = default_value
+    
+    return value
+
+# Retrieving or setting output folder
+env_var_name = 'GRADIO_OUTPUT_FOLDER'
+default_value = 'output/'
+
+output_folder = get_or_create_env_var(env_var_name, default_value)
+print(f'The value of {env_var_name} is {output_folder}')
+
 def get_file_path_end(file_path):
     # First, get the basename of the file (e.g., "example.txt" from "/path/to/example.txt")
     basename = os.path.basename(file_path)

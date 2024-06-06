@@ -1,5 +1,5 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
-from tools.helper_functions import get_file_path_end
+from tools.helper_functions import get_file_path_end, output_folder
 from PIL import Image
 import os
 from gradio import Progress
@@ -50,7 +50,7 @@ def convert_pdf_to_images(pdf_path:str, progress=Progress(track_tqdm=True)):
         print("Current page: ", str(page_num))
 
         # Convert one page to image
-        image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1)
+        image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=300, use_cropbox=True, use_pdftocairo=False)
         
         # If no images are returned, break the loop
         if not image:
@@ -124,8 +124,8 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     # Convert annotated text pdf back to image to give genuine redactions
     print("Creating image version of results")
     pdf_text_image_paths = process_file(out_text_file_path[0])
-    out_text_image_file_path = "output/" + file_path_without_ext + "_result_as_text_back_to_img.pdf"
-    pdf_text_image_paths[0].save(out_text_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_text_image_paths[1:])
+    out_text_image_file_path = output_folder + file_path_without_ext + "_result_as_text_back_to_img.pdf"
+    pdf_text_image_paths[0].save(out_text_image_file_path, "PDF" ,resolution=300.0, save_all=True, append_images=pdf_text_image_paths[1:])
 
     out_file_paths.append(out_text_image_file_path)
 

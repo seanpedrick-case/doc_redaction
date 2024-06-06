@@ -48,7 +48,7 @@ with block:
             in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language", multiselect=False)
             in_allow_list = gr.Dataframe(label="Allow list - enter a new term to ignore for redaction on each row e.g. Lambeth -> add new row -> Lambeth 2030", headers=["Allow list"], row_count=1, col_count=1, value=[[""]], type="array", column_widths=["50%"])
         
-        redact_btn = gr.Button("Redact document")
+        redact_btn = gr.Button("Redact document", variant="primary")
         
         with gr.Row():
             output_summary = gr.Textbox(label="Output summary")
