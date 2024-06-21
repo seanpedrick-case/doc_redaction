@@ -10,10 +10,6 @@ spacy # Not specified as latest versions create a conflict with latest versions 
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.7.1/en_core_web_lg-3.7.1.tar.gz
 gradio # Not specified as latest versions create a conflict with latest versions of spacy
 boto3==1.34.103
-# Following are not currently necessary for the app, may be added for improved pdf parsing in future
-#unstructured
-#unstructured_inference # This is big! Only necessary if you want to use the high res strategy in pdf_partition
-#unstructured_pytesseract
-#pillow-heif
-#python-docx
-#python-pptx
+faker
+openpyxl
+pyarrow

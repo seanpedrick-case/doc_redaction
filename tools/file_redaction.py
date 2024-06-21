@@ -5,7 +5,7 @@ from presidio_image_redactor import ImageRedactorEngine, ImageAnalyzerEngine
 from presidio_image_redactor.entities import ImageRecognizerResult
 from pdfminer.high_level import extract_pages
 from tools.file_conversion import process_file
-from pdfminer.layout import LTTextContainer, LTChar, LTTextLine, LTAnno
+from pdfminer.layout import LTTextContainer, LTChar, LTTextLine #, LTAnno
 from pikepdf import Pdf, Dictionary, Name
 from gradio import Progress
 import time
@@ -13,64 +13,89 @@ from collections import defaultdict  # For efficient grouping
 
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
 from tools.helper_functions import get_file_path_end, output_folder
-from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
+from tools.file_conversion import process_file, is_pdf, convert_text_pdf_to_img_pdf
 import gradio as gr
 
 
-def choose_and_run_redactor(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, progress=gr.Progress(track_tqdm=True)):
+def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, progress=gr.Progress(track_tqdm=True)):
 
     tic = time.perf_counter()
 
-    out_message = ''
+    out_message = []
     out_file_paths = []
 
     if in_allow_list:
         in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
-    if file_path:
-         file_path_without_ext = get_file_path_end(file_path)
-    else:
-         out_message = "No file selected"
-         print(out_message)
-         return out_message, out_file_paths
 
-    if in_redact_method == "Image analysis":
-        # Analyse and redact image-based pdf or image
-        # if is_pdf_or_image(file_path) == False:
-        #     return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
+    print("File paths:", file_paths)
 
-        pdf_images = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat)
-        out_image_file_path = output_folder + file_path_without_ext + "_result_as_img.pdf"
-        pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
+    for file in progress.tqdm(file_paths, desc="Redacting files", unit = "files"):
+        file_path = file.name
 
-        out_file_paths.append(out_image_file_path)
-        out_message = "Image-based PDF successfully redacted and saved to file."
+        if file_path:
+            file_path_without_ext = get_file_path_end(file_path)
+            if is_pdf(file_path) == False:
+                # If user has not submitted a pdf, assume it's an image
+                print("File is not a pdf, assuming that image analysis needs to be used.")
+                in_redact_method = "Image analysis"
+        else:
+            out_message = "No file selected"
+            print(out_message)
+            return out_message, out_file_paths
 
-    elif in_redact_method == "Text analysis":
-        if is_pdf(file_path) == False:
-            return "Please upload a PDF file for text analysis.", None
+        if in_redact_method == "Image analysis":
+            # Analyse and redact image-based pdf or image
+            # if is_pdf_or_image(file_path) == False:
+            #     return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
 
-        # Analyse text-based pdf
-        pdf_text = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
-        out_text_file_path = output_folder + file_path_without_ext + "_result_as_text.pdf"
-        pdf_text.save(out_text_file_path)
+            print("Redacting file as image-based pdf")
+            pdf_images = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat)
+            out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_img.pdf"
+            pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
 
-        out_file_paths.append(out_text_file_path)
+            out_file_paths.append(out_image_file_path)
+            out_message.append("File '" + file_path_without_ext + "' successfully redacted and saved to file.")
 
-        out_message = "Text-based PDF successfully redacted and saved to file."
-        
-    else:
-        out_message = "No redaction method selected"
-        print(out_message)
-        return out_message, out_file_paths
+        elif in_redact_method == "Text analysis":
+            if is_pdf(file_path) == False:
+                return "Please upload a PDF file for text analysis. If you have an image, select 'Image analysis'.", None, None
+
+            # Analyse text-based pdf
+            print('Redacting file as text-based PDF')
+            pdf_text = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
+            out_text_file_path = output_folder + file_path_without_ext + "_text_redacted.pdf"
+            pdf_text.save(out_text_file_path)
+
+            #out_file_paths.append(out_text_file_path)
+            out_message_new = "File " + file_path_without_ext + " successfully redacted."
+            out_message.append(out_message_new)
+
+            # Convert message
+            convert_message="Converting PDF to image-based PDF to embed redactions."
+            #progress(0.8, desc=convert_message)
+            print(convert_message)
+
+            # Convert document to image-based document to 'embed' redactions
+            img_output_summary, img_output_file_path = convert_text_pdf_to_img_pdf(file_path, [out_text_file_path])
+            out_file_paths.extend(img_output_file_path)
+
+            # Add confirmation for converting to image if you want
+            # out_message.append(img_output_summary)  
+            
+        else:
+            out_message = "No redaction method selected"
+            print(out_message)
+            return out_message, out_file_paths
     
     toc = time.perf_counter()
     out_time = f"Time taken: {toc - tic:0.1f} seconds."
     print(out_time)
 
-    out_message = out_message + "\n\n" + out_time
+    out_message_out = '\n'.join(out_message)
+    out_message_out = out_message_out + "\n\n" + out_time
 
-    return out_message, out_file_paths, out_file_paths
+    return out_message_out, out_file_paths, out_file_paths
 
 def merge_img_bboxes(bboxes, horizontal_threshold=150, vertical_threshold=25):
             merged_bboxes = []
@@ -115,7 +140,7 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
         out_message = "PDF does not exist as images. Converting pages to image"
         print(out_message)
-        progress(0, desc=out_message)
+        #progress(0, desc=out_message)
 
         image_paths = process_file(file_path)
 
@@ -124,9 +149,10 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
     out_message = "Redacting pages"
     print(out_message)
-    progress(0.1, desc=out_message)
+    #progress(0.1, desc=out_message)
 
-    for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
+    #for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
+    for i in range(0, number_of_pages):
 
         print("Redacting page ", str(i + 1))
 
@@ -171,7 +197,6 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
     return images
 
-
 def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
     '''
     Redact chosen entities from a pdf that is made up of multiple pages that are not images.
@@ -189,9 +214,9 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
 
     page_num = 0
 
-    for page in progress.tqdm(pdf.pages, total=len(pdf.pages), unit="pages", desc="Redacting pages"):
-
-        print("Page number is: ", page_num)
+    #for page in progress.tqdm(pdf.pages, total=len(pdf.pages), unit="pages", desc="Redacting pages"):
+    for page in pdf.pages:
+        print("Page number is: ", page_num + 1)
 
         annotations_on_page = []
         analyzed_bounding_boxes = []
@@ -309,88 +334,3 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
     analyzed_bounding_boxes_df.to_csv(output_folder + "annotations_made.csv")
 
     return pdf
-
-
-# for page_num, annotations_on_page in enumerate(annotations_all_pages):
-            #     # 2. Normalize annotation heights on the same line:
-            #     line_heights = {}  # {y_coordinate: max_height}
-
-            #     # Get line heights for every annotation
-            #     for annotation in annotations_on_page:
-            #         if 'Rect' in annotation:
-            #             y = annotation['Rect'][1]
-            #             height = annotation['Rect'][3] - annotation['Rect'][1]
-            #             line_heights[y] = max(line_heights.get(y, 0), height)
-
-            #     # Update line heights for annotations
-            #     for annotation in annotations_on_page:
-            #         if 'Rect' in annotation:
-            #             y = annotation['Rect'][1]
-            #             annotation['Rect'][3] = y + line_heights[y]
-
-            #             # Update QuadPoints to match the new Rect coordinates
-            #             x1, y1, x2, y2 = annotation['Rect']  # Extract coordinates from Rect
-            #             annotation['QuadPoints'] = [
-            #                 x1, y2,  # Top left
-            #                 x2, y2,  # Top right
-            #                 x1, y1,  # Bottom left
-            #                 x2, y1   # Bottom right
-            #             ]
-
-
-# def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
-#     '''
-#     take an path for an image of a document, then run this image through the Presidio ImageAnalyzer to get a redacted page back
-#     '''
-
-#     if not image_paths:
-
-#         out_message = "PDF does not exist as images. Converting pages to image"
-#         print(out_message)
-#         progress(0, desc=out_message)
-
-#         image_paths = process_file(file_path)
-
-#     # Create a new PDF
-#     #pdf = pikepdf.new()
-
-#     images = []
-#     number_of_pages = len(image_paths)
-
-#     out_message = "Redacting pages"
-#     print(out_message)
-#     progress(0.1, desc=out_message)
-
-#     for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
-
-#         print("Redacting page ", str(i + 1))
-
-#         # Get the image to redact using PIL lib (pillow)
-#         image = image_paths[i] #Image.open(image_paths[i])
-
-#         # %%
-#         image_analyser = ImageAnalyzerEngine(nlp_analyser)
-#         engine = ImageRedactorEngine(image_analyser)
-
-#         if language == 'en':
-#             ocr_lang = 'eng'
-#         else: ocr_lang = language
-
-#         # %%
-#         # Redact the image with pink color
-#         redacted_image = engine.redact(image,
-#             fill=(0, 0, 0),
-#             ocr_kwargs={"lang": ocr_lang},
-#             allow_list=allow_list,
-#             ad_hoc_recognizers= None,
-#             **{
-#                 "language": language,
-#                 "entities": chosen_redact_entities,
-#                 "score_threshold": score_threshold
-#             },
-#             )
-        
-#         images.append(redacted_image)
-       
-
-#     return images

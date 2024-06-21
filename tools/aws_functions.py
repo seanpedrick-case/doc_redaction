@@ -3,45 +3,44 @@ import pandas as pd
 import boto3
 import tempfile
 import os
+from tools.helper_functions import get_or_create_env_var
 
 PandasDataFrame = Type[pd.DataFrame]
+bucket_name=""
 
-bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
+# Get AWS credentials if required
 
-try:
-    session = boto3.Session() # profile_name="default"
-except Exception as e:
-    print(e)
+aws_var = "RUN_AWS_FUNCTIONS"
+aws_var_default = "0"
+aws_var_val = get_or_create_env_var(aws_var, aws_var_default)
+print(f'The value of {aws_var} is {aws_var_val}')
 
-# sts = session.client("sts")
-# Create a Session with the IAM role ARN
-# aws_role = os.environ['AWS_ROLE_DATA_TEXT_SEARCH']
-# response = sts.assume_role(
-#     RoleArn=aws_role,
-#     RoleSessionName="ecs-test-session"
-# )
-# print(response)
+if aws_var_val == "1":
+    try:
+        bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
+        session = boto3.Session() # profile_name="default"
+    except Exception as e:
+        print(e)
 
+    def get_assumed_role_info():
+        sts = boto3.client('sts', region_name='eu-west-2', endpoint_url='https://sts.eu-west-2.amazonaws.com')
+        response = sts.get_caller_identity()
 
-def get_assumed_role_info():
-    sts = boto3.client('sts', region_name='eu-west-2', endpoint_url='https://sts.eu-west-2.amazonaws.com')
-    response = sts.get_caller_identity()
+        # Extract ARN of the assumed role
+        assumed_role_arn = response['Arn']
+        
+        # Extract the name of the assumed role from the ARN
+        assumed_role_name = assumed_role_arn.split('/')[-1]
+        
+        return assumed_role_arn, assumed_role_name
 
-    # Extract ARN of the assumed role
-    assumed_role_arn = response['Arn']
-    
-    # Extract the name of the assumed role from the ARN
-    assumed_role_name = assumed_role_arn.split('/')[-1]
-    
-    return assumed_role_arn, assumed_role_name
+    try:
+        assumed_role_arn, assumed_role_name = get_assumed_role_info()
 
-try:
-    assumed_role_arn, assumed_role_name = get_assumed_role_info()
-
-    print("Assumed Role ARN:", assumed_role_arn)
-    print("Assumed Role Name:", assumed_role_name)
-except Exception as e:
-    print(e)
+        print("Assumed Role ARN:", assumed_role_arn)
+        print("Assumed Role Name:", assumed_role_name)
+    except Exception as e:
+        print(e)
 
 # Download direct from S3 - requires login credentials
 def download_file_from_s3(bucket_name, key, local_file_path):
@@ -50,8 +49,6 @@ def download_file_from_s3(bucket_name, key, local_file_path):
     s3.download_file(bucket_name, key, local_file_path)
     print(f"File downloaded from S3: s3://{bucket_name}/{key} to {local_file_path}")
                          
-#download_file_from_s3(bucket_name, object_key, local_file_loc)
-
 def download_folder_from_s3(bucket_name, s3_folder, local_folder):
     """
     Download all files from an S3 folder to a local folder.
@@ -76,7 +73,6 @@ def download_folder_from_s3(bucket_name, s3_folder, local_folder):
             print(f"Downloaded 's3://{bucket_name}/{object_key}' to '{local_file_path}'")
         except Exception as e:
             print(f"Error downloading 's3://{bucket_name}/{object_key}':", e)
-
 
 def download_files_from_s3(bucket_name, s3_folder, local_folder, filenames):
     """
@@ -110,8 +106,6 @@ def download_files_from_s3(bucket_name, s3_folder, local_folder, filenames):
             print(f"Downloaded 's3://{bucket_name}/{object_key}' to '{local_file_path}'")
         except Exception as e:
             print(f"Error downloading 's3://{bucket_name}/{object_key}':", e)
-
-
 
 def load_data_from_aws(in_aws_keyword_file, aws_password="", bucket_name=bucket_name):
 

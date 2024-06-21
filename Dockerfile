@@ -16,7 +16,7 @@ COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir gradio==4.33.0 
+RUN pip install --no-cache-dir gradio==4.36.1
 
 # Set up a new user named "user" with user ID 1000
 RUN useradd -m -u 1000 user

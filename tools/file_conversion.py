@@ -45,9 +45,10 @@ def convert_pdf_to_images(pdf_path:str, progress=Progress(track_tqdm=True)):
     images = []
 
     # Open the PDF file
-    for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
+    #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
+    for page_num in range(0,page_count): #progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
         
-        print("Current page: ", str(page_num))
+        # print("Current page: ", str(page_num + 1))
 
         # Convert one page to image
         image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=300, use_cropbox=True, use_pdftocairo=False)
@@ -72,48 +73,61 @@ def process_file(file_path):
     if file_extension in ['.jpg', '.jpeg', '.png']:
         print(f"{file_path} is an image file.")
         # Perform image processing here
-        out_path = [Image.open(file_path)]
+        img_object = [Image.open(file_path)]
 
     # Check if the file is a PDF
     elif file_extension == '.pdf':
         print(f"{file_path} is a PDF file. Converting to image set")
         # Run your function for processing PDF files here
-        out_path = convert_pdf_to_images(file_path)
+        img_object = convert_pdf_to_images(file_path)
 
     else:
         print(f"{file_path} is not an image or PDF file.")
-        out_path = ['']
+        img_object = ['']
 
-    return out_path
+    # print('Image object is:', img_object)
 
-def prepare_image_or_text_pdf(file_path:str, in_redact_method:str, in_allow_list:List[List[str]]=None):
+    return img_object
+
+def prepare_image_or_text_pdf(file_paths:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, progress=Progress(track_tqdm=True)):
 
     out_message = ''
     out_file_paths = []
 
-    in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
+    #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
-    if file_path:
-        file_path_without_ext = get_file_path_end(file_path)
-    else:
-        out_message = "No file selected"
-        print(out_message)
-        return out_message, out_file_paths
+    #for file in progress.tqdm(file_paths, desc="Preparing files"):
+    for file in file_paths:
+        file_path = file.name
 
-    if in_redact_method == "Image analysis":
-        # Analyse and redact image-based pdf or image
-        if is_pdf_or_image(file_path) == False:
-            return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
-        
-        out_file_path = process_file(file_path)
+        #if file_path:
+        #    file_path_without_ext = get_file_path_end(file_path)
+        if not file_path:
+            out_message = "No file selected"
+            print(out_message)
+            return out_message, out_file_paths
 
-    elif in_redact_method == "Text analysis":
-        if is_pdf(file_path) == False:
-            return "Please upload a PDF file for text analysis.", None
-        
-        out_file_path = file_path
+        if in_redact_method == "Image analysis":
+            # Analyse and redact image-based pdf or image
+            if is_pdf_or_image(file_path) == False:
+                out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
+                print(out_message)
+                return out_message, None
+            
+            out_file_path = process_file(file_path)
+            print("Out file path at image conversion step:", out_file_path)
+
+        elif in_redact_method == "Text analysis":
+            if is_pdf(file_path) == False:
+                out_message = "Please upload a PDF file for text analysis."
+                print(out_message)
+                return out_message, None
+            
+            out_file_path = file_path
+
+        out_file_paths.append(out_file_path)
     
-    return out_message, out_file_path
+    return out_message, out_file_paths
 
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
@@ -122,14 +136,20 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     out_file_paths = out_text_file_path
 
     # Convert annotated text pdf back to image to give genuine redactions
-    print("Creating image version of results")
+    print("Creating image version of redacted PDF to embed redactions.")
+    
     pdf_text_image_paths = process_file(out_text_file_path[0])
-    out_text_image_file_path = output_folder + file_path_without_ext + "_result_as_text_back_to_img.pdf"
+    out_text_image_file_path = output_folder + file_path_without_ext + "_text_redacted_as_img.pdf"
     pdf_text_image_paths[0].save(out_text_image_file_path, "PDF" ,resolution=300.0, save_all=True, append_images=pdf_text_image_paths[1:])
 
-    out_file_paths.append(out_text_image_file_path)
+    # out_file_paths.append(out_text_image_file_path)
 
-    out_message = "Image-based PDF successfully redacted and saved to text-based annotated file, and image-based file."
+    out_file_paths = [out_text_image_file_path]
+
+    out_message = "PDF " + file_path_without_ext + " converted to image-based file."
+    print(out_message)
+
+    print("Out file paths:", out_file_paths)
 
     return out_message, out_file_paths
 
