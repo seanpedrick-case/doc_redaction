@@ -128,7 +128,7 @@ print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
 if __name__ == "__main__":
 
-    if os.environ['COGNITO_AUTH'] == "0":
+    if os.environ['COGNITO_AUTH'] == "1":
         app.queue().launch(show_error=True, auth=authenticate_user)
     else:
         app.queue().launch(show_error=True, inbrowser=True)
