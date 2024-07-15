@@ -111,6 +111,8 @@ def add_folder_to_path(folder_path: str):
         print(f"Folder not found at {folder_path} - not added to PATH")
 
 async def get_connection_params(request: gr.Request):
+    base_folder = ""
+
     if request:
         #print("request user:", request.username)
 
@@ -148,6 +150,7 @@ async def get_connection_params(request: gr.Request):
 
         if request.username:
             out_session_hash = request.username
+            base_folder = "user-files/"
             print("Request username found:", out_session_hash)
 
         elif 'x-cognito-id' in request.headers:

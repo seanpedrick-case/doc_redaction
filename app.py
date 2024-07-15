@@ -123,12 +123,12 @@ with app:
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state])
 
 # Launch the Gradio app
-COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
+COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '1')
 print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
 if __name__ == "__main__":
 
-    if os.environ['COGNITO_AUTH'] == "1":
+    if os.environ['COGNITO_AUTH'] == "0":
         app.queue().launch(show_error=True, auth=authenticate_user)
     else:
         app.queue().launch(show_error=True, inbrowser=True)
