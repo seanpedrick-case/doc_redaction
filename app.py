@@ -3,15 +3,16 @@ import os
 # By default TLDExtract will try to pull files from the internet. I have instead downloaded this file locally to avoid the requirement for an internet connection.
 os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
 
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_text_pdf
 from tools.data_anonymise import do_anonymise
+from tools.auth import authenticate_user
 #from tools.aws_functions import load_data_from_aws
 import gradio as gr
 
-add_folder_to_path("_internal/tesseract/")
-add_folder_to_path("_internal/poppler/poppler-24.02.0/Library/bin/")
+add_folder_to_path("tesseract/")
+add_folder_to_path("poppler/poppler-24.02.0/Library/bin/")
 
 ensure_output_folder_exists()
 
@@ -20,13 +21,16 @@ full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREET
 language = 'en'
 
 # Create the gradio interface
-block = gr.Blocks(theme = gr.themes.Base())
+app = gr.Blocks(theme = gr.themes.Base())
 
-with block:
+with app:
 
     prepared_pdf_state = gr.State([])
     output_image_files_state = gr.State([])
     output_file_list_state = gr.State([])
+
+    session_hash_state = gr.State()
+    s3_output_folder_state = gr.State()
 
     gr.Markdown(
     """
@@ -116,7 +120,15 @@ with block:
     in_file_text.upload(fn=put_columns_in_df, inputs=[in_file_text], outputs=[in_colnames])    
     match_btn.click(fn=do_anonymise, inputs=[in_file_text, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list], outputs=[text_output_summary, text_output_file], api_name="redact_text")
 
+    app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state])
 
 # Launch the Gradio app
+COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
+print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
+
 if __name__ == "__main__":
-    block.queue().launch(show_error=True) # root_path="/address-match", debug=True, server_name="0.0.0.0", server_port=7861
+
+    if os.environ['COGNITO_AUTH'] == "1":
+        app.queue().launch(show_error=True, auth=authenticate_user)
+    else:
+        app.queue().launch(show_error=True, inbrowser=True)

@@ -14,3 +14,4 @@ poppler/*
 build/*
 dist/*
 build_deps/*
+doc_redaction_amplify_app/*
