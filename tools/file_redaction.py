@@ -17,20 +17,36 @@ from tools.file_conversion import process_file, is_pdf, convert_text_pdf_to_img_
 import gradio as gr
 
 
-def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, progress=gr.Progress(track_tqdm=True)):
+def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list = [], progress=gr.Progress(track_tqdm=True)):
 
     tic = time.perf_counter()
 
-    out_message = []
-    out_file_paths = []
+    # If out message is string or out_file_paths are blank, change to a list so it can be appended to
+    if isinstance(out_message, str):
+        out_message = [out_message]
+
+    if not out_file_paths:
+        out_file_paths = []
+
+    print("Latest file completed is:", str(latest_file_completed))
+
+    latest_file_completed = int(latest_file_completed)
+
+    # If we have already redacted the last file, return the input out_message and file list to the relevant components
+    if latest_file_completed == len(file_paths):
+        print("Last file reached, returning files:", str(latest_file_completed))
+        final_out_message = '\n'.join(out_message)
+        return final_out_message, out_file_paths, out_file_paths, latest_file_completed
+    
+    file_paths_loop = [file_paths[int(latest_file_completed)]]
 
     if in_allow_list:
         in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
-
+    
 
     print("File paths:", file_paths)
 
-    for file in progress.tqdm(file_paths, desc="Redacting files", unit = "files"):
+    for file in progress.tqdm(file_paths_loop, desc="Redacting files", unit = "files"):
         file_path = file.name
 
         if file_path:
@@ -42,7 +58,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         else:
             out_message = "No file selected"
             print(out_message)
-            return out_message, out_file_paths
+            return out_message, out_file_paths, out_file_paths, latest_file_completed
 
         if in_redact_method == "Image analysis":
             # Analyse and redact image-based pdf or image
@@ -56,6 +72,11 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
 
             out_file_paths.append(out_image_file_path)
             out_message.append("File '" + file_path_without_ext + "' successfully redacted and saved to file.")
+
+            # Increase latest file completed count unless we are at the last file
+            if latest_file_completed != len(file_paths):
+                print("Completed file number:", str(latest_file_completed))
+                latest_file_completed += 1                
 
         elif in_redact_method == "Text analysis":
             if is_pdf(file_path) == False:
@@ -81,21 +102,26 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             out_file_paths.extend(img_output_file_path)
 
             # Add confirmation for converting to image if you want
-            # out_message.append(img_output_summary)  
+            # out_message.append(img_output_summary)
+
+            if latest_file_completed != len(file_paths):
+                print("Completed file number:", str(latest_file_completed))
+                latest_file_completed += 1                
             
         else:
             out_message = "No redaction method selected"
             print(out_message)
-            return out_message, out_file_paths
+            return out_message, out_file_paths, out_file_paths, latest_file_completed    
+        
     
     toc = time.perf_counter()
-    out_time = f"Time taken: {toc - tic:0.1f} seconds."
+    out_time = f"in {toc - tic:0.1f} seconds."
     print(out_time)
 
     out_message_out = '\n'.join(out_message)
-    out_message_out = out_message_out + "\n\n" + out_time
+    out_message_out = out_message_out + " " + out_time
 
-    return out_message_out, out_file_paths, out_file_paths
+    return out_message_out, out_file_paths, out_file_paths, latest_file_completed
 
 def merge_img_bboxes(bboxes, horizontal_threshold=150, vertical_threshold=25):
             merged_bboxes = []

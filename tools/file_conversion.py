@@ -89,15 +89,31 @@ def process_file(file_path):
 
     return img_object
 
-def prepare_image_or_text_pdf(file_paths:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, progress=Progress(track_tqdm=True)):
+def prepare_image_or_text_pdf(file_paths:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], progress=Progress(track_tqdm=True)):
 
-    out_message = ''
-    out_file_paths = []
+    # If out message or out_file_paths are blank, change to a list so it can be appended to
+    #if isinstance(out_message, str):
+    #    out_message = [out_message]
+
+    if not file_paths:
+        file_paths = []
+
+    out_file_paths = file_paths
+    
+    latest_file_completed = int(latest_file_completed)
+
+    # If we have already redacted the last file, return the input out_message and file list to the relevant components
+    if latest_file_completed == len(out_file_paths):
+        print("Last file reached, returning files:", str(latest_file_completed))
+        #final_out_message = '\n'.join(out_message)
+        return out_message, out_file_paths
 
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
+    file_paths_loop = [out_file_paths[int(latest_file_completed)]]
+
     #for file in progress.tqdm(file_paths, desc="Preparing files"):
-    for file in file_paths:
+    for file in file_paths_loop:
         file_path = file.name
 
         #if file_path:
@@ -112,7 +128,7 @@ def prepare_image_or_text_pdf(file_paths:List[str], in_redact_method:str, in_all
             if is_pdf_or_image(file_path) == False:
                 out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
                 print(out_message)
-                return out_message, None
+                return out_message, out_file_paths
             
             out_file_path = process_file(file_path)
             print("Out file path at image conversion step:", out_file_path)
@@ -121,7 +137,7 @@ def prepare_image_or_text_pdf(file_paths:List[str], in_redact_method:str, in_all
             if is_pdf(file_path) == False:
                 out_message = "Please upload a PDF file for text analysis."
                 print(out_message)
-                return out_message, None
+                return out_message, out_file_paths
             
             out_file_path = file_path
 
@@ -152,9 +168,3 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     print("Out file paths:", out_file_paths)
 
     return out_message, out_file_paths
-
-        
-
-        
-    
-

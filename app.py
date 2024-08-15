@@ -6,7 +6,7 @@ os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
 from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_text_pdf
-from tools.data_anonymise import do_anonymise
+from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
 #from tools.aws_functions import load_data_from_aws
 import gradio as gr
@@ -28,6 +28,7 @@ with app:
     prepared_pdf_state = gr.State([])
     output_image_files_state = gr.State([])
     output_file_list_state = gr.State([])
+    text_output_file_list_state = gr.State([])
 
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
@@ -51,7 +52,8 @@ with app:
         
         with gr.Row():
             output_summary = gr.Textbox(label="Output summary")
-            output_file = gr.File(label="Output file")
+            output_file = gr.File(label="Output files")
+            text_documents_done = gr.Number(value=0, label="Number of documents redacted", interactive=False)
 
         with gr.Row():
             convert_text_pdf_to_img_btn = gr.Button(value="Convert pdf to image-based pdf to apply redactions", variant="secondary", visible=False)
@@ -64,16 +66,19 @@ with app:
         )    
         with gr.Accordion("Paste open text", open = False):
             in_text = gr.Textbox(label="Enter open text", lines=10)
-        with gr.Accordion("Upload xlsx (first sheet read only) or csv file(s)", open = False):
-            in_file_text = gr.File(label="Choose an xlsx (first sheet read only) or csv files", file_count= "multiple", file_types=['.xlsx', '.csv', '.parquet', '.csv.gz'])
-
-        in_colnames = gr.Dropdown(choices=["Choose a column"], multiselect = True, label="Select columns that you want to anonymise. Ensure that at least one named column exists in all files.")
+        with gr.Accordion("Upload xlsx or csv files", open = True):
+            in_data_files = gr.File(label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
         
-        match_btn = gr.Button("Anonymise text", variant="primary")
+        in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheets to anonymise"], multiselect = True, label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).", visible=False, allow_custom_value=True)
+
+        in_colnames = gr.Dropdown(choices=["Choose columns to anonymise"], multiselect = True, label="Select columns that you want to anonymise (showing columns present across all files).")
+        
+        tabular_data_redact_btn = gr.Button("Anonymise text", variant="primary")
         
         with gr.Row():
             text_output_summary = gr.Textbox(label="Output result")
-            text_output_file = gr.File(label="Output file")
+            text_output_file = gr.File(label="Output files")
+            text_tabular_files_done = gr.Number(value=0, label="Number of tabular files redacted", interactive=False)
 
     with gr.Tab(label="Redaction settings"):
         gr.Markdown(
@@ -83,13 +88,16 @@ with app:
         with gr.Accordion("Settings for documents", open = True):
             in_redaction_method = gr.Radio(label="Default document redaction method - text analysis is faster is not useful for image-based PDFs. Imaged-based is slightly less accurate in general.", value = "Text analysis", choices=["Text analysis", "Image analysis"])
         with gr.Accordion("Settings for open text or xlsx/csv files", open = True):
-            anon_strat = gr.Radio(choices=["replace", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace") 
+            anon_strat = gr.Radio(choices=["replace with <REDACTED>", "replace with <ENTITY_NAME>", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace with <REDACTED>") 
 
         with gr.Accordion("Settings for documents and open text/xlsx/csv files", open = True):
             in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact (click close to down arrow for full list)")
             with gr.Row():
                 in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language (only English currently supported)", multiselect=False)
                 in_allow_list = gr.Dataframe(label="Allow list - enter a new term to ignore for redaction on each row e.g. Lambeth -> add new row -> Lambeth 2030", headers=["Allow list"], row_count=1, col_count=(1, 'fixed'), value=[[""]], type="array", column_widths=["100px"], datatype='str')
+
+        # Invisible text box to hold the session hash/username just for logging purposes
+        session_hash_textbox = gr.Textbox(value="", visible=False) 
             
     # AWS options - not yet implemented
     # with gr.Tab(label="Advanced options"):
@@ -104,26 +112,38 @@ with app:
     # ### Loading AWS data ###
     # load_aws_data_button.click(fn=load_data_from_aws, inputs=[in_aws_file, aws_password_box], outputs=[in_file, aws_log_box])
 
+    callback = gr.CSVLogger()
    
     # Document redaction
-    redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list],
+    redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary],
                     outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list],
-                    outputs=[output_summary, output_file, output_file_list_state], api_name="redact_doc")#.\
-                    #then(fn = convert_text_pdf_to_img_pdf, inputs=[in_file, output_file_list_state],
-                    #outputs=[output_summary, output_file])
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done], api_name="redact_doc")
     
-    #convert_text_pdf_to_img_btn.click(fn = convert_text_pdf_to_img_pdf, inputs=[in_file, output_file_list_state],
-    #                outputs=[output_summary, output_file], api_name="convert_to_img")
+    # If the output file count text box changes, keep going with redacting each document until done
+    text_documents_done.change(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary],
+                    outputs=[output_summary, prepared_pdf_state]).\
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done])
 
-     # Open text interaction            
-    in_file_text.upload(fn=put_columns_in_df, inputs=[in_file_text], outputs=[in_colnames])    
-    match_btn.click(fn=do_anonymise, inputs=[in_file_text, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list], outputs=[text_output_summary, text_output_file], api_name="redact_text")
+     # Tabular data redaction           
+    in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets]) 
 
-    app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state])
+    tabular_data_redact_btn.click(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, in_excel_sheets], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done], api_name="redact_text")
+
+    # If the output file count text box changes, keep going with redacting each data file until done
+    text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, in_excel_sheets], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done])
+
+    app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
+
+    # This needs to be called at some point prior to the first call to callback.flag()
+    callback.setup([session_hash_textbox], "logs")
+
+    #app.load(lambda *args: callback.flag(list(args)), [session_hash_textbox], None, preprocess=False)
+    session_hash_textbox.change(lambda *args: callback.flag(list(args)), [session_hash_textbox], None, preprocess=False)
 
 # Launch the Gradio app
-COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '1')
+COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
 print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
 if __name__ == "__main__":

@@ -76,17 +76,46 @@ def ensure_output_folder_exists():
 def put_columns_in_df(in_file):
     new_choices = []
     concat_choices = []
+    all_sheet_names = []
+    number_of_excel_files = 0
     
     for file in in_file:
-        df = read_file(file.name)
-        new_choices = list(df.columns)
+        file_name = file.name
+        file_type = detect_file_type(file_name)
+        print("File type is:", file_type)
+
+        if file_type == 'xlsx':
+            number_of_excel_files += 1
+            new_choices = []
+            print("Running through all xlsx sheets")
+            anon_xlsx = pd.ExcelFile(file_name)
+            new_sheet_names = anon_xlsx.sheet_names
+            # Iterate through the sheet names
+            for sheet_name in new_sheet_names:
+                # Read each sheet into a DataFrame
+                df = pd.read_excel(file_name, sheet_name=sheet_name)
+
+                # Process the DataFrame (e.g., print its contents)
+                print(f"Sheet Name: {sheet_name}")
+                print(df.head())  # Print the first few rows
+
+                new_choices.extend(list(df.columns))
+
+            all_sheet_names.extend(new_sheet_names)
+
+        else:
+            df = read_file(file_name)
+            new_choices = list(df.columns)
 
         concat_choices.extend(new_choices)
-
+        
     # Drop duplicate columns
     concat_choices = list(set(concat_choices))
-        
-    return gr.Dropdown(choices=concat_choices, value=concat_choices)
+
+    if number_of_excel_files > 0:      
+        return gr.Dropdown(choices=concat_choices, value=concat_choices), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names, visible=True)
+    else:
+        return gr.Dropdown(choices=concat_choices, value=concat_choices), gr.Dropdown(visible=False)
 
 # Following function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
 def add_folder_to_path(folder_path: str):
@@ -104,7 +133,7 @@ def add_folder_to_path(folder_path: str):
         if absolute_path not in current_path.split(os.pathsep):
             full_path_extension = absolute_path + os.pathsep + current_path
             os.environ['PATH'] = full_path_extension
-            print(f"Updated PATH with: ", full_path_extension)
+            #print(f"Updated PATH with: ", full_path_extension)
         else:
             print(f"Directory {folder_path} already exists in PATH.")
     else:
@@ -167,7 +196,7 @@ async def get_connection_params(request: gr.Request):
         #if bucket_name:
         #    print("S3 output folder is: " + "s3://" + bucket_name + "/" + output_folder)
 
-        return out_session_hash, output_folder
+        return out_session_hash, output_folder, out_session_hash
     else:
         print("No session parameters found.")
         return "",""
