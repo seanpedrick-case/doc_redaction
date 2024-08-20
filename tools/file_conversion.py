@@ -3,7 +3,7 @@ from tools.helper_functions import get_file_path_end, output_folder
 from PIL import Image
 import os
 from gradio import Progress
-from typing import List
+from typing import List, Optional
 
 def is_pdf_or_image(filename):
     """
@@ -55,6 +55,7 @@ def convert_pdf_to_images(pdf_path:str, progress=Progress(track_tqdm=True)):
         
         # If no images are returned, break the loop
         if not image:
+            print("Conversion of page", str(page_num), "to file failed.")
             break
 
         images.extend(image)
@@ -74,6 +75,7 @@ def process_file(file_path):
         print(f"{file_path} is an image file.")
         # Perform image processing here
         img_object = [Image.open(file_path)]
+        # Load images from the file paths
 
     # Check if the file is a PDF
     elif file_extension == '.pdf':
@@ -85,36 +87,78 @@ def process_file(file_path):
         print(f"{file_path} is not an image or PDF file.")
         img_object = ['']
 
-    # print('Image object is:', img_object)
+    print('Image object is:', img_object)
 
     return img_object
 
-def prepare_image_or_text_pdf(file_paths:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], progress=Progress(track_tqdm=True)):
+
+
+def prepare_image_or_text_pdf(
+    file_paths: List[str],
+    in_redact_method: str,
+    in_allow_list: Optional[List[List[str]]] = None,
+    latest_file_completed: int = 0,
+    out_message: List[str] = [],
+    first_loop_state: bool = False,
+    progress: Progress = Progress(track_tqdm=True)
+) -> tuple[List[str], List[str]]:
+    """
+    Prepare and process image or text PDF files for redaction.
+
+    This function takes a list of file paths, processes each file based on the specified redaction method,
+    and returns the output messages and processed file paths.
+
+    Args:
+        file_paths (List[str]): List of file paths to process.
+        in_redact_method (str): The redaction method to use.
+        in_allow_list (Optional[List[List[str]]]): List of allowed terms for redaction.
+        latest_file_completed (int): Index of the last completed file.
+        out_message (List[str]): List to store output messages.
+        first_loop_state (bool): Flag indicating if this is the first iteration.
+        progress (Progress): Progress tracker for the operation.
+
+    Returns:
+        tuple[List[str], List[str]]: A tuple containing the output messages and processed file paths.
+    """
 
     # If out message or out_file_paths are blank, change to a list so it can be appended to
     #if isinstance(out_message, str):
     #    out_message = [out_message]
 
+    
+
+    # If this is the first time around, set variables to 0/blank
+    if first_loop_state==True:
+        latest_file_completed = 0
+        out_message = []
+        out_file_paths = []
+    else:
+        print("Now attempting file:", str(latest_file_completed + 1))
+        out_file_paths = []  
+
     if not file_paths:
         file_paths = []
 
-    out_file_paths = file_paths
+    #out_file_paths = file_paths
     
     latest_file_completed = int(latest_file_completed)
 
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
-    if latest_file_completed == len(out_file_paths):
+    if latest_file_completed == len(file_paths):
         print("Last file reached, returning files:", str(latest_file_completed))
         #final_out_message = '\n'.join(out_message)
         return out_message, out_file_paths
 
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
-    file_paths_loop = [out_file_paths[int(latest_file_completed)]]
+    file_paths_loop = [file_paths[int(latest_file_completed)]]
+    print("file_paths_loop:", str(file_paths_loop))
 
     #for file in progress.tqdm(file_paths, desc="Preparing files"):
     for file in file_paths_loop:
         file_path = file.name
+
+        print("file_path:", file_path)
 
         #if file_path:
         #    file_path_without_ext = get_file_path_end(file_path)

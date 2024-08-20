@@ -1,4 +1,4 @@
-from typing import Type
+from typing import Type, List
 import pandas as pd
 import boto3
 import tempfile
@@ -6,12 +6,11 @@ import os
 from tools.helper_functions import get_or_create_env_var
 
 PandasDataFrame = Type[pd.DataFrame]
-bucket_name=""
 
 # Get AWS credentials if required
-
+bucket_name=""
 aws_var = "RUN_AWS_FUNCTIONS"
-aws_var_default = "0"
+aws_var_default = "1"
 aws_var_val = get_or_create_env_var(aws_var, aws_var_default)
 print(f'The value of {aws_var} is {aws_var_val}')
 
@@ -157,3 +156,45 @@ def load_data_from_aws(in_aws_keyword_file, aws_password="", bucket_name=bucket_
         print(out_message)
 
     return files, out_message
+
+def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=bucket_name):
+    """
+    Uploads a file from local machine to Amazon S3.
+
+    Args:
+    - local_file_path: Local file path(s) of the file(s) to upload.
+    - s3_key: Key (path) to the file in the S3 bucket.
+    - s3_bucket: Name of the S3 bucket.
+
+    Returns:
+    - Message as variable/printed to console
+    """
+    final_out_message = []
+
+    s3_client = boto3.client('s3')
+
+    if isinstance(local_file_paths, str):
+        local_file_paths = [local_file_paths]
+
+    for file in local_file_paths:
+        try:
+            # Get file name off file path
+            file_name = os.path.basename(file)
+
+            s3_key_full = s3_key + file_name
+            print("S3 key: ", s3_key_full)
+
+            s3_client.upload_file(file, s3_bucket, s3_key_full)
+            out_message = "File " + file_name + " uploaded successfully to S3!"
+            print(out_message)
+        
+        except Exception as e:
+            out_message = f"Error uploading file(s) to S3: {e}"
+            print(out_message)
+
+        final_out_message.append(out_message)
+        final_out_message_str = '\n'.join(final_out_message)
+
+    return final_out_message_str
+        
+    

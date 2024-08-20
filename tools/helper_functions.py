@@ -139,6 +139,23 @@ def add_folder_to_path(folder_path: str):
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
 
+# Upon running a process, the feedback buttons are revealed
+def reveal_feedback_buttons():
+    return gr.Radio(visible=True), gr.Textbox(visible=True), gr.Button(visible=True)
+
+def wipe_logs(feedback_logs_loc, usage_logs_loc):
+    try:
+        os.remove(feedback_logs_loc)
+    except Exception as e:
+        print("Could not remove feedback logs file", e)
+    try:
+        os.remove(usage_logs_loc)
+    except Exception as e:
+        print("Could not remove usage logs file", e)
+    
+
+    
+
 async def get_connection_params(request: gr.Request):
     base_folder = ""
 

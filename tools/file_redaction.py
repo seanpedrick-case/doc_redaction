@@ -1,4 +1,4 @@
-from PIL import Image
+from PIL import Image, ImageChops, ImageDraw
 from typing import List
 import pandas as pd
 from presidio_image_redactor import ImageRedactorEngine, ImageAnalyzerEngine
@@ -14,12 +14,19 @@ from collections import defaultdict  # For efficient grouping
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
 from tools.helper_functions import get_file_path_end, output_folder
 from tools.file_conversion import process_file, is_pdf, convert_text_pdf_to_img_pdf
+from tools.data_anonymise import generate_decision_process_output
 import gradio as gr
 
 
-def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list = [], progress=gr.Progress(track_tqdm=True)):
+def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list = [], first_loop_state:bool=False, progress=gr.Progress(track_tqdm=True)):
 
     tic = time.perf_counter()
+
+    # If this is the first time around, set variables to 0/blank
+    if first_loop_state==True:
+        latest_file_completed = 0
+        out_message = []
+        out_file_paths = []
 
     # If out message is string or out_file_paths are blank, change to a list so it can be appended to
     if isinstance(out_message, str):
@@ -44,14 +51,15 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
     
 
-    print("File paths:", file_paths)
+    #print("File paths:", file_paths)
 
     for file in progress.tqdm(file_paths_loop, desc="Redacting files", unit = "files"):
         file_path = file.name
 
         if file_path:
             file_path_without_ext = get_file_path_end(file_path)
-            if is_pdf(file_path) == False:
+            is_a_pdf = is_pdf(file_path) == True
+            if is_a_pdf == False:
                 # If user has not submitted a pdf, assume it's an image
                 print("File is not a pdf, assuming that image analysis needs to be used.")
                 in_redact_method = "Image analysis"
@@ -65,13 +73,19 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             # if is_pdf_or_image(file_path) == False:
             #     return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
 
-            print("Redacting file as image-based pdf")
-            pdf_images = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat)
+            print("Redacting file as image-based file")
+            pdf_images, output_logs = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat, is_a_pdf)
             out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_img.pdf"
             pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
 
             out_file_paths.append(out_image_file_path)
-            out_message.append("File '" + file_path_without_ext + "' successfully redacted and saved to file.")
+            out_message.append("File '" + file_path_without_ext + "' successfully redacted and saved to file")
+
+            output_logs_str = str(output_logs)
+            logs_output_file_name = out_image_file_path + "_decision_process_output.txt"
+            with open(logs_output_file_name, "w") as f:
+                f.write(output_logs_str)
+            out_file_paths.append(logs_output_file_name)
 
             # Increase latest file completed count unless we are at the last file
             if latest_file_completed != len(file_paths):
@@ -84,12 +98,12 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
 
             # Analyse text-based pdf
             print('Redacting file as text-based PDF')
-            pdf_text = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
+            pdf_text, output_logs = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
             out_text_file_path = output_folder + file_path_without_ext + "_text_redacted.pdf"
             pdf_text.save(out_text_file_path)
 
             #out_file_paths.append(out_text_file_path)
-            out_message_new = "File " + file_path_without_ext + " successfully redacted."
+            out_message_new = "File " + file_path_without_ext + " successfully redacted"
             out_message.append(out_message_new)
 
             # Convert message
@@ -100,6 +114,12 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             # Convert document to image-based document to 'embed' redactions
             img_output_summary, img_output_file_path = convert_text_pdf_to_img_pdf(file_path, [out_text_file_path])
             out_file_paths.extend(img_output_file_path)
+
+            output_logs_str = str(output_logs)
+            logs_output_file_name = img_output_file_path[0] + "_decision_process_output.txt"
+            with open(logs_output_file_name, "w") as f:
+                f.write(output_logs_str)
+            out_file_paths.append(logs_output_file_name)
 
             # Add confirmation for converting to image if you want
             # out_message.append(img_output_summary)
@@ -138,7 +158,7 @@ def merge_img_bboxes(bboxes, horizontal_threshold=150, vertical_threshold=25):
                 merged_box = group[0]
                 for next_box in group[1:]:
                     if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
-                        print("Merging a box")
+                        #print("Merging a box")
                         # Calculate new dimensions for the merged box
                         new_left = min(merged_box.left, next_box.left)
                         new_top = min(merged_box.top, next_box.top)
@@ -154,16 +174,14 @@ def merge_img_bboxes(bboxes, horizontal_threshold=150, vertical_threshold=25):
                 merged_bboxes.append(merged_box) 
             return merged_bboxes
 
-def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
+def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, is_a_pdf:bool=True, progress=Progress(track_tqdm=True)):
     '''
     Take an path for an image of a document, then run this image through the Presidio ImageAnalyzer and PIL to get a redacted page back. Adapted from Presidio ImageRedactorEngine.
     '''
-    from PIL import Image, ImageChops, ImageDraw
 
     fill = (0, 0, 0)
 
     if not image_paths:
-
         out_message = "PDF does not exist as images. Converting pages to image"
         print(out_message)
         #progress(0, desc=out_message)
@@ -180,12 +198,12 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
     #for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
     for i in range(0, number_of_pages):
 
-        print("Redacting page ", str(i + 1))
+        print("Redacting page", str(i + 1))
 
         # Get the image to redact using PIL lib (pillow)
-        image = image_paths[i] #Image.open(image_paths[i])
+        #print("image_paths:", image_paths)
 
-        image = ImageChops.duplicate(image)
+        image = ImageChops.duplicate(image_paths[i])
 
         # %%
         image_analyser = ImageAnalyzerEngine(nlp_analyser)
@@ -200,8 +218,14 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
                 "allow_list": allow_list,
                 "language": language,
                 "entities": chosen_redact_entities,
-                "score_threshold": score_threshold
+                "score_threshold": score_threshold,
+                "return_decision_process":True,
             })
+        
+        # Text placeholder in this processing step, as the analyze method does not return the OCR text
+        if bboxes:
+            decision_process_output_str = str(bboxes)
+            print("Decision process:", decision_process_output_str)
         
         #print("For page: ", str(i), "Bounding boxes: ", bboxes)
 
@@ -209,7 +233,7 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
                
         merged_bboxes = merge_img_bboxes(bboxes)
 
-        print("For page: ", str(i), "Merged bounding boxes: ", merged_bboxes)
+        #print("For page:", str(i), "Merged bounding boxes:", merged_bboxes)
 
         # 3. Draw the merged boxes (unchanged)
         for box in merged_bboxes:
@@ -221,7 +245,7 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
         images.append(image)
 
-    return images
+    return images, decision_process_output_str
 
 def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
     '''
@@ -242,7 +266,7 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
 
     #for page in progress.tqdm(pdf.pages, total=len(pdf.pages), unit="pages", desc="Redacting pages"):
     for page in pdf.pages:
-        print("Page number is: ", page_num + 1)
+        print("Page number is:", page_num + 1)
 
         annotations_on_page = []
         analyzed_bounding_boxes = []
@@ -261,8 +285,11 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
                                                             language=language, 
                                                             entities=chosen_redact_entities,
                                                             score_threshold=score_threshold,
-                                                            return_decision_process=False,
+                                                            return_decision_process=True,
                                                             allow_list=allow_list)
+                    
+
+                    
 
                     characters = [char                    # This is what we want to include in the list
                             for line in text_container          # Loop through each line in text_container
@@ -292,7 +319,7 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
                                         current_box = char_box
                                         current_y = char_box[1]
                                     else:  # Now we have previous values to compare
-                                        print("Comparing values")
+                                        #print("Comparing values")
                                         vertical_diff_bboxes = abs(char_box[1] - current_y)
                                         horizontal_diff_bboxes = abs(char_box[0] - current_box[2])
                                         #print("Vertical distance with last bbox: ", str(vertical_diff_bboxes), "Horizontal distance: ", str(horizontal_diff_bboxes), "For result: ", result)
@@ -303,9 +330,6 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
                                         ):
                                             old_right_pos = current_box[2]
                                             current_box[2] = char_box[2]
-
-                                            print("Old right pos: ", str(old_right_pos), "has been replaced with: ", str(current_box[2]), "for result: ", result)
-
                                         else:
                                             merged_bounding_boxes.append(
                                                 {"boundingBox": current_box, "result": result})
@@ -324,13 +348,17 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
                         combined_analyzer_results.extend(analyzer_results)
 
             if len(analyzer_results) > 0:
+                #decision_process_output_str = generate_decision_process_output(analyzer_results, {'text':text_to_analyze})
+                #print("Decision process:", decision_process_output_str)
                 # Create summary df of annotations to be made
                 analyzed_bounding_boxes_df_new = pd.DataFrame(analyzed_bounding_boxes)
                 analyzed_bounding_boxes_df_text = analyzed_bounding_boxes_df_new['result'].astype(str).str.split(",",expand=True).replace(".*: ", "", regex=True)
                 analyzed_bounding_boxes_df_text.columns = ["type", "start", "end", "score"]
                 analyzed_bounding_boxes_df_new = pd.concat([analyzed_bounding_boxes_df_new, analyzed_bounding_boxes_df_text], axis = 1)
                 analyzed_bounding_boxes_df_new['page'] = page_num + 1
-                analyzed_bounding_boxes_df = pd.concat([analyzed_bounding_boxes_df, analyzed_bounding_boxes_df_new], axis = 0)
+                analyzed_bounding_boxes_df = pd.concat([analyzed_bounding_boxes_df, analyzed_bounding_boxes_df_new], axis = 0).drop('result', axis=1)
+
+                print('analyzed_bounding_boxes_df:', analyzed_bounding_boxes_df)
 
             for analyzed_bounding_box in analyzed_bounding_boxes:
                 bounding_box = analyzed_bounding_box["boundingBox"]
@@ -352,11 +380,9 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
 
             annotations_all_pages.extend([annotations_on_page])
  
-            print("For page number: ", page_num, " there are ", len(annotations_all_pages[page_num]), " annotations")
+            print("For page number:", page_num, "there are", len(annotations_all_pages[page_num]), "annotations")
             page.Annots = pdf.make_indirect(annotations_on_page)
 
             page_num += 1
-    
-    analyzed_bounding_boxes_df.to_csv(output_folder + "annotations_made.csv")
 
-    return pdf
+    return pdf, analyzed_bounding_boxes_df

@@ -3,7 +3,8 @@ import os
 # By default TLDExtract will try to pull files from the internet. I have instead downloaded this file locally to avoid the requirement for an internet connection.
 os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
 
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs
+from tools.aws_functions import upload_file_to_s3
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_text_pdf
 from tools.data_anonymise import anonymise_data_files
@@ -29,9 +30,15 @@ with app:
     output_image_files_state = gr.State([])
     output_file_list_state = gr.State([])
     text_output_file_list_state = gr.State([])
+    first_loop_state = gr.State(True)
+    second_loop_state = gr.State(False)
 
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
+    feedback_logs_state = gr.State('feedback/log.csv')
+    feedback_s3_logs_loc_state = gr.State('feedback/')
+    usage_logs_state = gr.State('logs/log.csv')
+    usage_s3_logs_loc_state = gr.State('logs/')
 
     gr.Markdown(
     """
@@ -39,9 +46,9 @@ with app:
 
     Redact personal information from documents, open text, or xlsx/csv tabular data. See the 'Redaction settings' to change various settings such as which types of information to redact (e.g. people, places), or terms to exclude from redaction.
 
-    WARNING: This is a beta product. It is not 100% accurate, and it will miss some personal information. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed.
+    WARNING: In testing the app seems to only find about 60% of personal information on a given (typed) page of text. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed.
 
-    Other redaction entities are possible to include in this app easily, especially country-specific entities. If you want to use these, clone the repo locally and add entity names from [this link](https://microsoft.github.io/presidio/supported_entities/) to the 'full_entity_list' variable in app.py.
+    This app accepts a maximum file size of 10mb. Please consider giving feedback for the quality of the answers underneath the redact buttons when the option appears, this will help to improve the app.
     """)
 
     with gr.Tab("PDFs/images"):
@@ -57,6 +64,15 @@ with app:
 
         with gr.Row():
             convert_text_pdf_to_img_btn = gr.Button(value="Convert pdf to image-based pdf to apply redactions", variant="secondary", visible=False)
+
+        with gr.Row():
+            pdf_feedback_radio = gr.Radio(choices=["The results were good", "The results were not good"], visible=False)
+        with gr.Row():
+            pdf_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
+            pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
+
+        with gr.Row():
+            s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
     
     with gr.Tab(label="Open text or Excel/csv files"):
         gr.Markdown(
@@ -73,12 +89,19 @@ with app:
 
         in_colnames = gr.Dropdown(choices=["Choose columns to anonymise"], multiselect = True, label="Select columns that you want to anonymise (showing columns present across all files).")
         
-        tabular_data_redact_btn = gr.Button("Anonymise text", variant="primary")
+        tabular_data_redact_btn = gr.Button("Redact text/data files", variant="primary")
         
         with gr.Row():
             text_output_summary = gr.Textbox(label="Output result")
             text_output_file = gr.File(label="Output files")
             text_tabular_files_done = gr.Number(value=0, label="Number of tabular files redacted", interactive=False)
+
+        with gr.Row():
+            data_feedback_radio = gr.Radio(label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 60% of personally identifiable information in a given (typed) document.",
+                choices=["The results were good", "The results were not good"], visible=False)
+        with gr.Row():
+            data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
+            data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
     with gr.Tab(label="Redaction settings"):
         gr.Markdown(
@@ -111,44 +134,55 @@ with app:
     
     # ### Loading AWS data ###
     # load_aws_data_button.click(fn=load_data_from_aws, inputs=[in_aws_file, aws_password_box], outputs=[in_file, aws_log_box])
-
-    callback = gr.CSVLogger()
    
     # Document redaction
-    redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary],
-                    outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state],
+    redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, first_loop_state], outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, first_loop_state],
                     outputs=[output_summary, output_file, output_file_list_state, text_documents_done], api_name="redact_doc")
     
     # If the output file count text box changes, keep going with redacting each document until done
-    text_documents_done.change(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary],
-                    outputs=[output_summary, prepared_pdf_state]).\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done])
+    text_documents_done.change(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, second_loop_state], outputs=[output_summary, prepared_pdf_state]).\
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, second_loop_state],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done]).\
+    then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn])
 
      # Tabular data redaction           
     in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets]) 
 
-    tabular_data_redact_btn.click(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, in_excel_sheets], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done], api_name="redact_text")
+    tabular_data_redact_btn.click(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, in_excel_sheets, first_loop_state], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done], api_name="redact_text")
 
     # If the output file count text box changes, keep going with redacting each data file until done
-    text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, in_excel_sheets], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done])
+    text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, in_excel_sheets, second_loop_state], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done]).\
+    then(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn])    
 
+    #app.load(wipe_logs, inputs=[feedback_logs_state, usage_logs_state], outputs=[]).\
+    #    then(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
+    
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
 
-    # This needs to be called at some point prior to the first call to callback.flag()
+    # Log usernames and times of access to file (to know who is using the app when running on AWS)
+    callback = gr.CSVLogger()
     callback.setup([session_hash_textbox], "logs")
-
-    #app.load(lambda *args: callback.flag(list(args)), [session_hash_textbox], None, preprocess=False)
     session_hash_textbox.change(lambda *args: callback.flag(list(args)), [session_hash_textbox], None, preprocess=False)
+
+    # User submitted feedback for pdf redactions
+    pdf_callback = gr.CSVLogger()
+    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text], "feedback")
+    pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text], None, preprocess=False).\
+    then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+
+    # User submitted feedback for data redactions
+    data_callback = gr.CSVLogger()
+    data_callback.setup([data_feedback_radio, data_further_details_text], "feedback")
+    data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args)), [data_feedback_radio, data_further_details_text], None, preprocess=False).\
+    then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
 print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
 if __name__ == "__main__":
-
     if os.environ['COGNITO_AUTH'] == "1":
-        app.queue().launch(show_error=True, auth=authenticate_user)
+        app.queue().launch(show_error=True, auth=authenticate_user, max_file_size='10mb')
     else:
-        app.queue().launch(show_error=True, inbrowser=True)
+        app.queue().launch(show_error=True, inbrowser=True, max_file_size='10mb')

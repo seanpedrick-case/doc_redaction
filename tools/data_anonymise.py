@@ -5,11 +5,10 @@ import time
 import pandas as pd
 
 from faker import Faker
-
 from gradio import Progress
-from typing import List
+from typing import List, Dict, Any
 
-from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine
+from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine, DictAnalyzerResult, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
 
@@ -23,6 +22,76 @@ from tools.presidio_analyzer_custom import analyze_dict
 fake = Faker("en_UK")
 def fake_first_name(x):
     return fake.first_name()
+
+# Writing decision making process to file
+def generate_decision_process_output(analyzer_results: List[DictAnalyzerResult], df_dict: Dict[str, List[Any]]) -> str:
+    """
+    Generate a detailed output of the decision process for entity recognition.
+
+    This function takes the results from the analyzer and the original data dictionary,
+    and produces a string output detailing the decision process for each recognized entity.
+    It includes information such as entity type, position, confidence score, and the context
+    in which the entity was found.
+
+    Args:
+        analyzer_results (List[DictAnalyzerResult]): The results from the entity analyzer.
+        df_dict (Dict[str, List[Any]]): The original data in dictionary format.
+
+    Returns:
+        str: A string containing the detailed decision process output.
+    """
+    decision_process_output = []
+    keys_to_keep = ['entity_type', 'start', 'end']
+
+    def process_recognizer_result(result, recognizer_result, data_row, dictionary_key, df_dict, keys_to_keep):
+        output = []
+
+        if hasattr(result, 'value'):
+            text = result.value[data_row]
+        else:
+            text = ""        
+
+        if isinstance(recognizer_result, list):
+            for sub_result in recognizer_result:
+                if isinstance(text, str):
+                    found_text = text[sub_result.start:sub_result.end]
+                else:
+                    found_text = ''
+                analysis_explanation = {key: sub_result.__dict__[key] for key in keys_to_keep}
+                analysis_explanation.update({
+                    'data_row': str(data_row),
+                    'column': list(df_dict.keys())[dictionary_key],
+                    'entity': found_text
+                })
+                output.append(str(analysis_explanation))
+        
+        return output
+    
+    #print("Analyser results:", analyzer_results)
+
+    # Run through each column to analyse for PII
+    for i, result in enumerate(analyzer_results):
+        print("Looking at result:", str(i))
+
+        # If a single result
+        if isinstance(result, RecognizerResult):
+            decision_process_output.extend(process_recognizer_result(result, result, 0, i, df_dict, keys_to_keep))
+
+        # If a list of results
+        elif isinstance(result, List):
+            for x, recognizer_result in enumerate(result.recognizer_results):       
+                decision_process_output.extend(process_recognizer_result(result, recognizer_result, x, i, df_dict, keys_to_keep))
+
+        else:
+            try:
+                decision_process_output.extend(process_recognizer_result(result, result, 0, i, df_dict, keys_to_keep))
+            except Exception as e:
+                print(e)
+
+    decision_process_output_str = '\n'.join(decision_process_output)
+    
+
+    return decision_process_output_str
 
 def anon_consistent_names(df):
     # ## Pick out common names and replace them with the same person value
@@ -118,6 +187,9 @@ def anon_consistent_names(df):
 
 def anonymise_script(df, anon_strat, language:str, chosen_redact_entities:List[str], in_allow_list:List[str]=[], progress=Progress(track_tqdm=False)):
 
+    print("Identifying personal information")
+    analyse_tic = time.perf_counter()
+
     key_string = ""
 
     # DataFrame to dict
@@ -133,34 +205,26 @@ def anonymise_script(df, anon_strat, language:str, chosen_redact_entities:List[s
 
     batch_anonymizer = BatchAnonymizerEngine(anonymizer_engine = anonymizer)
 
-    # analyzer_results = batch_analyzer.analyze_dict(df_dict, language=language, 
-    #                                                         entities=chosen_redact_entities,
-    #                                                         score_threshold=score_threshold,
-    #                                                         return_decision_process=False,
-    #                                                         in_allow_list=in_allow_list_flat)
-
-    print("Identifying personal information")
-    analyse_tic = time.perf_counter()
-
-    print("Allow list:", in_allow_list)
+    #print("Allow list:", in_allow_list)
+    #print("Input data keys:", df_dict.keys())
 
     # Use custom analyzer to be able to track progress with Gradio
     analyzer_results = analyze_dict(batch_analyzer, df_dict, language=language, 
                                                             entities=chosen_redact_entities,
                                                             score_threshold=score_threshold,
-                                                            return_decision_process=False,
+                                                            return_decision_process=True,
                                                             allow_list=in_allow_list_flat)
+    
     analyzer_results = list(analyzer_results)
-    #analyzer_results
+
+    # Usage in the main function:
+    decision_process_output_str = generate_decision_process_output(analyzer_results, df_dict)
 
     analyse_toc = time.perf_counter()
     analyse_time_out = f"Analysing the text took {analyse_toc - analyse_tic:0.1f} seconds."
     print(analyse_time_out)
 
-    
-
     # Create faker function (note that it has to receive a value)
-    
     fake = Faker("en_UK")
 
     def fake_first_name(x):
@@ -197,7 +261,7 @@ def anonymise_script(df, anon_strat, language:str, chosen_redact_entities:List[s
 
     scrubbed_df = pd.DataFrame(anonymizer_results)
     
-    return scrubbed_df, key_string
+    return scrubbed_df, key_string, decision_process_output_str
 
 def anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, excel_sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name):
     def check_lists(list1, list2):
@@ -238,7 +302,7 @@ def anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_
     anon_df_remain = anon_df.drop(chosen_cols_in_anon_df, axis = 1)
     
     # Anonymise the selected columns
-    anon_df_part_out, key_string = anonymise_script(anon_df_part, anon_strat, language, chosen_redact_entities, in_allow_list)
+    anon_df_part_out, key_string, decision_process_output_str = anonymise_script(anon_df_part, anon_strat, language, chosen_redact_entities, in_allow_list)
         
     # Rejoin the dataframe together
     anon_df_out = pd.concat([anon_df_part_out, anon_df_remain], axis = 1)
@@ -261,11 +325,20 @@ def anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_
             # Write each DataFrame to a different worksheet.
             anon_df_out.to_excel(writer, sheet_name=excel_sheet_name, index=None)
 
+        decision_process_log_output_file = anon_xlsx_export_file_name + "decision_process_output.txt"
+        with open(decision_process_log_output_file, "w") as f:
+            f.write(decision_process_output_str)
+
     else:
         anon_export_file_name = output_folder + out_file_part + "_" + excel_sheet_name + "_anon_" + anon_strat_txt + ".csv"
         anon_df_out.to_csv(anon_export_file_name, index = None)
 
+        decision_process_log_output_file = anon_export_file_name + "_decision_process_output.txt"
+        with open(decision_process_log_output_file, "w") as f:
+            f.write(decision_process_output_str)
+
     out_file_paths.append(anon_export_file_name)
+    out_file_paths.append(decision_process_log_output_file)
 
     # As files are created in a loop, there is a risk of duplicate file names being output. Use set to keep uniques.
     out_file_paths = list(set(out_file_paths))
@@ -276,9 +349,15 @@ def anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_
 
     return out_file_paths, out_message, key_string
        
-def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chosen_cols:List[str], language:str, chosen_redact_entities:List[str], in_allow_list:List[str]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list = [], in_excel_sheets:list=[], progress=Progress(track_tqdm=True)):
+def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chosen_cols:List[str], language:str, chosen_redact_entities:List[str], in_allow_list:List[str]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list = [], in_excel_sheets:list=[], first_loop_state:bool=False, progress=Progress(track_tqdm=True)):
     
     tic = time.perf_counter()
+
+    # If this is the first time around, set variables to 0/blank
+    if first_loop_state==True:
+        latest_file_completed = 0
+        out_message = []
+        out_file_paths = []
 
     # Load file
     # If out message or out_file_paths are blank, change to a list so it can be appended to
