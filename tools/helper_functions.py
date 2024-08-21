@@ -141,7 +141,7 @@ def add_folder_to_path(folder_path: str):
 
 # Upon running a process, the feedback buttons are revealed
 def reveal_feedback_buttons():
-    return gr.Radio(visible=True), gr.Textbox(visible=True), gr.Button(visible=True)
+    return gr.Radio(visible=True), gr.Textbox(visible=True), gr.Button(visible=True), gr.Markdown(visible=True)
 
 def wipe_logs(feedback_logs_loc, usage_logs_loc):
     try:

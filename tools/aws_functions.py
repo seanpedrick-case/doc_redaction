@@ -10,7 +10,7 @@ PandasDataFrame = Type[pd.DataFrame]
 # Get AWS credentials if required
 bucket_name=""
 aws_var = "RUN_AWS_FUNCTIONS"
-aws_var_default = "1"
+aws_var_default = "0"
 aws_var_val = get_or_create_env_var(aws_var, aws_var_default)
 print(f'The value of {aws_var} is {aws_var_val}')
 
@@ -185,11 +185,11 @@ def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=buck
             print("S3 key: ", s3_key_full)
 
             s3_client.upload_file(file, s3_bucket, s3_key_full)
-            out_message = "File " + file_name + " uploaded successfully to S3!"
+            out_message = "File " + file_name + " uploaded successfully!"
             print(out_message)
         
         except Exception as e:
-            out_message = f"Error uploading file(s) to S3: {e}"
+            out_message = f"Error uploading file(s): {e}"
             print(out_message)
 
         final_out_message.append(out_message)

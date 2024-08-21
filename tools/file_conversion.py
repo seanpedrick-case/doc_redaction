@@ -87,8 +87,6 @@ def process_file(file_path):
         print(f"{file_path} is not an image or PDF file.")
         img_object = ['']
 
-    print('Image object is:', img_object)
-
     return img_object
 
 def prepare_image_or_text_pdf(
@@ -129,7 +127,7 @@ def prepare_image_or_text_pdf(
         out_message = []
         out_file_paths = []
     else:
-        print("Now attempting file:", str(latest_file_completed + 1))
+        print("Now attempting file:", str(latest_file_completed))
         out_file_paths = []  
 
     if not file_paths:
@@ -140,7 +138,7 @@ def prepare_image_or_text_pdf(
     latest_file_completed = int(latest_file_completed)
 
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
-    if latest_file_completed == len(file_paths):
+    if latest_file_completed >= len(file_paths):
         print("Last file reached, returning files:", str(latest_file_completed))
         #final_out_message = '\n'.join(out_message)
         return out_message, out_file_paths
@@ -204,6 +202,6 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     out_message = "PDF " + file_path_without_ext + " converted to image-based file."
     print(out_message)
 
-    print("Out file paths:", out_file_paths)
+    #print("Out file paths:", out_file_paths)
 
     return out_message, out_file_paths

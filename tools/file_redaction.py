@@ -18,9 +18,10 @@ from tools.data_anonymise import generate_decision_process_output
 import gradio as gr
 
 
-def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list = [], first_loop_state:bool=False, progress=gr.Progress(track_tqdm=True)):
+def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list=[], log_files_output_paths:list=[], first_loop_state:bool=False, progress=gr.Progress(track_tqdm=True)):
 
     tic = time.perf_counter()
+
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -35,23 +36,21 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
     if not out_file_paths:
         out_file_paths = []
 
-    print("Latest file completed is:", str(latest_file_completed))
-
     latest_file_completed = int(latest_file_completed)
 
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
-    if latest_file_completed == len(file_paths):
-        print("Last file reached, returning files:", str(latest_file_completed))
+    if latest_file_completed >= len(file_paths):
+        print("Last file reached")
+        # Set to a very high number so as not to mess with subsequent file processing by the user
+        latest_file_completed = 99
         final_out_message = '\n'.join(out_message)
-        return final_out_message, out_file_paths, out_file_paths, latest_file_completed
+        return final_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
     
     file_paths_loop = [file_paths[int(latest_file_completed)]]
 
     if in_allow_list:
         in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
     
-
-    #print("File paths:", file_paths)
 
     for file in progress.tqdm(file_paths_loop, desc="Redacting files", unit = "files"):
         file_path = file.name
@@ -66,7 +65,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         else:
             out_message = "No file selected"
             print(out_message)
-            return out_message, out_file_paths, out_file_paths, latest_file_completed
+            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
 
         if in_redact_method == "Image analysis":
             # Analyse and redact image-based pdf or image
@@ -85,7 +84,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             logs_output_file_name = out_image_file_path + "_decision_process_output.txt"
             with open(logs_output_file_name, "w") as f:
                 f.write(output_logs_str)
-            out_file_paths.append(logs_output_file_name)
+            log_files_output_paths.append(logs_output_file_name)
 
             # Increase latest file completed count unless we are at the last file
             if latest_file_completed != len(file_paths):
@@ -119,19 +118,19 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             logs_output_file_name = img_output_file_path[0] + "_decision_process_output.txt"
             with open(logs_output_file_name, "w") as f:
                 f.write(output_logs_str)
-            out_file_paths.append(logs_output_file_name)
+            log_files_output_paths.append(logs_output_file_name)
 
             # Add confirmation for converting to image if you want
             # out_message.append(img_output_summary)
 
             if latest_file_completed != len(file_paths):
-                print("Completed file number:", str(latest_file_completed))
+                print("Completed file number:", str(latest_file_completed), "more files to do")
                 latest_file_completed += 1                
             
         else:
             out_message = "No redaction method selected"
             print(out_message)
-            return out_message, out_file_paths, out_file_paths, latest_file_completed    
+            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
         
     
     toc = time.perf_counter()
@@ -141,7 +140,9 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
     out_message_out = '\n'.join(out_message)
     out_message_out = out_message_out + " " + out_time
 
-    return out_message_out, out_file_paths, out_file_paths, latest_file_completed
+    out_message_out = out_message_out + "\n\nGo to to the Redaction settings tab to see redaction logs. Please give feedback on the results below to help improve this app."
+
+    return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
 
 def merge_img_bboxes(bboxes, horizontal_threshold=150, vertical_threshold=25):
             merged_bboxes = []
@@ -388,12 +389,8 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
                 # Merge bounding boxes if very close together
                 text_container_analyzed_bounding_boxes = merge_bounding_boxes(text_container_analyzer_results, characters, combine_pixel_dist)
 
-                print("\n\nanalyzed_bounding_boxes_in_loop:", text_container_analyzed_bounding_boxes)
-
                 page_analyzed_bounding_boxes.extend(text_container_analyzed_bounding_boxes)
                 page_analyzer_results.extend(text_container_analyzer_results)
-
-            print("analyzed_bounding_boxes_out_loop:\n\n", page_analyzed_bounding_boxes)
 
             decision_process_table_on_page = create_text_redaction_process_results(page_analyzer_results, page_analyzed_bounding_boxes, page_num)           
 

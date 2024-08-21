@@ -36,6 +36,7 @@ with app:
     output_image_files_state = gr.State([])
     output_file_list_state = gr.State([])
     text_output_file_list_state = gr.State([])
+    log_files_output_list_state = gr.State([]) 
     first_loop_state = gr.State(True)
     second_loop_state = gr.State(False)
 
@@ -66,16 +67,15 @@ with app:
         with gr.Row():
             output_summary = gr.Textbox(label="Output summary")
             output_file = gr.File(label="Output files")
-            text_documents_done = gr.Number(value=0, label="Number of documents redacted", interactive=False)
+            text_documents_done = gr.Number(value=0, label="Number of documents redacted", interactive=False, visible=False)
 
         with gr.Row():
             convert_text_pdf_to_img_btn = gr.Button(value="Convert pdf to image-based pdf to apply redactions", variant="secondary", visible=False)
 
-        with gr.Row():
-            pdf_feedback_radio = gr.Radio(choices=["The results were good", "The results were not good"], visible=False)
-        with gr.Row():
-            pdf_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
-            pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
+        pdf_feedback_title = gr.Markdown(value="## Please give feedback", visible=False)
+        pdf_feedback_radio = gr.Radio(choices=["The results were good", "The results were not good"], visible=False)
+        pdf_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
+        pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
         with gr.Row():
             s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
@@ -100,14 +100,13 @@ with app:
         with gr.Row():
             text_output_summary = gr.Textbox(label="Output result")
             text_output_file = gr.File(label="Output files")
-            text_tabular_files_done = gr.Number(value=0, label="Number of tabular files redacted", interactive=False)
+            text_tabular_files_done = gr.Number(value=0, label="Number of tabular files redacted", interactive=False, visible=False)
 
-        with gr.Row():
-            data_feedback_radio = gr.Radio(label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 60% of personally identifiable information in a given (typed) document.",
+        data_feedback_title = gr.Markdown(value="## Please give feedback", visible=False)
+        data_feedback_radio = gr.Radio(label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 60% of personally identifiable information in a given (typed) document.",
                 choices=["The results were good", "The results were not good"], visible=False)
-        with gr.Row():
-            data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
-            data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
+        data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
+        data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
     with gr.Tab(label="Redaction settings"):
         gr.Markdown(
@@ -124,6 +123,7 @@ with app:
             with gr.Row():
                 in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language (only English currently supported)", multiselect=False)
                 in_allow_list = gr.Dataframe(label="Allow list - enter a new term to ignore for redaction on each row e.g. Lambeth -> add new row -> Lambeth 2030", headers=["Allow list"], row_count=1, col_count=(1, 'fixed'), value=[[""]], type="array", column_widths=["100px"], datatype='str')
+            log_files_output = gr.File(label="Log file output", interactive=False)
 
         # Invisible text box to hold the session hash/username just for logging purposes
         session_hash_textbox = gr.Textbox(value="", visible=False) 
@@ -143,23 +143,23 @@ with app:
    
     # Document redaction
     redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, first_loop_state], outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, first_loop_state],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done], api_name="redact_doc")
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state], api_name="redact_doc")
     
     # If the output file count text box changes, keep going with redacting each document until done
     text_documents_done.change(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, second_loop_state], outputs=[output_summary, prepared_pdf_state]).\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, second_loop_state],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done]).\
-    then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn])
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state]).\
+    then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
 
      # Tabular data redaction           
     in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets]) 
 
-    tabular_data_redact_btn.click(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, in_excel_sheets, first_loop_state], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done], api_name="redact_text")
+    tabular_data_redact_btn.click(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, first_loop_state], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state], api_name="redact_text")
 
     # If the output file count text box changes, keep going with redacting each data file until done
-    text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, in_excel_sheets, second_loop_state], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done]).\
-    then(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn])    
+    text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, second_loop_state], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state]).\
+    then(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title])    
 
     #app.load(wipe_logs, inputs=[feedback_logs_state, usage_logs_state], outputs=[]).\
     #    then(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
@@ -169,19 +169,20 @@ with app:
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     callback = gr.CSVLogger()
     callback.setup([session_hash_textbox], logs_data_folder)
-    session_hash_textbox.change(lambda *args: callback.flag(list(args)), [session_hash_textbox], None, preprocess=False)
+    session_hash_textbox.change(lambda *args: callback.flag(list(args)), [session_hash_textbox], None, preprocess=False).\
+    then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
     # User submitted feedback for pdf redactions
     pdf_callback = gr.CSVLogger()
-    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text], feedback_data_folder)
-    pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text], None, preprocess=False).\
-    then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text, in_file], feedback_data_folder)
+    pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text, in_file], None, preprocess=False).\
+    then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[pdf_further_details_text])
 
     # User submitted feedback for data redactions
     data_callback = gr.CSVLogger()
-    data_callback.setup([data_feedback_radio, data_further_details_text], feedback_data_folder)
-    data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args)), [data_feedback_radio, data_further_details_text], None, preprocess=False).\
-    then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+    data_callback.setup([data_feedback_radio, data_further_details_text, in_data_files], feedback_data_folder)
+    data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args)), [data_feedback_radio, data_further_details_text, in_data_files], None, preprocess=False).\
+    then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[data_further_details_text])
 
 # Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')

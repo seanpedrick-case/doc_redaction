@@ -69,23 +69,18 @@ def generate_decision_process_output(analyzer_results: List[DictAnalyzerResult],
 
     # Run through each column to analyse for PII
     for i, result in enumerate(analyzer_results):
-        print("Looking at result:", str(i))
-        print("result:\n\n", result)
 
         # If a single result
         if isinstance(result, RecognizerResult):
-            print("Processing recogniser result as RecognizerResult:", str(i))
             decision_process_output.extend(process_recognizer_result(result, result, 0, i, df_dict, keys_to_keep))
 
         # If a list of results
         elif isinstance(result, list) or isinstance(result, DictAnalyzerResult):
             for x, recognizer_result in enumerate(result.recognizer_results):
-                print("Processing recogniser result as List:", str(i))       
                 decision_process_output.extend(process_recognizer_result(result, recognizer_result, x, i, df_dict, keys_to_keep))
 
         else:
             try:
-                print("Processing recogniser result in other:", str(i))
                 decision_process_output.extend(process_recognizer_result(result, result, 0, i, df_dict, keys_to_keep))
             except Exception as e:
                 print(e)
@@ -269,7 +264,8 @@ def anonymise_script(df, anon_strat, language:str, chosen_redact_entities:List[s
     
     return scrubbed_df, key_string, decision_process_output_str
 
-def anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, excel_sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name):
+def anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, excel_sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths):
+
     def check_lists(list1, list2):
             return any(string in list2 for string in list1)
         
@@ -344,7 +340,7 @@ def anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_
             f.write(decision_process_output_str)
 
     out_file_paths.append(anon_export_file_name)
-    out_file_paths.append(decision_process_log_output_file)
+    log_files_output_paths.append(decision_process_log_output_file)
 
     # As files are created in a loop, there is a risk of duplicate file names being output. Use set to keep uniques.
     out_file_paths = list(set(out_file_paths))
@@ -353,9 +349,9 @@ def anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_
     if anon_file=='open_text':
         out_message = [anon_df_out['text'][0]]
 
-    return out_file_paths, out_message, key_string
+    return out_file_paths, out_message, key_string, log_files_output_paths
        
-def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chosen_cols:List[str], language:str, chosen_redact_entities:List[str], in_allow_list:List[str]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list = [], in_excel_sheets:list=[], first_loop_state:bool=False, progress=Progress(track_tqdm=True)):
+def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chosen_cols:List[str], language:str, chosen_redact_entities:List[str], in_allow_list:List[str]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list = [], log_files_output_paths:list = [], in_excel_sheets:list=[], first_loop_state:bool=False, progress=Progress(track_tqdm=True)):
     
     tic = time.perf_counter()
 
@@ -386,13 +382,15 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
             file_paths=['open_text']
         else:
             out_message = "Please enter text or a file to redact."
-            return out_message, out_file_paths, out_file_paths, latest_file_completed
+            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
         
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
-    if latest_file_completed == len(file_paths):
+    if latest_file_completed >= len(file_paths):
         print("Last file reached, returning files:", str(latest_file_completed))
+        # Set to a very high number so as not to mess with subsequent file processing by the user
+        latest_file_completed = 99
         final_out_message = '\n'.join(out_message)
-        return final_out_message, out_file_paths, out_file_paths, latest_file_completed
+        return final_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
     
     file_path_loop = [file_paths[int(latest_file_completed)]]
         
@@ -401,7 +399,11 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
         if anon_file=='open_text':
             anon_df = pd.DataFrame(data={'text':[in_text]})
             chosen_cols=['text']
+            sheet_name = ""
+            file_type = ""
             out_file_part = anon_file
+
+            out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths)
         else:
             # If file is an xlsx, we are going to run through all the Excel sheets to anonymise them separately.
             file_type = detect_file_type(anon_file)
@@ -419,7 +421,7 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
                 anon_xlsx = pd.ExcelFile(anon_file)                
 
                 # Create xlsx file:
-                anon_xlsx_export_file_name = output_folder + out_file_part + ".xlsx"
+                anon_xlsx_export_file_name = output_folder + out_file_part + "_redacted.xlsx"
 
                 from openpyxl import Workbook
 
@@ -440,13 +442,13 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
                     print(anon_df.head())  # Print the first few rows
 
                     
-                    out_file_paths, out_message, key_string = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type,  anon_xlsx_export_file_name)
+                    out_file_paths, out_message, key_string, log_files_output_paths  = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type,  anon_xlsx_export_file_name, log_files_output_paths)
                     
             else:
                 sheet_name = ""
                 anon_df = read_file(anon_file)
                 out_file_part = get_file_path_end(anon_file.name)
-                out_file_paths, out_message, key_string = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "")
+                out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths)
 
         # Increase latest file completed count unless we are at the last file
         if latest_file_completed != len(file_paths):
@@ -464,5 +466,7 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
 
         out_message_out = '\n'.join(out_message)
         out_message_out = out_message_out + " " + out_time
+
+        out_message_out = out_message_out + "\n\nGo to to the Redaction settings tab to see redaction logs. Please give feedback on the results below to help improve this app."
     
-    return out_message_out, out_file_paths, out_file_paths, latest_file_completed
+    return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
