@@ -247,142 +247,167 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
     return images, decision_process_output_str
 
+def analyze_text_container(text_container, language, chosen_redact_entities, score_threshold, allow_list):
+    if isinstance(text_container, LTTextContainer):
+        text_to_analyze = text_container.get_text()
+
+        analyzer_results = nlp_analyser.analyze(text=text_to_analyze,
+                                                language=language, 
+                                                entities=chosen_redact_entities,
+                                                score_threshold=score_threshold,
+                                                return_decision_process=True,
+                                                allow_list=allow_list)
+        characters = [char
+                for line in text_container
+                if isinstance(line, LTTextLine)
+                for char in line]
+        
+        return analyzer_results, characters
+    return [], []
+
+# Inside the loop where you process analyzer_results, merge bounding boxes that are right next to each other:
+def merge_bounding_boxes(analyzer_results, characters, combine_pixel_dist):
+    analyzed_bounding_boxes = []
+    if len(analyzer_results) > 0 and len(characters) > 0:
+        merged_bounding_boxes = []
+        current_box = None
+        current_y = None
+
+        for i, result in enumerate(analyzer_results):
+            print("Considering result", str(i))
+            for char in characters[result.start : result.end]:
+                if isinstance(char, LTChar):
+                    char_box = list(char.bbox)
+
+                    if current_y is None or current_box is None:
+                        current_box = char_box
+                        current_y = char_box[1]
+                    else:
+                        vertical_diff_bboxes = abs(char_box[1] - current_y)
+                        horizontal_diff_bboxes = abs(char_box[0] - current_box[2])
+
+                        if (
+                            vertical_diff_bboxes <= 5
+                            and horizontal_diff_bboxes <= combine_pixel_dist
+                        ):
+                            current_box[2] = char_box[2]  # Extend the current box horizontally
+                        else:
+                            merged_bounding_boxes.append(
+                                {"boundingBox": current_box, "result": result})
+                            
+                            # Reset current_box and current_y after appending
+                            current_box = char_box
+                            current_y = char_box[1]
+            
+            # After finishing with the current result, add the last box for this result
+            if current_box:
+                merged_bounding_boxes.append({"boundingBox": current_box, "result": result})
+                current_box = None
+                current_y = None  # Reset for the next result
+
+        if not merged_bounding_boxes:
+            analyzed_bounding_boxes.extend(
+                {"boundingBox": char.bbox, "result": result} 
+                for result in analyzer_results 
+                for char in characters[result.start:result.end] 
+                if isinstance(char, LTChar)
+            )
+        else:
+            analyzed_bounding_boxes.extend(merged_bounding_boxes)
+
+        print("analysed_bounding_boxes:\n\n", analyzed_bounding_boxes)
+    
+    return analyzed_bounding_boxes
+
+def create_text_redaction_process_results(analyzer_results, analyzed_bounding_boxes, page_num):
+    decision_process_table = pd.DataFrame()
+
+    if len(analyzer_results) > 0:
+        # Create summary df of annotations to be made
+        analyzed_bounding_boxes_df_new = pd.DataFrame(analyzed_bounding_boxes)
+        analyzed_bounding_boxes_df_text = analyzed_bounding_boxes_df_new['result'].astype(str).str.split(",",expand=True).replace(".*: ", "", regex=True)
+        analyzed_bounding_boxes_df_text.columns = ["type", "start", "end", "score"]
+        analyzed_bounding_boxes_df_new = pd.concat([analyzed_bounding_boxes_df_new, analyzed_bounding_boxes_df_text], axis = 1)
+        analyzed_bounding_boxes_df_new['page'] = page_num + 1
+        decision_process_table = pd.concat([decision_process_table, analyzed_bounding_boxes_df_new], axis = 0).drop('result', axis=1)
+
+        print('\n\ndecision_process_table:\n\n', decision_process_table)
+    
+    return decision_process_table
+
+def create_annotations_for_bounding_boxes(analyzed_bounding_boxes):
+    annotations_on_page = []
+    for analyzed_bounding_box in analyzed_bounding_boxes:
+        bounding_box = analyzed_bounding_box["boundingBox"]
+        annotation = Dictionary(
+            Type=Name.Annot,
+            Subtype=Name.Square, #Name.Highlight,
+            QuadPoints=[bounding_box[0], bounding_box[3], bounding_box[2], bounding_box[3],
+                        bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[1]],
+            Rect=[bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3]],
+            C=[0, 0, 0],
+            IC=[0, 0, 0],
+            CA=1, # Transparency
+            T=analyzed_bounding_box["result"].entity_type,
+            BS=Dictionary(
+                W=0,                     # Border width: 1 point
+                S=Name.S                # Border style: solid
+            )
+        )
+        annotations_on_page.append(annotation)
+    return annotations_on_page
+
 def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
     '''
     Redact chosen entities from a pdf that is made up of multiple pages that are not images.
     '''
-    
-    combined_analyzer_results = []
-    analyser_explanations = []
     annotations_all_pages = []
-    analyzed_bounding_boxes_df = pd.DataFrame()
-
-    # Horizontal distance between PII bounding boxes under/equal they are combined into one
-    combine_pixel_dist = 100
+    decision_process_table_all_pages = []
+    
+    combine_pixel_dist = 100 # Horizontal distance between PII bounding boxes under/equal they are combined into one
 
     pdf = Pdf.open(filename)
-
     page_num = 0
 
-    #for page in progress.tqdm(pdf.pages, total=len(pdf.pages), unit="pages", desc="Redacting pages"):
     for page in pdf.pages:
         print("Page number is:", page_num + 1)
 
         annotations_on_page = []
-        analyzed_bounding_boxes = []
+        decision_process_table_on_page = []       
 
         for page_layout in extract_pages(filename, page_numbers = [page_num], maxpages=1):
-            analyzer_results = []
+            
+            page_analyzer_results = []
+            page_analyzed_bounding_boxes = []
+            text_container_analyzer_results = []
+            text_container_analyzed_bounding_boxes = []
+            characters = []
 
             for text_container in page_layout:
-                if isinstance(text_container, LTTextContainer):
-                    text_to_analyze = text_container.get_text()
+                text_container_analyzer_results, characters = analyze_text_container(text_container, language, chosen_redact_entities, score_threshold, allow_list)
+                # Merge bounding boxes if very close together
+                text_container_analyzed_bounding_boxes = merge_bounding_boxes(text_container_analyzer_results, characters, combine_pixel_dist)
 
-                    analyzer_results = []
-                    characters = []
+                print("\n\nanalyzed_bounding_boxes_in_loop:", text_container_analyzed_bounding_boxes)
 
-                    analyzer_results = nlp_analyser.analyze(text=text_to_analyze,
-                                                            language=language, 
-                                                            entities=chosen_redact_entities,
-                                                            score_threshold=score_threshold,
-                                                            return_decision_process=True,
-                                                            allow_list=allow_list)
-                    
+                page_analyzed_bounding_boxes.extend(text_container_analyzed_bounding_boxes)
+                page_analyzer_results.extend(text_container_analyzer_results)
 
-                    
+            print("analyzed_bounding_boxes_out_loop:\n\n", page_analyzed_bounding_boxes)
 
-                    characters = [char                    # This is what we want to include in the list
-                            for line in text_container          # Loop through each line in text_container
-                            if isinstance(line, LTTextLine)    # Check if the line is an instance of LTTextLine
-                            for char in line]                   # Loop through each character in the line
-                            #if isinstance(char, LTChar)]  # Check if the character is not an instance of LTAnno #isinstance(char, LTChar) or
-                    
+            decision_process_table_on_page = create_text_redaction_process_results(page_analyzer_results, page_analyzed_bounding_boxes, page_num)           
 
-                    # if len(analyzer_results) > 0 and len(characters) > 0:
-                    #     analyzed_bounding_boxes.extend({"boundingBox": char.bbox, "result": result} for result in analyzer_results for char in characters[result.start:result.end] if isinstance(char, LTChar))
-                    #     combined_analyzer_results.extend(analyzer_results)
-
-                    # Inside the loop where you process analyzer_results:
-                    if len(analyzer_results) > 0 and len(characters) > 0:
-                        merged_bounding_boxes = []
-                        current_box = None
-                        current_y = None
-
-                        for result in analyzer_results:
-                            for char in characters[result.start : result.end]:
-                                if isinstance(char, LTChar):
-                                    char_box = list(char.bbox)
-
-                                    # Fix: Check if either current_y or current_box are None
-                                    if current_y is None or current_box is None:
-                                        # This is the first character, so initialize current_box and current_y
-                                        current_box = char_box
-                                        current_y = char_box[1]
-                                    else:  # Now we have previous values to compare
-                                        #print("Comparing values")
-                                        vertical_diff_bboxes = abs(char_box[1] - current_y)
-                                        horizontal_diff_bboxes = abs(char_box[0] - current_box[2])
-                                        #print("Vertical distance with last bbox: ", str(vertical_diff_bboxes), "Horizontal distance: ", str(horizontal_diff_bboxes), "For result: ", result)
-
-                                        if (
-                                            vertical_diff_bboxes <= 5
-                                            and horizontal_diff_bboxes <= combine_pixel_dist
-                                        ):
-                                            old_right_pos = current_box[2]
-                                            current_box[2] = char_box[2]
-                                        else:
-                                            merged_bounding_boxes.append(
-                                                {"boundingBox": current_box, "result": result})
-
-                                            current_box = char_box
-                                            current_y = char_box[1]
-                            # Add the last box
-                            if current_box:
-                                merged_bounding_boxes.append({"boundingBox": current_box, "result": result})
-
-                        if not merged_bounding_boxes:
-                            analyzed_bounding_boxes.extend({"boundingBox": char.bbox, "result": result} for result in analyzer_results for char in characters[result.start:result.end] if isinstance(char, LTChar))
-                        else:
-                            analyzed_bounding_boxes.extend(merged_bounding_boxes)
-                            
-                        combined_analyzer_results.extend(analyzer_results)
-
-            if len(analyzer_results) > 0:
-                #decision_process_output_str = generate_decision_process_output(analyzer_results, {'text':text_to_analyze})
-                #print("Decision process:", decision_process_output_str)
-                # Create summary df of annotations to be made
-                analyzed_bounding_boxes_df_new = pd.DataFrame(analyzed_bounding_boxes)
-                analyzed_bounding_boxes_df_text = analyzed_bounding_boxes_df_new['result'].astype(str).str.split(",",expand=True).replace(".*: ", "", regex=True)
-                analyzed_bounding_boxes_df_text.columns = ["type", "start", "end", "score"]
-                analyzed_bounding_boxes_df_new = pd.concat([analyzed_bounding_boxes_df_new, analyzed_bounding_boxes_df_text], axis = 1)
-                analyzed_bounding_boxes_df_new['page'] = page_num + 1
-                analyzed_bounding_boxes_df = pd.concat([analyzed_bounding_boxes_df, analyzed_bounding_boxes_df_new], axis = 0).drop('result', axis=1)
-
-                print('analyzed_bounding_boxes_df:', analyzed_bounding_boxes_df)
-
-            for analyzed_bounding_box in analyzed_bounding_boxes:
-                bounding_box = analyzed_bounding_box["boundingBox"]
-                annotation = Dictionary(
-                    Type=Name.Annot,
-                    Subtype=Name.Square, #Name.Highlight,
-                    QuadPoints=[bounding_box[0], bounding_box[3], bounding_box[2], bounding_box[3], bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[1]],
-                    Rect=[bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3]],
-                    C=[0, 0, 0],
-                    IC=[0, 0, 0],
-                    CA=1, # Transparency
-                    T=analyzed_bounding_box["result"].entity_type,
-                    BS=Dictionary(
-                        W=0,                     # Border width: 1 point
-                        S=Name.S                # Border style: solid
-                    )
-                )
-                annotations_on_page.append(annotation)     
-
-            annotations_all_pages.extend([annotations_on_page])
- 
-            print("For page number:", page_num, "there are", len(annotations_all_pages[page_num]), "annotations")
+            annotations_on_page = create_annotations_for_bounding_boxes(page_analyzed_bounding_boxes)
+            #print('\n\nannotations_on_page:', annotations_on_page)    
+          
+            # Make page annotations
             page.Annots = pdf.make_indirect(annotations_on_page)
 
+            annotations_all_pages.extend([annotations_on_page])
+            decision_process_table_all_pages.extend([decision_process_table_on_page])
+            
+            print("For page number:", page_num, "there are", len(annotations_all_pages[page_num]), "annotations")
+            
             page_num += 1
 
-    return pdf, analyzed_bounding_boxes_df
+    return pdf, decision_process_table_all_pages

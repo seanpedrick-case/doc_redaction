@@ -12,6 +12,9 @@ from tools.auth import authenticate_user
 #from tools.aws_functions import load_data_from_aws
 import gradio as gr
 
+from datetime import datetime
+today_rev = datetime.now().strftime("%Y%m%d")
+
 add_folder_to_path("tesseract/")
 add_folder_to_path("poppler/poppler-24.02.0/Library/bin/")
 
@@ -20,6 +23,9 @@ ensure_output_folder_exists()
 chosen_redact_entities = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE"] 
 full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE", 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS']
 language = 'en'
+
+feedback_data_folder = 'feedback/' + today_rev + '/'
+logs_data_folder = 'logs/' + today_rev + '/'
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Base())
@@ -35,10 +41,10 @@ with app:
 
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
-    feedback_logs_state = gr.State('feedback/log.csv')
-    feedback_s3_logs_loc_state = gr.State('feedback/')
-    usage_logs_state = gr.State('logs/log.csv')
-    usage_s3_logs_loc_state = gr.State('logs/')
+    feedback_logs_state = gr.State(feedback_data_folder + 'log.csv')
+    feedback_s3_logs_loc_state = gr.State(feedback_data_folder)
+    usage_logs_state = gr.State(logs_data_folder + 'log.csv')
+    usage_s3_logs_loc_state = gr.State(logs_data_folder)
 
     gr.Markdown(
     """
@@ -162,18 +168,18 @@ with app:
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     callback = gr.CSVLogger()
-    callback.setup([session_hash_textbox], "logs")
+    callback.setup([session_hash_textbox], logs_data_folder)
     session_hash_textbox.change(lambda *args: callback.flag(list(args)), [session_hash_textbox], None, preprocess=False)
 
     # User submitted feedback for pdf redactions
     pdf_callback = gr.CSVLogger()
-    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text], "feedback")
+    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text], feedback_data_folder)
     pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
     # User submitted feedback for data redactions
     data_callback = gr.CSVLogger()
-    data_callback.setup([data_feedback_radio, data_further_details_text], "feedback")
+    data_callback.setup([data_feedback_radio, data_further_details_text], feedback_data_folder)
     data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args)), [data_feedback_radio, data_further_details_text], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 

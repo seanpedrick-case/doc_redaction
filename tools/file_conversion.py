@@ -91,8 +91,6 @@ def process_file(file_path):
 
     return img_object
 
-
-
 def prepare_image_or_text_pdf(
     file_paths: List[str],
     in_redact_method: str,
@@ -123,9 +121,7 @@ def prepare_image_or_text_pdf(
 
     # If out message or out_file_paths are blank, change to a list so it can be appended to
     #if isinstance(out_message, str):
-    #    out_message = [out_message]
-
-    
+    #    out_message = [out_message]    
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -188,7 +184,6 @@ def prepare_image_or_text_pdf(
         out_file_paths.append(out_file_path)
     
     return out_message, out_file_paths
-
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     file_path_without_ext = get_file_path_end(in_file_path)

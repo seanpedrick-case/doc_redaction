@@ -23,27 +23,7 @@ fake = Faker("en_UK")
 def fake_first_name(x):
     return fake.first_name()
 
-# Writing decision making process to file
-def generate_decision_process_output(analyzer_results: List[DictAnalyzerResult], df_dict: Dict[str, List[Any]]) -> str:
-    """
-    Generate a detailed output of the decision process for entity recognition.
-
-    This function takes the results from the analyzer and the original data dictionary,
-    and produces a string output detailing the decision process for each recognized entity.
-    It includes information such as entity type, position, confidence score, and the context
-    in which the entity was found.
-
-    Args:
-        analyzer_results (List[DictAnalyzerResult]): The results from the entity analyzer.
-        df_dict (Dict[str, List[Any]]): The original data in dictionary format.
-
-    Returns:
-        str: A string containing the detailed decision process output.
-    """
-    decision_process_output = []
-    keys_to_keep = ['entity_type', 'start', 'end']
-
-    def process_recognizer_result(result, recognizer_result, data_row, dictionary_key, df_dict, keys_to_keep):
+def process_recognizer_result(result, recognizer_result, data_row, dictionary_key, df_dict, keys_to_keep):
         output = []
 
         if hasattr(result, 'value'):
@@ -66,29 +46,53 @@ def generate_decision_process_output(analyzer_results: List[DictAnalyzerResult],
                 output.append(str(analysis_explanation))
         
         return output
-    
-    #print("Analyser results:", analyzer_results)
+
+# Writing decision making process to file
+def generate_decision_process_output(analyzer_results: List[DictAnalyzerResult], df_dict: Dict[str, List[Any]]) -> str:
+    """
+    Generate a detailed output of the decision process for entity recognition.
+
+    This function takes the results from the analyzer and the original data dictionary,
+    and produces a string output detailing the decision process for each recognized entity.
+    It includes information such as entity type, position, confidence score, and the context
+    in which the entity was found.
+
+    Args:
+        analyzer_results (List[DictAnalyzerResult]): The results from the entity analyzer.
+        df_dict (Dict[str, List[Any]]): The original data in dictionary format.
+
+    Returns:
+        str: A string containing the detailed decision process output.
+    """
+    decision_process_output = []
+    keys_to_keep = ['entity_type', 'start', 'end']
 
     # Run through each column to analyse for PII
     for i, result in enumerate(analyzer_results):
         print("Looking at result:", str(i))
+        print("result:\n\n", result)
 
         # If a single result
         if isinstance(result, RecognizerResult):
+            print("Processing recogniser result as RecognizerResult:", str(i))
             decision_process_output.extend(process_recognizer_result(result, result, 0, i, df_dict, keys_to_keep))
 
         # If a list of results
-        elif isinstance(result, List):
-            for x, recognizer_result in enumerate(result.recognizer_results):       
+        elif isinstance(result, list) or isinstance(result, DictAnalyzerResult):
+            for x, recognizer_result in enumerate(result.recognizer_results):
+                print("Processing recogniser result as List:", str(i))       
                 decision_process_output.extend(process_recognizer_result(result, recognizer_result, x, i, df_dict, keys_to_keep))
 
         else:
             try:
+                print("Processing recogniser result in other:", str(i))
                 decision_process_output.extend(process_recognizer_result(result, result, 0, i, df_dict, keys_to_keep))
             except Exception as e:
                 print(e)
 
     decision_process_output_str = '\n'.join(decision_process_output)
+
+    print("decision_process_output_str:\n\n", decision_process_output_str)
     
 
     return decision_process_output_str
@@ -220,6 +224,8 @@ def anonymise_script(df, anon_strat, language:str, chosen_redact_entities:List[s
     # Usage in the main function:
     decision_process_output_str = generate_decision_process_output(analyzer_results, df_dict)
 
+    #print("decision_process_output_str:\n\n", decision_process_output_str)
+
     analyse_toc = time.perf_counter()
     analyse_time_out = f"Analysing the text took {analyse_toc - analyse_tic:0.1f} seconds."
     print(analyse_time_out)
@@ -325,12 +331,12 @@ def anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_
             # Write each DataFrame to a different worksheet.
             anon_df_out.to_excel(writer, sheet_name=excel_sheet_name, index=None)
 
-        decision_process_log_output_file = anon_xlsx_export_file_name + "decision_process_output.txt"
+        decision_process_log_output_file = anon_xlsx_export_file_name + "_" + excel_sheet_name + "_decision_process_output.txt"
         with open(decision_process_log_output_file, "w") as f:
             f.write(decision_process_output_str)
 
     else:
-        anon_export_file_name = output_folder + out_file_part + "_" + excel_sheet_name + "_anon_" + anon_strat_txt + ".csv"
+        anon_export_file_name = output_folder + out_file_part + "_anon_" + anon_strat_txt + ".csv"
         anon_df_out.to_csv(anon_export_file_name, index = None)
 
         decision_process_log_output_file = anon_export_file_name + "_decision_process_output.txt"
