@@ -18,7 +18,7 @@ from tools.data_anonymise import generate_decision_process_output
 import gradio as gr
 
 
-def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list=[], log_files_output_paths:list=[], first_loop_state:bool=False, progress=gr.Progress(track_tqdm=True)):
+def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list=[], log_files_output_paths:list=[], first_loop_state:bool=False, page_min:int=0, page_max:int=999, progress=gr.Progress(track_tqdm=True)):
 
     tic = time.perf_counter()
 
@@ -73,7 +73,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             #     return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
 
             print("Redacting file as image-based file")
-            pdf_images, output_logs = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat, is_a_pdf)
+            pdf_images, output_logs = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat, is_a_pdf, page_min, page_max)
             out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_img.pdf"
             pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
 
@@ -97,7 +97,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
 
             # Analyse text-based pdf
             print('Redacting file as text-based PDF')
-            pdf_text, output_logs = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat)
+            pdf_text, output_logs = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat, page_min, page_max)
             out_text_file_path = output_folder + file_path_without_ext + "_text_redacted.pdf"
             pdf_text.save(out_text_file_path)
 
@@ -175,12 +175,13 @@ def merge_img_bboxes(bboxes, horizontal_threshold=150, vertical_threshold=25):
                 merged_bboxes.append(merged_box) 
             return merged_bboxes
 
-def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, is_a_pdf:bool=True, progress=Progress(track_tqdm=True)):
+def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, is_a_pdf:bool=True, page_min:int=0, page_max:int=999, progress=Progress(track_tqdm=True)):
     '''
     Take an path for an image of a document, then run this image through the Presidio ImageAnalyzer and PIL to get a redacted page back. Adapted from Presidio ImageRedactorEngine.
     '''
 
     fill = (0, 0, 0)
+    decision_process_output_str = ""
 
     if not image_paths:
         out_message = "PDF does not exist as images. Converting pages to image"
@@ -190,59 +191,101 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
         image_paths = process_file(file_path)
 
     images = []
-    number_of_pages = len(image_paths)
+
+    #print("Image paths:", image_paths)
+    number_of_pages = len(image_paths[0])
+
+    print("Number of pages:", str(number_of_pages))
 
     out_message = "Redacting pages"
     print(out_message)
     #progress(0.1, desc=out_message)
 
+    # Check that page_min and page_max are within expected ranges
+    if page_max > number_of_pages or page_max == 0:
+        page_max = number_of_pages
+    #else:
+    #    page_max = page_max - 1
+
+    if page_min <= 0:
+        page_min = 0
+    else:
+        page_min = page_min - 1
+
+    print("Page range:", str(page_min), "to", str(page_max))
+
     #for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
-    for i in range(0, number_of_pages):
+    
+    for n in range(0, number_of_pages):
 
-        print("Redacting page", str(i + 1))
+        try:
+            image = image_paths[0][n]#.copy()
+            print("Skipping page", str(n))
+            #print("image:", image)
+        except Exception as e:
+            print("Could not redact page:", str(i), "due to:")
+            print(e)
+            continue
 
-        # Get the image to redact using PIL lib (pillow)
-        #print("image_paths:", image_paths)
+        if n >= page_min and n <= page_max:
+        #for i in range(page_min, page_max):
 
-        image = ImageChops.duplicate(image_paths[i])
+            i = n
 
-        # %%
-        image_analyser = ImageAnalyzerEngine(nlp_analyser)
-        engine = ImageRedactorEngine(image_analyser)
+            print("Redacting page", str(i))
 
-        if language == 'en':
-            ocr_lang = 'eng'
-        else: ocr_lang = language
+            # Get the image to redact using PIL lib (pillow)
+            #print("image_paths:", image_paths)
 
-        bboxes = image_analyser.analyze(image,ocr_kwargs={"lang": ocr_lang},
-                **{
-                "allow_list": allow_list,
-                "language": language,
-                "entities": chosen_redact_entities,
-                "score_threshold": score_threshold,
-                "return_decision_process":True,
-            })
-        
-        # Text placeholder in this processing step, as the analyze method does not return the OCR text
-        if bboxes:
-            decision_process_output_str = str(bboxes)
-            print("Decision process:", decision_process_output_str)
-        
-        #print("For page: ", str(i), "Bounding boxes: ", bboxes)
+            #image = ImageChops.duplicate(image_paths[i])
+            #print("Image paths i:", image_paths[0])
 
-        draw = ImageDraw.Draw(image)
-               
-        merged_bboxes = merge_img_bboxes(bboxes)
+            # Assuming image_paths[i] is your PIL image object
+            try:
+                image = image_paths[0][i]#.copy()
+                #print("image:", image)
+            except Exception as e:
+                print("Could not redact page:", str(i), "due to:")
+                print(e)
+                continue
 
-        #print("For page:", str(i), "Merged bounding boxes:", merged_bboxes)
+            # %%
+            image_analyser = ImageAnalyzerEngine(nlp_analyser)
+            engine = ImageRedactorEngine(image_analyser)
 
-        # 3. Draw the merged boxes (unchanged)
-        for box in merged_bboxes:
-            x0 = box.left
-            y0 = box.top
-            x1 = x0 + box.width
-            y1 = y0 + box.height
-            draw.rectangle([x0, y0, x1, y1], fill=fill)
+            if language == 'en':
+                ocr_lang = 'eng'
+            else: ocr_lang = language
+
+            bboxes = image_analyser.analyze(image,ocr_kwargs={"lang": ocr_lang},
+                    **{
+                    "allow_list": allow_list,
+                    "language": language,
+                    "entities": chosen_redact_entities,
+                    "score_threshold": score_threshold,
+                    "return_decision_process":True,
+                })
+            
+            # Text placeholder in this processing step, as the analyze method does not return the OCR text
+            if bboxes:
+                decision_process_output_str = str(bboxes)
+                print("Decision process:", decision_process_output_str)
+            
+            #print("For page: ", str(i), "Bounding boxes: ", bboxes)
+
+            draw = ImageDraw.Draw(image)
+                
+            merged_bboxes = merge_img_bboxes(bboxes)
+
+            #print("For page:", str(i), "Merged bounding boxes:", merged_bboxes)
+
+            # 3. Draw the merged boxes (unchanged)
+            for box in merged_bboxes:
+                x0 = box.left
+                y0 = box.top
+                x1 = x0 + box.width
+                y1 = y0 + box.height
+                draw.rectangle([x0, y0, x1, y1], fill=fill)
 
         images.append(image)
 
@@ -358,7 +401,7 @@ def create_annotations_for_bounding_boxes(analyzed_bounding_boxes):
         annotations_on_page.append(annotation)
     return annotations_on_page
 
-def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, progress=Progress(track_tqdm=True)):
+def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, page_min:int=0, page_max:int=999, progress=Progress(track_tqdm=True)):
     '''
     Redact chosen entities from a pdf that is made up of multiple pages that are not images.
     '''
@@ -370,13 +413,30 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
     pdf = Pdf.open(filename)
     page_num = 0
 
-    for page in pdf.pages:
-        print("Page number is:", page_num + 1)
+    number_of_pages = len(pdf.pages)
+
+    # Check that page_min and page_max are within expected ranges
+    if page_max > number_of_pages or page_max == 0:
+        page_max = number_of_pages
+    #else:
+    #    page_max = page_max - 1
+
+    if page_min <= 0:
+        page_min = 0
+    else:
+        page_min = page_min - 1
+
+    print("Page range is",str(page_min), "to", str(page_max))
+    
+    for page_no in range(page_min, page_max):
+        page = pdf.pages[page_no]
+
+        print("Page number is:", page_no)
 
         annotations_on_page = []
         decision_process_table_on_page = []       
 
-        for page_layout in extract_pages(filename, page_numbers = [page_num], maxpages=1):
+        for page_layout in extract_pages(filename, page_numbers = [page_no], maxpages=1):
             
             page_analyzer_results = []
             page_analyzed_bounding_boxes = []
@@ -403,8 +463,8 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
             annotations_all_pages.extend([annotations_on_page])
             decision_process_table_all_pages.extend([decision_process_table_on_page])
             
-            print("For page number:", page_num, "there are", len(annotations_all_pages[page_num]), "annotations")
+            print("For page number:", page_no, "there are", len(annotations_all_pages[page_num]), "annotations")
             
-            page_num += 1
+            #page_num += 1
 
     return pdf, decision_process_table_all_pages

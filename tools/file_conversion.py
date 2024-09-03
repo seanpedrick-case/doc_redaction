@@ -36,7 +36,7 @@ def is_pdf(filename):
 # %%
 ## Convert pdf to image if necessary
 
-def convert_pdf_to_images(pdf_path:str, progress=Progress(track_tqdm=True)):
+def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(track_tqdm=True)):
 
     # Get the number of pages in the PDF
     page_count = pdfinfo_from_path(pdf_path)['Pages']
@@ -46,21 +46,26 @@ def convert_pdf_to_images(pdf_path:str, progress=Progress(track_tqdm=True)):
 
     # Open the PDF file
     #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
-    for page_num in range(0,page_count): #progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
+    for page_num in range(page_min,page_count): #progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
         
         # print("Current page: ", str(page_num + 1))
 
         # Convert one page to image
         image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=300, use_cropbox=True, use_pdftocairo=False)
         
+
         # If no images are returned, break the loop
         if not image:
             print("Conversion of page", str(page_num), "to file failed.")
             break
 
+        # print("Conversion of page", str(page_num), "to file succeeded.")
+        # print("image:", image)
+
         images.extend(image)
 
     print("PDF has been converted to images.")
+    # print("Images:", images)
 
     return images
 
@@ -146,7 +151,7 @@ def prepare_image_or_text_pdf(
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
     file_paths_loop = [file_paths[int(latest_file_completed)]]
-    print("file_paths_loop:", str(file_paths_loop))
+    #print("file_paths_loop:", str(file_paths_loop))
 
     #for file in progress.tqdm(file_paths, desc="Preparing files"):
     for file in file_paths_loop:
@@ -169,7 +174,7 @@ def prepare_image_or_text_pdf(
                 return out_message, out_file_paths
             
             out_file_path = process_file(file_path)
-            print("Out file path at image conversion step:", out_file_path)
+            #print("Out file path at image conversion step:", out_file_path)
 
         elif in_redact_method == "Text analysis":
             if is_pdf(file_path) == False:

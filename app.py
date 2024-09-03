@@ -27,6 +27,19 @@ language = 'en'
 feedback_data_folder = 'feedback/' + today_rev + '/'
 logs_data_folder = 'logs/' + today_rev + '/'
 
+def create_logs_folder(session_hash_textbox):
+    print("session_hash_textbox", session_hash_textbox)
+
+    feedback_data_folder = 'feedback/' + session_hash_textbox + "/" + today_rev + '/'
+    logs_data_folder = 'logs/' + session_hash_textbox + "/" + today_rev + '/'
+
+    feedback_logs_state = gr.State(feedback_data_folder + 'log.csv')
+    feedback_s3_logs_loc_state = gr.State(feedback_data_folder)
+    usage_logs_state = gr.State(logs_data_folder + 'log.csv')
+    usage_s3_logs_loc_state = gr.State(logs_data_folder)
+
+    return feedback_logs_state, feedback_s3_logs_loc_state, usage_logs_state, usage_s3_logs_loc_state
+
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Base())
 
@@ -42,16 +55,20 @@ with app:
 
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
+
+
+
     feedback_logs_state = gr.State(feedback_data_folder + 'log.csv')
     feedback_s3_logs_loc_state = gr.State(feedback_data_folder)
     usage_logs_state = gr.State(logs_data_folder + 'log.csv')
     usage_s3_logs_loc_state = gr.State(logs_data_folder)
+    
 
     gr.Markdown(
     """
     # Document redaction
 
-    Redact personal information from documents, open text, or xlsx/csv tabular data. See the 'Redaction settings' to change various settings such as which types of information to redact (e.g. people, places), or terms to exclude from redaction.
+    Redact personal information from documents, open text, or xlsx/csv tabular data. See the 'Redaction settings' to change various settings such as which types of information to redact (e.g. people, places), or terms to exclude from redaction. If you are getting 0 redactions, it's possible that the text in the document is saved in image format instead of as selectable text. Select 'Image analysis' on the Settings page in this case.
 
     WARNING: In testing the app seems to only find about 60% of personal information on a given (typed) page of text. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed.
 
@@ -115,6 +132,9 @@ with app:
     """)
         with gr.Accordion("Settings for documents", open = True):
             in_redaction_method = gr.Radio(label="Default document redaction method - text analysis is faster is not useful for image-based PDFs. Imaged-based is slightly less accurate in general.", value = "Text analysis", choices=["Text analysis", "Image analysis"])
+            with gr.Row():
+                page_min = gr.Number(precision=0,minimum=0,maximum=9999, label="Lowest page to redact")
+                page_max = gr.Number(precision=0,minimum=0,maximum=9999, label="Highest page to redact")
         with gr.Accordion("Settings for open text or xlsx/csv files", open = True):
             anon_strat = gr.Radio(choices=["replace with <REDACTED>", "replace with <ENTITY_NAME>", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace with <REDACTED>") 
 
@@ -143,12 +163,12 @@ with app:
    
     # Document redaction
     redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, first_loop_state], outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state],
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max],
                     outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state], api_name="redact_doc")
     
     # If the output file count text box changes, keep going with redacting each document until done
     text_documents_done.change(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, second_loop_state], outputs=[output_summary, prepared_pdf_state]).\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state],
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max],
                     outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state]).\
     then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
 
@@ -162,9 +182,11 @@ with app:
     then(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title])    
 
     #app.load(wipe_logs, inputs=[feedback_logs_state, usage_logs_state], outputs=[]).\
-    #    then(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
-    
-    app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
+    #    then(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])    
+
+
+    app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])#.\
+    #then(create_logs_folder, inputs=[session_hash_textbox], outputs = [feedback_logs_state, feedback_s3_logs_loc_state, usage_logs_state, usage_s3_logs_loc_state])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     callback = gr.CSVLogger()
@@ -190,6 +212,6 @@ print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
 if __name__ == "__main__":
     if os.environ['COGNITO_AUTH'] == "1":
-        app.queue().launch(show_error=True, auth=authenticate_user, max_file_size='10mb')
+        app.queue().launch(show_error=True, auth=authenticate_user, max_file_size='50mb')
     else:
-        app.queue().launch(show_error=True, inbrowser=True, max_file_size='10mb')
+        app.queue().launch(show_error=True, inbrowser=True, max_file_size='50mb')

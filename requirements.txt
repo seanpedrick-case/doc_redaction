@@ -1,9 +1,9 @@
 pdfminer.six==20231228
 pdf2image==1.17.0
 opencv-python==4.9.0.80
-presidio_analyzer==2.2.354
-presidio_anonymizer==2.2.354
-presidio-image-redactor==0.0.52
+presidio_analyzer==2.2.355
+presidio_anonymizer==2.2.355
+presidio-image-redactor==0.0.53
 pikepdf==8.15.1
 pandas==2.2.2
 spacy==3.7.5
