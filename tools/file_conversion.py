@@ -1,5 +1,5 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
-from tools.helper_functions import get_file_path_end, output_folder
+from tools.helper_functions import get_file_path_end, output_folder, detect_file_type
 from PIL import Image
 import os
 from gradio import Progress
@@ -158,6 +158,12 @@ def prepare_image_or_text_pdf(
         file_path = file.name
 
         print("file_path:", file_path)
+
+        file_extension = os.path.splitext(file_path)[1].lower()
+
+        # Check if the file is an image type
+        if file_extension in ['.jpg', '.jpeg', '.png']:
+            in_redact_method = "Image analysis"
 
         #if file_path:
         #    file_path_without_ext = get_file_path_end(file_path)

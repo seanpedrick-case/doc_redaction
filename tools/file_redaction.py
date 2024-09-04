@@ -190,7 +190,12 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
         image_paths = process_file(file_path)
 
-    images = []
+    print("image_paths:", image_paths)
+    
+
+    if not isinstance(image_paths, list):
+        print("Converting image_paths to list")
+        image_paths = [image_paths]
 
     #print("Image paths:", image_paths)
     number_of_pages = len(image_paths[0])
@@ -216,6 +221,8 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
     #for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
     
+    images = []
+
     for n in range(0, number_of_pages):
 
         try:
