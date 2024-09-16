@@ -10,7 +10,7 @@ PandasDataFrame = Type[pd.DataFrame]
 # Get AWS credentials if required
 bucket_name=""
 aws_var = "RUN_AWS_FUNCTIONS"
-aws_var_default = "0"
+aws_var_default = "1"
 aws_var_val = get_or_create_env_var(aws_var, aws_var_default)
 print(f'The value of {aws_var} is {aws_var_val}')
 

@@ -2,6 +2,7 @@ from pdf2image import convert_from_path, pdfinfo_from_path
 from tools.helper_functions import get_file_path_end, output_folder, detect_file_type
 from PIL import Image
 import os
+import time
 from gradio import Progress
 from typing import List, Optional
 
@@ -61,6 +62,8 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(trac
 
         # print("Conversion of page", str(page_num), "to file succeeded.")
         # print("image:", image)
+
+        #image[0].save(pdf_path + "_" + str(page_num) + ".png", format="PNG")
 
         images.extend(image)
 
@@ -122,6 +125,8 @@ def prepare_image_or_text_pdf(
         tuple[List[str], List[str]]: A tuple containing the output messages and processed file paths.
     """
 
+    tic = time.perf_counter()
+
     # If out message or out_file_paths are blank, change to a list so it can be appended to
     #if isinstance(out_message, str):
     #    out_message = [out_message]    
@@ -156,8 +161,9 @@ def prepare_image_or_text_pdf(
     #for file in progress.tqdm(file_paths, desc="Preparing files"):
     for file in file_paths_loop:
         file_path = file.name
+        file_path_without_ext = get_file_path_end(file_path)
 
-        print("file_path:", file_path)
+        #print("file:", file_path)
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
@@ -191,8 +197,16 @@ def prepare_image_or_text_pdf(
             out_file_path = file_path
 
         out_file_paths.append(out_file_path)
+
+        toc = time.perf_counter()
+        out_time = f"File '{file_path_without_ext}' prepared in {toc - tic:0.1f} seconds."
+
+        print(out_time)
+
+        out_message.append(out_time)
+        out_message_out = '\n'.join(out_message)
     
-    return out_message, out_file_paths
+    return out_message_out, out_file_paths
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     file_path_without_ext = get_file_path_end(in_file_path)

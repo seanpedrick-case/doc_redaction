@@ -1,4 +1,5 @@
 import os
+import socket
 
 # By default TLDExtract will try to pull files from the internet. I have instead downloaded this file locally to avoid the requirement for an internet connection.
 os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
@@ -24,21 +25,11 @@ chosen_redact_entities = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "
 full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE", 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS']
 language = 'en'
 
-feedback_data_folder = 'feedback/' + today_rev + '/'
-logs_data_folder = 'logs/' + today_rev + '/'
+host_name = socket.gethostname()
 
-def create_logs_folder(session_hash_textbox):
-    print("session_hash_textbox", session_hash_textbox)
-
-    feedback_data_folder = 'feedback/' + session_hash_textbox + "/" + today_rev + '/'
-    logs_data_folder = 'logs/' + session_hash_textbox + "/" + today_rev + '/'
-
-    feedback_logs_state = gr.State(feedback_data_folder + 'log.csv')
-    feedback_s3_logs_loc_state = gr.State(feedback_data_folder)
-    usage_logs_state = gr.State(logs_data_folder + 'log.csv')
-    usage_s3_logs_loc_state = gr.State(logs_data_folder)
-
-    return feedback_logs_state, feedback_s3_logs_loc_state, usage_logs_state, usage_s3_logs_loc_state
+feedback_logs_folder = 'feedback/' + today_rev + '/' + host_name + '/'
+access_logs_folder = 'logs/' + today_rev + '/' + host_name + '/'
+usage_logs_folder = 'usage/' + today_rev + '/' + host_name + '/'
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Base())
@@ -56,13 +47,13 @@ with app:
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
 
-
-
-    feedback_logs_state = gr.State(feedback_data_folder + 'log.csv')
-    feedback_s3_logs_loc_state = gr.State(feedback_data_folder)
-    usage_logs_state = gr.State(logs_data_folder + 'log.csv')
-    usage_s3_logs_loc_state = gr.State(logs_data_folder)
-    
+    # Logging state
+    feedback_logs_state = gr.State(feedback_logs_folder + 'log.csv')
+    feedback_s3_logs_loc_state = gr.State(feedback_logs_folder)
+    access_logs_state = gr.State(access_logs_folder + 'log.csv')
+    access_s3_logs_loc_state = gr.State(access_logs_folder)
+    usage_logs_state = gr.State(usage_logs_folder + 'log.csv')
+    usage_s3_logs_loc_state = gr.State(usage_logs_folder)      
 
     gr.Markdown(
     """
@@ -96,6 +87,8 @@ with app:
 
         with gr.Row():
             s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
+            # This keeps track of the time taken to redact files for logging purposes.
+            estimated_time_taken_number = gr.Number(value=0.0, precision=1, visible=False)
     
     with gr.Tab(label="Open text or Excel/csv files"):
         gr.Markdown(
@@ -148,7 +141,7 @@ with app:
         # Invisible text box to hold the session hash/username just for logging purposes
         session_hash_textbox = gr.Textbox(value="", visible=False) 
             
-    # AWS options - not yet implemented
+    # AWS options - placeholder for possibility of storing data on s3
     # with gr.Tab(label="Advanced options"):
     #     with gr.Accordion(label = "AWS data access", open = True):
     #         aws_password_box = gr.Textbox(label="Password for AWS data access (ask the Data team if you don't have this)")
@@ -163,13 +156,13 @@ with app:
    
     # Document redaction
     redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, first_loop_state], outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state], api_name="redact_doc")
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number], api_name="redact_doc")
     
     # If the output file count text box changes, keep going with redacting each document until done
     text_documents_done.change(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, second_loop_state], outputs=[output_summary, prepared_pdf_state]).\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state]).\
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number]).\
     then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
 
      # Tabular data redaction           
@@ -181,30 +174,32 @@ with app:
     text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, second_loop_state], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state]).\
     then(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title])    
 
-    #app.load(wipe_logs, inputs=[feedback_logs_state, usage_logs_state], outputs=[]).\
-    #    then(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])    
-
-
-    app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])#.\
-    #then(create_logs_folder, inputs=[session_hash_textbox], outputs = [feedback_logs_state, feedback_s3_logs_loc_state, usage_logs_state, usage_s3_logs_loc_state])
+    # Get connection details on app load
+    app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     callback = gr.CSVLogger()
-    callback.setup([session_hash_textbox], logs_data_folder)
+    callback.setup([session_hash_textbox], access_logs_folder)
     session_hash_textbox.change(lambda *args: callback.flag(list(args)), [session_hash_textbox], None, preprocess=False).\
-    then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+    then(fn = upload_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
     # User submitted feedback for pdf redactions
     pdf_callback = gr.CSVLogger()
-    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text, in_file], feedback_data_folder)
+    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text, in_file], feedback_logs_folder)
     pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text, in_file], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[pdf_further_details_text])
 
     # User submitted feedback for data redactions
     data_callback = gr.CSVLogger()
-    data_callback.setup([data_feedback_radio, data_further_details_text, in_data_files], feedback_data_folder)
+    data_callback.setup([data_feedback_radio, data_further_details_text, in_data_files], feedback_logs_folder)
     data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args)), [data_feedback_radio, data_further_details_text, in_data_files], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[data_further_details_text])
+
+    # Log processing time/token usage when making a query
+    usage_callback = gr.CSVLogger()
+    usage_callback.setup([session_hash_textbox, in_data_files, estimated_time_taken_number], usage_logs_folder)
+    estimated_time_taken_number.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, in_data_files, estimated_time_taken_number], None, preprocess=False).\
+    then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')

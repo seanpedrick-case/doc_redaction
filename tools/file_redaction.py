@@ -9,6 +9,7 @@ from pdfminer.layout import LTTextContainer, LTChar, LTTextLine #, LTAnno
 from pikepdf import Pdf, Dictionary, Name
 from gradio import Progress
 import time
+import re
 from collections import defaultdict  # For efficient grouping
 
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
@@ -18,15 +19,14 @@ from tools.data_anonymise import generate_decision_process_output
 import gradio as gr
 
 
-def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list=[], log_files_output_paths:list=[], first_loop_state:bool=False, page_min:int=0, page_max:int=999, progress=gr.Progress(track_tqdm=True)):
+def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list=[], log_files_output_paths:list=[], first_loop_state:bool=False, page_min:int=0, page_max:int=999, estimated_time_taken_state:float=0.0, progress=gr.Progress(track_tqdm=True)):
 
     tic = time.perf_counter()
-
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
         latest_file_completed = 0
-        out_message = []
+        #out_message = []
         out_file_paths = []
 
     # If out message is string or out_file_paths are blank, change to a list so it can be appended to
@@ -44,7 +44,30 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         # Set to a very high number so as not to mess with subsequent file processing by the user
         latest_file_completed = 99
         final_out_message = '\n'.join(out_message)
-        return final_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
+        #final_out_message = final_out_message + "\n\nGo to to the Redaction settings tab to see redaction logs. Please give feedback on the results below to help improve this app."
+
+        def sum_numbers_from_string(string):
+            """Extracts all numbers from a string and adds them up.
+
+            Args:
+                string: The input string.
+
+            Returns:
+                The sum of all numbers extracted from the string.
+            """
+
+            # Extract all numbers using regular expression
+            numbers = re.findall(r'\d+', string)
+
+            # Convert the numbers to integers and sum them up
+            sum_of_numbers = sum(int(num) for num in numbers)
+
+            return sum_of_numbers
+
+        estimate_total_processing_time = sum_numbers_from_string(final_out_message)
+        print("Estimated total processing time:", str(estimate_total_processing_time))
+
+        return final_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimate_total_processing_time
     
     file_paths_loop = [file_paths[int(latest_file_completed)]]
 
@@ -65,7 +88,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         else:
             out_message = "No file selected"
             print(out_message)
-            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
+            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state
 
         if in_redact_method == "Image analysis":
             # Analyse and redact image-based pdf or image
@@ -78,7 +101,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
 
             out_file_paths.append(out_image_file_path)
-            out_message.append("File '" + file_path_without_ext + "' successfully redacted and saved to file")
+            out_message.append("File '" + file_path_without_ext + "' successfully redacted")
 
             output_logs_str = str(output_logs)
             logs_output_file_name = out_image_file_path + "_decision_process_output.txt"
@@ -101,9 +124,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             out_text_file_path = output_folder + file_path_without_ext + "_text_redacted.pdf"
             pdf_text.save(out_text_file_path)
 
-            #out_file_paths.append(out_text_file_path)
-            out_message_new = "File " + file_path_without_ext + " successfully redacted"
-            out_message.append(out_message_new)
+            
 
             # Convert message
             convert_message="Converting PDF to image-based PDF to embed redactions."
@@ -123,6 +144,10 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             # Add confirmation for converting to image if you want
             # out_message.append(img_output_summary)
 
+            #out_file_paths.append(out_text_file_path)
+            out_message_new = "File '" + file_path_without_ext + "' successfully redacted"
+            out_message.append(out_message_new)
+
             if latest_file_completed != len(file_paths):
                 print("Completed file number:", str(latest_file_completed), "more files to do")
                 latest_file_completed += 1                
@@ -130,7 +155,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         else:
             out_message = "No redaction method selected"
             print(out_message)
-            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
+            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state
         
     
     toc = time.perf_counter()
@@ -140,9 +165,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
     out_message_out = '\n'.join(out_message)
     out_message_out = out_message_out + " " + out_time
 
-    out_message_out = out_message_out + "\n\nGo to to the Redaction settings tab to see redaction logs. Please give feedback on the results below to help improve this app."
-
-    return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
+    return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state
 
 def merge_img_bboxes(bboxes, horizontal_threshold=150, vertical_threshold=25):
             merged_bboxes = []
@@ -317,7 +340,7 @@ def analyze_text_container(text_container, language, chosen_redact_entities, sco
     return [], []
 
 # Inside the loop where you process analyzer_results, merge bounding boxes that are right next to each other:
-def merge_bounding_boxes(analyzer_results, characters, combine_pixel_dist):
+def merge_bounding_boxes(analyzer_results, characters, combine_pixel_dist, vertical_padding=2):
     analyzed_bounding_boxes = []
     if len(analyzer_results) > 0 and len(characters) > 0:
         merged_bounding_boxes = []
@@ -329,6 +352,8 @@ def merge_bounding_boxes(analyzer_results, characters, combine_pixel_dist):
             for char in characters[result.start : result.end]:
                 if isinstance(char, LTChar):
                     char_box = list(char.bbox)
+                    # Add vertical padding to the top of the box
+                    char_box[3] += vertical_padding
 
                     if current_y is None or current_box is None:
                         current_box = char_box
@@ -342,6 +367,7 @@ def merge_bounding_boxes(analyzer_results, characters, combine_pixel_dist):
                             and horizontal_diff_bboxes <= combine_pixel_dist
                         ):
                             current_box[2] = char_box[2]  # Extend the current box horizontally
+                            current_box[3] = max(current_box[3], char_box[3])  # Ensure the top is the highest
                         else:
                             merged_bounding_boxes.append(
                                 {"boundingBox": current_box, "result": result})
