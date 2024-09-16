@@ -47,20 +47,20 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         #final_out_message = final_out_message + "\n\nGo to to the Redaction settings tab to see redaction logs. Please give feedback on the results below to help improve this app."
 
         def sum_numbers_from_string(string):
-            """Extracts all numbers from a string and adds them up.
+            """Extracts all numbers from a string and adds them up, including numbers with decimals.
 
             Args:
                 string: The input string.
 
-            Returns:
+            Returns:s
                 The sum of all numbers extracted from the string.
             """
 
-            # Extract all numbers using regular expression
-            numbers = re.findall(r'\d+', string)
+            # Extract all numbers using regular expression, allowing for decimals
+            numbers = re.findall(r'\d+(\.\d+)?', string)
 
-            # Convert the numbers to integers and sum them up
-            sum_of_numbers = sum(int(num) for num in numbers)
+            # Convert the numbers to floats and sum them up
+            sum_of_numbers = sum(float(num) for num in numbers)
 
             return sum_of_numbers
 
