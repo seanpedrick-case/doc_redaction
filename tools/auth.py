@@ -2,10 +2,10 @@
 import boto3
 from tools.helper_functions import get_or_create_env_var
 
-client_id = get_or_create_env_var('AWS_CLIENT_ID', 'l762du1rg94e1r2q0ii7ls0ef') # This client id is borrowed from async gradio app client
+client_id = get_or_create_env_var('AWS_CLIENT_ID', '') # This client id is borrowed from async gradio app client
 print(f'The value of AWS_CLIENT_ID is {client_id}')
 
-user_pool_id = get_or_create_env_var('AWS_USER_POOL_ID', 'eu-west-2_8fCzl8qej')
+user_pool_id = get_or_create_env_var('AWS_USER_POOL_ID', '')
 print(f'The value of AWS_USER_POOL_ID is {user_pool_id}')
 
 def authenticate_user(username, password, user_pool_id=user_pool_id, client_id=client_id):

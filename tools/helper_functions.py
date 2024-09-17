@@ -153,9 +153,6 @@ def wipe_logs(feedback_logs_loc, usage_logs_loc):
     except Exception as e:
         print("Could not remove usage logs file", e)
     
-
-    
-
 async def get_connection_params(request: gr.Request):
     base_folder = ""
 

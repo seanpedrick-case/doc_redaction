@@ -178,9 +178,9 @@ with app:
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
-    callback = gr.CSVLogger()
-    callback.setup([session_hash_textbox], access_logs_folder)
-    session_hash_textbox.change(lambda *args: callback.flag(list(args)), [session_hash_textbox], None, preprocess=False).\
+    access_callback = gr.CSVLogger()
+    access_callback.setup([session_hash_textbox], access_logs_folder)
+    session_hash_textbox.change(lambda *args: access_callback.flag(list(args)), [session_hash_textbox], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
     # User submitted feedback for pdf redactions
