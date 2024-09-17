@@ -46,25 +46,28 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         final_out_message = '\n'.join(out_message)
         #final_out_message = final_out_message + "\n\nGo to to the Redaction settings tab to see redaction logs. Please give feedback on the results below to help improve this app."
 
-        def sum_numbers_from_string(string):
-            """Extracts all numbers from a string and adds them up, including numbers with decimals.
+        def sum_numbers_before_seconds(string):
+            """Extracts numbers that precede the word 'seconds' from a string and adds them up.
 
             Args:
                 string: The input string.
 
-            Returns:s
-                The sum of all numbers extracted from the string.
+            Returns:
+                The sum of all numbers before 'seconds' in the string.
             """
 
-            # Extract all numbers using regular expression, allowing for decimals
-            numbers = re.findall(r'\d+(\.\d+)?', string)
+            # Extract numbers before 'seconds' using regular expression
+            numbers = re.findall(r'\d+(\.\d+)?\s*seconds', string)
 
-            # Convert the numbers to floats and sum them up
-            sum_of_numbers = sum(float(num) for num in numbers)
+            # Extract the numbers from the matches
+            numbers = [float(num.split()[0]) for num in numbers]
+
+            # Sum up the extracted numbers
+            sum_of_numbers = sum(numbers)
 
             return sum_of_numbers
 
-        estimate_total_processing_time = sum_numbers_from_string(final_out_message)
+        estimate_total_processing_time = sum_numbers_before_seconds(final_out_message)
         print("Estimated total processing time:", str(estimate_total_processing_time))
 
         return final_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimate_total_processing_time
@@ -150,8 +153,8 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
 
             if latest_file_completed != len(file_paths):
                 print("Completed file number:", str(latest_file_completed), "more files to do")
-                latest_file_completed += 1                
-            
+                latest_file_completed += 1
+                            
         else:
             out_message = "No redaction method selected"
             print(out_message)
