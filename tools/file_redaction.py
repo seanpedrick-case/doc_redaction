@@ -1,23 +1,28 @@
+import time
+import re
+import json
+import io
+import os
 from PIL import Image, ImageChops, ImageDraw
 from typing import List
 import pandas as pd
-from presidio_image_redactor import ImageRedactorEngine, ImageAnalyzerEngine
+
 from presidio_image_redactor.entities import ImageRecognizerResult
 from pdfminer.high_level import extract_pages
-from tools.file_conversion import process_file
 from pdfminer.layout import LTTextContainer, LTChar, LTTextLine #, LTAnno
 from pikepdf import Pdf, Dictionary, Name
+import gradio as gr
 from gradio import Progress
-import time
-import re
+
 from collections import defaultdict  # For efficient grouping
 
+from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult
+from tools.file_conversion import process_file
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
 from tools.helper_functions import get_file_path_end, output_folder
 from tools.file_conversion import process_file, is_pdf, convert_text_pdf_to_img_pdf
 from tools.data_anonymise import generate_decision_process_output
-import gradio as gr
-
+from tools.aws_textract import analyse_page_with_textract, convert_pike_pdf_page_to_bytes, json_to_ocrresult
 
 def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list=[], log_files_output_paths:list=[], first_loop_state:bool=False, page_min:int=0, page_max:int=999, estimated_time_taken_state:float=0.0, progress=gr.Progress(track_tqdm=True)):
 
@@ -93,17 +98,20 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             print(out_message)
             return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state
 
-        if in_redact_method == "Image analysis":
+        if in_redact_method == "Image analysis" or in_redact_method == "AWS Textract":
             # Analyse and redact image-based pdf or image
             # if is_pdf_or_image(file_path) == False:
             #     return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
 
-            print("Redacting file as image-based file")
-            pdf_images, output_logs = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat, is_a_pdf, page_min, page_max)
+            print("Redacting file" + file_path_without_ext + "as an image-based file")
+            pdf_images, output_logs, logging_file_paths = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat, is_a_pdf, page_min, page_max, in_redact_method)
             out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_img.pdf"
             pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
 
             out_file_paths.append(out_image_file_path)
+            if logging_file_paths:
+                log_files_output_paths.extend(logging_file_paths)
+
             out_message.append("File '" + file_path_without_ext + "' successfully redacted")
 
             output_logs_str = str(output_logs)
@@ -118,16 +126,15 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
                 latest_file_completed += 1                
 
         elif in_redact_method == "Text analysis":
+            
             if is_pdf(file_path) == False:
                 return "Please upload a PDF file for text analysis. If you have an image, select 'Image analysis'.", None, None
-
+            
             # Analyse text-based pdf
             print('Redacting file as text-based PDF')
-            pdf_text, output_logs = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat, page_min, page_max)
+            pdf_text, output_logs = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat, page_min, page_max, "Text analysis")
             out_text_file_path = output_folder + file_path_without_ext + "_text_redacted.pdf"
-            pdf_text.save(out_text_file_path)
-
-            
+            pdf_text.save(out_text_file_path)            
 
             # Convert message
             convert_message="Converting PDF to image-based PDF to embed redactions."
@@ -170,54 +177,59 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
 
     return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state
 
-def merge_img_bboxes(bboxes, horizontal_threshold=150, vertical_threshold=25):
-            merged_bboxes = []
-            grouped_bboxes = defaultdict(list)
+def merge_img_bboxes(bboxes, handwriting_or_signature_boxes = [], horizontal_threshold=150, vertical_threshold=25):
+    merged_bboxes = []
+    grouped_bboxes = defaultdict(list)
 
-            # 1. Group by approximate vertical proximity
-            for box in bboxes:
-                grouped_bboxes[round(box.top / vertical_threshold)].append(box)
+    if handwriting_or_signature_boxes:
+        print("Handwriting or signature boxes exist at merge:", handwriting_or_signature_boxes)
+        bboxes.extend(handwriting_or_signature_boxes)
 
-            # 2. Merge within each group
-            for _, group in grouped_bboxes.items():
-                group.sort(key=lambda box: box.left)
+    # 1. Group by approximate vertical proximity
+    for box in bboxes:
+        grouped_bboxes[round(box.top / vertical_threshold)].append(box)
 
-                merged_box = group[0]
-                for next_box in group[1:]:
-                    if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
-                        #print("Merging a box")
-                        # Calculate new dimensions for the merged box
-                        new_left = min(merged_box.left, next_box.left)
-                        new_top = min(merged_box.top, next_box.top)
-                        new_width = max(merged_box.left + merged_box.width, next_box.left + next_box.width) - new_left
-                        new_height = max(merged_box.top + merged_box.height, next_box.top + next_box.height) - new_top
-                        merged_box = ImageRecognizerResult(
-                            merged_box.entity_type, merged_box.start, merged_box.end, merged_box.score, new_left, new_top, new_width, new_height
-                        )
-                    else:
-                        merged_bboxes.append(merged_box)
-                        merged_box = next_box  
+    # 2. Merge within each group
+    for _, group in grouped_bboxes.items():
+        group.sort(key=lambda box: box.left)
 
-                merged_bboxes.append(merged_box) 
-            return merged_bboxes
+        merged_box = group[0]
+        for next_box in group[1:]:
+            if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
+                #print("Merging a box")
+                # Calculate new dimensions for the merged box
+                print("Merged box:", merged_box)
+                new_left = min(merged_box.left, next_box.left)
+                new_top = min(merged_box.top, next_box.top)
+                new_width = max(merged_box.left + merged_box.width, next_box.left + next_box.width) - new_left
+                new_height = max(merged_box.top + merged_box.height, next_box.top + next_box.height) - new_top
+                merged_box = ImageRecognizerResult(
+                    merged_box.entity_type, merged_box.start, merged_box.end, merged_box.score, new_left, new_top, new_width, new_height
+                )
+            else:
+                merged_bboxes.append(merged_box)
+                merged_box = next_box  
 
-def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, is_a_pdf:bool=True, page_min:int=0, page_max:int=999, progress=Progress(track_tqdm=True)):
+        merged_bboxes.append(merged_box) 
+    return merged_bboxes
+
+def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, is_a_pdf:bool=True, page_min:int=0, page_max:int=999, analysis_type:str="Image analysis", progress=Progress(track_tqdm=True)):
     '''
     Take an path for an image of a document, then run this image through the Presidio ImageAnalyzer and PIL to get a redacted page back. Adapted from Presidio ImageRedactorEngine.
     '''
-
-    fill = (0, 0, 0)
+    # json_file_path is for AWS Textract outputs
+    logging_file_paths = []
+    file_name = get_file_path_end(file_path)
+    fill = (0, 0, 0)   # Fill colour
     decision_process_output_str = ""
+    images = []
+    image_analyser = CustomImageAnalyzerEngine(nlp_analyser)
 
     if not image_paths:
         out_message = "PDF does not exist as images. Converting pages to image"
         print(out_message)
-        #progress(0, desc=out_message)
 
         image_paths = process_file(file_path)
-
-    print("image_paths:", image_paths)
-    
 
     if not isinstance(image_paths, list):
         print("Converting image_paths to list")
@@ -235,84 +247,142 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
     # Check that page_min and page_max are within expected ranges
     if page_max > number_of_pages or page_max == 0:
         page_max = number_of_pages
-    #else:
-    #    page_max = page_max - 1
 
     if page_min <= 0:
         page_min = 0
     else:
         page_min = page_min - 1
 
-    print("Page range:", str(page_min), "to", str(page_max))
+    print("Page range:", str(page_min + 1), "to", str(page_max))
 
     #for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
     
-    images = []
-
     for n in range(0, number_of_pages):
+        handwriting_or_signature_boxes = []
 
         try:
             image = image_paths[0][n]#.copy()
             print("Skipping page", str(n))
             #print("image:", image)
         except Exception as e:
-            print("Could not redact page:", str(i), "due to:")
+            print("Could not redact page:", str(n), "due to:")
             print(e)
             continue
 
-        if n >= page_min and n <= page_max:
-        #for i in range(page_min, page_max):
+        if n >= page_min and n < page_max:
 
             i = n
 
-            print("Redacting page", str(i))
+            reported_page_number = str(i + 1)
 
-            # Get the image to redact using PIL lib (pillow)
-            #print("image_paths:", image_paths)
-
-            #image = ImageChops.duplicate(image_paths[i])
-            #print("Image paths i:", image_paths[0])
+            print("Redacting page", reported_page_number)
 
             # Assuming image_paths[i] is your PIL image object
             try:
                 image = image_paths[0][i]#.copy()
                 #print("image:", image)
             except Exception as e:
-                print("Could not redact page:", str(i), "due to:")
+                print("Could not redact page:", reported_page_number, "due to:")
                 print(e)
                 continue
 
             # %%
-            image_analyser = ImageAnalyzerEngine(nlp_analyser)
-            engine = ImageRedactorEngine(image_analyser)
+            # image_analyser = ImageAnalyzerEngine(nlp_analyser)
+            # engine = ImageRedactorEngine(image_analyser)
 
             if language == 'en':
                 ocr_lang = 'eng'
             else: ocr_lang = language
 
-            bboxes = image_analyser.analyze(image,ocr_kwargs={"lang": ocr_lang},
-                    **{
-                    "allow_list": allow_list,
-                    "language": language,
-                    "entities": chosen_redact_entities,
-                    "score_threshold": score_threshold,
-                    "return_decision_process":True,
-                })
-            
-            # Text placeholder in this processing step, as the analyze method does not return the OCR text
+            # bboxes = image_analyser.analyze(image,
+            #         ocr_kwargs={"lang": ocr_lang},
+            #         **{
+            #         "allow_list": allow_list,
+            #         "language": language,
+            #         "entities": chosen_redact_entities,
+            #         "score_threshold": score_threshold,
+            #         "return_decision_process":True,
+            #     })
+
+            # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
+            if analysis_type == "Image analysis":
+                ocr_results = image_analyser.perform_ocr(image)
+
+                # Process all OCR text with bounding boxes
+                #print("OCR results:", ocr_results)
+                ocr_results_str = str(ocr_results)
+                ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_page_" + reported_page_number + ".txt"
+                with open(ocr_results_file_path, "w") as f:
+                    f.write(ocr_results_str)
+                logging_file_paths.append(ocr_results_file_path)
+
+            # Import results from json and convert
+            if analysis_type == "AWS Textract":
+
+                # Ensure image is a PIL Image object
+                # if isinstance(image, str):
+                #     image = Image.open(image)
+                # elif not isinstance(image, Image.Image):
+                #     print(f"Unexpected image type on page {i}: {type(image)}")
+                #     continue
+
+                # Convert the image to bytes using an in-memory buffer
+                image_buffer = io.BytesIO()
+                image.save(image_buffer, format='PNG')  # Save as PNG, or adjust format if needed
+                pdf_page_as_bytes = image_buffer.getvalue()
+                
+                json_file_path = output_folder + file_name + "_page_" + reported_page_number + "_textract.json"
+                
+                if not os.path.exists(json_file_path):
+                    text_blocks = analyse_page_with_textract(pdf_page_as_bytes, json_file_path) # Analyse page with Textract
+                    logging_file_paths.append(json_file_path)
+                else:
+                    # Open the file and load the JSON data
+                    print("Found existing Textract json results file for this page.")
+                    with open(json_file_path, 'r') as json_file:
+                        text_blocks = json.load(json_file)
+                        text_blocks = text_blocks['Blocks']
+
+
+                # Need image size to convert textract OCR outputs to the correct sizes
+                #print("Image size:", image.size)
+                page_width, page_height = image.size
+
+                ocr_results, handwriting_or_signature_boxes = json_to_ocrresult(text_blocks, page_width, page_height)
+       
+                #print("OCR results:", ocr_results)
+                ocr_results_str = str(ocr_results)
+                textract_ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_page_" + reported_page_number + "_textract.txt"
+                with open(textract_ocr_results_file_path, "w") as f:
+                            f.write(ocr_results_str)
+                logging_file_paths.append(textract_ocr_results_file_path)
+
+            # Step 2: Analyze text and identify PII
+            bboxes = image_analyser.analyze_text(
+                ocr_results,
+                language=language,
+                entities=chosen_redact_entities,
+                allow_list=allow_list,
+                score_threshold=score_threshold,
+            )
+
+            # Process the bboxes (PII entities)
             if bboxes:
+                for bbox in bboxes:
+                    print(f"Entity: {bbox.entity_type}, Text: {bbox.text}, Bbox: ({bbox.left}, {bbox.top}, {bbox.width}, {bbox.height})")
                 decision_process_output_str = str(bboxes)
                 print("Decision process:", decision_process_output_str)
-            
-            #print("For page: ", str(i), "Bounding boxes: ", bboxes)
 
-            draw = ImageDraw.Draw(image)
-                
-            merged_bboxes = merge_img_bboxes(bboxes)
+            # Merge close bounding boxes
+            merged_bboxes = merge_img_bboxes(bboxes, handwriting_or_signature_boxes)
 
             #print("For page:", str(i), "Merged bounding boxes:", merged_bboxes)
+            #from PIL import Image
+            #image_object = Image.open(image)
 
-            # 3. Draw the merged boxes (unchanged)
+            # 3. Draw the merged boxes
+            draw = ImageDraw.Draw(image)
+
             for box in merged_bboxes:
                 x0 = box.left
                 y0 = box.top
@@ -322,7 +392,7 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
         images.append(image)
 
-    return images, decision_process_output_str
+    return images, decision_process_output_str, logging_file_paths
 
 def analyze_text_container(text_container, language, chosen_redact_entities, score_threshold, allow_list):
     if isinstance(text_container, LTTextContainer):
@@ -343,16 +413,82 @@ def analyze_text_container(text_container, language, chosen_redact_entities, sco
     return [], []
 
 # Inside the loop where you process analyzer_results, merge bounding boxes that are right next to each other:
-def merge_bounding_boxes(analyzer_results, characters, combine_pixel_dist, vertical_padding=2):
-    analyzed_bounding_boxes = []
-    if len(analyzer_results) > 0 and len(characters) > 0:
-        merged_bounding_boxes = []
-        current_box = None
-        current_y = None
+# def merge_bounding_boxes(analyzer_results, characters, combine_pixel_dist, vertical_padding=2):
+#     '''
+#     Merge identified bounding boxes containing PII that are very close to one another
+#     '''
+#     analyzed_bounding_boxes = []
+#     if len(analyzer_results) > 0 and len(characters) > 0:
+#         merged_bounding_boxes = []
+#         current_box = None
+#         current_y = None
 
+#         for i, result in enumerate(analyzer_results):
+#             print("Considering result", str(i))
+#             for char in characters[result.start : result.end]:
+#                 if isinstance(char, LTChar):
+#                     char_box = list(char.bbox)
+#                     # Add vertical padding to the top of the box
+#                     char_box[3] += vertical_padding
+
+#                     if current_y is None or current_box is None:
+#                         current_box = char_box
+#                         current_y = char_box[1]
+#                     else:
+#                         vertical_diff_bboxes = abs(char_box[1] - current_y)
+#                         horizontal_diff_bboxes = abs(char_box[0] - current_box[2])
+
+#                         if (
+#                             vertical_diff_bboxes <= 5
+#                             and horizontal_diff_bboxes <= combine_pixel_dist
+#                         ):
+#                             current_box[2] = char_box[2]  # Extend the current box horizontally
+#                             current_box[3] = max(current_box[3], char_box[3])  # Ensure the top is the highest
+#                         else:
+#                             merged_bounding_boxes.append(
+#                                 {"boundingBox": current_box, "result": result})
+                            
+#                             # Reset current_box and current_y after appending
+#                             current_box = char_box
+#                             current_y = char_box[1]
+            
+#             # After finishing with the current result, add the last box for this result
+#             if current_box:
+#                 merged_bounding_boxes.append({"boundingBox": current_box, "result": result})
+#                 current_box = None
+#                 current_y = None  # Reset for the next result
+
+#         if not merged_bounding_boxes:
+#             analyzed_bounding_boxes.extend(
+#                 {"boundingBox": char.bbox, "result": result} 
+#                 for result in analyzer_results 
+#                 for char in characters[result.start:result.end] 
+#                 if isinstance(char, LTChar)
+#             )
+#         else:
+#             analyzed_bounding_boxes.extend(merged_bounding_boxes)
+
+#         print("analysed_bounding_boxes:\n\n", analyzed_bounding_boxes)
+    
+#     return analyzed_bounding_boxes
+
+def merge_bounding_boxes(analyzer_results, characters, combine_pixel_dist, vertical_padding=2, signature_bounding_boxes=None):
+    '''
+    Merge identified bounding boxes containing PII or signatures that are very close to one another.
+    '''
+    analyzed_bounding_boxes = []
+    merged_bounding_boxes = []
+    current_box = None
+    current_y = None
+
+    # Handle PII and text bounding boxes first
+    if len(analyzer_results) > 0 and len(characters) > 0:
         for i, result in enumerate(analyzer_results):
-            print("Considering result", str(i))
-            for char in characters[result.start : result.end]:
+            #print("Considering result", str(i))
+            #print("Result:", result)
+            #print("Characters:", characters)
+
+            for char in characters[result.start: result.end]:
                 if isinstance(char, LTChar):
                     char_box = list(char.bbox)
                     # Add vertical padding to the top of the box
@@ -378,24 +514,55 @@ def merge_bounding_boxes(analyzer_results, characters, combine_pixel_dist, verti
                             # Reset current_box and current_y after appending
                             current_box = char_box
                             current_y = char_box[1]
-            
+
             # After finishing with the current result, add the last box for this result
             if current_box:
                 merged_bounding_boxes.append({"boundingBox": current_box, "result": result})
                 current_box = None
                 current_y = None  # Reset for the next result
 
-        if not merged_bounding_boxes:
-            analyzed_bounding_boxes.extend(
-                {"boundingBox": char.bbox, "result": result} 
-                for result in analyzer_results 
-                for char in characters[result.start:result.end] 
-                if isinstance(char, LTChar)
-            )
-        else:
-            analyzed_bounding_boxes.extend(merged_bounding_boxes)
+    # Handle signature bounding boxes (without specific characters)
+    if signature_bounding_boxes is not None:
+        for sig_box in signature_bounding_boxes:
+            sig_box = list(sig_box)  # Ensure it's a list to modify the values
+            if current_y is None or current_box is None:
+                current_box = sig_box
+                current_y = sig_box[1]
+            else:
+                vertical_diff_bboxes = abs(sig_box[1] - current_y)
+                horizontal_diff_bboxes = abs(sig_box[0] - current_box[2])
 
-        print("analysed_bounding_boxes:\n\n", analyzed_bounding_boxes)
+                if (
+                    vertical_diff_bboxes <= 5
+                    and horizontal_diff_bboxes <= combine_pixel_dist
+                ):
+                    current_box[2] = sig_box[2]  # Extend the current box horizontally
+                    current_box[3] = max(current_box[3], sig_box[3])  # Ensure the top is the highest
+                else:
+                    merged_bounding_boxes.append({"boundingBox": current_box, "type": "signature"})
+                    
+                    # Reset current_box and current_y after appending
+                    current_box = sig_box
+                    current_y = sig_box[1]
+
+            # Add the last bounding box for the signature
+            if current_box:
+                merged_bounding_boxes.append({"boundingBox": current_box, "type": "signature"})
+                current_box = None
+                current_y = None
+
+    # If no bounding boxes were merged, add individual character bounding boxes
+    if not merged_bounding_boxes:
+        analyzed_bounding_boxes.extend(
+            {"boundingBox": char.bbox, "result": result}
+            for result in analyzer_results
+            for char in characters[result.start:result.end]
+            if isinstance(char, LTChar)
+        )
+    else:
+        analyzed_bounding_boxes.extend(merged_bounding_boxes)
+
+    #print("analysed_bounding_boxes:\n\n", analyzed_bounding_boxes)
     
     return analyzed_bounding_boxes
 
@@ -437,7 +604,7 @@ def create_annotations_for_bounding_boxes(analyzed_bounding_boxes):
         annotations_on_page.append(annotation)
     return annotations_on_page
 
-def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, page_min:int=0, page_max:int=999, progress=Progress(track_tqdm=True)):
+def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, page_min:int=0, page_max:int=999, analysis_type:str = "Text analysis", progress=Progress(track_tqdm=True)):
     '''
     Redact chosen entities from a pdf that is made up of multiple pages that are not images.
     '''
@@ -469,6 +636,12 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
 
         print("Page number is:", page_no)
 
+        # The /MediaBox in a PDF specifies the size of the page [left, bottom, right, top]
+        media_box = page.MediaBox
+        page_width = media_box[2] - media_box[0]
+        page_height = media_box[3] - media_box[1]
+        
+
         annotations_on_page = []
         decision_process_table_on_page = []       
 
@@ -480,13 +653,23 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
             text_container_analyzed_bounding_boxes = []
             characters = []
 
-            for text_container in page_layout:
-                text_container_analyzer_results, characters = analyze_text_container(text_container, language, chosen_redact_entities, score_threshold, allow_list)
-                # Merge bounding boxes if very close together
-                text_container_analyzed_bounding_boxes = merge_bounding_boxes(text_container_analyzer_results, characters, combine_pixel_dist)
+            if analysis_type == "Text analysis":
+                for i, text_container in enumerate(page_layout):
 
-                page_analyzed_bounding_boxes.extend(text_container_analyzed_bounding_boxes)
-                page_analyzer_results.extend(text_container_analyzer_results)
+                    text_container_analyzer_results, characters = analyze_text_container(text_container, language, chosen_redact_entities, score_threshold, allow_list)
+                                 
+                    # Merge bounding boxes if very close together
+                    text_container_analyzed_bounding_boxes = merge_bounding_boxes(text_container_analyzer_results, characters, combine_pixel_dist, vertical_padding = 2)
+
+
+                    page_analyzed_bounding_boxes.extend(text_container_analyzed_bounding_boxes)
+                    page_analyzer_results.extend(text_container_analyzer_results)
+
+                    # Merge bounding boxes if very close together
+                    text_container_analyzed_bounding_boxes = merge_bounding_boxes(text_container_analyzer_results, characters, combine_pixel_dist, vertical_padding = 2)
+
+                    page_analyzed_bounding_boxes.extend(text_container_analyzed_bounding_boxes)
+                    page_analyzer_results.extend(text_container_analyzer_results)
 
             decision_process_table_on_page = create_text_redaction_process_results(page_analyzer_results, page_analyzed_bounding_boxes, page_num)           
 

@@ -49,7 +49,7 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(trac
     #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
     for page_num in range(page_min,page_count): #progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
         
-        # print("Current page: ", str(page_num + 1))
+        print("Converting page: ", str(page_num + 1))
 
         # Convert one page to image
         image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=300, use_cropbox=True, use_pdftocairo=False)
@@ -128,8 +128,8 @@ def prepare_image_or_text_pdf(
     tic = time.perf_counter()
 
     # If out message or out_file_paths are blank, change to a list so it can be appended to
-    #if isinstance(out_message, str):
-    #    out_message = [out_message]    
+    if isinstance(out_message, str):
+        out_message = [out_message]    
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -150,8 +150,11 @@ def prepare_image_or_text_pdf(
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
     if latest_file_completed >= len(file_paths):
         print("Last file reached, returning files:", str(latest_file_completed))
-        #final_out_message = '\n'.join(out_message)
-        return out_message, out_file_paths
+        if isinstance(out_message, list):
+            final_out_message = '\n'.join(out_message)
+        else:
+            final_out_message = out_message
+        return final_out_message, out_file_paths
 
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
@@ -178,7 +181,7 @@ def prepare_image_or_text_pdf(
             print(out_message)
             return out_message, out_file_paths
 
-        if in_redact_method == "Image analysis":
+        if in_redact_method == "Image analysis" or in_redact_method == "AWS Textract":
             # Analyse and redact image-based pdf or image
             if is_pdf_or_image(file_path) == False:
                 out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."

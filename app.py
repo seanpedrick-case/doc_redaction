@@ -124,7 +124,7 @@ with app:
     Define redaction settings that affect both document and open text redaction.
     """)
         with gr.Accordion("Settings for documents", open = True):
-            in_redaction_method = gr.Radio(label="Default document redaction method - text analysis is faster is not useful for image-based PDFs. Imaged-based is slightly less accurate in general.", value = "Text analysis", choices=["Text analysis", "Image analysis"])
+            in_redaction_method = gr.Radio(label="Default document redaction method - text analysis is faster is not useful for image-based PDFs. Imaged-based is slightly less accurate in general.", value = "Text analysis", choices=["Text analysis", "Image analysis", "AWS Textract"])
             with gr.Row():
                 page_min = gr.Number(precision=0,minimum=0,maximum=9999, label="Lowest page to redact")
                 page_max = gr.Number(precision=0,minimum=0,maximum=9999, label="Highest page to redact")
