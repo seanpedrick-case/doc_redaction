@@ -64,22 +64,40 @@ class CustomImageAnalyzerEngine:
         ocr_results: List[OCRResult], 
         **text_analyzer_kwargs
     ) -> List[CustomImageRecognizerResult]:
-        # Combine all OCR text
-        full_text = ' '.join([result.text for result in ocr_results])
-        
         # Define English as default language, if not specified
         if "language" not in text_analyzer_kwargs:
             text_analyzer_kwargs["language"] = "en"
         
-        analyzer_result = self.analyzer_engine.analyze(
-            text=full_text, **text_analyzer_kwargs
-        )
-        
         allow_list = text_analyzer_kwargs.get('allow_list', [])
-        
-        return self.map_analyzer_results_to_bounding_boxes(
-            analyzer_result, ocr_results, full_text, allow_list
-        )
+        combined_results = []
+
+        for ocr_result in ocr_results:
+            # Analyze each OCR result (line) individually
+            analyzer_result = self.analyzer_engine.analyze(
+                text=ocr_result.text, **text_analyzer_kwargs
+            )
+            
+            for result in analyzer_result:
+                # Extract the relevant portion of text based on start and end
+                relevant_text = ocr_result.text[result.start:result.end]
+                
+                # Create a new OCRResult with the relevant text and adjusted position
+                relevant_ocr_result = OCRResult(
+                    text=relevant_text,
+                    left=ocr_result.left + self.estimate_x_offset(ocr_result.text, result.start),
+                    top=ocr_result.top,
+                    width=self.estimate_width(ocr_result, result.start, result.end),
+                    height=ocr_result.height
+                )
+                
+                # Map the analyzer results to bounding boxes for this line
+                line_results = self.map_analyzer_results_to_bounding_boxes(
+                    [result], [relevant_ocr_result], relevant_text, allow_list
+                )
+                
+                combined_results.extend(line_results)
+
+        return combined_results
 
     @staticmethod
     def map_analyzer_results_to_bounding_boxes(
@@ -114,3 +132,57 @@ class CustomImageAnalyzerEngine:
             text_position = word_end + 1  # +1 for the space between words
 
         return pii_bboxes
+
+    @staticmethod
+    def estimate_x_offset(full_text: str, start: int) -> int:
+        # Estimate the x-offset based on character position
+        # This is a simple estimation and might need refinement for variable-width fonts
+        return int(start / len(full_text) * len(full_text))
+
+    @staticmethod
+    def estimate_width(ocr_result: OCRResult, start: int, end: int) -> int:
+        # Estimate the width of the relevant text portion
+        full_width = ocr_result.width
+        full_length = len(ocr_result.text)
+        return int((end - start) / full_length * full_width)
+
+# Function to combine OCR results into line-level results
+def combine_ocr_results(ocr_results, x_threshold = 20, y_threshold = 10):
+    # Sort OCR results by 'top' to ensure line order
+    ocr_results = sorted(ocr_results, key=lambda x: (x.top, x.left))
+    
+    combined_results = []
+    current_line = []
+    current_bbox = None
+
+    for result in ocr_results:
+        if not current_line:
+            # Start a new line
+            current_line.append(result)
+            current_bbox = result
+        else:
+            # Check if the result is on the same line (y-axis) and close horizontally (x-axis)
+            last_result = current_line[-1]
+            if abs(result.top - last_result.top) <= y_threshold and \
+               (result.left - (last_result.left + last_result.width)) <= x_threshold:
+                # Update the bounding box to include the new word
+                new_right = max(current_bbox.left + current_bbox.width, result.left + result.width)
+                current_bbox = OCRResult(
+                    text=f"{current_bbox.text} {result.text}",
+                    left=current_bbox.left,
+                    top=current_bbox.top,
+                    width=new_right - current_bbox.left,
+                    height=max(current_bbox.height, result.height)
+                )
+                current_line.append(result)
+            else:
+                # Commit the current line and start a new one
+                combined_results.append(current_bbox)
+                current_line = [result]
+                current_bbox = result
+
+    # Append the last line
+    if current_bbox:
+        combined_results.append(current_bbox)
+
+    return combined_results

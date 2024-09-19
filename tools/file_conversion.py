@@ -3,6 +3,7 @@ from tools.helper_functions import get_file_path_end, output_folder, detect_file
 from PIL import Image
 import os
 import time
+import json
 from gradio import Progress
 from typing import List, Optional
 
@@ -173,6 +174,15 @@ def prepare_image_or_text_pdf(
         # Check if the file is an image type
         if file_extension in ['.jpg', '.jpeg', '.png']:
             in_redact_method = "Image analysis"
+
+        # If the file loaded in is json, assume this is a textract response object. Save this to the output folder so it can be found later during redaction and go to the next file.
+        if file_extension in ['.json']:
+            json_contents = json.load(file_path)
+            # Write the response to a JSON file
+            out_folder = output_folder + file_path
+            with open(file_path, 'w') as json_file:
+                json.dump(json_contents, out_folder, indent=4)  # indent=4 makes the JSON file pretty-printed
+            continue
 
         #if file_path:
         #    file_path_without_ext = get_file_path_end(file_path)

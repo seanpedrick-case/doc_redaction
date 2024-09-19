@@ -16,7 +16,7 @@ from gradio import Progress
 
 from collections import defaultdict  # For efficient grouping
 
-from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult
+from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult
 from tools.file_conversion import process_file
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
 from tools.helper_functions import get_file_path_end, output_folder
@@ -24,9 +24,11 @@ from tools.file_conversion import process_file, is_pdf, convert_text_pdf_to_img_
 from tools.data_anonymise import generate_decision_process_output
 from tools.aws_textract import analyse_page_with_textract, convert_pike_pdf_page_to_bytes, json_to_ocrresult
 
-def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list=[], log_files_output_paths:list=[], first_loop_state:bool=False, page_min:int=0, page_max:int=999, estimated_time_taken_state:float=0.0, progress=gr.Progress(track_tqdm=True)):
+def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], language:str, chosen_redact_entities:List[str], in_redact_method:str, in_allow_list:List[List[str]]=None, latest_file_completed:int=0, out_message:list=[], out_file_paths:list=[], log_files_output_paths:list=[], first_loop_state:bool=False, page_min:int=0, page_max:int=999, estimated_time_taken_state:float=0.0, handwrite_signature_checkbox:List[str]=["Redact all identified handwriting", "Redact all identified signatures"], progress=gr.Progress(track_tqdm=True)):
 
     tic = time.perf_counter()
+    all_request_metadata = []
+    all_request_metadata_str = ""
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -75,12 +77,15 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         estimate_total_processing_time = sum_numbers_before_seconds(final_out_message)
         print("Estimated total processing time:", str(estimate_total_processing_time))
 
-        return final_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimate_total_processing_time
+        return final_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimate_total_processing_time, all_request_metadata
     
     file_paths_loop = [file_paths[int(latest_file_completed)]]
 
-    if in_allow_list:
-        in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
+    if not in_allow_list.empty:
+        in_allow_list_flat = in_allow_list[0].tolist()
+        print("In allow list:", in_allow_list_flat)
+    else:
+        in_allow_list_flat = []
     
 
     for file in progress.tqdm(file_paths_loop, desc="Redacting files", unit = "files"):
@@ -96,7 +101,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         else:
             out_message = "No file selected"
             print(out_message)
-            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state
+            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata
 
         if in_redact_method == "Image analysis" or in_redact_method == "AWS Textract":
             # Analyse and redact image-based pdf or image
@@ -104,7 +109,9 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             #     return "Please upload a PDF file or image file (JPG, PNG) for image analysis.", None
 
             print("Redacting file" + file_path_without_ext + "as an image-based file")
-            pdf_images, output_logs, logging_file_paths = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat, is_a_pdf, page_min, page_max, in_redact_method)
+            pdf_images, output_logs, logging_file_paths, request_metadata = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat, is_a_pdf, page_min, page_max, in_redact_method, handwrite_signature_checkbox)
+
+            # Save file
             out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_img.pdf"
             pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
 
@@ -114,11 +121,17 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
 
             out_message.append("File '" + file_path_without_ext + "' successfully redacted")
 
+            # Save decision making process
             output_logs_str = str(output_logs)
             logs_output_file_name = out_image_file_path + "_decision_process_output.txt"
             with open(logs_output_file_name, "w") as f:
                 f.write(output_logs_str)
             log_files_output_paths.append(logs_output_file_name)
+
+            # Save Textract request metadata (if exists)
+            if request_metadata:
+                print("Request metadata:", all_request_metadata)
+                all_request_metadata.append(request_metadata)
 
             # Increase latest file completed count unless we are at the last file
             if latest_file_completed != len(file_paths):
@@ -165,7 +178,7 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
         else:
             out_message = "No redaction method selected"
             print(out_message)
-            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state
+            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata
         
     
     toc = time.perf_counter()
@@ -175,15 +188,33 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
     out_message_out = '\n'.join(out_message)
     out_message_out = out_message_out + " " + out_time
 
-    return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state
+    # If textract requests made, write to logging file
+    if all_request_metadata:
+        all_request_metadata_str = '\n'.join(all_request_metadata)
 
-def merge_img_bboxes(bboxes, handwriting_or_signature_boxes = [], horizontal_threshold=150, vertical_threshold=25):
+        print("all_request_metadata_file_path")
+        all_request_metadata_file_path = output_folder + "textract_request_metadata.txt"   
+
+        with open(all_request_metadata_file_path, "w") as f:
+            f.write(all_request_metadata_str)
+        log_files_output_paths.append(all_request_metadata_file_path)
+
+    return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str
+
+def merge_img_bboxes(bboxes, signature_recogniser_results = [], handwriting_recogniser_results = [], handwrite_signature_checkbox:List[str]=["Redact all identified handwriting", "Redact all identified signatures"], horizontal_threshold=150, vertical_threshold=25):
     merged_bboxes = []
     grouped_bboxes = defaultdict(list)
 
-    if handwriting_or_signature_boxes:
-        print("Handwriting or signature boxes exist at merge:", handwriting_or_signature_boxes)
-        bboxes.extend(handwriting_or_signature_boxes)
+    if signature_recogniser_results or handwriting_recogniser_results:
+
+        if "Redact all identified handwriting" in handwrite_signature_checkbox:
+            print("Handwriting boxes exist at merge:", handwriting_recogniser_results)
+            bboxes.extend(handwriting_recogniser_results)
+            
+
+        if "Redact all identified signatures" in handwrite_signature_checkbox:
+            print("Signature boxes exist at merge:", handwriting_recogniser_results)
+            bboxes.extend(signature_recogniser_results)
 
     # 1. Group by approximate vertical proximity
     for box in bboxes:
@@ -198,13 +229,18 @@ def merge_img_bboxes(bboxes, handwriting_or_signature_boxes = [], horizontal_thr
             if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
                 #print("Merging a box")
                 # Calculate new dimensions for the merged box
-                print("Merged box:", merged_box)
+                #print("Merged box:", merged_box)
+                if merged_box.text == next_box.text:
+                    new_text = merged_box.text
+                else:
+                    new_text = merged_box.text + " " + next_box.text
+
                 new_left = min(merged_box.left, next_box.left)
                 new_top = min(merged_box.top, next_box.top)
                 new_width = max(merged_box.left + merged_box.width, next_box.left + next_box.width) - new_left
                 new_height = max(merged_box.top + merged_box.height, next_box.top + next_box.height) - new_top
-                merged_box = ImageRecognizerResult(
-                    merged_box.entity_type, merged_box.start, merged_box.end, merged_box.score, new_left, new_top, new_width, new_height
+                merged_box = CustomImageRecognizerResult(
+                    merged_box.entity_type, merged_box.start, merged_box.end, merged_box.score, new_left, new_top, new_width, new_height, new_text
                 )
             else:
                 merged_bboxes.append(merged_box)
@@ -213,7 +249,7 @@ def merge_img_bboxes(bboxes, handwriting_or_signature_boxes = [], horizontal_thr
         merged_bboxes.append(merged_box) 
     return merged_bboxes
 
-def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, is_a_pdf:bool=True, page_min:int=0, page_max:int=999, analysis_type:str="Image analysis", progress=Progress(track_tqdm=True)):
+def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, is_a_pdf:bool=True, page_min:int=0, page_max:int=999, analysis_type:str="Image analysis", handwrite_signature_checkbox:List[str]=["Redact all identified handwriting", "Redact all identified signatures"], progress=Progress(track_tqdm=True)):
     '''
     Take an path for an image of a document, then run this image through the Presidio ImageAnalyzer and PIL to get a redacted page back. Adapted from Presidio ImageRedactorEngine.
     '''
@@ -223,6 +259,7 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
     fill = (0, 0, 0)   # Fill colour
     decision_process_output_str = ""
     images = []
+    request_metadata = {}
     image_analyser = CustomImageAnalyzerEngine(nlp_analyser)
 
     if not image_paths:
@@ -256,6 +293,12 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
     print("Page range:", str(page_min + 1), "to", str(page_max))
 
     #for i in progress.tqdm(range(0,number_of_pages), total=number_of_pages, unit="pages", desc="Redacting pages"):
+
+    all_ocr_results = []
+    all_decision_process = []
+
+    if analysis_type == "Image analysis": ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + ".txt"
+    elif analysis_type == "AWS Textract": ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + "_textract.txt"
     
     for n in range(0, number_of_pages):
         handwriting_or_signature_boxes = []
@@ -277,6 +320,7 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
             print("Redacting page", reported_page_number)
 
+            
             # Assuming image_paths[i] is your PIL image object
             try:
                 image = image_paths[0][i]#.copy()
@@ -286,45 +330,25 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
                 print(e)
                 continue
 
-            # %%
-            # image_analyser = ImageAnalyzerEngine(nlp_analyser)
-            # engine = ImageRedactorEngine(image_analyser)
+            # Need image size to convert textract OCR outputs to the correct sizes
+            page_width, page_height = image.size
 
+            # Possibility to use different languages
             if language == 'en':
                 ocr_lang = 'eng'
             else: ocr_lang = language
 
-            # bboxes = image_analyser.analyze(image,
-            #         ocr_kwargs={"lang": ocr_lang},
-            #         **{
-            #         "allow_list": allow_list,
-            #         "language": language,
-            #         "entities": chosen_redact_entities,
-            #         "score_threshold": score_threshold,
-            #         "return_decision_process":True,
-            #     })
-
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
             if analysis_type == "Image analysis":
+                
                 ocr_results = image_analyser.perform_ocr(image)
 
-                # Process all OCR text with bounding boxes
-                #print("OCR results:", ocr_results)
-                ocr_results_str = str(ocr_results)
-                ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_page_" + reported_page_number + ".txt"
-                with open(ocr_results_file_path, "w") as f:
-                    f.write(ocr_results_str)
-                logging_file_paths.append(ocr_results_file_path)
-
+                # Combine OCR results
+                ocr_results = combine_ocr_results(ocr_results)
+    
             # Import results from json and convert
             if analysis_type == "AWS Textract":
-
-                # Ensure image is a PIL Image object
-                # if isinstance(image, str):
-                #     image = Image.open(image)
-                # elif not isinstance(image, Image.Image):
-                #     print(f"Unexpected image type on page {i}: {type(image)}")
-                #     continue
+                
 
                 # Convert the image to bytes using an in-memory buffer
                 image_buffer = io.BytesIO()
@@ -334,7 +358,7 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
                 json_file_path = output_folder + file_name + "_page_" + reported_page_number + "_textract.json"
                 
                 if not os.path.exists(json_file_path):
-                    text_blocks = analyse_page_with_textract(pdf_page_as_bytes, json_file_path) # Analyse page with Textract
+                    text_blocks, request_metadata = analyse_page_with_textract(pdf_page_as_bytes, json_file_path) # Analyse page with Textract
                     logging_file_paths.append(json_file_path)
                 else:
                     # Open the file and load the JSON data
@@ -343,19 +367,7 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
                         text_blocks = json.load(json_file)
                         text_blocks = text_blocks['Blocks']
 
-
-                # Need image size to convert textract OCR outputs to the correct sizes
-                #print("Image size:", image.size)
-                page_width, page_height = image.size
-
-                ocr_results, handwriting_or_signature_boxes = json_to_ocrresult(text_blocks, page_width, page_height)
-       
-                #print("OCR results:", ocr_results)
-                ocr_results_str = str(ocr_results)
-                textract_ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_page_" + reported_page_number + "_textract.txt"
-                with open(textract_ocr_results_file_path, "w") as f:
-                            f.write(ocr_results_str)
-                logging_file_paths.append(textract_ocr_results_file_path)
+                ocr_results, handwriting_or_signature_boxes, signature_recogniser_results, handwriting_recogniser_results = json_to_ocrresult(text_blocks, page_width, page_height)
 
             # Step 2: Analyze text and identify PII
             bboxes = image_analyser.analyze_text(
@@ -364,21 +376,19 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
                 entities=chosen_redact_entities,
                 allow_list=allow_list,
                 score_threshold=score_threshold,
-            )
-
-            # Process the bboxes (PII entities)
-            if bboxes:
-                for bbox in bboxes:
-                    print(f"Entity: {bbox.entity_type}, Text: {bbox.text}, Bbox: ({bbox.left}, {bbox.top}, {bbox.width}, {bbox.height})")
-                decision_process_output_str = str(bboxes)
-                print("Decision process:", decision_process_output_str)
+            )            
 
             # Merge close bounding boxes
-            merged_bboxes = merge_img_bboxes(bboxes, handwriting_or_signature_boxes)
+            merged_bboxes = merge_img_bboxes(bboxes, signature_recogniser_results, handwriting_recogniser_results, handwrite_signature_checkbox)
 
-            #print("For page:", str(i), "Merged bounding boxes:", merged_bboxes)
-            #from PIL import Image
-            #image_object = Image.open(image)
+            # Export the decision making process
+            if merged_bboxes:
+                for bbox in merged_bboxes:
+                    print(f"Entity: {bbox.entity_type}, Text: {bbox.text}, Bbox: ({bbox.left}, {bbox.top}, {bbox.width}, {bbox.height})")
+
+                
+                decision_process_output_str = "Page " + reported_page_number + ":\n" + str(merged_bboxes)
+                all_decision_process.append(decision_process_output_str)
 
             # 3. Draw the merged boxes
             draw = ImageDraw.Draw(image)
@@ -390,9 +400,20 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
                 y1 = y0 + box.height
                 draw.rectangle([x0, y0, x1, y1], fill=fill)
 
+            ocr_results_str = "Page:" + reported_page_number + "\n" + str(ocr_results)
+            all_ocr_results.append(ocr_results_str) 
+
         images.append(image)
 
-    return images, decision_process_output_str, logging_file_paths
+    # Write OCR results as a log file    
+    ocr_results_out = "\n".join(all_ocr_results)
+    with open(ocr_results_file_path, "w") as f:
+        f.write(ocr_results_out)
+    logging_file_paths.append(ocr_results_file_path)
+
+    all_decision_process_str = "\n".join(all_decision_process)
+
+    return images, all_decision_process_str, logging_file_paths, request_metadata
 
 def analyze_text_container(text_container, language, chosen_redact_entities, score_threshold, allow_list):
     if isinstance(text_container, LTTextContainer):

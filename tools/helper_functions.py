@@ -73,6 +73,31 @@ def ensure_output_folder_exists():
     else:
         print(f"The 'output/' folder already exists.")
 
+def custom_regex_load(in_file):
+    '''
+    When file is loaded, update the column dropdown choices and write to relevant data states.
+    '''
+
+    custom_regex = pd.DataFrame()
+
+    file_list = [string.name for string in in_file]
+
+    regex_file_names = [string for string in file_list if "csv" in string.lower()]
+    if regex_file_names:
+        regex_file_name = regex_file_names[0]
+        custom_regex = pd.read_csv(regex_file_name, low_memory=False, header=None)
+        #regex_file_name_no_ext = get_file_path_end(regex_file_name)
+
+        output_text = "Allow list file loaded."
+        print(output_text)
+    else:
+        error = "No allow list file provided."
+        print(error)
+        output_text = error
+        return error, custom_regex
+       
+    return output_text, custom_regex
+
 def put_columns_in_df(in_file):
     new_choices = []
     concat_choices = []

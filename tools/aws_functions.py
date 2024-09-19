@@ -14,6 +14,10 @@ aws_var_default = "0"
 aws_var_val = get_or_create_env_var(aws_var, aws_var_default)
 print(f'The value of {aws_var} is {aws_var_val}')
 
+# Launch the Gradio app
+AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
+print(f'The value of AWS_REGION is {AWS_REGION}')
+
 if aws_var_val == "1":
     try:
         bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
@@ -22,7 +26,8 @@ if aws_var_val == "1":
         print(e)
 
     def get_assumed_role_info():
-        sts = boto3.client('sts', region_name='eu-west-2', endpoint_url='https://sts.eu-west-2.amazonaws.com')
+        sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'
+        sts = boto3.client('sts', region_name=AWS_REGION, endpoint_url=sts_endpoint)
         response = sts.get_caller_identity()
 
         # Extract ARN of the assumed role

@@ -26,7 +26,7 @@ titles_recogniser = PatternRecognizer(supported_entity="TITLES", patterns = [tit
 # Custom postcode recogniser
 
 # Define the regex pattern in a Presidio `Pattern` object:
-ukpostcode_pattern = Pattern(name="ukpostcode_pattern",regex="\\b(?:[A-Z][A-HJ-Y]?[0-9][0-9A-Z]? ?[0-9][A-Z]{2}|GIR ?0A{2})\\b|(?:[A-Z][A-HJ-Y]?[0-9][0-9A-Z]? ?[0-9]{1}?)$|\\b(?:[A-Z][A-HJ-Y]?[0-9][0-9A-Z]?)\\b", score = 1)
+ukpostcode_pattern = Pattern(name="ukpostcode_pattern",regex="\b([A-Z][A-HJ-Y]?[0-9][0-9A-Z]? ?[0-9][A-Z]{2}|GIR ?0AA)\b", score = 1)
 
 # Define the recognizer with one or more patterns
 ukpostcode_recogniser = PatternRecognizer(supported_entity="UKPOSTCODE", patterns = [ukpostcode_pattern])

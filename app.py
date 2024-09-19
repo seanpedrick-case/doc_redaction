@@ -4,7 +4,7 @@ import socket
 # By default TLDExtract will try to pull files from the internet. I have instead downloaded this file locally to avoid the requirement for an internet connection.
 os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
 
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, custom_regex_load
 from tools.aws_functions import upload_file_to_s3
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_text_pdf
@@ -12,6 +12,7 @@ from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
 #from tools.aws_functions import load_data_from_aws
 import gradio as gr
+import pandas as pd
 
 from datetime import datetime
 today_rev = datetime.now().strftime("%Y%m%d")
@@ -44,6 +45,8 @@ with app:
     first_loop_state = gr.State(True)
     second_loop_state = gr.State(False)
 
+    in_allow_list_state = gr.State(pd.DataFrame())
+
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
 
@@ -69,8 +72,8 @@ with app:
     with gr.Tab("PDFs/images"):
 
         with gr.Accordion("Redact document", open = True):
-            in_file = gr.File(label="Choose document/image files (PDF, JPG, PNG)", file_count= "multiple", file_types=['.pdf', '.jpg', '.png'])
-            redact_btn = gr.Button("Redact document(s)", variant="primary")
+            in_file = gr.File(label="Choose document/image files (PDF, JPG, PNG)", file_count= "multiple", file_types=['.pdf', '.jpg', '.png', '.json'])
+            document_redact_btn = gr.Button("Redact document(s)", variant="primary")
         
         with gr.Row():
             output_summary = gr.Textbox(label="Output summary")
@@ -128,6 +131,8 @@ with app:
             with gr.Row():
                 page_min = gr.Number(precision=0,minimum=0,maximum=9999, label="Lowest page to redact")
                 page_max = gr.Number(precision=0,minimum=0,maximum=9999, label="Highest page to redact")
+            with gr.Row():
+                handwrite_signature_checkbox = gr.CheckboxGroup(choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting", "Redact all identified signatures"])
         with gr.Accordion("Settings for open text or xlsx/csv files", open = True):
             anon_strat = gr.Radio(choices=["replace with <REDACTED>", "replace with <ENTITY_NAME>", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace with <REDACTED>") 
 
@@ -135,11 +140,16 @@ with app:
             in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact (click close to down arrow for full list)")
             with gr.Row():
                 in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language (only English currently supported)", multiselect=False)
-                in_allow_list = gr.Dataframe(label="Allow list - enter a new term to ignore for redaction on each row e.g. Lambeth -> add new row -> Lambeth 2030", headers=["Allow list"], row_count=1, col_count=(1, 'fixed'), value=[[""]], type="array", column_widths=["100px"], datatype='str')
+                #in_allow_list = gr.Dataframe(label="Allow list - enter a new term to ignore for redaction on each row e.g. Lambeth -> add new row -> Lambeth 2030", headers=["Allow list"], row_count=1, col_count=(1, 'fixed'), value=[[""]], type="array", column_widths=["100px"], datatype='str')
+                with gr.Row():
+                    in_allow_list = gr.UploadButton(label="Import allow list file.", file_count="multiple")    
+                    gr.Markdown("""Import allow list file - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will not be redacted.""")
+                    in_allow_list_text = gr.Textbox(label="Custom allow list load status")
             log_files_output = gr.File(label="Log file output", interactive=False)
 
-        # Invisible text box to hold the session hash/username just for logging purposes
-        session_hash_textbox = gr.Textbox(value="", visible=False) 
+        # Invisible text box to hold the session hash/username and Textract request metadata just for logging purposes
+        session_hash_textbox = gr.Textbox(value="", visible=False)
+        textract_metadata_textbox = gr.Textbox(value="", visible=False)
             
     # AWS options - placeholder for possibility of storing data on s3
     # with gr.Tab(label="Advanced options"):
@@ -153,16 +163,19 @@ with app:
     
     # ### Loading AWS data ###
     # load_aws_data_button.click(fn=load_data_from_aws, inputs=[in_aws_file, aws_password_box], outputs=[in_file, aws_log_box])
+
+    # If a custom allow list is uploaded
+    in_allow_list.upload(fn=custom_regex_load, inputs=[in_allow_list], outputs=[in_allow_list_text, in_allow_list_state])
    
     # Document redaction
-    redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, first_loop_state], outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number], api_name="redact_doc")
+    document_redact_btn.click(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, first_loop_state], outputs=[output_summary, prepared_pdf_state], api_name="prepare").\
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox], api_name="redact_doc")
     
     # If the output file count text box changes, keep going with redacting each document until done
     text_documents_done.change(fn = prepare_image_or_text_pdf, inputs=[in_file, in_redaction_method, in_allow_list, text_documents_done, output_summary, second_loop_state], outputs=[output_summary, prepared_pdf_state]).\
-    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number]).\
+    then(fn = choose_and_run_redactor, inputs=[in_file, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox]).\
     then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
 
      # Tabular data redaction           
@@ -197,8 +210,8 @@ with app:
 
     # Log processing time/token usage when making a query
     usage_callback = gr.CSVLogger()
-    usage_callback.setup([session_hash_textbox, in_data_files, estimated_time_taken_number], usage_logs_folder)
-    estimated_time_taken_number.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, in_data_files, estimated_time_taken_number], None, preprocess=False).\
+    usage_callback.setup([session_hash_textbox, in_data_files, estimated_time_taken_number, textract_metadata_textbox], usage_logs_folder)
+    estimated_time_taken_number.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, in_data_files, estimated_time_taken_number, textract_metadata_textbox], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Launch the Gradio app
