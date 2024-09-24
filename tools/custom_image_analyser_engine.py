@@ -420,7 +420,7 @@ class CustomImageAnalyzerEngine:
             #     block_size=11
             # )
             image_preprocessor = ContrastSegmentedImageEnhancer()
-            print(image_preprocessor)
+            #print(image_preprocessor)
         self.image_preprocessor = image_preprocessor
 
     def perform_ocr(self, image: Union[str, Image.Image, np.ndarray]) -> List[OCRResult]:
@@ -461,6 +461,7 @@ class CustomImageAnalyzerEngine:
     def analyze_text(
         self, 
         ocr_results: List[OCRResult], 
+        ocr_results_with_children: Dict[str, Dict],
         **text_analyzer_kwargs
     ) -> List[CustomImageRecognizerResult]:
         # Define English as default language, if not specified
@@ -468,8 +469,8 @@ class CustomImageAnalyzerEngine:
             text_analyzer_kwargs["language"] = "en"
         
         allow_list = text_analyzer_kwargs.get('allow_list', [])
-        combined_results = []
 
+        combined_results = []
         for ocr_result in ocr_results:
             # Analyze each OCR result (line) individually
             analyzer_result = self.analyzer_engine.analyze(
@@ -480,18 +481,42 @@ class CustomImageAnalyzerEngine:
                 # Extract the relevant portion of text based on start and end
                 relevant_text = ocr_result.text[result.start:result.end]
                 
-                # Create a new OCRResult with the relevant text and adjusted position
-                relevant_ocr_result = OCRResult(
-                    text=relevant_text,
-                    left=ocr_result.left + self.estimate_x_offset(ocr_result.text, result.start),
-                    top=ocr_result.top,
-                    width=self.estimate_width(ocr_result=ocr_result, start=result.start, end=result.end),
-                    height=ocr_result.height
-                )
+                # Find the corresponding entry in ocr_results_with_children
+                child_info = ocr_results_with_children.get(ocr_result.text)
+                if child_info:
+                    # Calculate left and width based on child words
+                    #print("Found in ocr_results_with_children")
+                    child_words = child_info['words']
+                    start_word = child_words[0]
+                    end_word = child_words[-1]
+                    left = start_word['bounding_box'][0]
+                    width = end_word['bounding_box'][2] - left
+
+                    relevant_ocr_result = OCRResult(
+                        text=relevant_text,
+                        left=left,
+                        top=ocr_result.top,
+                        width=width,
+                        height=ocr_result.height
+                    )
+                else:
+                    # Fallback to previous method if not found in ocr_results_with_children
+                    #print("Couldn't find result in ocr_results_with_children")
+                    relevant_ocr_result = OCRResult(
+                        text=relevant_text,
+                        left=ocr_result.left + self.estimate_x_offset(relevant_text, result.start),
+                        top=ocr_result.top,
+                        width=self.estimate_width(ocr_result=ocr_result, start=result.start, end=result.end),
+                        height=ocr_result.height
+                    )
+
+                result_mod = result
+                result.start = 0
+                result.end = len(relevant_text)
                 
                 # Map the analyzer results to bounding boxes for this line
                 line_results = self.map_analyzer_results_to_bounding_boxes(
-                    [result], [relevant_ocr_result], relevant_text, allow_list
+                    [result_mod], [relevant_ocr_result], ocr_result.text, allow_list, ocr_results_with_children
                 )
                 
                 combined_results.extend(line_results)
@@ -504,33 +529,95 @@ class CustomImageAnalyzerEngine:
         ocr_results: List[OCRResult],
         full_text: str,
         allow_list: List[str],
+        ocr_results_with_children: Dict[str, Dict]
     ) -> List[CustomImageRecognizerResult]:
         pii_bboxes = []
         text_position = 0
 
         for ocr_result in ocr_results:
             word_end = text_position + len(ocr_result.text)
+
+            #print("Checking relevant OCR result:", ocr_result)
             
             for result in text_analyzer_results:
-                if (max(text_position, result.start) < min(word_end, result.end)) and (ocr_result.text not in allow_list):
+                max_of_current_text_pos_or_result_start_pos = max(text_position, result.start)
+                min_of_result_end_pos_or_results_end = min(word_end, result.end)
+
+                #print("max_of_current_text_pos_or_result_start_pos", str(max_of_current_text_pos_or_result_start_pos))
+                #print("min_of_result_end_pos_or_results_end", str(min_of_result_end_pos_or_results_end))
+
+                if (max_of_current_text_pos_or_result_start_pos < min_of_result_end_pos_or_results_end) and (ocr_result.text not in allow_list):
+                    print("result", result, "made it through if statement")
+
+                    # Find the corresponding entry in ocr_results_with_children
+                    child_info = ocr_results_with_children.get(full_text)
+                    if child_info:
+                        # Use the bounding box from ocr_results_with_children
+                        bbox = child_info['bounding_box']
+                        left, top, right, bottom = bbox
+                        width = right - left
+                        height = bottom - top
+                    else:
+                        # Fallback to ocr_result if not found
+                        left = ocr_result.left
+                        top = ocr_result.top
+                        width = ocr_result.width
+                        height = ocr_result.height
+
                     pii_bboxes.append(
                         CustomImageRecognizerResult(
                             entity_type=result.entity_type,
                             start=result.start,
                             end=result.end,
                             score=result.score,
-                            left=ocr_result.left,
-                            top=ocr_result.top,
-                            width=ocr_result.width,
-                            height=ocr_result.height,
+                            left=left,
+                            top=top,
+                            width=width,
+                            height=height,
                             text=ocr_result.text
                         )
                     )
-                    break
             
             text_position = word_end + 1  # +1 for the space between words
 
         return pii_bboxes
+
+    # @staticmethod
+    # def map_analyzer_results_to_bounding_boxes(
+    #     text_analyzer_results: List[RecognizerResult],
+    #     ocr_results: List[OCRResult],
+    #     full_text: str,
+    #     allow_list: List[str],
+    # ) -> List[CustomImageRecognizerResult]:
+    #     pii_bboxes = []
+    #     text_position = 0
+
+    #     for ocr_result in ocr_results:
+    #         word_end = text_position + len(ocr_result.text)
+
+    #         print("Checking relevant OCR result:", ocr_result)
+            
+    #         for result in text_analyzer_results:
+    #             if (max(text_position, result.start) < min(word_end, result.end)) and (ocr_result.text not in allow_list):
+    #                 print("result", result, "made it through if statement")
+
+    #                 pii_bboxes.append(
+    #                     CustomImageRecognizerResult(
+    #                         entity_type=result.entity_type,
+    #                         start=result.start,
+    #                         end=result.end,
+    #                         score=result.score,
+    #                         left=ocr_result.left,
+    #                         top=ocr_result.top,
+    #                         width=ocr_result.width,
+    #                         height=ocr_result.height,
+    #                         text=ocr_result.text
+    #                     )
+    #                 )
+            
+    #         text_position = word_end + 1  # +1 for the space between words
+
+    #     return pii_bboxes
     
     @staticmethod
     def remove_space_boxes(ocr_result: dict) -> dict:
@@ -676,17 +763,33 @@ class CustomImageAnalyzerEngine:
 
 
 # Function to combine OCR results into line-level results
-def combine_ocr_results(ocr_results, x_threshold=20, y_threshold=3):
-    # Sort OCR results by 'top' to ensure line order
-    ocr_results = sorted(ocr_results, key=lambda x: (x.top, x.left))
-    
+def combine_ocr_results(ocr_results, x_threshold=50, y_threshold=12):
+    # Group OCR results into lines based on y_threshold
+    lines = []
+    current_line = []
+    for result in sorted(ocr_results, key=lambda x: x.top):
+        if not current_line or abs(result.top - current_line[0].top) <= y_threshold:
+            current_line.append(result)
+        else:
+            lines.append(current_line)
+            current_line = [result]
+    if current_line:
+        lines.append(current_line)
+
+    # Sort each line by left position
+    for line in lines:
+        line.sort(key=lambda x: x.left)
+
+    # Flatten the sorted lines back into a single list
+    sorted_results = [result for line in lines for result in line]
+
     combined_results = []
     new_format_results = {}
     current_line = []
     current_bbox = None
     line_counter = 1
 
-    for result in ocr_results:
+    for result in sorted_results:
         if not current_line:
             # Start a new line
             current_line.append(result)

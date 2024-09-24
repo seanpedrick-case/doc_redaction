@@ -16,7 +16,6 @@ score_threshold = 0.001
 
 # %%
 # Custom title recogniser
-import re
 titles_list = ["Sir", "Ma'am", "Madam", "Mr", "Mr.", "Mrs", "Mrs.", "Ms", "Ms.", "Miss", "Dr", "Dr.", "Professor"]
 titles_regex = '\\b' + '\\b|\\b'.join(rf"{re.escape(title)}" for title in titles_list) + '\\b'
 titles_pattern = Pattern(name="titles_pattern",regex=titles_regex, score = 1)
@@ -26,7 +25,11 @@ titles_recogniser = PatternRecognizer(supported_entity="TITLES", patterns = [tit
 # Custom postcode recogniser
 
 # Define the regex pattern in a Presidio `Pattern` object:
-ukpostcode_pattern = Pattern(name="ukpostcode_pattern",regex="\b([A-Z][A-HJ-Y]?[0-9][0-9A-Z]? ?[0-9][A-Z]{2}|GIR ?0AA)\b", score = 1)
+ukpostcode_pattern = Pattern(
+    name="ukpostcode_pattern",
+    regex=r"\b([A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}|GIR ?0AA)\b",
+    score=1
+)
 
 # Define the recognizer with one or more patterns
 ukpostcode_recogniser = PatternRecognizer(supported_entity="UKPOSTCODE", patterns = [ukpostcode_pattern])
@@ -77,10 +80,9 @@ def extract_street_name(text:str) -> str:
         street_name = match.group('street_name').strip()
         start_pos = match.start()
         end_pos = match.end()
-        print(f"Start: {start_pos}, End: {end_pos}")
-        print(f"Preceding words: {preceding_word}")
-        print(f"Street name: {street_name}")
-        print()
+        #print(f"Start: {start_pos}, End: {end_pos}")
+        #print(f"Preceding words: {preceding_word}")
+        #print(f"Street name: {street_name}")
 
         start_positions.append(start_pos)
         end_positions.append(end_pos)
@@ -158,7 +160,7 @@ loaded_nlp_engine = LoadedSpacyNlpEngine(loaded_spacy_model = nlp)
 nlp_analyser = AnalyzerEngine(nlp_engine=loaded_nlp_engine,
                 default_score_threshold=score_threshold,
                 supported_languages=["en"],
-                log_decision_process=True,
+                log_decision_process=False,
                 )
 
 # %%
