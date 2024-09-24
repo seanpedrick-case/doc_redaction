@@ -195,7 +195,9 @@ def anonymise_script(df, anon_strat, language:str, chosen_redact_entities:List[s
     df_dict = df.to_dict(orient="list")
 
     if in_allow_list:
-        in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
+        in_allow_list_flat = in_allow_list #[item for sublist in in_allow_list for item in sublist]
+    else:
+        in_allow_list_flat = []
 
     #analyzer = nlp_analyser #AnalyzerEngine()
     batch_analyzer = BatchAnalyzerEngine(analyzer_engine=nlp_analyser)
@@ -371,7 +373,9 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
     
 
     if in_allow_list:
-        in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
+        in_allow_list_flat = in_allow_list #[item for sublist in in_allow_list for item in sublist]
+    else:
+        in_allow_list_flat = []
     
     anon_df = pd.DataFrame()
     #out_file_paths = []

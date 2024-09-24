@@ -98,7 +98,33 @@ def process_file(file_path):
 
     return img_object
 
-def prepare_image_or_text_pdf(
+def get_input_file_names(file_input):
+    '''
+    Get list of input files to report to logs.
+    '''
+
+    all_relevant_files = []
+
+    for file in file_input:
+        file_path = file.name
+        print(file_path)
+        file_path_without_ext = get_file_path_end(file_path)
+
+        #print("file:", file_path)
+
+        file_extension = os.path.splitext(file_path)[1].lower()
+
+        # Check if the file is an image type
+        if file_extension in ['.jpg', '.jpeg', '.png', '.xlsx', '.csv', '.parquet']:
+            all_relevant_files.append(file_path_without_ext)
+    
+    all_relevant_files_str = ", ".join(all_relevant_files)
+
+    print("all_relevant_files_str:", all_relevant_files_str)
+
+    return all_relevant_files_str
+
+def prepare_image_or_pdf(
     file_paths: List[str],
     in_redact_method: str,
     in_allow_list: Optional[List[List[str]]] = None,
@@ -159,6 +185,8 @@ def prepare_image_or_text_pdf(
 
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
+    progress(0.1, desc='Preparing file')
+
     file_paths_loop = [file_paths[int(latest_file_completed)]]
     #print("file_paths_loop:", str(file_paths_loop))
 
@@ -173,7 +201,7 @@ def prepare_image_or_text_pdf(
 
         # Check if the file is an image type
         if file_extension in ['.jpg', '.jpeg', '.png']:
-            in_redact_method = "Image analysis"
+            in_redact_method = "Quick image analysis - typed text"
 
         # If the file loaded in is json, assume this is a textract response object. Save this to the output folder so it can be found later during redaction and go to the next file.
         if file_extension in ['.json']:
@@ -191,7 +219,7 @@ def prepare_image_or_text_pdf(
             print(out_message)
             return out_message, out_file_paths
 
-        if in_redact_method == "Image analysis" or in_redact_method == "AWS Textract":
+        if in_redact_method == "Quick image analysis - typed text" or in_redact_method == "Complex image analysis - AWS Textract, handwriting/signatures":
             # Analyse and redact image-based pdf or image
             if is_pdf_or_image(file_path) == False:
                 out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
@@ -201,7 +229,7 @@ def prepare_image_or_text_pdf(
             out_file_path = process_file(file_path)
             #print("Out file path at image conversion step:", out_file_path)
 
-        elif in_redact_method == "Text analysis":
+        elif in_redact_method == "Simple text analysis - PDFs with selectable text":
             if is_pdf(file_path) == False:
                 out_message = "Please upload a PDF file for text analysis."
                 print(out_message)

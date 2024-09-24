@@ -44,7 +44,7 @@ def analyse_page_with_textract(pdf_page_bytes, json_file_path):
     response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
 
     text_blocks = response['Blocks']
-    request_metadata = extract_textract_metadata(response)
+    request_metadata = extract_textract_metadata(response) # Metadata comes out as a string
 
     # Write the response to a JSON file
     with open(json_file_path, 'w') as json_file:
@@ -92,56 +92,75 @@ def json_to_ocrresult(json_data, page_width, page_height):
     signatures = []
     handwriting = []
 
+    combined_results = {}
+
     for text_block in json_data:
 
         is_signature = False
         is_handwriting = False
 
+        
+
         if (text_block['BlockType'] == 'LINE') | (text_block['BlockType'] == 'SIGNATURE'): # (text_block['BlockType'] == 'WORD') |
 
-            if (text_block['BlockType'] == 'LINE'):
-            
-                # If a line, pull out the text type and confidence from the child words and get text, bounding box
+            if text_block['BlockType'] == 'LINE':
+                # Extract text and bounding box for the line
+                line_text = text_block.get('Text', '')
+                line_bbox = text_block["Geometry"]["BoundingBox"]
+                line_left = int(line_bbox["Left"] * page_width)
+                line_top = int(line_bbox["Top"] * page_height)
+                line_right = int((line_bbox["Left"] + line_bbox["Width"]) * page_width)
+                line_bottom = int((line_bbox["Top"] + line_bbox["Height"]) * page_height)
 
-                if 'Text' in text_block:
-                    text = text_block['Text']
-
+                words = []
                 if 'Relationships' in text_block:
                     for relationship in text_block['Relationships']:
                         if relationship['Type'] == 'CHILD':
                             for child_id in relationship['Ids']:
                                 child_block = next((block for block in json_data if block['Id'] == child_id), None)
-                                if child_block and 'TextType' in child_block:
-                                    text_type = child_block['TextType']
-                                    confidence = text_block['Confidence']
-                                    break
-                            break
+                                if child_block and child_block['BlockType'] == 'WORD':
+                                    word_text = child_block.get('Text', '')
+                                    word_bbox = child_block["Geometry"]["BoundingBox"]
+                                    confidence = child_block.get('Confidence','')
+                                    word_left = int(word_bbox["Left"] * page_width)
+                                    word_top = int(word_bbox["Top"] * page_height)
+                                    word_right = int((word_bbox["Left"] + word_bbox["Width"]) * page_width)
+                                    word_bottom = int((word_bbox["Top"] + word_bbox["Height"]) * page_height)
 
-                # Extract BoundingBox details
-                bbox = text_block["Geometry"]["BoundingBox"]
-                left = bbox["Left"]
-                top = bbox["Top"]
-                width = bbox["Width"]
-                height = bbox["Height"]
+                                    # Extract BoundingBox details
+                                    width = word_bbox["Width"]
+                                    height = word_bbox["Height"]
 
-                # Convert proportional coordinates to absolute coordinates
-                left_abs = int(left * page_width)
-                top_abs = int(top * page_height)
-                width_abs = int(width * page_width)
-                height_abs = int(height * page_height)
+                                    # Convert proportional coordinates to absolute coordinates
+                                    width_abs = int(width * page_width)
+                                    height_abs = int(height * page_height)
+                                    
+                                    words.append({
+                                        'text': word_text,
+                                        'bounding_box': (word_left, word_top, word_right, word_bottom)
+                                    })
+                                    # Check for handwriting
+                                    text_type = child_block.get("TextType", '')
 
-                # If handwriting or signature, add to bounding box
+                                    if text_type == "HANDWRITING":
+                                        is_handwriting = True
+                                        entity_name = "HANDWRITING"
+                                        word_end = len(entity_name)
+                                        recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= word_text, score= confidence, start=0, end=word_end, left=word_left, top=word_top, width=width_abs, height=height_abs)
+                                        handwriting.append(recogniser_result)                    
+                                        print("Handwriting found:", handwriting[-1]) 
+
+                combined_results[line_text] = {
+                    'bounding_box': (line_left, line_top, line_right, line_bottom),
+                    'words': words
+                }
+
                 
-                if text_type == "HANDWRITING":
-                    is_handwriting = True
-                    entity_name = "HANDWRITING"
-                    word_end = len(entity_name)
-                    recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= text, score= confidence, start=0, end=word_end, left=left_abs, top=top_abs, width=width_abs, height=height_abs)
-                    handwriting.append(recogniser_result)                    
-                    print("Handwriting found:", handwriting[-1]) 
+
+                # If handwriting or signature, add to bounding box               
 
             elif (text_block['BlockType'] == 'SIGNATURE'):
-                text = "SIGNATURE"
+                line_text = "SIGNATURE"
 
                 is_signature = True
                 entity_name = "SIGNATURE"
@@ -161,12 +180,25 @@ def json_to_ocrresult(json_data, page_width, page_height):
                 width_abs = int(width * page_width)
                 height_abs = int(height * page_height)
 
-                recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= text, score= confidence, start=0, end=word_end, left=left_abs, top=top_abs, width=width_abs, height=height_abs)
+                recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= line_text, score= confidence, start=0, end=word_end, left=left_abs, top=top_abs, width=width_abs, height=height_abs)
                 signatures.append(recogniser_result)
                 print("Signature found:", signatures[-1])
 
+            # Extract BoundingBox details
+            bbox = text_block["Geometry"]["BoundingBox"]
+            left = bbox["Left"]
+            top = bbox["Top"]
+            width = bbox["Width"]
+            height = bbox["Height"]
+
+            # Convert proportional coordinates to absolute coordinates
+            left_abs = int(left * page_width)
+            top_abs = int(top * page_height)
+            width_abs = int(width * page_width)
+            height_abs = int(height * page_height)
+
             # Create OCRResult with absolute coordinates
-            ocr_result = OCRResult(text, left_abs, top_abs, width_abs, height_abs)
+            ocr_result = OCRResult(line_text, left_abs, top_abs, width_abs, height_abs)
             all_ocr_results.append(ocr_result)
 
             is_signature_or_handwriting = is_signature | is_handwriting
@@ -178,4 +210,4 @@ def json_to_ocrresult(json_data, page_width, page_height):
                 if is_signature: signature_recogniser_results.append(recogniser_result)
                 if is_handwriting: handwriting_recogniser_results.append(recogniser_result)
     
-    return all_ocr_results, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results
+    return all_ocr_results, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, combined_results
