@@ -91,8 +91,9 @@ def json_to_ocrresult(json_data, page_width, page_height):
     handwriting_recogniser_results = []
     signatures = []
     handwriting = []
+    ocr_results_with_children = {}
 
-    combined_results = {}
+    i = 1
 
     for text_block in json_data:
 
@@ -100,17 +101,23 @@ def json_to_ocrresult(json_data, page_width, page_height):
         is_handwriting = False
 
         
-
+        
         if (text_block['BlockType'] == 'LINE') | (text_block['BlockType'] == 'SIGNATURE'): # (text_block['BlockType'] == 'WORD') |
 
+            # Extract text and bounding box for the line
+            line_bbox = text_block["Geometry"]["BoundingBox"]
+            line_left = int(line_bbox["Left"] * page_width)
+            line_top = int(line_bbox["Top"] * page_height)
+            line_right = int((line_bbox["Left"] + line_bbox["Width"]) * page_width)
+            line_bottom = int((line_bbox["Top"] + line_bbox["Height"]) * page_height)
+
+            width_abs = int(line_bbox["Width"] * page_width)
+            height_abs = int(line_bbox["Height"] * page_height)
+
             if text_block['BlockType'] == 'LINE':
+                
                 # Extract text and bounding box for the line
                 line_text = text_block.get('Text', '')
-                line_bbox = text_block["Geometry"]["BoundingBox"]
-                line_left = int(line_bbox["Left"] * page_width)
-                line_top = int(line_bbox["Top"] * page_height)
-                line_right = int((line_bbox["Left"] + line_bbox["Width"]) * page_width)
-                line_bottom = int((line_bbox["Top"] + line_bbox["Height"]) * page_height)
 
                 words = []
                 if 'Relationships' in text_block:
@@ -128,12 +135,12 @@ def json_to_ocrresult(json_data, page_width, page_height):
                                     word_bottom = int((word_bbox["Top"] + word_bbox["Height"]) * page_height)
 
                                     # Extract BoundingBox details
-                                    width = word_bbox["Width"]
-                                    height = word_bbox["Height"]
+                                    word_width = word_bbox["Width"]
+                                    word_height = word_bbox["Height"]
 
                                     # Convert proportional coordinates to absolute coordinates
-                                    width_abs = int(width * page_width)
-                                    height_abs = int(height * page_height)
+                                    word_width_abs = int(word_width * page_width)
+                                    word_height_abs = int(word_height * page_height)
                                     
                                     words.append({
                                         'text': word_text,
@@ -146,18 +153,14 @@ def json_to_ocrresult(json_data, page_width, page_height):
                                         is_handwriting = True
                                         entity_name = "HANDWRITING"
                                         word_end = len(entity_name)
-                                        recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= word_text, score= confidence, start=0, end=word_end, left=word_left, top=word_top, width=width_abs, height=height_abs)
-                                        handwriting.append(recogniser_result)                    
+
+                                        recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= word_text, score= confidence, start=0, end=word_end, left=word_left, top=word_top, width=word_width_abs, height=word_height_abs)
+
+                                        handwriting.append(recogniser_result)
+
                                         print("Handwriting found:", handwriting[-1]) 
 
-                combined_results[line_text] = {
-                    'bounding_box': (line_left, line_top, line_right, line_bottom),
-                    'words': words
-                }
-
-                
-
-                # If handwriting or signature, add to bounding box               
+            # If handwriting or signature, add to bounding box               
 
             elif (text_block['BlockType'] == 'SIGNATURE'):
                 line_text = "SIGNATURE"
@@ -167,38 +170,26 @@ def json_to_ocrresult(json_data, page_width, page_height):
                 confidence = text_block['Confidence']
                 word_end = len(entity_name)
 
-                # Extract BoundingBox details
-                bbox = text_block["Geometry"]["BoundingBox"]
-                left = bbox["Left"]
-                top = bbox["Top"]
-                width = bbox["Width"]
-                height = bbox["Height"]
+                recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= line_text, score= confidence, start=0, end=word_end, left=line_left, top=line_top, width=width_abs, height=height_abs)
 
-                # Convert proportional coordinates to absolute coordinates
-                left_abs = int(left * page_width)
-                top_abs = int(top * page_height)
-                width_abs = int(width * page_width)
-                height_abs = int(height * page_height)
-
-                recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= line_text, score= confidence, start=0, end=word_end, left=left_abs, top=top_abs, width=width_abs, height=height_abs)
                 signatures.append(recogniser_result)
                 print("Signature found:", signatures[-1])
 
-            # Extract BoundingBox details
-            bbox = text_block["Geometry"]["BoundingBox"]
-            left = bbox["Left"]
-            top = bbox["Top"]
-            width = bbox["Width"]
-            height = bbox["Height"]
+                words = []
+                words.append({
+                             'text': line_text,
+                             'bounding_box': (line_left, line_top, line_right, line_bottom)
+                        })
 
-            # Convert proportional coordinates to absolute coordinates
-            left_abs = int(left * page_width)
-            top_abs = int(top * page_height)
-            width_abs = int(width * page_width)
-            height_abs = int(height * page_height)
+            ocr_results_with_children["text_line_" + str(i)] = {
+                "line": i,
+                'text': line_text,
+                'bounding_box': (line_left, line_top, line_right, line_bottom),
+                'words': words
+            }         
 
             # Create OCRResult with absolute coordinates
-            ocr_result = OCRResult(line_text, left_abs, top_abs, width_abs, height_abs)
+            ocr_result = OCRResult(line_text, line_left, line_top, width_abs, height_abs)
             all_ocr_results.append(ocr_result)
 
             is_signature_or_handwriting = is_signature | is_handwriting
@@ -209,5 +200,7 @@ def json_to_ocrresult(json_data, page_width, page_height):
 
                 if is_signature: signature_recogniser_results.append(recogniser_result)
                 if is_handwriting: handwriting_recogniser_results.append(recogniser_result)
+
+            i += 1
     
-    return all_ocr_results, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, combined_results
+    return all_ocr_results, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, ocr_results_with_children

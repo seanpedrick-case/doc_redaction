@@ -89,7 +89,7 @@ with app:
     with gr.Tab("PDFs/images"):
         with gr.Accordion("Redact document", open = True):
             in_doc_files = gr.File(label="Choose document/image files (PDF, JPG, PNG)", file_count= "multiple", file_types=['.pdf', '.jpg', '.png', '.json'])
-            in_redaction_method = gr.Radio(label="Choose document redaction method. Note that for AWS Textract, there will be a cost to the service from use of AWS services.", value = "Simple text analysis - PDFs with selectable text", choices=["Simple text analysis - PDFs with selectable text", "Quick image analysis - typed text", "Complex image analysis - AWS Textract, handwriting/signatures"])
+            in_redaction_method = gr.Radio(label="Choose document redaction method. AWS Textract has a cost per page so please only use when needed.", value = "Simple text analysis - PDFs with selectable text", choices=["Simple text analysis - PDFs with selectable text", "Quick image analysis - typed text", "Complex image analysis - docs with handwriting/signatures (AWS Textract)"])
             gr.Markdown("""If you only want to redact certain pages, or certain entities (e.g. just email addresses), please go to the redaction settings tab.""")
             document_redact_btn = gr.Button("Redact document(s)", variant="primary")
         
@@ -150,7 +150,7 @@ with app:
                 page_min = gr.Number(precision=0,minimum=0,maximum=9999, label="Lowest page to redact")
                 page_max = gr.Number(precision=0,minimum=0,maximum=9999, label="Highest page to redact")
             with gr.Row():
-                handwrite_signature_checkbox = gr.CheckboxGroup(choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting", "Redact all identified signatures"])
+                handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract settings", choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting", "Redact all identified signatures"])
         with gr.Accordion("Settings for open text or xlsx/csv files", open = True):
             anon_strat = gr.Radio(choices=["replace with <REDACTED>", "replace with <ENTITY_NAME>", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace with <REDACTED>") 
 

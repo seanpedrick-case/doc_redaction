@@ -219,7 +219,7 @@ def prepare_image_or_pdf(
             print(out_message)
             return out_message, out_file_paths
 
-        if in_redact_method == "Quick image analysis - typed text" or in_redact_method == "Complex image analysis - AWS Textract, handwriting/signatures":
+        if in_redact_method == "Quick image analysis - typed text" or in_redact_method == "Complex image analysis - docs with handwriting/signatures (AWS Textract)":
             # Analyse and redact image-based pdf or image
             if is_pdf_or_image(file_path) == False:
                 out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
