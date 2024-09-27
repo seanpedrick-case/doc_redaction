@@ -225,30 +225,47 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
 
     return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str
 
-def redact_page_with_pymupdf(doc, annotations_on_page, page_no, scale=(1,1)): 
+def redact_page_with_pymupdf(doc, annotations_on_page, page_no, image = None):#, scale=(1,1)): 
 
     page = doc.load_page(page_no)
-    page_height = max(page.rect.height, page.mediabox[3] - page.mediabox[1])
+    mediabox_height = page.mediabox[3] - page.mediabox[1]
+    mediabox_width = page.mediabox[2] - page.mediabox[0]
+    rect_height = page.rect.height
+    rect_width = page.rect.width    
 
     #print("page_rect_height:", page.rect.height)
     #print("page mediabox size:", page.mediabox[3] - page.mediabox[1])
 
     for annot in annotations_on_page:
         if isinstance(annot, CustomImageRecognizerResult):
-            scale_width = scale[0]
-            scale_height = scale[1]
+            image_page_width, image_page_height = image.size
 
-            print("scale:", scale)
+            # Calculate scaling factors between PIL image and pymupdf
+            scale_width = rect_width / image_page_width
+            scale_height = rect_height / image_page_height
+
+            #scale_width = scale[0]
+            #scale_height = scale[1]
+
+            #print("scale:", scale)
 
             # Calculate scaled coordinates
-            x1 = annot.left * scale_width
-            new_y1 = (annot.top * scale_height)  # Flip Y0 (since it starts from bottom)
-            x2 = (annot.left + annot.width) * scale_width  # Calculate x1
-            new_y2 = ((annot.top + annot.height) * scale_height)  # Calculate y1 correctly
+            x1 = (annot.left * scale_width)# + page_x_adjust
+            new_y1 = (annot.top * scale_height)# - page_y_adjust  # Flip Y0 (since it starts from bottom)
+            x2 = ((annot.left + annot.width) * scale_width)# + page_x_adjust  # Calculate x1
+            new_y2 = ((annot.top + annot.height) * scale_height)# - page_y_adjust  # Calculate y1 correctly
 
             rect = Rect(x1, new_y1, x2, new_y2)  # Create the PyMuPDF Rect (y1, y0 are flipped)
 
         else:
+            # Calculate scaling factors
+            scale_height = rect_height / mediabox_height if mediabox_height else 1
+            scale_width = rect_width / mediabox_width if mediabox_width else 1
+
+            # Adjust coordinates based on scaling factors
+            page_x_adjust = (rect_width - mediabox_width) / 2  # Center adjustment
+            page_y_adjust = (rect_height - mediabox_height) / 2  # Center adjustment
+
             #print("In the pikepdf conversion function")
             # Extract the /Rect field
             rect_field = annot["/Rect"]
@@ -258,8 +275,10 @@ def redact_page_with_pymupdf(doc, annotations_on_page, page_no, scale=(1,1)):
 
             # Convert the Y-coordinates (flip using the page height)
             x1, y1, x2, y2 = rect_coordinates
-            new_y1 = page_height - y2
-            new_y2 = page_height - y1
+            x1 = x1 + page_x_adjust
+            new_y1 = (rect_height - y2) - page_y_adjust
+            x2 = x2 + page_x_adjust
+            new_y2 = (rect_height - y1) - page_y_adjust
 
             rect = Rect(x1, new_y1, x2, new_y2)
 
@@ -482,18 +501,18 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
 
             # Get the dimensions of the page in points with pymupdf to get relative scale
-            page = doc.load_page(i)
-            mu_page_rect = page.rect
+            #page = doc.load_page(i)
+            #mu_page_rect = page.rect
             #mu_page_width = mu_page_rect.width
-            mu_page_height = max(mu_page_rect.height, page.mediabox[3] - page.mediabox[1])
-            mu_page_width = max(mu_page_rect.width, page.mediabox[2] - page.mediabox[0])
+            #mu_page_height = max(mu_page_rect.height, page.mediabox[3] - page.mediabox[1])
+            #mu_page_width = max(mu_page_rect.width, page.mediabox[2] - page.mediabox[0])
             #mu_page_height = mu_page_rect.height
 
             # Calculate scaling factors between PIL image and pymupdf
-            scale_width = mu_page_width / page_width
-            scale_height = mu_page_height / page_height
+            #scale_width = mu_page_width / page_width
+            #scale_height = mu_page_height / page_height
 
-            scale = (scale_width, scale_height)
+            #scale = (scale_width, scale_height)
 
 
             # Possibility to use different languages
@@ -583,7 +602,7 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
             ## Apply annotations with pymupdf
             else:
-                doc = redact_page_with_pymupdf(doc, merged_redaction_bboxes, i, scale)
+                doc = redact_page_with_pymupdf(doc, merged_redaction_bboxes, i, image)#, scale)
 
             #doc.save("image_redact.pdf")
 
