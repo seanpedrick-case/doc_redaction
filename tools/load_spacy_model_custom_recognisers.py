@@ -19,7 +19,8 @@ score_threshold = 0.001
 titles_list = ["Sir", "Ma'am", "Madam", "Mr", "Mr.", "Mrs", "Mrs.", "Ms", "Ms.", "Miss", "Dr", "Dr.", "Professor"]
 titles_regex = '\\b' + '\\b|\\b'.join(rf"{re.escape(title)}" for title in titles_list) + '\\b'
 titles_pattern = Pattern(name="titles_pattern",regex=titles_regex, score = 1)
-titles_recogniser = PatternRecognizer(supported_entity="TITLES", patterns = [titles_pattern])
+titles_recogniser = PatternRecognizer(supported_entity="TITLES", patterns = [titles_pattern],
+    global_regex_flags=re.DOTALL | re.MULTILINE)
 
 # %%
 # Custom postcode recogniser

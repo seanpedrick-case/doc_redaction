@@ -67,8 +67,7 @@ with app:
     doc_file_name_textbox = gr.Textbox(value="", visible=False)
     data_file_name_textbox = gr.Textbox(value="", visible=False)
     s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
-    estimated_time_taken_number = gr.Number(value=0.0, precision=1, visible=False) # This keeps track of the time taken to redact files for logging purposes.  
-
+    estimated_time_taken_number = gr.Number(value=0.0, precision=1, visible=False) # This keeps track of the time taken to redact files for logging purposes.
 
     ###
     # UI DESIGN

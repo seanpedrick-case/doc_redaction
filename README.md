@@ -6,7 +6,7 @@ colorTo: green
 sdk: docker
 app_file: app.py
 pinned: false
-license: mit
+license: agpl-3.0
 ---
 
 # Document redaction

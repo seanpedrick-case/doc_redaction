@@ -11,8 +11,13 @@ import pandas as pd
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer, LTChar, LTTextLine, LTTextLineHorizontal, LTAnno
 from pikepdf import Pdf, Dictionary, Name
+import pymupdf
+from pymupdf import Rect   
+
 import gradio as gr
 from gradio import Progress
+
+from typing import Tuple
 
 from collections import defaultdict  # For efficient grouping
 
@@ -114,11 +119,17 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
                 return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str
 
             print("Redacting file " + file_path_without_ext + " as an image-based file")
+
             pdf_images, redaction_logs, logging_file_paths, new_request_metadata = redact_image_pdf(file_path, image_paths, language, chosen_redact_entities, in_allow_list_flat, is_a_pdf, page_min, page_max, in_redact_method, handwrite_signature_checkbox)
 
             # Save file
-            out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_img.pdf"
-            pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
+            if is_pdf(file_path) == False:
+                out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_img.pdf"
+                pdf_images[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pdf_images[1:])
+            
+            else:
+                out_image_file_path = output_folder + file_path_without_ext + "_redacted.pdf"
+                pdf_images.save(out_image_file_path)
 
             out_file_paths.append(out_image_file_path)
             if logging_file_paths:
@@ -148,6 +159,8 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
                 latest_file_completed += 1                
 
         elif in_redact_method == "Simple text analysis - PDFs with selectable text":
+
+            print("file_path:", file_path)
             
             if is_pdf(file_path) == False:
                 return "Please upload a PDF file for text analysis. If you have an image, select 'Image analysis'.", None, None
@@ -155,27 +168,25 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
             # Analyse text-based pdf
             print('Redacting file as text-based PDF')
             pdf_text, decision_process_logs, page_text_outputs = redact_text_pdf(file_path, language, chosen_redact_entities, in_allow_list_flat, page_min, page_max, "Simple text analysis - PDFs with selectable text")
+            
             out_text_file_path = output_folder + file_path_without_ext + "_text_redacted.pdf"
-            pdf_text.save(out_text_file_path)            
+            pdf_text.save(out_text_file_path)
+            out_file_paths.append(out_text_file_path)   
 
             # Convert message
-            convert_message="Converting PDF to image-based PDF to embed redactions."
-            print(convert_message)
+            #convert_message="Converting PDF to image-based PDF to embed redactions."
+            #print(convert_message)
 
             # Convert document to image-based document to 'embed' redactions
-            img_output_summary, img_output_file_path = convert_text_pdf_to_img_pdf(file_path, [out_text_file_path])
-            out_file_paths.extend(img_output_file_path)
-
-            #decision_process_logs_str = str(decision_process_logs)
-            #logs_output_file_name = img_output_file_path[0] + "_decision_process_output.txt"
-            #with open(logs_output_file_name, "w") as f:
-            #    f.write(output_logs_str)
+            #img_output_summary, img_output_file_path = convert_text_pdf_to_img_pdf(file_path, [out_text_file_path])
+            #out_file_paths.extend(img_output_file_path)
             
-            logs_output_file_name = img_output_file_path[0] + "_decision_process_output.csv"
-            decision_process_logs.to_csv(logs_output_file_name)
-            log_files_output_paths.append(logs_output_file_name)
+            # Write logs to file
+            decision_logs_output_file_name = out_text_file_path + "_decision_process_output.csv"
+            decision_process_logs.to_csv(decision_logs_output_file_name)
+            log_files_output_paths.append(decision_logs_output_file_name)
 
-            all_text_output_file_name = img_output_file_path[0] + "_all_text_output.csv"
+            all_text_output_file_name = out_text_file_path + "_all_text_output.csv"
             page_text_outputs.to_csv(all_text_output_file_name)
             log_files_output_paths.append(all_text_output_file_name)
 
@@ -213,6 +224,69 @@ def choose_and_run_redactor(file_paths:List[str], image_paths:List[str], languag
 
 
     return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str
+
+def redact_page_with_pymupdf(doc, annotations_on_page, page_no, scale=(1,1)): 
+
+    page = doc.load_page(page_no)
+    page_height = max(page.rect.height, page.mediabox[3] - page.mediabox[1])
+
+    #print("page_rect_height:", page.rect.height)
+    #print("page mediabox size:", page.mediabox[3] - page.mediabox[1])
+
+    for annot in annotations_on_page:
+        if isinstance(annot, CustomImageRecognizerResult):
+            scale_width = scale[0]
+            scale_height = scale[1]
+
+            print("scale:", scale)
+
+            # Calculate scaled coordinates
+            x1 = annot.left * scale_width
+            new_y1 = (annot.top * scale_height)  # Flip Y0 (since it starts from bottom)
+            x2 = (annot.left + annot.width) * scale_width  # Calculate x1
+            new_y2 = ((annot.top + annot.height) * scale_height)  # Calculate y1 correctly
+
+            rect = Rect(x1, new_y1, x2, new_y2)  # Create the PyMuPDF Rect (y1, y0 are flipped)
+
+        else:
+            #print("In the pikepdf conversion function")
+            # Extract the /Rect field
+            rect_field = annot["/Rect"]
+
+            # Convert the extracted /Rect field to a list of floats (since pikepdf uses Decimal objects)
+            rect_coordinates = [float(coord) for coord in rect_field]
+
+            # Convert the Y-coordinates (flip using the page height)
+            x1, y1, x2, y2 = rect_coordinates
+            new_y1 = page_height - y2
+            new_y2 = page_height - y1
+
+            rect = Rect(x1, new_y1, x2, new_y2)
+
+        # Convert to a PyMuPDF Rect object
+        #rect = Rect(rect_coordinates)
+
+                    # Calculate the middle y value and set height to 1 pixel
+        middle_y = (new_y1 + new_y2) / 2
+        rect_single_pixel_height = Rect(x1, middle_y, x2, middle_y + 1)  # Height of 1 pixel
+        
+        print("rect:", rect)
+        # Add a redaction annotation
+        #page.add_redact_annot(rect)
+
+        # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
+        page.add_redact_annot(rect_single_pixel_height)
+
+        # Set up drawing a black box over the whole rect
+        shape = page.new_shape()
+        shape.draw_rect(rect)
+        shape.finish(color=(0, 0, 0), fill=(0, 0, 0))  # Black fill for the rectangle
+        shape.commit()
+
+    page.apply_redactions(images=0, graphics=0)
+    page.clean_contents()
+
+    return doc
 
 def bounding_boxes_overlap(box1, box2):
     """Check if two bounding boxes overlap."""
@@ -328,6 +402,9 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
     #request_metadata = {}
     image_analyser = CustomImageAnalyzerEngine(nlp_analyser)
 
+    # Also open as pymupdf pdf to apply annotations later on
+    doc = pymupdf.open(file_path)
+
     if not image_paths:
         out_message = "PDF does not exist as images. Converting pages to image"
         print(out_message)
@@ -403,6 +480,22 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
             # Need image size to convert textract OCR outputs to the correct sizes
             page_width, page_height = image.size
 
+
+            # Get the dimensions of the page in points with pymupdf to get relative scale
+            page = doc.load_page(i)
+            mu_page_rect = page.rect
+            #mu_page_width = mu_page_rect.width
+            mu_page_height = max(mu_page_rect.height, page.mediabox[3] - page.mediabox[1])
+            mu_page_width = max(mu_page_rect.width, page.mediabox[2] - page.mediabox[0])
+            #mu_page_height = mu_page_rect.height
+
+            # Calculate scaling factors between PIL image and pymupdf
+            scale_width = mu_page_width / page_width
+            scale_height = mu_page_height / page_height
+
+            scale = (scale_width, scale_height)
+
+
             # Possibility to use different languages
             if language == 'en':
                 ocr_lang = 'eng'
@@ -477,14 +570,22 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
             
 
             # 3. Draw the merged boxes
-            draw = ImageDraw.Draw(image)
+            if is_pdf(file_path) == False:
+                draw = ImageDraw.Draw(image)
 
-            for box in merged_redaction_bboxes:
-                x0 = box.left
-                y0 = box.top
-                x1 = x0 + box.width
-                y1 = y0 + box.height
-                draw.rectangle([x0, y0, x1, y1], fill=fill)
+                for box in merged_redaction_bboxes:
+                    x0 = box.left
+                    y0 = box.top
+                    x1 = x0 + box.width
+                    y1 = y0 + box.height
+                    draw.rectangle([x0, y0, x1, y1], fill=fill)
+
+
+            ## Apply annotations with pymupdf
+            else:
+                doc = redact_page_with_pymupdf(doc, merged_redaction_bboxes, i, scale)
+
+            #doc.save("image_redact.pdf")
 
             # Log OCR results
 
@@ -527,7 +628,9 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
 
                 all_decision_process_table = pd.concat([all_decision_process_table, decision_process_table])
 
-        images.append(image)
+        if is_pdf(file_path) == False:
+            images.append(image)
+            doc = images
 
     # Write OCR results as a log file    
     # line_level_ocr_results_out = "\n".join(all_ocr_results)
@@ -537,32 +640,46 @@ def redact_image_pdf(file_path:str, image_paths:List[str], language:str, chosen_
     all_line_level_ocr_results_df.to_csv(ocr_results_file_path)
     logging_file_paths.append(ocr_results_file_path)
 
-    return images, all_decision_process_table, logging_file_paths, request_metadata
+    return doc, all_decision_process_table, logging_file_paths, request_metadata
 
-def analyze_text_container(text_container, language, chosen_redact_entities, score_threshold, allow_list):
+def get_text_container_characters(text_container:LTTextContainer):
+
     if isinstance(text_container, LTTextContainer):
-        text_to_analyze = text_container.get_text()
-
-        analyzer_results = nlp_analyser.analyze(text=text_to_analyze,
-                                                language=language, 
-                                                entities=chosen_redact_entities,
-                                                score_threshold=score_threshold,
-                                                return_decision_process=True,
-                                                allow_list=allow_list)
-        
-        #print("\ntext_container:", text_container)
         characters = [char
-                for line in text_container
-                if isinstance(line, LTTextLine) or isinstance(line, LTTextLineHorizontal)
-                for char in line]
-        
-        return analyzer_results, characters
-    return [], []
+                    for line in text_container
+                    if isinstance(line, LTTextLine) or isinstance(line, LTTextLineHorizontal)
+                    for char in line]
+    
+        return characters
+    return []
+    
 
-def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> OCRResult:
+def analyze_text_container(text_container:OCRResult, language:str, chosen_redact_entities:List[str], score_threshold:float, allow_list:List[str]):
+    '''
+    Take text and bounding boxes in OCRResult format and analyze it for PII using spacy and the Microsoft Presidio package.
+    '''
+
+    text_to_analyze = text_container.text
+    #print("text_to_analyze:", text_to_analyze)
+
+    analyzer_results = nlp_analyser.analyze(text=text_to_analyze,
+                                            language=language, 
+                                            entities=chosen_redact_entities,
+                                            score_threshold=score_threshold,
+                                            return_decision_process=True,
+                                            allow_list=allow_list)        
+    return analyzer_results
+
+
+def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tuple[List[OCRResult], List[LTChar]]:
     '''
     Create an OCRResult object based on a list of pdfminer LTChar objects.
     '''
+
+    line_level_results_out = []
+    line_level_characters_out = []
+    #all_line_level_characters_out = []
+    character_objects_out = []  # New list to store character objects
 
     # Initialize variables
     full_text = ""
@@ -574,6 +691,8 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> OCR
     current_word_bbox = [float('inf'), float('inf'), float('-inf'), float('-inf')]  # [x0, y0, x1, y1]
 
     for char in char_objects:
+        character_objects_out.append(char)  # Collect character objects
+
         if isinstance(char, LTAnno):
             # Handle space separately by finalizing the word
             full_text += char.get_text()  # Adds space or newline
@@ -581,6 +700,23 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> OCR
                 word_bboxes.append((current_word, current_word_bbox))
                 current_word = ""
                 current_word_bbox = [float('inf'), float('inf'), float('-inf'), float('-inf')]  # Reset for next word
+
+            # Check for line break (assuming a new line is indicated by a specific character)
+            if '\n' in char.get_text():
+                #print("char_anno:", char)
+                # Finalize the current line
+                if current_word:
+                    word_bboxes.append((current_word, current_word_bbox))
+                # Create an OCRResult for the current line
+                line_level_results_out.append(OCRResult(full_text, round(overall_bbox[0], 2), round(overall_bbox[1], 2), round(overall_bbox[2] - overall_bbox[0], 2), round(overall_bbox[3] - overall_bbox[1], 2)))
+                line_level_characters_out.append(character_objects_out)
+                # Reset for the next line
+                character_objects_out = []
+                full_text = ""
+                overall_bbox = [float('inf'), float('inf'), float('-inf'), float('-inf')]
+                current_word = ""
+                current_word_bbox = [float('inf'), float('inf'), float('-inf'), float('-inf')]
+
             continue
 
         # Concatenate text for LTChar
@@ -602,13 +738,18 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> OCR
         current_word_bbox[2] = max(current_word_bbox[2], x1)  # x1
         current_word_bbox[3] = max(current_word_bbox[3], y1)  # y1
 
+
     # Finalize the last word if any
     if current_word:
         word_bboxes.append((current_word, current_word_bbox))
 
-    return OCRResult(full_text, overall_bbox[0], overall_bbox[1], overall_bbox[2], overall_bbox[3])
+    if full_text:
+        line_level_results_out.append(OCRResult(full_text, round(overall_bbox[0],2), round(overall_bbox[1], 2), round(overall_bbox[2]-overall_bbox[0],2), round(overall_bbox[3]-overall_bbox[1],2)))
+        
 
-def merge_text_bounding_boxes(analyzer_results:CustomImageRecognizerResult, characters:List[LTChar], combine_pixel_dist:int, vertical_padding:int=2):
+    return line_level_results_out, line_level_characters_out  # Return both results and character objects
+
+def merge_text_bounding_boxes(analyzer_results:CustomImageRecognizerResult, characters:List[LTChar], combine_pixel_dist:int, vertical_padding:int=0):
     '''
     Merge identified bounding boxes containing PII that are very close to one another
     '''
@@ -653,13 +794,13 @@ def merge_text_bounding_boxes(analyzer_results:CustomImageRecognizerResult, char
                 vertical_diff_bboxes = abs(char_box[1] - current_y)
                 horizontal_diff_bboxes = abs(char_box[0] - current_box[2])
 
-                #print(f"Comparing boxes: current_box={current_box}, char_box={char_box}")
+                #print(f"Comparing boxes: current_box={current_box}, char_box={char_box}, current_text={current_text}, char_text={text}")
                 #print(f"Vertical diff: {vertical_diff_bboxes}, Horizontal diff: {horizontal_diff_bboxes}")
 
                 if (
-                    vertical_diff_bboxes <= 5
-                    and horizontal_diff_bboxes <= combine_pixel_dist
+                    vertical_diff_bboxes <= 5 and horizontal_diff_bboxes <= combine_pixel_dist
                 ):
+                    #print("box is being extended")
                     current_box[2] = char_box[2]  # Extend the current box horizontally
                     current_box[3] = max(current_box[3], char_box[3])  # Ensure the top is the highest
                     current_result.end = max(current_result.end, result.end)  # Extend the text range
@@ -710,7 +851,7 @@ def create_text_redaction_process_results(analyzer_results, analyzed_bounding_bo
         analyzed_bounding_boxes_df_new['page'] = page_num + 1
         decision_process_table = pd.concat([decision_process_table, analyzed_bounding_boxes_df_new], axis = 0).drop('result', axis=1)
 
-        print('\n\ndecision_process_table:\n\n', decision_process_table)
+        #print('\n\ndecision_process_table:\n\n', decision_process_table)
     
     return decision_process_table
 
@@ -741,11 +882,15 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
     Redact chosen entities from a pdf that is made up of multiple pages that are not images.
     '''
     annotations_all_pages = []
+    page_text_outputs_all_pages = pd.DataFrame()
     decision_process_table_all_pages = pd.DataFrame()
     
-    combine_pixel_dist = 100 # Horizontal distance between PII bounding boxes under/equal they are combined into one
+    combine_pixel_dist = 20 # Horizontal distance between PII bounding boxes under/equal they are combined into one
 
+    # Open with Pikepdf to get text lines
     pdf = Pdf.open(filename)
+    # Also open pdf with pymupdf to be able to annotate later while retaining text
+    doc = pymupdf.open(filename) 
     page_num = 0
 
     number_of_pages = len(pdf.pages)
@@ -773,30 +918,31 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
         #page_width = media_box[2] - media_box[0]
         #page_height = media_box[3] - media_box[1]
         
-
-        annotations_on_page = []
-        decision_process_table_on_page = pd.DataFrame()      
-
         for page_layout in extract_pages(filename, page_numbers = [page_no], maxpages=1):
             
             page_analyzer_results = []
-            page_analyzed_bounding_boxes = []
-            text_container_analyzer_results = []
-            text_container_analyzed_bounding_boxes = []
+            page_analyzed_bounding_boxes = []            
+            
             characters = []
-            page_text_outputs = pd.DataFrame()
+            annotations_on_page = []
+            decision_process_table_on_page = pd.DataFrame()    
+            page_text_outputs = pd.DataFrame()  
 
             if analysis_type == "Simple text analysis - PDFs with selectable text":
-                for i, text_container in enumerate(page_layout):
+                for text_container in page_layout:
 
-                    text_container_analyzer_results, characters = analyze_text_container(text_container, language, chosen_redact_entities, score_threshold, allow_list)
-                                 
+                    text_container_analyzer_results = []
+                    text_container_analyzed_bounding_boxes = []
+
+                    characters = get_text_container_characters(text_container)
+
                     # Create dataframe for all the text on the page
-                    line_level_text_results = create_text_bounding_boxes_from_characters(characters)
+                    line_level_text_results_list, line_characters = create_text_bounding_boxes_from_characters(characters)
 
-                    if line_level_text_results.text:
-                        line_level_text_results_list = [line_level_text_results]
+                    print("line_characters:", line_characters)
 
+                    # Create page_text_outputs (OCR format outputs)
+                    if line_level_text_results_list:
                         # Convert to DataFrame and add to ongoing logging table
                         line_level_text_results_df = pd.DataFrame([{
                             'page': page_no + 1,
@@ -809,33 +955,58 @@ def redact_text_pdf(filename:str, language:str, chosen_redact_entities:List[str]
 
                         page_text_outputs = pd.concat([page_text_outputs, line_level_text_results_df])
 
-                    # Merge bounding boxes if very close together
-                    text_container_analyzed_bounding_boxes = merge_text_bounding_boxes(text_container_analyzer_results, characters, combine_pixel_dist, vertical_padding = 2)
+                    # Analyse each line of text in turn for PII and add to list
+                    for i, text_line in enumerate(line_level_text_results_list):
+                        text_line_analyzer_result = []
+                        text_line_bounding_boxes = []
+
+                        #print("text_line:", text_line.text)
+
+                        text_line_analyzer_result = analyze_text_container(text_line, language, chosen_redact_entities, score_threshold, allow_list)
+
+                        # Merge bounding boxes for the line if multiple found close together                    
+                        if text_line_analyzer_result:
+                            # Merge bounding boxes if very close together
+                            print("text_line_bounding_boxes:", text_line_bounding_boxes)
+                            print("line_characters:")
+                            #print(line_characters[i])
+                            print("".join(char._text for char in line_characters[i]))
+                            text_line_bounding_boxes = merge_text_bounding_boxes(text_line_analyzer_result, line_characters[i], combine_pixel_dist, vertical_padding = 0)
+
+                            text_container_analyzer_results.extend(text_line_analyzer_result)
+                            text_container_analyzed_bounding_boxes.extend(text_line_bounding_boxes)
+                        
+                        print("\n FINAL text_container_analyzer_results:", text_container_analyzer_results)
 
                     
                     page_analyzer_results.extend(text_container_analyzer_results)
                     page_analyzed_bounding_boxes.extend(text_container_analyzed_bounding_boxes)
 
-            
-            print("page_analyzer_results:", page_analyzer_results)
-            print("page_analyzed_bounding_boxes:", page_analyzed_bounding_boxes)
+      
 
-            decision_process_table_on_page = create_text_redaction_process_results(page_analyzer_results, page_analyzed_bounding_boxes, page_num)           
-
+            # Annotate redactions on page
             annotations_on_page = create_annotations_for_bounding_boxes(page_analyzed_bounding_boxes)
-            #print('\n\nAnnotations_on_page:', annotations_on_page)    
+ 
+            # Make pymupdf redactions
+            doc = redact_page_with_pymupdf(doc, annotations_on_page, page_no)
           
             # Make page annotations
-            page.Annots = pdf.make_indirect(annotations_on_page)
-            annotations_all_pages.extend([annotations_on_page])
+            #page.Annots = pdf.make_indirect(annotations_on_page)
+            if annotations_on_page:
+                annotations_all_pages.extend([annotations_on_page])
 
-            decision_process_table_all_pages = pd.concat([decision_process_table_all_pages, decision_process_table_on_page])
-
-            page_text_outputs = page_text_outputs.sort_values(["top", "left"], ascending=[False, False]).reset_index(drop=True)
-            #page_text_outputs.to_csv("text_page_text_outputs.csv")
-            
             print("For page number:", page_no, "there are", len(annotations_all_pages[page_num]), "annotations")
-            
-            #page_num += 1
 
-    return pdf, decision_process_table_all_pages, page_text_outputs
+            # Write logs
+            # Create decision process table
+            decision_process_table_on_page = create_text_redaction_process_results(page_analyzer_results, page_analyzed_bounding_boxes, page_num)     
+
+            if not decision_process_table_on_page.empty:
+                decision_process_table_all_pages = pd.concat([decision_process_table_all_pages, decision_process_table_on_page])
+
+            if not page_text_outputs.empty:
+                page_text_outputs = page_text_outputs.sort_values(["top", "left"], ascending=[False, False]).reset_index(drop=True)
+                #page_text_outputs.to_csv("text_page_text_outputs.csv")
+                page_text_outputs_all_pages = pd.concat([page_text_outputs_all_pages, page_text_outputs])
+            
+    return doc, decision_process_table_all_pages, page_text_outputs_all_pages

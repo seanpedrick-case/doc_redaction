@@ -498,12 +498,12 @@ class CustomImageAnalyzerEngine:
                 total_width = 0  # Initialize total width
 
                 for word_text in relevant_text.split():  # Iterate through each word in relevant_text
-                    print("Looking for word_text:", word_text)
+                    #print("Looking for word_text:", word_text)
                     for word in child_words:
                         #if word['text'].strip(string.punctuation).strip() == word_text.strip(string.punctuation).strip():  # Check for exact match
                         if word_text in word['text']:
                             found_word = word
-                            print("found_word:", found_word)
+                            #print("found_word:", found_word)
 
                             if word_num == 0:  # First word
                                 left = found_word['bounding_box'][0]
@@ -535,8 +535,8 @@ class CustomImageAnalyzerEngine:
                 result_reset_pos.start = 0
                 result_reset_pos.end = len(relevant_text)
                 
-                print("result_reset_pos:", result_reset_pos)
-                print("relevant_line_ocr_result:", relevant_line_ocr_result)
+                #print("result_reset_pos:", result_reset_pos)
+                #print("relevant_line_ocr_result:", relevant_line_ocr_result)
                 #print("ocr_results_with_children_line_level:", ocr_results_with_children_line_level)
 
                 # Map the analyzer results to bounding boxes for this line
@@ -544,7 +544,7 @@ class CustomImageAnalyzerEngine:
                     [result_reset_pos], [relevant_line_ocr_result], relevant_line_ocr_result.text, allow_list, ocr_results_with_children_line_level
                 )
 
-                print("line_results:", line_results)
+                #print("line_results:", line_results)
                 
                 combined_results.extend(line_results)
 
@@ -581,7 +581,7 @@ class CustomImageAnalyzerEngine:
 
                     #print("child_info in sub function:", child_info)
                     #print("redaction_result_bounding_box:", redaction_result_bounding_box)
-                    print("Overlaps?", bounding_boxes_overlap(redaction_result_bounding_box, child_info['bounding_box']))
+                    #print("Overlaps?", bounding_boxes_overlap(redaction_result_bounding_box, child_info['bounding_box']))
 
                     if bounding_boxes_overlap(redaction_result_bounding_box, child_info['bounding_box']):
                         # Use the bounding box from ocr_results_with_children
