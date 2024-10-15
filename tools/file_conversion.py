@@ -1,6 +1,8 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
 from tools.helper_functions import get_file_path_end, output_folder, detect_file_type
-from PIL import Image
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
 import os
 import time
 import json

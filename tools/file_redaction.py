@@ -3,7 +3,9 @@ import re
 import json
 import io
 import os
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
 from typing import List, Dict, Tuple
 import pandas as pd
 
