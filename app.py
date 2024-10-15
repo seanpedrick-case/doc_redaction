@@ -4,10 +4,13 @@ import socket
 # By default TLDExtract will try to pull files from the internet. I have instead downloaded this file locally to avoid the requirement for an internet connection.
 os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
 
+from gradio_image_annotation import image_annotator
+
 from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, custom_regex_load
 from tools.aws_functions import upload_file_to_s3
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
+from tools.redaction_review import apply_redactions, crop, get_boxes_json, modify_existing_page_redactions, decrease_page, increase_page, update_annotator
 from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
 #from tools.aws_functions import load_data_from_aws
@@ -53,6 +56,10 @@ with app:
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
 
+    pdf_doc_state = gr.State([])
+    images_pdf_state = gr.State([]) # List of pdf pages converted to PIL images
+    all_image_annotations_state = gr.State([])
+
     # Logging state
     feedback_logs_state = gr.State(feedback_logs_folder + 'log.csv')
     feedback_s3_logs_loc_state = gr.State(feedback_logs_folder)
@@ -65,9 +72,12 @@ with app:
     session_hash_textbox = gr.Textbox(value="", visible=False) # Invisible text box to hold the session hash/username, Textract request metadata, data file names just for logging purposes.
     textract_metadata_textbox = gr.Textbox(value="", visible=False)
     doc_file_name_textbox = gr.Textbox(value="", visible=False)
+    doc_file_name_with_extension_textbox = gr.Textbox(value="", visible=False)
     data_file_name_textbox = gr.Textbox(value="", visible=False)
     s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
     estimated_time_taken_number = gr.Number(value=0.0, precision=1, visible=False) # This keeps track of the time taken to redact files for logging purposes.
+    annotate_previous_page = gr.Number(value=1, label="Previous page", precision=0, visible=False) # Keeps track of the last page that the annotator was on
+
 
     ###
     # UI DESIGN
@@ -106,7 +116,29 @@ with app:
         pdf_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
         pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
         
-    
+    # Object annotation
+    with gr.Tab("Review redactions", id="tab_object_annotation"):
+
+        with gr.Row():
+            annotation_last_page_button = gr.Button("Previous page")
+            annotate_current_page = gr.Number(value=1, label="Current page", precision=0)
+            
+            annotation_next_page_button = gr.Button("Next page")
+
+        annotation_button_apply = gr.Button("Apply revised redactions", variant="primary")
+
+        annotator = image_annotator(
+            label="Modify redaction boxes",
+            label_list=["Redaction"],
+            label_colors=[(0, 0, 0)],
+            sources=None,#["upload"],
+            show_clear_button=False,
+            show_remove_button=False,
+            interactive=False
+        )
+
+        output_review_files = gr.File(label="Review output files")
+
     # TEXT / TABULAR DATA TAB
     with gr.Tab(label="Open text or Excel/csv files"):
         gr.Markdown(
@@ -170,17 +202,29 @@ with app:
     ###
     # PDF/IMAGE REDACTION
     ###
-    in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_textbox])
+    in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_textbox, doc_file_name_with_extension_textbox])
 
-    document_redact_btn.click(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, text_documents_done, output_summary, first_loop_state], outputs=[output_summary, prepared_pdf_state], api_name="prepare_doc").\
-    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox], api_name="redact_doc")
+    document_redact_btn.click(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, text_documents_done, output_summary, first_loop_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state], api_name="prepare_doc").\
+    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, pdf_doc_state],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state], api_name="redact_doc").\
+                    then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page])
     
     # If the output file count text box changes, keep going with redacting each document until done
-    text_documents_done.change(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, text_documents_done, output_summary, second_loop_state], outputs=[output_summary, prepared_pdf_state]).\
-    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox]).\
-    then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
+    text_documents_done.change(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, text_documents_done, output_summary, second_loop_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state]).\
+    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, pdf_doc_state],
+                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state]).\
+                    then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page]).\
+                    then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
+    
+    annotate_current_page.change(
+        modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page])
+
+    annotation_last_page_button.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page])
+    annotation_next_page_button.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page])
+
+    #annotation_button_get.click(get_boxes_json, annotator, json_boxes)
+    annotation_button_apply.click(apply_redactions, inputs=[annotator, in_doc_files, pdf_doc_state, all_image_annotations_state, annotate_current_page], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files], scroll_to_output=True)
 
     ###
     # TABULAR DATA REDACTION

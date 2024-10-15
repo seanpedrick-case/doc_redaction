@@ -14,7 +14,6 @@ aws_var_default = "0"
 aws_var_val = get_or_create_env_var(aws_var, aws_var_default)
 print(f'The value of {aws_var} is {aws_var_val}')
 
-# Launch the Gradio app
 AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
 print(f'The value of AWS_REGION is {AWS_REGION}')
 

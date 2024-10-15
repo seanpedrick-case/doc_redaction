@@ -53,8 +53,18 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(trac
         print("Converting page: ", str(page_num + 1))
 
         # Convert one page to image
-        image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=300, use_cropbox=True, use_pdftocairo=False)
+        out_path  = pdf_path + "_" + str(page_num) + ".png"
         
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+        # Check if the image already exists
+        if os.path.exists(out_path):
+            print(f"Loading existing image from {out_path}.")
+            image = [Image.open(out_path)]  # Load the existing image
+        else:
+            image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=300, use_cropbox=True, use_pdftocairo=False)
+            image[0].save(out_path, format="PNG")  # Save the new image
 
         # If no images are returned, break the loop
         if not image:
@@ -64,7 +74,7 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(trac
         # print("Conversion of page", str(page_num), "to file succeeded.")
         # print("image:", image)
 
-        #image[0].save(pdf_path + "_" + str(page_num) + ".png", format="PNG")
+        
 
         images.extend(image)
 
@@ -105,6 +115,8 @@ def get_input_file_names(file_input):
 
     all_relevant_files = []
 
+    #print("file_input:", file_input)
+
     for file in file_input:
         file_path = file.name
         print(file_path)
@@ -114,15 +126,17 @@ def get_input_file_names(file_input):
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
+        file_name_with_extension = file_path_without_ext + file_extension
+
         # Check if the file is an image type
-        if file_extension in ['.jpg', '.jpeg', '.png', '.xlsx', '.csv', '.parquet']:
+        if file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet']:
             all_relevant_files.append(file_path_without_ext)
     
     all_relevant_files_str = ", ".join(all_relevant_files)
 
-    print("all_relevant_files_str:", all_relevant_files_str)
+    #print("all_relevant_files_str:", all_relevant_files_str)
 
-    return all_relevant_files_str
+    return all_relevant_files_str, file_name_with_extension
 
 def prepare_image_or_pdf(
     file_paths: List[str],
@@ -154,7 +168,7 @@ def prepare_image_or_pdf(
 
     tic = time.perf_counter()
 
-    # If out message or out_file_paths are blank, change to a list so it can be appended to
+    # If out message or converted_file_paths are blank, change to a list so it can be appended to
     if isinstance(out_message, str):
         out_message = [out_message]    
 
@@ -162,15 +176,17 @@ def prepare_image_or_pdf(
     if first_loop_state==True:
         latest_file_completed = 0
         out_message = []
-        out_file_paths = []
+        converted_file_paths = []
+        image_file_paths = []
     else:
         print("Now attempting file:", str(latest_file_completed))
-        out_file_paths = []  
+        converted_file_paths = []
+        image_file_paths = []
 
     if not file_paths:
         file_paths = []
 
-    #out_file_paths = file_paths
+    #converted_file_paths = file_paths
     
     latest_file_completed = int(latest_file_completed)
 
@@ -181,7 +197,7 @@ def prepare_image_or_pdf(
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, out_file_paths
+        return final_out_message, converted_file_paths, image_file_paths
 
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
@@ -217,27 +233,33 @@ def prepare_image_or_pdf(
         if not file_path:
             out_message = "No file selected"
             print(out_message)
-            return out_message, out_file_paths
+            return out_message, converted_file_paths, image_file_paths
 
         if in_redact_method == "Quick image analysis - typed text" or in_redact_method == "Complex image analysis - docs with handwriting/signatures (AWS Textract)":
             # Analyse and redact image-based pdf or image
             if is_pdf_or_image(file_path) == False:
                 out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
                 print(out_message)
-                return out_message, out_file_paths
+                return out_message, converted_file_paths, image_file_paths
             
-            out_file_path = process_file(file_path)
-            #print("Out file path at image conversion step:", out_file_path)
+            converted_file_path = process_file(file_path)
+            image_file_path = converted_file_path
+            #print("Out file path at image conversion step:", converted_file_path)
 
         elif in_redact_method == "Simple text analysis - PDFs with selectable text":
             if is_pdf(file_path) == False:
                 out_message = "Please upload a PDF file for text analysis."
                 print(out_message)
-                return out_message, out_file_paths
+                return out_message, converted_file_paths, image_file_paths
             
-            out_file_path = file_path
+            converted_file_path = file_path # Pikepdf works with the basic unconverted pdf file
+            image_file_path = process_file(file_path)
+            
 
-        out_file_paths.append(out_file_path)
+        converted_file_paths.append(converted_file_path)
+        image_file_paths.extend(image_file_path)
+
+        #print("file conversion image_file_paths:", image_file_paths)
 
         toc = time.perf_counter()
         out_time = f"File '{file_path_without_ext}' prepared in {toc - tic:0.1f} seconds."
@@ -247,7 +269,7 @@ def prepare_image_or_pdf(
         out_message.append(out_time)
         out_message_out = '\n'.join(out_message)
     
-    return out_message_out, out_file_paths
+    return out_message_out, converted_file_paths, image_file_paths
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     file_path_without_ext = get_file_path_end(in_file_path)
