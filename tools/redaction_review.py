@@ -120,7 +120,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
     '''
     Apply modified redactions to a pymupdf
     '''
-    print("all_image_annotations:", all_image_annotations)
+    #print("all_image_annotations:", all_image_annotations)
 
     output_files = []
 
@@ -199,10 +199,13 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
     output_files.append(out_pdf_file_path)
 
     # Save the gradio_annotation_boxes to a JSON file
-    #out_annotation_file_path = output_folder + file_base + '_modified_redactions.json'
-    #with open(out_annotation_file_path, 'w') as f:
-    #    json.dump(all_image_annotations, f)
-    #output_files.append(out_annotation_file_path)
+    try:
+        out_annotation_file_path = output_folder + file_base + '_modified_redactions.json'
+        with open(out_annotation_file_path, 'w') as f:
+            json.dump(all_image_annotations, f)
+        output_files.append(out_annotation_file_path)
+    except:
+        print("Could not save annotations to json file.")
 
     return doc, all_image_annotations, output_files
 
