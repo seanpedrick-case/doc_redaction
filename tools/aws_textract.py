@@ -158,7 +158,7 @@ def json_to_ocrresult(json_data, page_width, page_height):
 
                                         handwriting.append(recogniser_result)
 
-                                        print("Handwriting found:", handwriting[-1]) 
+                                        #print("Handwriting found:", handwriting[-1]) 
 
             # If handwriting or signature, add to bounding box               
 
@@ -173,7 +173,7 @@ def json_to_ocrresult(json_data, page_width, page_height):
                 recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= line_text, score= confidence, start=0, end=word_end, left=line_left, top=line_top, width=width_abs, height=height_abs)
 
                 signatures.append(recogniser_result)
-                print("Signature found:", signatures[-1])
+                #print("Signature found:", signatures[-1])
 
                 words = []
                 words.append({

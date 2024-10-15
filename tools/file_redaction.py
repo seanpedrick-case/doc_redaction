@@ -3,7 +3,8 @@ import re
 import json
 import io
 import os
-from PIL import Image, ImageChops, ImageFile
+import boto3
+from PIL import Image, ImageChops, ImageFile, ImageDraw
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from typing import List, Dict, Tuple
@@ -118,6 +119,16 @@ def choose_and_run_redactor(file_paths:List[str], prepared_pdf_file_paths:List[s
             return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pdf_text, all_image_annotations
 
         if in_redact_method == "Quick image analysis - typed text" or in_redact_method == "Complex image analysis - docs with handwriting/signatures (AWS Textract)":
+
+            if in_redact_method == "Complex image analysis - docs with handwriting/signatures (AWS Textract)":
+                # Try accessing Textract through boto3
+                try:
+                    boto3.client('textract')
+                except:
+                    out_message = "Cannot connect to AWS Textract. Please choose another redaction method."
+                    print(out_message)
+                    return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pdf_text, all_image_annotations
+
             #Analyse and redact image-based pdf or image
             if is_pdf_or_image(file_path) == False:
                 out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
@@ -477,17 +488,17 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
     # Process signature and handwriting results
     if signature_recogniser_results or handwriting_recogniser_results:
         if "Redact all identified handwriting" in handwrite_signature_checkbox:
-            print("Handwriting boxes exist at merge:", handwriting_recogniser_results)
+            #print("Handwriting boxes exist at merge:", handwriting_recogniser_results)
             bboxes.extend(handwriting_recogniser_results)
 
         if "Redact all identified signatures" in handwrite_signature_checkbox:
-            print("Signature boxes exist at merge:", signature_recogniser_results)
+            #print("Signature boxes exist at merge:", signature_recogniser_results)
             bboxes.extend(signature_recogniser_results)
 
     # Reconstruct bounding boxes for substrings of interest
     reconstructed_bboxes = []
     for bbox in bboxes:
-        print("bbox:", bbox)
+        #print("bbox:", bbox)
         bbox_box = (bbox.left, bbox.top, bbox.left + bbox.width, bbox.top + bbox.height)
         for line_text, line_info in combined_results.items():
             line_box = line_info['bounding_box']
@@ -636,33 +647,37 @@ def redact_image_pdf(file_path:str, prepared_pdf_file_paths:List[str], language:
     if analysis_type == "Quick image analysis - typed text": ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + ".csv"
     elif analysis_type == "Complex image analysis - docs with handwriting/signatures (AWS Textract)": ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + "_textract.csv"    
     
-    for i in range(0, number_of_pages):
+    for page_no in progress.tqdm(range(0, number_of_pages), unit="pages", desc="Redacting pages"):
+    #for page_no in range(0, number_of_pages):
         handwriting_or_signature_boxes = []
         signature_recogniser_results = []
         handwriting_recogniser_results = []
+        
 
 
-        # Assuming prepared_pdf_file_paths[i] is your PIL image object
+        # Assuming prepared_pdf_file_paths[page_no] is a PIL image object
         try:
-            image = prepared_pdf_file_paths[i]#.copy()
-            print("image:", image)
+            image = prepared_pdf_file_paths[page_no]#.copy()
+            #print("image:", image)
         except Exception as e:
             print("Could not redact page:", reported_page_number, "due to:")
             print(e)
+            
             continue
 
-        image_annotations = {"image": image, "boxes": []}     
+        image_annotations = {"image": image, "boxes": []}
+
+        
+        pymupdf_page = pymupdf_doc.load_page(page_no)
 
         #try:
-        print("prepared_pdf_file_paths:", prepared_pdf_file_paths)
+        #print("prepared_pdf_file_paths:", prepared_pdf_file_paths)
  
-        if i >= page_min and i < page_max:            
+        if page_no >= page_min and page_no < page_max:            
 
-            reported_page_number = str(i + 1)
+            reported_page_number = str(page_no + 1)
 
-            print("Redacting page", reported_page_number)
-
-            pymupdf_page = pymupdf_doc.load_page(i)
+            print("Redacting page", reported_page_number)            
 
             # Need image size to convert textract OCR outputs to the correct sizes
             page_width, page_height = image.size
@@ -811,6 +826,8 @@ def redact_image_pdf(file_path:str, prepared_pdf_file_paths:List[str], language:
 
         all_image_annotations.append(image_annotations)
 
+        #print("\nall_image_annotations for page", str(page_no), "are:", all_image_annotations)
+
     all_line_level_ocr_results_df.to_csv(ocr_results_file_path)
     logging_file_paths.append(ocr_results_file_path)
 
@@ -849,8 +866,6 @@ def analyse_text_container(text_container:OCRResult, language:str, chosen_redact
                                                 score_threshold=score_threshold,
                                                 return_decision_process=True,
                                                 allow_list=allow_list)   
-
-    print(analyser_results)
          
     return analyser_results
 
@@ -1097,8 +1112,10 @@ def redact_text_pdf(filename:str, prepared_pdf_image_path:str, language:str, cho
     else: page_min = page_min - 1
 
     print("Page range is",str(page_min + 1), "to", str(page_max))
-    
-    for page_no in range(0, number_of_pages): #range(page_min, page_max):
+
+    #for page_no in range(0, number_of_pages):     
+    for page_no in progress.tqdm(range(0, number_of_pages), unit="pages", desc="Redacting pages"):
+        
         #print("prepared_pdf_image_path:", prepared_pdf_image_path)
         #print("prepared_pdf_image_path[page_no]:", prepared_pdf_image_path[page_no])
         image = prepared_pdf_image_path[page_no]
@@ -1150,23 +1167,23 @@ def redact_text_pdf(filename:str, prepared_pdf_image_path:str, language:str, cho
 
                         # Analyse each line of text in turn for PII and add to list
                         for i, text_line in enumerate(line_level_text_results_list):
-                            text_line_analyzer_result = []
+                            text_line_analyser_result = []
                             text_line_bounding_boxes = []
 
                             #print("text_line:", text_line.text)
 
-                            text_line_analyzer_result = analyse_text_container(text_line, language, chosen_redact_entities, score_threshold, allow_list)
+                            text_line_analyser_result = analyse_text_container(text_line, language, chosen_redact_entities, score_threshold, allow_list)
 
                             # Merge bounding boxes for the line if multiple found close together                    
-                            if text_line_analyzer_result:
+                            if text_line_analyser_result:
                                 # Merge bounding boxes if very close together
                                 #print("text_line_bounding_boxes:", text_line_bounding_boxes)
                                 #print("line_characters:")
                                 #print(line_characters[i])
                                 #print("".join(char._text for char in line_characters[i]))
-                                text_line_bounding_boxes = merge_text_bounding_boxes(text_line_analyzer_result, line_characters[i], combine_pixel_dist, vertical_padding = 0)
+                                text_line_bounding_boxes = merge_text_bounding_boxes(text_line_analyser_result, line_characters[i], combine_pixel_dist, vertical_padding = 0)
 
-                                text_container_analyser_results.extend(text_line_analyzer_result)
+                                text_container_analyser_results.extend(text_line_analyser_result)
                                 text_container_analysed_bounding_boxes.extend(text_line_bounding_boxes)
                             
                             #print("\n FINAL text_container_analyser_results:", text_container_analyser_results)
@@ -1188,7 +1205,7 @@ def redact_text_pdf(filename:str, prepared_pdf_image_path:str, language:str, cho
 
                 annotations_all_pages.extend([annotations_on_page])
 
-                print("For page number:", page_no, "there are", len(annotations_all_pages[page_num]), "annotations")
+                print("For page number:", page_no, "there are", len(image_annotations["boxes"]), "annotations")
 
                 # Write logs
                 # Create decision process table
@@ -1203,5 +1220,7 @@ def redact_text_pdf(filename:str, prepared_pdf_image_path:str, language:str, cho
                     page_text_outputs_all_pages = pd.concat([page_text_outputs_all_pages, page_text_outputs])
 
         all_image_annotations.append(image_annotations)
+
+    #print("all_image_annotations:", all_image_annotations)
             
     return pymupdf_doc, decision_process_table_all_pages, page_text_outputs_all_pages, all_image_annotations

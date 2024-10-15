@@ -76,7 +76,7 @@ with app:
     data_file_name_textbox = gr.Textbox(value="", visible=False)
     s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
     estimated_time_taken_number = gr.Number(value=0.0, precision=1, visible=False) # This keeps track of the time taken to redact files for logging purposes.
-    annotate_previous_page = gr.Number(value=1, label="Previous page", precision=0, visible=False) # Keeps track of the last page that the annotator was on
+    annotate_previous_page = gr.Number(value=0, label="Previous page", precision=0, visible=False) # Keeps track of the last page that the annotator was on
 
 
     ###
@@ -121,7 +121,7 @@ with app:
 
         with gr.Row():
             annotation_last_page_button = gr.Button("Previous page")
-            annotate_current_page = gr.Number(value=1, label="Current page", precision=0)
+            annotate_current_page = gr.Number(value=1, label="Current page (select page number then press enter)", precision=0)
             
             annotation_next_page_button = gr.Button("Next page")
 
@@ -131,8 +131,10 @@ with app:
             label="Modify redaction boxes",
             label_list=["Redaction"],
             label_colors=[(0, 0, 0)],
+            show_label=False,
             sources=None,#["upload"],
             show_clear_button=False,
+            show_share_button=False,
             show_remove_button=False,
             interactive=False
         )
@@ -216,12 +218,14 @@ with app:
                     then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page]).\
                     then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
     
-    annotate_current_page.change(
+    annotate_current_page.submit(
         modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page]).\
         then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page])
 
-    annotation_last_page_button.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page])
-    annotation_next_page_button.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page])
+    annotation_last_page_button.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page])
+    annotation_next_page_button.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page])
 
     #annotation_button_get.click(get_boxes_json, annotator, json_boxes)
     annotation_button_apply.click(apply_redactions, inputs=[annotator, in_doc_files, pdf_doc_state, all_image_annotations_state, annotate_current_page], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files], scroll_to_output=True)

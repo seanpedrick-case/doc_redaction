@@ -49,8 +49,8 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(trac
     images = []
 
     # Open the PDF file
-    #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
-    for page_num in range(page_min,page_count): #progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"):
+    #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"): range(page_min,page_count): #
+    for page_num in progress.tqdm(range(page_min,page_count), total=page_count, unit="pages", desc="Preparing pages"):
         
         print("Converting page: ", str(page_num + 1))
 

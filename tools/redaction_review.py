@@ -38,18 +38,23 @@ def increase_page(number:int, image_annotator_object:AnnotatedImageData):
         return max_pages
 
 def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int):
-    #print("\nImage annotator object:", image_annotator_object[0])
+    # print("\nImage annotator object:", image_annotator_object)
 
     if not image_annotator_object:
         return image_annotator(
         label="Modify redaction boxes",
         #label_list=["Redaction"],
         #label_colors=[(0, 0, 0)],
+        show_label=False,
         sources=["upload"],
         show_clear_button=False,
+        show_share_button=False,
         show_remove_button=False,
         interactive=False
-    ), gr.Number(label = "Current page", value=1, precision=0)
+    ), gr.Number(label = "Current page (select page number then press enter)", value=1, precision=0)
+
+    if page_num is None:
+        page_num = 0
 
     # Check bounding values for current page and page max
     if page_num > 0:
@@ -70,19 +75,21 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int):
         box_thickness=1,
         #label_list=["Redaction"],
         #label_colors=[(0, 0, 0)],
-        height='60%',
-        width='60%',
+        show_label=False,
+        height='100%',
+        width='100%',
         box_min_size=1,
         box_selected_thickness=2,
         handle_size=4,
         sources=None,#["upload"],
         show_clear_button=False,
+        show_share_button=False,
         show_remove_button=False,
         handles_cursor=True,
         interactive=True
     )
 
-    number_reported = gr.Number(label = "Current page", value=page_num_reported, precision=0)
+    number_reported = gr.Number(label = "Current page (select page number then press enter)", value=page_num_reported, precision=0)
 
     return out_image_annotator, number_reported
 
@@ -90,7 +97,14 @@ def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_
     '''
     Overwrite current image annotations with modifications
     '''
-    print("all_image_annotations before:",all_image_annotations)
+    #If no previous page or is 0, i.e. first time run, then make no changes
+    if not previous_page:
+        return all_image_annotations, current_page
+
+    if not current_page:
+        current_page = 1
+
+    #print("all_image_annotations before:",all_image_annotations)
     
     image_annotated['image'] = all_image_annotations[previous_page - 1]["image"]
 
@@ -98,14 +112,15 @@ def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_
 
     all_image_annotations[previous_page - 1] = image_annotated
 
-    print("all_image_annotations after:",all_image_annotations)
+    #print("all_image_annotations after:",all_image_annotations)
 
     return all_image_annotations, current_page
 
-def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Document, all_image_annotations:List[AnnotatedImageData], current_page:int):
+def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Document, all_image_annotations:List[AnnotatedImageData], current_page:int, progress=gr.Progress(track_tqdm=True)):
     '''
     Apply modified redactions to a pymupdf
     '''
+    print("all_image_annotations:", all_image_annotations)
 
     output_files = []
 
@@ -154,23 +169,26 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
 
         number_of_pages = unredacted_doc.page_count
 
-        for i in range(0, number_of_pages):
+        print("Saving pages to file.")
 
-            print("Re-redacting page", str(i))
+        for i in progress.tqdm(range(0, number_of_pages), desc="Saving redactions to file", unit = "pages"):
+
+            #print("Saving page", str(i))
             
             image_loc = all_image_annotations[i]['image']
-            print("Image location:", image_loc)
-            
-            # Load in image
-            if isinstance(image_loc, Image.Image):
-                # Save to file so the image annotator can pick it up
-                image_out_folder = output_folder + file_base + "_page_" + str(i) + ".png"
-                image_loc.save(image_out_folder)
-                image = image_out_folder
+            #print("Image location:", image_loc)
+
+            # Load in image object
+            if isinstance(image_loc, np.ndarray):
+                image = Image.fromarray(image_loc.astype('uint8'))
+                #all_image_annotations[i]['image'] = image_loc.tolist()
+            elif isinstance(image_loc, Image.Image):
+                image = image_loc
+                #image_out_folder = output_folder + file_base + "_page_" + str(i) + ".png"
+                #image_loc.save(image_out_folder)
+                #all_image_annotations[i]['image'] = image_out_folder
             elif isinstance(image_loc, str):
                 image = Image.open(image_loc)
-            else:              
-                image = Image.fromarray(image_loc.astype('uint8'))
 
             pymupdf_page = unredacted_doc.load_page(i) #doc.load_page(current_page -1)
             pymupdf_page = redact_page_with_pymupdf(pymupdf_page, all_image_annotations[i], image)
@@ -181,20 +199,10 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
     output_files.append(out_pdf_file_path)
 
     # Save the gradio_annotation_boxes to a JSON file
-    out_annotation_file_path = output_folder + file_base + '_modified_redactions.json'
-    all_image_annotations_with_lists = all_image_annotations
-
-    # Convert image arrays to lists for JSON serialization
-    for annotation in all_image_annotations_with_lists:
-        if isinstance(annotation['image'], np.ndarray):
-            annotation['image'] = annotation['image'].tolist()
-        elif isinstance(annotation['image'], Image.Image):
-            annotation['image'] = image_out_folder
-
-    with open(out_annotation_file_path, 'w') as f:
-        json.dump(all_image_annotations_with_lists, f)
-
-    output_files.append(out_annotation_file_path)
+    #out_annotation_file_path = output_folder + file_base + '_modified_redactions.json'
+    #with open(out_annotation_file_path, 'w') as f:
+    #    json.dump(all_image_annotations, f)
+    #output_files.append(out_annotation_file_path)
 
     return doc, all_image_annotations, output_files
 
