@@ -89,6 +89,8 @@ with app:
 
     Redact personal information from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Documents/images can be redacted using 'Quick' image analysis that works fine for typed text, but not handwriting/signatures. On the Redaction settings tab, choose 'Complex image analysis' OCR using AWS Textract (if you are using AWS) to redact these more complex elements (this service has a cost, so please only use for more complex redaction tasks). Also see the 'Redaction settings' tab to choose which pages to redact, the type of information to redact (e.g. people, places), or terms to exclude from redaction.
 
+    You can also review suggested redactions on the 'Review redactions' tab using a point and click visual interface. Please see the [User Guide](https://github.com/seanpedrick-case/doc_redaction/blob/main/README.md) for a walkthrough on how to use this and all other features in the app.
+
     NOTE: In testing the app seems to find about 60% of personal information on a given (typed) page of text. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed.
 
     This app accepts a maximum file size of 50mb. Please consider giving feedback for the quality of the answers underneath the redact buttons when the option appears, this will help to improve the app.
@@ -193,7 +195,7 @@ with app:
                 in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language (only English currently supported)", multiselect=False)
                 # Upload 'Allow list' for terms not to be redacted
                 with gr.Row():
-                    in_allow_list = gr.UploadButton(label="Import allow list file.", file_count="multiple")    
+                    in_allow_list = gr.UploadButton(label="Import allow list file", file_count="multiple")    
                     gr.Markdown("""Import allow list file - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will not be redacted.""")
                     in_allow_list_text = gr.Textbox(label="Custom allow list load status")
             log_files_output = gr.File(label="Log file output", interactive=False)
