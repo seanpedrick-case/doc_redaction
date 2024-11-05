@@ -10,6 +10,8 @@ from PIL import ImageDraw, ImageFont, Image
 from typing import Optional, Tuple, Union
 from copy import deepcopy
 from tools.helper_functions import clean_unicode_text
+from tools.aws_functions import comprehend_client
+from tools.presidio_analyzer_custom import recognizer_result_from_dict
 #import string  # Import string to get a list of common punctuation characters
 
 @dataclass
@@ -459,6 +461,8 @@ class CustomImageAnalyzerEngine:
         self, 
         line_level_ocr_results: List[OCRResult], 
         ocr_results_with_children: Dict[str, Dict],
+        chosen_redact_comprehend_entities:List[str],
+        pii_identification_method:str="Local",        
         **text_analyzer_kwargs
     ) -> List[CustomImageRecognizerResult]:
         # Define English as default language, if not specified
@@ -472,10 +476,34 @@ class CustomImageAnalyzerEngine:
 
         combined_results = []
         for i, line_level_ocr_result in enumerate(line_level_ocr_results):
+
+            analyzer_result = []
+
             # Analyze each OCR result (line) individually
-            analyzer_result = self.analyzer_engine.analyze(
-                text=line_level_ocr_result.text, **text_analyzer_kwargs
-            )
+
+            if pii_identification_method == "Local":
+                analyzer_result = self.analyzer_engine.analyze(
+                    text=line_level_ocr_result.text, **text_analyzer_kwargs
+                )
+
+            elif pii_identification_method == "AWS Comprehend":
+
+                # Call the detect_pii_entities method
+                response = comprehend_client.detect_pii_entities(
+                    Text=line_level_ocr_result.text,
+                    LanguageCode=text_analyzer_kwargs["language"] # Specify the language of the text
+                )
+
+                for result in response["Entities"]:
+                    result_text = line_level_ocr_result.text[result["BeginOffset"]:result["EndOffset"]+1]
+
+                    if result_text not in allow_list:
+
+                        if result.get("Type") in chosen_redact_comprehend_entities:
+
+                            recogniser_entity = recognizer_result_from_dict(result)
+                            analyzer_result.append(recogniser_entity)
+
 
             if i < len(ocr_results_with_children):  # Check if i is a valid index
                 child_level_key = list(ocr_results_with_children.keys())[i]

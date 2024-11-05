@@ -7,7 +7,7 @@ os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
 from gradio_image_annotation import image_annotator
 
 from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, custom_regex_load
-from tools.aws_functions import upload_file_to_s3
+from tools.aws_functions import upload_file_to_s3, RUN_AWS_FUNCTIONS
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
 from tools.redaction_review import apply_redactions, crop, get_boxes_json, modify_existing_page_redactions, decrease_page, increase_page, update_annotator
@@ -25,8 +25,14 @@ add_folder_to_path("poppler/poppler-24.02.0/Library/bin/")
 
 ensure_output_folder_exists()
 
-chosen_redact_entities = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE"] 
+chosen_comprehend_entities = ['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD', 'IP_ADDRESS','MAC_ADDRESS', 'LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER', 'INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER']
+
+full_comprehend_entity_list = ['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE','SSN','DATE_TIME','PASSPORT_NUMBER','DRIVER_ID','URL','AGE','USERNAME','PASSWORD','AWS_ACCESS_KEY','AWS_SECRET_KEY','IP_ADDRESS','MAC_ADDRESS','ALL','LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER','CA_SOCIAL_INSURANCE_NUMBER','US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER','UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER','IN_PERMANENT_ACCOUNT_NUMBER','IN_NREGA','INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER','CA_HEALTH_NUMBER','IN_AADHAAR','IN_VOTER_NUMBER']
+
+chosen_redact_entities = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE"]
+
 full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE", 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS']
+
 language = 'en'
 
 host_name = socket.gethostname()
@@ -34,6 +40,21 @@ host_name = socket.gethostname()
 feedback_logs_folder = 'feedback/' + today_rev + '/' + host_name + '/'
 access_logs_folder = 'logs/' + today_rev + '/' + host_name + '/'
 usage_logs_folder = 'usage/' + today_rev + '/' + host_name + '/'
+
+
+text_ocr_option = "Simple text analysis - PDFs with selectable text"
+tesseract_ocr_option = "Quick image analysis - typed text"
+textract_option = "Complex image analysis - docs with handwriting/signatures (AWS Textract)"
+
+local_pii_detector = "Local"
+aws_pii_detector  = "AWS Comprehend"
+
+if RUN_AWS_FUNCTIONS == "1":
+    default_ocr_val = textract_option
+    default_pii_detector = aws_pii_detector
+else:
+    default_ocr_val = text_ocr_option
+    default_pii_detector = local_pii_detector
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Base())
@@ -109,7 +130,9 @@ with app:
     with gr.Tab("PDFs/images"):
         with gr.Accordion("Redact document", open = True):
             in_doc_files = gr.File(label="Choose a document or image file (PDF, JPG, PNG)", file_count= "single", file_types=['.pdf', '.jpg', '.png', '.json'])
-            in_redaction_method = gr.Radio(label="Choose document redaction method. AWS Textract has a cost per page so please only use when needed.", value = "Simple text analysis - PDFs with selectable text", choices=["Simple text analysis - PDFs with selectable text", "Quick image analysis - typed text", "Complex image analysis - docs with handwriting/signatures (AWS Textract)"])
+            in_redaction_method = gr.Radio(label="Choose document redaction method. AWS Textract has a cost per page so please only use when needed.", value = text_ocr_option, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
+            pii_identification_method_drop = gr.Radio(label = "Choose PII detection method", value = default_pii_detector, choices=[local_pii_detector, aws_pii_detector])
+
             gr.Markdown("""If you only want to redact certain pages, or certain entities (e.g. just email addresses), please go to the redaction settings tab.""")
             document_redact_btn = gr.Button("Redact document(s)", variant="primary")
             current_loop_page_number = gr.Number(value=0,precision=0, interactive=False, label = "Last redacted page in document", visible=False)
@@ -201,21 +224,30 @@ with app:
             with gr.Row():
                 page_min = gr.Number(precision=0,minimum=0,maximum=9999, label="Lowest page to redact")
                 page_max = gr.Number(precision=0,minimum=0,maximum=9999, label="Highest page to redact")
-            with gr.Row():
-                handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract settings", choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting", "Redact all identified signatures"])
-        with gr.Accordion("Settings for open text or xlsx/csv files", open = True):
-            anon_strat = gr.Radio(choices=["replace with <REDACTED>", "replace with <ENTITY_NAME>", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace with <REDACTED>") 
+            
+            
+
+
 
         with gr.Accordion("Settings for documents and open text/xlsx/csv files", open = True):
-            in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact (click close to down arrow for full list)")
             with gr.Row():
-                in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language (only English currently supported)", multiselect=False)
-                # Upload 'Allow list' for terms not to be redacted
-                with gr.Row():
                     in_allow_list = gr.UploadButton(label="Import allow list file", file_count="multiple")    
                     gr.Markdown("""Import allow list file - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will not be redacted.""")
                     in_allow_list_text = gr.Textbox(label="Custom allow list load status")
-            log_files_output = gr.File(label="Log file output", interactive=False)
+
+            in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact - local PII identification model (click close to down arrow for full list)")
+            
+            in_redact_comprehend_entities = gr.Dropdown(value=chosen_comprehend_entities, choices=full_comprehend_entity_list, multiselect=True, label="Entities to redact - AWS Comprehend PII identification model (click close to down arrow for full list)")
+            
+            handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract settings", choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting", "Redact all identified signatures"])
+            #with gr.Row():
+            in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language (only English currently supported)", multiselect=False, visible=False)
+                
+
+        with gr.Accordion("Settings for open text or xlsx/csv files", open = True):
+            anon_strat = gr.Radio(choices=["replace with <REDACTED>", "replace with <ENTITY_NAME>", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace with <REDACTED>")
+            
+        log_files_output = gr.File(label="Log file output", interactive=False)
 
     # If a custom allow list is uploaded
     in_allow_list.upload(fn=custom_regex_load, inputs=[in_allow_list], outputs=[in_allow_list_text, in_allow_list_state])
@@ -227,12 +259,12 @@ with app:
 
     document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state]).\
     then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state], api_name="prepare_doc").\
-    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return],
+    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop],
                     outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state], api_name="redact_doc")#.\
                     #then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page])
     
     # If the app has completed a batch of pages, it will run this until the end of all pages in the document
-    current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return],
+    current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop],
                     outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state])
     
     # If a file has been completed, the function will continue onto the next document
@@ -318,9 +350,9 @@ print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
 if __name__ == "__main__":
     if os.environ['COGNITO_AUTH'] == "1":
-        app.queue().launch(show_error=True, auth=authenticate_user, max_file_size='100mb')
+        app.queue(max_size=5).launch(show_error=True, auth=authenticate_user, max_file_size='100mb')
     else:
-        app.queue().launch(show_error=True, inbrowser=True, max_file_size='100mb')
+        app.queue(max_size=5).launch(show_error=True, inbrowser=True, max_file_size='100mb')
 
 
 # AWS options - placeholder for possibility of storing data on s3 and retrieving it in app

@@ -23,6 +23,27 @@ fake = Faker("en_UK")
 def fake_first_name(x):
     return fake.first_name()
 
+def initial_clean(text):
+    #### Some of my cleaning functions
+    html_pattern_regex = r'<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});|\xa0|&nbsp;'
+    html_start_pattern_end_dots_regex = r'<(.*?)\.\.'
+    non_ascii_pattern = r'[^\x00-\x7F]+'
+    multiple_spaces_regex = r'\s{2,}'
+        
+    # Define a list of patterns and their replacements
+    patterns = [
+        (html_pattern_regex, ' '),
+        (html_start_pattern_end_dots_regex, ' '),
+        (non_ascii_pattern, ' '),
+        (multiple_spaces_regex, ' ')
+    ]
+    
+    # Apply each regex replacement
+    for pattern, replacement in patterns:
+        text = re.sub(pattern, replacement, text)
+    
+    return text
+
 def process_recognizer_result(result, recognizer_result, data_row, dictionary_key, df_dict, keys_to_keep):
         output = []
 

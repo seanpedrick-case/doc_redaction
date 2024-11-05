@@ -7,24 +7,22 @@ from tools.helper_functions import get_or_create_env_var
 
 PandasDataFrame = Type[pd.DataFrame]
 
-# Get AWS credentials if required
+# Get AWS credentials
 bucket_name=""
-aws_var = "RUN_AWS_FUNCTIONS"
-aws_var_default = "0"
-aws_var_val = get_or_create_env_var(aws_var, aws_var_default)
-print(f'The value of {aws_var} is {aws_var_val}')
+
+RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
+print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
 
 AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
 print(f'The value of AWS_REGION is {AWS_REGION}')
 
-if aws_var_val == "1":
-    try:
-        bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
-        session = boto3.Session() # profile_name="default"
-    except Exception as e:
-        print(e)
+try:
+    comprehend_client = boto3.client('comprehend', region_name=AWS_REGION) 
+except Exception as e:
+    print(e)
+    comprehend_client = ""
 
-    def get_assumed_role_info():
+def get_assumed_role_info():
         sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'
         sts = boto3.client('sts', region_name=AWS_REGION, endpoint_url=sts_endpoint)
         response = sts.get_caller_identity()
@@ -37,13 +35,27 @@ if aws_var_val == "1":
         
         return assumed_role_arn, assumed_role_name
 
+if RUN_AWS_FUNCTIONS == "1":
+    try:
+        bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
+        session = boto3.Session()
+        # Initialize the Boto3 client for Comprehend
+        
+            
+    except Exception as e:
+        print(e)    
+
     try:
         assumed_role_arn, assumed_role_name = get_assumed_role_info()
 
         print("Assumed Role ARN:", assumed_role_arn)
         print("Assumed Role Name:", assumed_role_name)
+
     except Exception as e:
         print(e)
+
+
+
 
 # Download direct from S3 - requires login credentials
 def download_file_from_s3(bucket_name, key, local_file_path):

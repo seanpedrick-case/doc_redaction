@@ -5,7 +5,28 @@ from tqdm import tqdm
 from presidio_analyzer import DictAnalyzerResult, RecognizerResult #, AnalyzerEngine
 from presidio_analyzer.nlp_engine import NlpArtifacts
 
+def recognizer_result_from_dict(data: Dict) -> RecognizerResult:
+    """
+    Create RecognizerResult from a dictionary.
 
+    :param data: e.g. {
+        "entity_type": "NAME",
+        "start": 24,
+        "end": 32,
+        "score": 0.8,
+        "recognition_metadata": None
+    }
+    :return: RecognizerResult
+    """
+
+    entity_type = data.get("Type")
+    start = data.get("BeginOffset")
+    end = data.get("EndOffset")
+    score = data.get("Score")
+    analysis_explanation = None
+    recognition_metadata = None
+    
+    return RecognizerResult(entity_type, start, end, score, analysis_explanation, recognition_metadata)
 
 def analyze_iterator_custom(
         self,

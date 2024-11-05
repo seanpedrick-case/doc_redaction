@@ -24,13 +24,17 @@ import gradio as gr
 from gradio import Progress
 from collections import defaultdict  # For efficient grouping
 
+from presidio_analyzer import RecognizerResult
+
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult
 from tools.file_conversion import process_file
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
 from tools.helper_functions import get_file_path_end, output_folder, clean_unicode_text, get_or_create_env_var
-from tools.file_conversion import process_file, is_pdf, convert_text_pdf_to_img_pdf, is_pdf_or_image
-from tools.data_anonymise import generate_decision_process_output
-from tools.aws_textract import analyse_page_with_textract, convert_pike_pdf_page_to_bytes, json_to_ocrresult
+from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
+# from tools.data_anonymise import generate_decision_process_output
+from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult
+from tools.aws_functions import comprehend_client
+from tools.presidio_analyzer_custom import recognizer_result_from_dict
 
 # Number of pages to loop through before breaking. Currently set very high, as functions are breaking on time metrics (e.g. every 105 seconds), rather than on number of pages redacted.
 
@@ -62,12 +66,12 @@ def sum_numbers_before_seconds(string:str):
 
     return sum_of_numbers
 
-
 def choose_and_run_redactor(file_paths:List[str],
  prepared_pdf_file_paths:List[str],
  prepared_pdf_image_paths:List[str],
  language:str,
  chosen_redact_entities:List[str],
+ chosen_redact_comprehend_entities:List[str],
  in_redact_method:str,
  in_allow_list:List[List[str]]=None,
  latest_file_completed:int=0,
@@ -86,6 +90,7 @@ def choose_and_run_redactor(file_paths:List[str],
  pymupdf_doc=[],
  current_loop_page:int=0,
  page_break_return:bool=False,
+ pii_identification_method:str="Local",
  progress=gr.Progress(track_tqdm=True)):
     '''
     This function orchestrates the redaction process based on the specified method and parameters. It takes the following inputs:
@@ -94,7 +99,8 @@ def choose_and_run_redactor(file_paths:List[str],
     - prepared_pdf_file_paths (List[str]): A list of paths to the PDF files prepared for redaction.
     - prepared_pdf_image_paths (List[str]): A list of paths to the PDF files converted to images for redaction.
     - language (str): The language of the text in the files.
-    - chosen_redact_entities (List[str]): A list of entity types to redact from the files.
+    - chosen_redact_entities (List[str]): A list of entity types to redact from the files using the local model (spacy) with Microsoft Presidio.
+    - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service
     - in_redact_method (str): The method to use for redaction.
     - in_allow_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
     - latest_file_completed (int, optional): The index of the last completed file. Defaults to 0.
@@ -113,6 +119,7 @@ def choose_and_run_redactor(file_paths:List[str],
     - pymupdf_doc (optional): A list containing the PDF document object. Defaults to an empty list.
     - current_loop_page (int, optional): The current page being processed in the loop. Defaults to 0.
     - page_break_return (bool, optional): A flag indicating if the function should return after a page break. Defaults to False.
+    - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
     The function returns a redacted document along with processing logs.
@@ -121,12 +128,12 @@ def choose_and_run_redactor(file_paths:List[str],
     tic = time.perf_counter()
     all_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
 
+
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
         print("First_loop_state is True")
         latest_file_completed = 0
         current_loop_page = 0
-        #out_message = []
         out_file_paths = []
         estimate_total_processing_time = 0
         estimated_time_taken_state = 0
@@ -135,10 +142,6 @@ def choose_and_run_redactor(file_paths:List[str],
     elif (first_loop_state == False) & (current_loop_page == 999):
         current_loop_page = 0
 
-
-    # If out message is string or out_file_paths are blank, change to a list so it can be appended to
-    #if isinstance(out_message, str):
-    #    out_message = [out_message]
 
     if not out_file_paths:
         out_file_paths = []
@@ -151,11 +154,6 @@ def choose_and_run_redactor(file_paths:List[str],
         number_of_files = 1
     else:
         number_of_files = len(file_paths)
-
-
-    print("\nIn choose_and_run_redactor function, latest_file_completed is:", latest_file_completed)
-    print("current_loop_page is:", current_loop_page)
-
 
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
     if latest_file_completed >= number_of_files:
@@ -242,7 +240,26 @@ def choose_and_run_redactor(file_paths:List[str],
 
             print("Redacting file " + file_path_without_ext + " as an image-based file")
 
-            pymupdf_doc, all_decision_process_table, logging_file_paths, new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df = redact_image_pdf(file_path, prepared_pdf_image_paths, language, chosen_redact_entities, in_allow_list_flat, is_a_pdf, page_min, page_max, in_redact_method, handwrite_signature_checkbox, "", current_loop_page, page_break_return, prepared_pdf_image_paths, annotations_all_pages, all_line_level_ocr_results_df, all_decision_process_table, pymupdf_doc)
+            pymupdf_doc,all_decision_process_table,logging_file_paths,new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df = redact_image_pdf(file_path,
+             prepared_pdf_image_paths,
+             language,
+             chosen_redact_entities,
+             chosen_redact_comprehend_entities,
+             in_allow_list_flat,
+             is_a_pdf,
+             page_min,
+             page_max,
+             in_redact_method,
+             handwrite_signature_checkbox,
+             "",
+             current_loop_page,
+             page_break_return,
+             prepared_pdf_image_paths,
+             annotations_all_pages,
+             all_line_level_ocr_results_df,
+             all_decision_process_table,
+             pymupdf_doc,
+             pii_identification_method)
 
             # Save Textract request metadata (if exists)
             if new_request_metadata:
@@ -260,7 +277,21 @@ def choose_and_run_redactor(file_paths:List[str],
             # Analyse text-based pdf
             print('Redacting file as text-based PDF')
             
-            pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return = redact_text_pdf(file_path, prepared_pdf_image_paths, language, chosen_redact_entities, in_allow_list_flat, page_min, page_max, "Simple text analysis - PDFs with selectable text", current_loop_page, page_break_return, annotations_all_pages, all_line_level_ocr_results_df, all_decision_process_table, pymupdf_doc)
+            pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return = redact_text_pdf(file_path,
+            prepared_pdf_image_paths,language,
+            chosen_redact_entities,
+            chosen_redact_comprehend_entities,
+            in_allow_list_flat,
+            page_min,
+            page_max,
+            "Simple text analysis - PDFs with selectable text",
+            current_loop_page,
+            page_break_return,
+            annotations_all_pages,
+            all_line_level_ocr_results_df,
+            all_decision_process_table,
+            pymupdf_doc,
+            pii_identification_method)
 
         else:
             out_message = "No redaction method selected"
@@ -287,27 +318,37 @@ def choose_and_run_redactor(file_paths:List[str],
                 pymupdf_doc.save(out_image_file_path)
 
             out_file_paths.append(out_image_file_path)
+
             if logging_file_paths:
                 log_files_output_paths.extend(logging_file_paths)
 
-            #if isinstance(out_message, list):
-            #    out_message.append("File '" + file_path_without_ext + "' successfully redacted")
-
             logs_output_file_name = out_image_file_path + "_decision_process_output.csv"
             all_decision_process_table.to_csv(logs_output_file_name, index = None, encoding="utf-8")
-            log_files_output_paths.append(logs_output_file_name)
+            #log_files_output_paths.append(logs_output_file_name)
+            out_file_paths.append(logs_output_file_name)
 
             all_text_output_file_name = out_image_file_path + "_ocr_output.csv"
             all_line_level_ocr_results_df.to_csv(all_text_output_file_name, index = None, encoding="utf-8")
-            log_files_output_paths.append(all_text_output_file_name)
+            #log_files_output_paths.append(all_text_output_file_name)
+            out_file_paths.append(all_text_output_file_name)
 
             # Make a combined message for the file                
             if isinstance(out_message, list):
                 combined_out_message = '\n'.join(out_message)  # Ensure out_message is a list of strings
             else: combined_out_message = out_message
 
+            toc = time.perf_counter()
+            time_taken = toc - tic
+            estimated_time_taken_state = estimated_time_taken_state + time_taken
+
             out_time_message = f" Redacted in {estimated_time_taken_state:0.1f} seconds."
             combined_out_message = combined_out_message + " " + out_time_message  # Ensure this is a single string
+
+            estimate_total_processing_time = sum_numbers_before_seconds(combined_out_message)
+            print("Estimated total processing time:", str(estimate_total_processing_time))
+
+            #out_time_message = f" Redacted in {estimated_time_taken_state:0.1f} seconds."
+            #combined_out_message = combined_out_message + " " + out_time_message  # Ensure this is a single string
         
             # Increase latest file completed count unless we are at the last file
             # if latest_file_completed != len(file_paths):
@@ -348,15 +389,6 @@ def choose_and_run_redactor(file_paths:List[str],
                 combined_out_message = '\n'.join(out_message)  # Ensure out_message is a list of strings
             else: combined_out_message = out_message
 
-            out_time_message = f" Redacted in {estimated_time_taken_state:0.1f} seconds."
-            combined_out_message = combined_out_message + " " + out_time_message  # Ensure this is a single string
-
-            estimate_total_processing_time = sum_numbers_before_seconds(combined_out_message)
-            print("Estimated total processing time:", str(estimate_total_processing_time))
-    
-    toc = time.perf_counter()
-    time_taken = toc - tic
-    estimated_time_taken_state = estimated_time_taken_state + time_taken
 
    # If textract requests made, write to logging file
     if all_request_metadata:
@@ -391,10 +423,6 @@ def convert_pikepdf_coords_to_pymudf(pymupdf_page, annot):
     mediabox_width = pymupdf_page.mediabox[2] - pymupdf_page.mediabox[0]
     rect_height = pymupdf_page.rect.height
     rect_width = pymupdf_page.rect.width  
-
-    # Calculate scaling factors
-    #scale_height = rect_height / mediabox_height if mediabox_height else 1
-    #scale_width = rect_width / mediabox_width if mediabox_width else 1
 
     # Adjust coordinates based on scaling factors
     page_x_adjust = (rect_width - mediabox_width) / 2  # Center adjustment
@@ -504,15 +532,12 @@ def move_page_info(file_path: str) -> str:
     
     return new_file_path
 
-def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):#, scale=(1,1)): 
+def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
 
     mediabox_height = page.mediabox[3] - page.mediabox[1]
     mediabox_width = page.mediabox[2] - page.mediabox[0]
     rect_height = page.rect.height
     rect_width = page.rect.width    
-
-    #print("page_rect_height:", page.rect.height)
-    #print("page mediabox size:", page.mediabox[3] - page.mediabox[1])
 
     out_annotation_boxes = {}
     all_image_annotation_boxes = []
@@ -525,16 +550,11 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):#, sc
         image_path = image
         image = Image.open(image_path)
 
-    #print("annotations_on_page:", annotations_on_page)
-
     # Check if this is an object used in the Gradio Annotation component
     if isinstance (annotations_on_page, dict):
         annotations_on_page = annotations_on_page["boxes"]
-        #print("annotations on page:", annotations_on_page)
 
     for annot in annotations_on_page:
-        #print("annot:", annot)
-
         # Check if an Image recogniser result, or a Gradio annotation object
         if (isinstance(annot, CustomImageRecognizerResult)) | isinstance(annot, dict):
 
@@ -600,7 +620,6 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):#, sc
         rect_single_pixel_height = Rect(x1, middle_y - 2, x2, middle_y + 2)  # Small height in middle of word to remove text
 
         # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
-        #print("rect_single_pixel_height:", rect_single_pixel_height)
         page.add_redact_annot(rect_single_pixel_height)
 
         # Set up drawing a black box over the whole rect
@@ -614,13 +633,8 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):#, sc
         "boxes": all_image_annotation_boxes
     }
 
-    #print("out_annotation_boxes:", out_annotation_boxes)
-
     page.apply_redactions(images=0, graphics=0)
     page.clean_contents()
-
-    #print("Everything is fine at end of redact_page_with_pymupdf")
-    #print("\nout_annotation_boxes:", out_annotation_boxes)
 
     return page, out_annotation_boxes
 
@@ -668,10 +682,6 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
                         combined_text = " ".join(word['text'] for word in relevant_words)
 
                         # Calculate new dimensions for the merged box
-
-
-                        
-                        
                         reconstructed_bbox = CustomImageRecognizerResult(
                             bbox.entity_type,
                             bbox.start,
@@ -740,7 +750,29 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
 
     return merged_bboxes
 
-def redact_image_pdf(file_path:str, prepared_pdf_file_paths:List[str], language:str, chosen_redact_entities:List[str], allow_list:List[str]=None, is_a_pdf:bool=True, page_min:int=0, page_max:int=999, analysis_type:str="Quick image analysis - typed text", handwrite_signature_checkbox:List[str]=["Redact all identified handwriting", "Redact all identified signatures"], request_metadata:str="", current_loop_page:int=0, page_break_return:bool=False, images=[], annotations_all_pages:List=[], all_line_level_ocr_results_df = pd.DataFrame(), all_decision_process_table = pd.DataFrame(), pymupdf_doc = [], page_break_val:int=int(page_break_value), logging_file_paths:List=[], max_time:int=int(max_time_value), progress=Progress(track_tqdm=True)):
+def redact_image_pdf(file_path:str,
+                     prepared_pdf_file_paths:List[str],
+                     language:str,
+                     chosen_redact_entities:List[str],
+                     chosen_redact_comprehend_entities:List[str],
+                     allow_list:List[str]=None,
+                     is_a_pdf:bool=True,
+                     page_min:int=0,
+                     page_max:int=999,
+                     analysis_type:str="Quick image analysis - typed text",
+                     handwrite_signature_checkbox:List[str]=["Redact all identified handwriting", "Redact all identified signatures"],
+                     request_metadata:str="", current_loop_page:int=0,
+                     page_break_return:bool=False,
+                     images=[],
+                     annotations_all_pages:List=[],
+                     all_line_level_ocr_results_df = pd.DataFrame(),
+                     all_decision_process_table = pd.DataFrame(),
+                     pymupdf_doc = [],
+                     pii_identification_method:str="Local",
+                     page_break_val:int=int(page_break_value),
+                     logging_file_paths:List=[],
+                     max_time:int=int(max_time_value),                     
+                     progress=Progress(track_tqdm=True)):
 
     '''
     This function redacts sensitive information from a PDF document. It takes the following parameters:
@@ -749,6 +781,7 @@ def redact_image_pdf(file_path:str, prepared_pdf_file_paths:List[str], language:
     - prepared_pdf_file_paths (List[str]): A list of paths to the PDF file pages converted to images.
     - language (str): The language of the text in the PDF.
     - chosen_redact_entities (List[str]): A list of entity types to redact from the PDF.
+    - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from the list allowed by the AWS Comprehend service.
     - allow_list (List[str], optional): A list of entity types to allow in the PDF. Defaults to None.
     - is_a_pdf (bool, optional): Indicates if the input file is a PDF. Defaults to True.
     - page_min (int, optional): The minimum page number to start redaction from. Defaults to 0.
@@ -756,13 +789,19 @@ def redact_image_pdf(file_path:str, prepared_pdf_file_paths:List[str], language:
     - analysis_type (str, optional): The type of analysis to perform on the PDF. Defaults to "Quick image analysis - typed text".
     - handwrite_signature_checkbox (List[str], optional): A list of options for redacting handwriting and signatures. Defaults to ["Redact all identified handwriting", "Redact all identified signatures"].
     - request_metadata (str, optional): Metadata related to the redaction request. Defaults to an empty string.
-    - current_loop_page (int, optional): The current page being processed in the loop. Defaults to 0.
     - page_break_return (bool, optional): Indicates if the function should return after a page break. Defaults to False.
+    - images (list, optional): List of image objects for each PDF page.
+    - annotations_all_pages (List, optional): List of annotations on all pages that is used by the gradio_image_annotation object.
+    - all_line_level_ocr_results_df (pd.DataFrame(), optional): All line level OCR results for the document as a Pandas dataframe,
+    - all_decision_process_table (pd.DataFrame(), optional): All redaction decisions for document as a Pandas dataframe.
+    - pymupdf_doc (List, optional): The document as a PyMupdf object.
+    - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to 3.
-    - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
+    - logging_file_paths (List, optional): List of file paths used for saving redaction process logging results.
+    - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.    
     - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
-    The function returns a redacted PDF document.
+    The function returns a fully or partially-redacted PDF document.
     '''
     file_name = get_file_path_end(file_path)
     fill = (0, 0, 0)   # Fill colour
@@ -901,20 +940,31 @@ def redact_image_pdf(file_path:str, prepared_pdf_file_paths:List[str], language:
 
             # Step 2: Analyze text and identify PII
             if chosen_redact_entities:
+
+                pii_identification_method= "AWS Comprehend" #"Local"
+
                 redaction_bboxes = image_analyser.analyze_text(
                     line_level_ocr_results,
                     line_level_ocr_results_with_children,
+                    chosen_redact_comprehend_entities = chosen_redact_comprehend_entities,
+                    pii_identification_method = pii_identification_method,                    
                     language=language,
                     entities=chosen_redact_entities,
                     allow_list=allow_list,
-                    score_threshold=score_threshold,
-                )
+                    score_threshold=score_threshold
+                )                
+
+                # redaction_bboxes = choose_redaction_method_and_analyse_pii(line_level_ocr_results,
+                #     line_level_ocr_results_with_children,
+                #     language,
+                #     chosen_redact_entities,
+                #     allow_list,
+                #     score_threshold,
+                #     pii_identification_method)
+                
             else:
                 redaction_bboxes = []
-
-            #print("\nsignature_recogniser_boxes:", signature_recogniser_results)
-            #print("\nhandwriting_recogniser_boxes:", handwriting_recogniser_results)
-            #print("\nredaction_bboxes:", redaction_bboxes)
+                
 
             if analysis_type == "Quick image analysis - typed text": interim_results_file_path = output_folder + "interim_analyser_bboxes_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + ".txt"
             elif analysis_type == "Complex image analysis - docs with handwriting/signatures (AWS Textract)": interim_results_file_path = output_folder + "interim_analyser_bboxes_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + "_textract.txt" 
@@ -1048,53 +1098,6 @@ def get_text_container_characters(text_container:LTTextContainer):
     
         return characters
     return []
-
-    
-def initial_clean(text):
-    #### Some of my cleaning functions
-    html_pattern_regex = r'<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});|\xa0|&nbsp;'
-    html_start_pattern_end_dots_regex = r'<(.*?)\.\.'
-    non_ascii_pattern = r'[^\x00-\x7F]+'
-    multiple_spaces_regex = r'\s{2,}'
-        
-    # Define a list of patterns and their replacements
-    patterns = [
-        (html_pattern_regex, ' '),
-        (html_start_pattern_end_dots_regex, ' '),
-        (non_ascii_pattern, ' '),
-        (multiple_spaces_regex, ' ')
-    ]
-    
-    # Apply each regex replacement
-    for pattern, replacement in patterns:
-        text = re.sub(pattern, replacement, text)
-    
-    return text
-
-
-def analyse_text_container(text_container:OCRResult, language:str, chosen_redact_entities:List[str], score_threshold:float, allow_list:List[str]):
-    '''
-    Take text and bounding boxes in OCRResult format and analyze it for PII using spacy and the Microsoft Presidio package.
-    '''
-
-    analyser_results = []
-
-    #text_to_analyse = initial_clean(text_container.text).strip()
-
-    text_to_analyse = initial_clean(text_container.text)
-
-    if chosen_redact_entities:
-        #print("Running Presidio analyze method. text_to_analyse:", text_to_analyse)
-
-        analyser_results = nlp_analyser.analyze(text=text_to_analyse,
-                                                language=language, 
-                                                entities=chosen_redact_entities,
-                                                score_threshold=score_threshold,
-                                                return_decision_process=True,
-                                                allow_list=allow_list) 
-         
-    return analyser_results
-
 
 def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tuple[List[OCRResult], List[LTChar]]:
     '''
@@ -1292,6 +1295,53 @@ def merge_text_bounding_boxes(analyser_results:CustomImageRecognizerResult, char
     
     return analysed_bounding_boxes
 
+def identify_pii_in_text_container(text_container:OCRResult, language:str, chosen_redact_entities:List[str], chosen_redact_comprehend_entities:List[str], score_threshold:float, allow_list:List[str], pii_identification_method:str="Local") -> List[RecognizerResult]:
+    '''
+    Take text and bounding boxes in OCRResult format and analyze it for PII using spacy and the Microsoft Presidio package, or the AWS Comprehend service.
+    '''
+
+    analyser_results = []
+
+    #text_to_analyse = initial_clean(text_container.text).strip()
+
+    text_to_analyse = text_container.text
+
+    if chosen_redact_entities:
+        if pii_identification_method == "Local":
+            analyser_results = nlp_analyser.analyze(text=text_to_analyse,
+                                                    language=language, 
+                                                    entities=chosen_redact_entities,
+                                                    score_threshold=score_threshold,
+                                                    return_decision_process=True,
+                                                    allow_list=allow_list)
+        
+        elif pii_identification_method == "AWS Comprehend":
+
+            # Call the detect_pii_entities method
+            response = comprehend_client.detect_pii_entities(
+                Text=text_to_analyse,
+                LanguageCode=language  # Specify the language of the text
+            )
+
+            for result in response["Entities"]:
+
+                result_text = text_to_analyse[result["BeginOffset"]:result["EndOffset"]+1]
+
+                if result_text not in allow_list:
+                    if result.get("Type") in chosen_redact_comprehend_entities:
+
+                        recogniser_entity = recognizer_result_from_dict(result)
+
+                        analyser_results.append(recogniser_entity)
+
+        else:
+            analyser_results = []
+    else:
+        analyser_results = []
+    
+         
+    return analyser_results
+
 def create_text_redaction_process_results(analyser_results, analysed_bounding_boxes, page_num):
     decision_process_table = pd.DataFrame()
 
@@ -1335,6 +1385,7 @@ def redact_text_pdf(
     prepared_pdf_image_path: str,  # Path to the prepared PDF image for redaction
     language: str,  # Language of the PDF content
     chosen_redact_entities: List[str],  # List of entities to be redacted
+    chosen_redact_comprehend_entities: List[str],
     allow_list: List[str] = None,  # Optional list of allowed entities
     page_min: int = 0,  # Minimum page number to start redaction
     page_max: int = 999,  # Maximum page number to end redaction
@@ -1345,11 +1396,12 @@ def redact_text_pdf(
     all_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(),  # DataFrame for OCR results
     all_decision_process_table: pd.DataFrame = pd.DataFrame(),  # DataFrame for decision process table
     pymupdf_doc: List = [],  # List of PyMuPDF documents
+    pii_identification_method: str = "Local",
     page_break_val: int = int(page_break_value),  # Value for page break
-    max_time: int = int(max_time_value),
+    max_time: int = int(max_time_value),    
     progress: Progress = Progress(track_tqdm=True)  # Progress tracking object
 ):
-
+    
     '''
     Redact chosen entities from a PDF that is made up of multiple pages that are not images.
     
@@ -1358,19 +1410,20 @@ def redact_text_pdf(
     - prepared_pdf_image_path: Path to the prepared PDF image for redaction
     - language: Language of the PDF content
     - chosen_redact_entities: List of entities to be redacted
+    - chosen_redact_comprehend_entities: List of entities to be redacted for AWS Comprehend
     - allow_list: Optional list of allowed entities
     - page_min: Minimum page number to start redaction
     - page_max: Maximum page number to end redaction
     - analysis_type: Type of analysis to perform
     - current_loop_page: Current page being processed in the loop
     - page_break_return: Flag to indicate if a page break should be returned
-    - images: List of images (not used in this function)
     - annotations_all_pages: List of annotations across all pages
     - all_line_level_ocr_results_df: DataFrame for OCR results
     - all_decision_process_table: DataFrame for decision process table
     - pymupdf_doc: List of PyMuPDF documents
+    - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - page_break_val: Value for page break
-    - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
+    - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.    
     - progress: Progress tracking object
     '''
 
@@ -1393,7 +1446,6 @@ def redact_text_pdf(
     if current_loop_page == 0: page_loop_start = 0
     else: page_loop_start = current_loop_page
 
-    #progress_bar = progress.tqdm(range(current_loop_page, number_of_pages), unit="pages", desc="Redacting pages")
     progress_bar = tqdm(range(current_loop_page, number_of_pages), unit="pages remaining", desc="Redacting pages")
 
     #for page_no in range(0, number_of_pages):     
@@ -1414,13 +1466,7 @@ def redact_text_pdf(
         image_annotations = {"image": image, "boxes": []} 
         pymupdf_page = pymupdf_doc.load_page(page_no)
 
-        #print("pymupdf page loaded")
-
-        #print("Page number is:", str(page_no + 1))
-
         if page_min <= page_no < page_max:
-
-            #print("Page is in range of pages to redact")
 
             for page_layout in extract_pages(filename, page_numbers = [page_no], maxpages=1):
                 
@@ -1465,7 +1511,16 @@ def redact_text_pdf(
                             text_line_analyser_result = []
                             text_line_bounding_boxes = []
 
-                            text_line_analyser_result = analyse_text_container(text_line, language, chosen_redact_entities, score_threshold, allow_list)
+                            # text_line_analyser_result = identify_pii_in_text_container(text_line, language, chosen_redact_entities, score_threshold, allow_list)
+
+                            #pii_identification_method="AWS Comprehend"#"Local"
+
+                            if chosen_redact_entities:
+
+                                text_line_analyser_result = identify_pii_in_text_container(text_line, language, chosen_redact_entities, chosen_redact_comprehend_entities, score_threshold, allow_list, pii_identification_method)
+                                
+                            else:
+                                text_line_analyser_result = []
 
                             # Merge bounding boxes for the line if multiple found close together                    
                             if text_line_analyser_result:
