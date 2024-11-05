@@ -4,8 +4,10 @@ from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 import os
+import gradio as gr
 import time
 import json
+import pymupdf
 from gradio import Progress
 from typing import List, Optional
 
@@ -62,11 +64,20 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(trac
 
         # Check if the image already exists
         if os.path.exists(out_path):
-            print(f"Loading existing image from {out_path}.")
-            image = [Image.open(out_path)]  # Load the existing image
+            #print(f"Loading existing image from {out_path}.")
+            image = Image.open(out_path)  # Load the existing image
+
+
+
         else:
-            image = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=300, use_cropbox=True, use_pdftocairo=False)
-            image[0].save(out_path, format="PNG")  # Save the new image
+            image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=300, use_cropbox=True, use_pdftocairo=False)
+
+            image = image_l[0]
+
+            # Convert to greyscale
+            image = image.convert("L")
+
+            image.save(out_path, format="PNG")  # Save the new image
 
         # If no images are returned, break the loop
         if not image:
@@ -76,9 +87,7 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(trac
         # print("Conversion of page", str(page_num), "to file succeeded.")
         # print("image:", image)
 
-        
-
-        images.extend(image)
+        images.append(out_path)
 
     print("PDF has been converted to images.")
     # print("Images:", images)
@@ -104,6 +113,8 @@ def process_file(file_path):
         # Run your function for processing PDF files here
         img_object = convert_pdf_to_images(file_path)
 
+        print("img_object has length", len(img_object), "and contains", img_object)
+
     else:
         print(f"{file_path} is not an image or PDF file.")
         img_object = ['']
@@ -119,9 +130,15 @@ def get_input_file_names(file_input):
 
     #print("file_input:", file_input)
 
-    for file in file_input:
-        file_path = file.name
-        print(file_path)
+    if isinstance(file_input, str):
+        file_input_list = [file_input]
+
+    for file in file_input_list:
+        if isinstance(file, str):
+            file_path = file
+        else:
+            file_path = file.name
+
         file_path_without_ext = get_file_path_end(file_path)
 
         #print("file:", file_path)
@@ -147,6 +164,8 @@ def prepare_image_or_pdf(
     latest_file_completed: int = 0,
     out_message: List[str] = [],
     first_loop_state: bool = False,
+    number_of_pages:int = 1,
+    current_loop_page_number:int=0,
     progress: Progress = Progress(track_tqdm=True)
 ) -> tuple[List[str], List[str]]:
     """
@@ -162,6 +181,7 @@ def prepare_image_or_pdf(
         latest_file_completed (int): Index of the last completed file.
         out_message (List[str]): List to store output messages.
         first_loop_state (bool): Flag indicating if this is the first iteration.
+        number_of_pages (int): integer indicating the number of pages in the document
         progress (Progress): Progress tracker for the operation.
 
     Returns:
@@ -170,47 +190,73 @@ def prepare_image_or_pdf(
 
     tic = time.perf_counter()
 
-    # If out message or converted_file_paths are blank, change to a list so it can be appended to
-    if isinstance(out_message, str):
-        out_message = [out_message]    
-
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
+        print("first_loop_state is True")
         latest_file_completed = 0
-        out_message = []
-        converted_file_paths = []
-        image_file_paths = []
+        out_message = []   
     else:
         print("Now attempting file:", str(latest_file_completed))
-        converted_file_paths = []
-        image_file_paths = []
+    
+    # This is only run when a new page is loaded, so can reset page loop values. If end of last file (99), current loop number set to 999
+    # if latest_file_completed == 99:
+    #     current_loop_page_number = 999
+    #     page_break_return = False
+    # else:
+    #     current_loop_page_number = 0
+    #     page_break_return = False
+
+    # If out message or converted_file_paths are blank, change to a list so it can be appended to
+    if isinstance(out_message, str):
+        out_message = [out_message]  
+
+    converted_file_paths = []
+    image_file_paths = []
+    pymupdf_doc = []
 
     if not file_paths:
         file_paths = []
 
-    #converted_file_paths = file_paths
+    if isinstance(file_paths, str):
+        file_path_number = 1
+    else:
+        file_path_number = len(file_paths)
+
+    print("Current_loop_page_number at start of prepare_image_or_pdf function is:", current_loop_page_number)
+    print("Number of file paths:", file_path_number)
+    print("Latest_file_completed:", latest_file_completed)
     
     latest_file_completed = int(latest_file_completed)
 
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
-    if latest_file_completed >= len(file_paths):
+    if latest_file_completed >= file_path_number:
         print("Last file reached, returning files:", str(latest_file_completed))
         if isinstance(out_message, list):
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, converted_file_paths, image_file_paths
+        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
 
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
     progress(0.1, desc='Preparing file')
 
-    file_paths_loop = [file_paths[int(latest_file_completed)]]
+    if isinstance(file_paths, str):
+        file_paths_list = [file_paths]
+        file_paths_loop = file_paths_list
+    else:
+        file_paths_list = file_paths
+        file_paths_loop = [file_paths_list[int(latest_file_completed)]]
+
+    
     #print("file_paths_loop:", str(file_paths_loop))
 
     #for file in progress.tqdm(file_paths, desc="Preparing files"):
     for file in file_paths_loop:
-        file_path = file.name
+        if isinstance(file, str):
+            file_path = file
+        else:
+            file_path = file.name
         file_path_without_ext = get_file_path_end(file_path)
 
         #print("file:", file_path)
@@ -235,14 +281,14 @@ def prepare_image_or_pdf(
         if not file_path:
             out_message = "No file selected"
             print(out_message)
-            return out_message, converted_file_paths, image_file_paths
+            return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
 
         if in_redact_method == "Quick image analysis - typed text" or in_redact_method == "Complex image analysis - docs with handwriting/signatures (AWS Textract)":
             # Analyse and redact image-based pdf or image
             if is_pdf_or_image(file_path) == False:
                 out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
                 print(out_message)
-                return out_message, converted_file_paths, image_file_paths
+                return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
             
             converted_file_path = process_file(file_path)
             image_file_path = converted_file_path
@@ -252,7 +298,7 @@ def prepare_image_or_pdf(
             if is_pdf(file_path) == False:
                 out_message = "Please upload a PDF file for text analysis."
                 print(out_message)
-                return out_message, converted_file_paths, image_file_paths
+                return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
             
             converted_file_path = file_path # Pikepdf works with the basic unconverted pdf file
             image_file_path = process_file(file_path)
@@ -261,7 +307,20 @@ def prepare_image_or_pdf(
         converted_file_paths.append(converted_file_path)
         image_file_paths.extend(image_file_path)
 
-        #print("file conversion image_file_paths:", image_file_paths)
+        # If a pdf, load as a pymupdf document
+        if is_pdf(file_path):
+            pymupdf_doc = pymupdf.open(file_path)
+            #print("pymupdf_doc:", pymupdf_doc)
+        elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
+            # Convert image to a pymupdf document
+            pymupdf_doc = pymupdf.open()  # Create a new empty document
+            img = Image.open(file_path)  # Open the image file
+            rect = pymupdf.Rect(0, 0, img.width, img.height)  # Create a rectangle for the image
+            page = pymupdf_doc.new_page(width=img.width, height=img.height)  # Add a new page
+            page.insert_image(rect, filename=file_path)  # Insert the image into the page
+            # Ensure to save the document after processing
+            #pymupdf_doc.save(output_path)  # Uncomment and specify output_path if needed
+            #pymupdf_doc.close()  # Close the PDF document
 
         toc = time.perf_counter()
         out_time = f"File '{file_path_without_ext}' prepared in {toc - tic:0.1f} seconds."
@@ -270,8 +329,12 @@ def prepare_image_or_pdf(
 
         out_message.append(out_time)
         out_message_out = '\n'.join(out_message)
+
+        number_of_pages = len(image_file_paths)
+
+        print("At end of prepare_image_or_pdf function - current_loop_page_number:", current_loop_page_number)
     
-    return out_message_out, converted_file_paths, image_file_paths
+    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     file_path_without_ext = get_file_path_end(in_file_path)

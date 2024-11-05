@@ -9,7 +9,8 @@ import PIL
 from PIL import ImageDraw, ImageFont, Image
 from typing import Optional, Tuple, Union
 from copy import deepcopy
-import string  # Import string to get a list of common punctuation characters
+from tools.helper_functions import clean_unicode_text
+#import string  # Import string to get a list of common punctuation characters
 
 @dataclass
 class OCRResult:
@@ -445,7 +446,7 @@ class CustomImageAnalyzerEngine:
         
         return [
             OCRResult(
-                text=ocr_result['text'][i],
+                text=clean_unicode_text(ocr_result['text'][i]),
                 left=ocr_result['left'][i],
                 top=ocr_result['top'][i],
                 width=ocr_result['width'][i],

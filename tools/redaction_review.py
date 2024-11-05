@@ -18,9 +18,9 @@ def decrease_page(number:int):
     '''
     #print("number:", str(number))
     if number > 1:
-        return number - 1
+        return number - 1, number - 1
     else:
-        return 1
+        return 1, 1
 
 def increase_page(number:int, image_annotator_object:AnnotatedImageData):
     '''
@@ -28,14 +28,14 @@ def increase_page(number:int, image_annotator_object:AnnotatedImageData):
     '''
 
     if not image_annotator_object:
-        return 1
+        return 1, 1
 
     max_pages = len(image_annotator_object)
 
     if number < max_pages:
-        return number + 1
+        return number + 1, number + 1
     else:
-        return max_pages
+        return max_pages, max_pages
 
 def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int):
     # print("\nImage annotator object:", image_annotator_object)
@@ -51,7 +51,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int):
         show_share_button=False,
         show_remove_button=False,
         interactive=False
-    ), gr.Number(label = "Current page (select page number then press enter)", value=1, precision=0)
+    ), gr.Number(label = "Page (press enter to change)", value=1, precision=0)
 
     if page_num is None:
         page_num = 0
@@ -89,9 +89,9 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int):
         interactive=True
     )
 
-    number_reported = gr.Number(label = "Current page (select page number then press enter)", value=page_num_reported, precision=0)
+    number_reported = gr.Number(label = "Page (press enter to change)", value=page_num_reported, precision=0)
 
-    return out_image_annotator, number_reported
+    return out_image_annotator, number_reported, number_reported
 
 def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_page:int, previous_page:int, all_image_annotations:List[AnnotatedImageData]):
     '''
@@ -99,7 +99,7 @@ def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_
     '''
     #If no previous page or is 0, i.e. first time run, then make no changes
     if not previous_page:
-        return all_image_annotations, current_page
+        return all_image_annotations, current_page, current_page
 
     if not current_page:
         current_page = 1
@@ -114,7 +114,7 @@ def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_
 
     #print("all_image_annotations after:",all_image_annotations)
 
-    return all_image_annotations, current_page
+    return all_image_annotations, current_page, current_page
 
 def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Document, all_image_annotations:List[AnnotatedImageData], current_page:int, progress=gr.Progress(track_tqdm=True)):
     '''
@@ -132,7 +132,11 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
         print("No image annotations found")
         return doc, all_image_annotations
     
-    file_path = file_paths[-1].name
+    if isinstance(file_paths, list):
+        file_path = file_paths[-1].name
+    else:
+        file_path = file_paths
+
     print("file_path:", file_path)
     file_base = get_file_path_end(file_path)
     

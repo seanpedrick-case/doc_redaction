@@ -181,23 +181,27 @@ def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=buck
         local_file_paths = [local_file_paths]
 
     for file in local_file_paths:
-        try:
-            # Get file name off file path
-            file_name = os.path.basename(file)
+        if s3_client:
+            #print(s3_client)
+            try:
+                # Get file name off file path
+                file_name = os.path.basename(file)
 
-            s3_key_full = s3_key + file_name
-            print("S3 key: ", s3_key_full)
+                s3_key_full = s3_key + file_name
+                print("S3 key: ", s3_key_full)
 
-            s3_client.upload_file(file, s3_bucket, s3_key_full)
-            out_message = "File " + file_name + " uploaded successfully!"
-            print(out_message)
-        
-        except Exception as e:
-            out_message = f"Error uploading file(s): {e}"
-            print(out_message)
+                s3_client.upload_file(file, s3_bucket, s3_key_full)
+                out_message = "File " + file_name + " uploaded successfully!"
+                print(out_message)
+            
+            except Exception as e:
+                out_message = f"Error uploading file(s): {e}"
+                print(out_message)
 
-        final_out_message.append(out_message)
-        final_out_message_str = '\n'.join(final_out_message)
+            final_out_message.append(out_message)
+            final_out_message_str = '\n'.join(final_out_message)
+
+        else: final_out_message_str = "Could not connect to AWS."
 
     return final_out_message_str
         

@@ -141,7 +141,7 @@ class LoadedSpacyNlpEngine(SpacyNlpEngine):
         self.nlp = {"en": loaded_spacy_model}
 
 # %%
-# Load spacy model
+#Load spacy model
 try:
 	import en_core_web_lg
 	nlp = en_core_web_lg.load()
@@ -151,6 +151,16 @@ except:
 	download("en_core_web_lg")
 	nlp = spacy.load("en_core_web_lg")
 	print("Successfully downloaded and imported spaCy model")
+     
+# try:
+# 	import en_core_web_sm
+# 	nlp = en_core_web_sm.load()
+# 	print("Successfully imported spaCy model")
+
+# except:
+# 	download("en_core_web_sm")
+# 	nlp = spacy.load("en_core_web_sm")
+# 	print("Successfully downloaded and imported spaCy model")
 
 # Pass the loaded model to the new LoadedSpacyNlpEngine
 loaded_nlp_engine = LoadedSpacyNlpEngine(loaded_spacy_model = nlp)

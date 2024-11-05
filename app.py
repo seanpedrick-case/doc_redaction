@@ -43,29 +43,38 @@ with app:
     ###
     # STATE VARIABLES
     ###
-    prepared_pdf_state = gr.State([])
-    output_image_files_state = gr.State([])
-    output_file_list_state = gr.State([])
-    text_output_file_list_state = gr.State([])
-    log_files_output_list_state = gr.State([]) 
-    first_loop_state = gr.State(True)
-    second_loop_state = gr.State(False)
+
+    pdf_doc_state = gr.State([])    
+    all_image_annotations_state = gr.State([])
+    all_line_level_ocr_results_df_state = gr.State(pd.DataFrame())
+    all_decision_process_table_state = gr.State(pd.DataFrame())
+
+    def reset_state_vars():
+        return [], [], pd.DataFrame(), pd.DataFrame()
+
 
     in_allow_list_state = gr.State(pd.DataFrame())
 
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
 
-    pdf_doc_state = gr.State([])
+    first_loop_state = gr.State(True)
+    second_loop_state = gr.State(False)
+
+    prepared_pdf_state = gr.State([])
     images_pdf_state = gr.State([]) # List of pdf pages converted to PIL images
-    all_image_annotations_state = gr.State([])
+    
+    output_image_files_state = gr.State([])
+    output_file_list_state = gr.State([])
+    text_output_file_list_state = gr.State([])
+    log_files_output_list_state = gr.State([]) 
 
     # Logging state
-    feedback_logs_state = gr.State(feedback_logs_folder + 'log.csv')
+    feedback_logs_state = gr.State(feedback_logs_folder + 'dataset1.csv') #'log.csv')
     feedback_s3_logs_loc_state = gr.State(feedback_logs_folder)
-    access_logs_state = gr.State(access_logs_folder + 'log.csv')
+    access_logs_state = gr.State(access_logs_folder + 'dataset1.csv') #'log.csv')
     access_s3_logs_loc_state = gr.State(access_logs_folder)
-    usage_logs_state = gr.State(usage_logs_folder + 'log.csv')
+    usage_logs_state = gr.State(usage_logs_folder + 'dataset1.csv') #'log.csv')
     usage_s3_logs_loc_state = gr.State(usage_logs_folder)    
 
     # Invisible elements effectively used as state variables
@@ -93,21 +102,23 @@ with app:
 
     NOTE: In testing the app seems to find about 60% of personal information on a given (typed) page of text. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed.
 
-    This app accepts a maximum file size of 50mb. Please consider giving feedback for the quality of the answers underneath the redact buttons when the option appears, this will help to improve the app.
+    This app accepts a maximum file size of 100mb. Please consider giving feedback for the quality of the answers underneath the redact buttons when the option appears, this will help to improve the app.
     """)
 
     # PDF / IMAGES TAB
     with gr.Tab("PDFs/images"):
         with gr.Accordion("Redact document", open = True):
-            in_doc_files = gr.File(label="Choose document/image files (PDF, JPG, PNG)", file_count= "multiple", file_types=['.pdf', '.jpg', '.png', '.json'])
+            in_doc_files = gr.File(label="Choose a document or image file (PDF, JPG, PNG)", file_count= "single", file_types=['.pdf', '.jpg', '.png', '.json'])
             in_redaction_method = gr.Radio(label="Choose document redaction method. AWS Textract has a cost per page so please only use when needed.", value = "Simple text analysis - PDFs with selectable text", choices=["Simple text analysis - PDFs with selectable text", "Quick image analysis - typed text", "Complex image analysis - docs with handwriting/signatures (AWS Textract)"])
             gr.Markdown("""If you only want to redact certain pages, or certain entities (e.g. just email addresses), please go to the redaction settings tab.""")
             document_redact_btn = gr.Button("Redact document(s)", variant="primary")
+            current_loop_page_number = gr.Number(value=0,precision=0, interactive=False, label = "Last redacted page in document", visible=False)
+            page_break_return = gr.Checkbox(value = False, label="Page break reached", visible=False)
         
         with gr.Row():
             output_summary = gr.Textbox(label="Output summary")
             output_file = gr.File(label="Output files")
-            text_documents_done = gr.Number(value=0, label="Number of documents redacted", interactive=False, visible=False)
+            latest_file_completed_text = gr.Number(value=0, label="Number of documents redacted", interactive=False, visible=False)
 
         with gr.Row():
             convert_text_pdf_to_img_btn = gr.Button(value="Convert pdf to image-based pdf to apply redactions", variant="secondary", visible=False)
@@ -122,10 +133,10 @@ with app:
     with gr.Tab("Review redactions", id="tab_object_annotation"):
 
         with gr.Row():
-            annotation_last_page_button = gr.Button("Previous page")
-            annotate_current_page = gr.Number(value=1, label="Current page (select page number then press enter)", precision=0)
-            
-            annotation_next_page_button = gr.Button("Next page")
+            annotation_last_page_button = gr.Button("Previous page", scale = 3)
+            annotate_current_page = gr.Number(value=1, label="Page (press enter to change)", precision=0, scale = 2)
+            annotate_max_pages = gr.Number(value=1, label="Total pages", precision=0, interactive=False, scale = 1)
+            annotation_next_page_button = gr.Button("Next page", scale = 3)
 
         annotation_button_apply = gr.Button("Apply revised redactions", variant="primary")
 
@@ -140,6 +151,12 @@ with app:
             show_remove_button=False,
             interactive=False
         )
+
+        with gr.Row():
+            annotation_last_page_button_bottom = gr.Button("Previous page", scale = 3)
+            annotate_current_page_bottom = gr.Number(value=1, label="Page (press enter to change)", precision=0, interactive=True, scale = 2)
+            annotate_max_pages_bottom = gr.Number(value=1, label="Total pages", precision=0, interactive=False, scale = 1)
+            annotation_next_page_button_bottom = gr.Button("Next page", scale = 3)
 
         output_review_files = gr.File(label="Review output files")
 
@@ -169,7 +186,7 @@ with app:
         # Feedback elements are invisible until revealed by redaction action
         data_feedback_title = gr.Markdown(value="## Please give feedback", visible=False)
         data_feedback_radio = gr.Radio(label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 60% of personally identifiable information in a given (typed) document.",
-                choices=["The results were good", "The results were not good"], visible=False)
+                choices=["The results were good", "The results were not good"], visible=False, show_label=True)
         data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
         data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
@@ -202,35 +219,55 @@ with app:
 
     # If a custom allow list is uploaded
     in_allow_list.upload(fn=custom_regex_load, inputs=[in_allow_list], outputs=[in_allow_list_text, in_allow_list_state])
-   
+
     ###
     # PDF/IMAGE REDACTION
     ###
     in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_textbox, doc_file_name_with_extension_textbox])
 
-    document_redact_btn.click(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, text_documents_done, output_summary, first_loop_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state], api_name="prepare_doc").\
-    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, pdf_doc_state],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state], api_name="redact_doc").\
-                    then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page])
+    document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state]).\
+    then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state], api_name="prepare_doc").\
+    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return],
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state], api_name="redact_doc")#.\
+                    #then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page])
     
-    # If the output file count text box changes, keep going with redacting each document until done
-    text_documents_done.change(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, text_documents_done, output_summary, second_loop_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state]).\
-    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, text_documents_done, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, pdf_doc_state],
-                    outputs=[output_summary, output_file, output_file_list_state, text_documents_done, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state]).\
-                    then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page]).\
-                    then(fn = reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
+    # If the app has completed a batch of pages, it will run this until the end of all pages in the document
+    current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return],
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state])
     
-    annotate_current_page.submit(
-        modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page])
+    # If a file has been completed, the function will continue onto the next document
+    latest_file_completed_text.change(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page, annotate_current_page_bottom]).\
+                    then(fn=reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
+        # latest_file_completed_text.change(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, current_loop_page_number], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state]).\
+    # then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return],
+                    # outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state]).\
+                    #then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page]).\
+                    #then(fn=reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
+    
+    ### REVIEW REDACTIONS
 
-    annotation_last_page_button.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page])
-    annotation_next_page_button.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page])
+    # Page controls at top
+    annotate_current_page.submit(
+        modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+    
+    annotation_last_page_button.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page, annotate_current_page_bottom]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+    annotation_next_page_button.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page, annotate_current_page_bottom]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
 
     #annotation_button_get.click(get_boxes_json, annotator, json_boxes)
     annotation_button_apply.click(apply_redactions, inputs=[annotator, in_doc_files, pdf_doc_state, all_image_annotations_state, annotate_current_page], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files], scroll_to_output=True)
+
+    # Page controls at bottom
+    annotate_current_page_bottom.submit(
+        modify_existing_page_redactions, inputs = [annotator, annotate_current_page_bottom, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+
+    annotation_last_page_button_bottom.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page, annotate_current_page_bottom]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+    annotation_next_page_button_bottom.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page, annotate_current_page_bottom]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
 
     ###
     # TABULAR DATA REDACTION
@@ -281,9 +318,9 @@ print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
 if __name__ == "__main__":
     if os.environ['COGNITO_AUTH'] == "1":
-        app.queue().launch(show_error=True, auth=authenticate_user, max_file_size='50mb')
+        app.queue().launch(show_error=True, auth=authenticate_user, max_file_size='100mb')
     else:
-        app.queue().launch(show_error=True, inbrowser=True, max_file_size='50mb')
+        app.queue().launch(show_error=True, inbrowser=True, max_file_size='100mb')
 
 
 # AWS options - placeholder for possibility of storing data on s3 and retrieving it in app

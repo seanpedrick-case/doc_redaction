@@ -1,6 +1,8 @@
 import os
+import re
 import gradio as gr
 import pandas as pd
+import unicodedata
 
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists
@@ -166,7 +168,7 @@ def add_folder_to_path(folder_path: str):
 
 # Upon running a process, the feedback buttons are revealed
 def reveal_feedback_buttons():
-    return gr.Radio(visible=True), gr.Textbox(visible=True), gr.Button(visible=True), gr.Markdown(visible=True)
+    return gr.Radio(visible=True, label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 60% of personally identifiable information in a given (typed) document."), gr.Textbox(visible=True), gr.Button(visible=True), gr.Markdown(visible=True)
 
 def wipe_logs(feedback_logs_loc, usage_logs_loc):
     try:
@@ -239,3 +241,25 @@ async def get_connection_params(request: gr.Request):
     else:
         print("No session parameters found.")
         return "",""
+    
+
+def clean_unicode_text(text):
+    # Step 1: Normalize unicode characters to decompose any special forms
+    normalized_text = unicodedata.normalize('NFKC', text)
+
+    # Step 2: Replace smart quotes and special punctuation with standard ASCII equivalents
+    replacements = {
+        '‘': "'", '’': "'", '“': '"', '”': '"', 
+        '–': '-', '—': '-', '…': '...', '•': '*',
+    }
+
+    # Perform replacements
+    for old_char, new_char in replacements.items():
+        normalized_text = normalized_text.replace(old_char, new_char)
+
+    # Step 3: Optionally remove non-ASCII characters if needed
+    # This regex removes any remaining non-ASCII characters, if desired.
+    # Comment this line if you want to keep all Unicode characters.
+    cleaned_text = re.sub(r'[^\x00-\x7F]+', '', normalized_text)
+
+    return cleaned_text

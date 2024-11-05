@@ -7,11 +7,16 @@ presidio_anonymizer==2.2.355
 presidio-image-redactor==0.0.53
 pikepdf==8.15.1
 pandas==2.2.3
-spacy==3.8.2
+spacy==3.7.5
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
-gradio==4.44.1
-boto3==1.35.40
+#en_core_web_sm @ https://github.com/explosion/spacy-#models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-#3.8.0.tar.gz
+gradio==5.4.0
+boto3==1.35.54
 pyarrow==17.0.0
 openpyxl==3.1.2
 Faker==22.2.0
 gradio_image_annotation==0.2.3
+numpy==1.26.4
+
+
+
