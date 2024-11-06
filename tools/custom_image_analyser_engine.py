@@ -477,122 +477,152 @@ class CustomImageAnalyzerEngine:
         allow_list = text_analyzer_kwargs.get('allow_list', [])
 
         combined_results = []
+        # Initialize variables for batching
+        current_batch = ""
+        current_batch_mapping = []  # List of (start_pos, line_index, original_text) tuples
+        analyzer_results_by_line = [[] for _ in line_level_ocr_results]  # Store results for each line
+
+        # Process OCR results in batches
         for i, line_level_ocr_result in enumerate(line_level_ocr_results):
-
-            analyzer_result = []
-            response = []
-
-            # Analyze each OCR result (line) individually
-
             if pii_identification_method == "Local":
                 analyzer_result = self.analyzer_engine.analyze(
                     text=line_level_ocr_result.text, **text_analyzer_kwargs
                 )
+                analyzer_results_by_line[i] = analyzer_result
 
             elif pii_identification_method == "AWS Comprehend":
-
                 if len(line_level_ocr_result.text) >= 3:
+                    # Add line to current batch with a separator
+                    if current_batch:
+                        current_batch += " | "  # Use a separator that's unlikely to appear in the text
+                    
+                    start_pos = len(current_batch)
+                    current_batch += line_level_ocr_result.text
+                    current_batch_mapping.append((start_pos, i, line_level_ocr_result.text))
 
-                    try:
-                        # Call the detect_pii_entities method
-                        response = comprehend_client.detect_pii_entities(
-                            Text=line_level_ocr_result.text,
-                            LanguageCode=text_analyzer_kwargs["language"] # Specify the language of the text
-                        )
-                    except Exception as e:
-                        print(e)
-                        time.sleep(3)
+                    # Process batch if it's approaching 300 characters or this is the last line
+                    if len(current_batch) >= 200 or i == len(line_level_ocr_results) - 1:
+                        print("length of text for Comprehend:", len(current_batch))
 
-                        response = comprehend_client.detect_pii_entities(
-                            Text=line_level_ocr_result.text,
-                            LanguageCode=text_analyzer_kwargs["language"] # Specify the language of the text
-                        )
+                        try:
+                            response = comprehend_client.detect_pii_entities(
+                                Text=current_batch,
+                                LanguageCode=text_analyzer_kwargs["language"]
+                            )
+                        except Exception as e:
+                            print(e)
+                            time.sleep(3)
+                            response = comprehend_client.detect_pii_entities(
+                                Text=current_batch,
+                                LanguageCode=text_analyzer_kwargs["language"]
+                            )
 
-                    comprehend_query_number += 1
+                        comprehend_query_number += 1
 
-                if response:
-                    for result in response["Entities"]:
-                        result_text = line_level_ocr_result.text[result["BeginOffset"]:result["EndOffset"]+1]
+                        # Map results back to original lines
+                        if response and "Entities" in response:
+                            for entity in response["Entities"]:
+                                entity_start = entity["BeginOffset"]
+                                entity_end = entity["EndOffset"]
+                                
+                                # Find which line this entity belongs to
+                                for batch_start, line_idx, original_text in current_batch_mapping:
+                                    batch_end = batch_start + len(original_text)
+                                    
+                                    # Check if entity belongs to this line
+                                    if batch_start <= entity_start < batch_end:
+                                        # Adjust offsets relative to the original line
+                                        relative_start = entity_start - batch_start
+                                        relative_end = min(entity_end - batch_start, len(original_text))
+                                        
+                                        result_text = original_text[relative_start:relative_end]
+                                        
+                                        if result_text not in allow_list:
+                                            if entity.get("Type") in chosen_redact_comprehend_entities:
+                                                # Create a new entity with adjusted positions
+                                                adjusted_entity = entity.copy()
+                                                adjusted_entity["BeginOffset"] = relative_start
+                                                adjusted_entity["EndOffset"] = relative_end
+                                                
+                                                recogniser_entity = recognizer_result_from_dict(adjusted_entity)
+                                                analyzer_results_by_line[line_idx].append(recogniser_entity)
+                        
+                        # Reset batch
+                        current_batch = ""
+                        current_batch_mapping = []
 
-                        if result_text not in allow_list:
-
-                            if result.get("Type") in chosen_redact_comprehend_entities:
-
-                                recogniser_entity = recognizer_result_from_dict(result)
-                                analyzer_result.append(recogniser_entity)
-
-
-            if i < len(ocr_results_with_children):  # Check if i is a valid index
-                child_level_key = list(ocr_results_with_children.keys())[i]
-            else:
-               continue            
-
-            ocr_results_with_children_line_level = ocr_results_with_children[child_level_key]
-
-            # Go through results to add bounding boxes            
-            for result in analyzer_result:
-                # Extract the relevant portion of text based on start and end
-                relevant_text = line_level_ocr_result.text[result.start:result.end]
-                
-                # Find the corresponding entry in ocr_results_with_children
-                child_words = ocr_results_with_children_line_level['words']
-
-                 # Initialize bounding box values
-                left, top, bottom = float('inf'), float('inf'), float('-inf')  
-                all_words = ""
-                word_num = 0  # Initialize word count
-                total_width = 0  # Initialize total width
-
-                for word_text in relevant_text.split():  # Iterate through each word in relevant_text
-                    #print("Looking for word_text:", word_text)
-                    for word in child_words:
-                        #if word['text'].strip(string.punctuation).strip() == word_text.strip(string.punctuation).strip():  # Check for exact match
-                        if word_text in word['text']:
-                            found_word = word
-                            #print("found_word:", found_word)
-
-                            if word_num == 0:  # First word
-                                left = found_word['bounding_box'][0]
-                                top = found_word['bounding_box'][1]
-                            bottom = max(bottom, found_word['bounding_box'][3])  # Update bottom for all words
-                            all_words += found_word['text'] + " "  # Concatenate words
-                            total_width = found_word['bounding_box'][2] - left  # Add each word's width
-                            word_num += 1
-                            break  # Move to the next word in relevant_text
-
-                width = total_width + horizontal_buffer # Set width to total width of all matched words
-                height = bottom - top if word_num > 0 else 0  # Calculate height
-
-                relevant_line_ocr_result = OCRResult(
-                    text=relevant_text,
-                    left=left,
-                    top=top - height_buffer,
-                    width=width,
-                    height=height + height_buffer
-                )
-
-                if not ocr_results_with_children_line_level:
-                    # Fallback to previous method if not found in ocr_results_with_children
-                    print("No child info found")
+            # Process results for each line
+        for i, analyzer_result in enumerate(analyzer_results_by_line):
+                if i >= len(ocr_results_with_children):
                     continue
 
-                # Reset the word positions indicated in the relevant ocr_result - i.e. it starts from 0 and ends at word length
-                result_reset_pos = result
-                result_reset_pos.start = 0
-                result_reset_pos.end = len(relevant_text)
-                
-                #print("result_reset_pos:", result_reset_pos)
-                #print("relevant_line_ocr_result:", relevant_line_ocr_result)
-                #print("ocr_results_with_children_line_level:", ocr_results_with_children_line_level)
+                child_level_key = list(ocr_results_with_children.keys())[i]
+                ocr_results_with_children_line_level = ocr_results_with_children[child_level_key]
 
-                # Map the analyzer results to bounding boxes for this line
-                line_results = self.map_analyzer_results_to_bounding_boxes(
-                    [result_reset_pos], [relevant_line_ocr_result], relevant_line_ocr_result.text, allow_list, ocr_results_with_children_line_level
-                )
+                # Go through results to add bounding boxes            
+                for result in analyzer_result:
+                    # Extract the relevant portion of text based on start and end
+                    relevant_text = line_level_ocr_results[i].text[result.start:result.end]
+                    
+                    # Find the corresponding entry in ocr_results_with_children
+                    child_words = ocr_results_with_children_line_level['words']
 
-                #print("line_results:", line_results)
-                
-                combined_results.extend(line_results)
+                     # Initialize bounding box values
+                    left, top, bottom = float('inf'), float('inf'), float('-inf')  
+                    all_words = ""
+                    word_num = 0  # Initialize word count
+                    total_width = 0  # Initialize total width
+
+                    for word_text in relevant_text.split():  # Iterate through each word in relevant_text
+                        #print("Looking for word_text:", word_text)
+                        for word in child_words:
+                            #if word['text'].strip(string.punctuation).strip() == word_text.strip(string.punctuation).strip():  # Check for exact match
+                            if word_text in word['text']:
+                                found_word = word
+                                #print("found_word:", found_word)
+
+                                if word_num == 0:  # First word
+                                    left = found_word['bounding_box'][0]
+                                    top = found_word['bounding_box'][1]
+                                bottom = max(bottom, found_word['bounding_box'][3])  # Update bottom for all words
+                                all_words += found_word['text'] + " "  # Concatenate words
+                                total_width = found_word['bounding_box'][2] - left  # Add each word's width
+                                word_num += 1
+                                break  # Move to the next word in relevant_text
+
+                    width = total_width + horizontal_buffer # Set width to total width of all matched words
+                    height = bottom - top if word_num > 0 else 0  # Calculate height
+
+                    relevant_line_ocr_result = OCRResult(
+                        text=relevant_text,
+                        left=left,
+                        top=top - height_buffer,
+                        width=width,
+                        height=height + height_buffer
+                    )
+
+                    if not ocr_results_with_children_line_level:
+                        # Fallback to previous method if not found in ocr_results_with_children
+                        print("No child info found")
+                        continue
+
+                    # Reset the word positions indicated in the relevant ocr_result - i.e. it starts from 0 and ends at word length
+                    result_reset_pos = result
+                    result_reset_pos.start = 0
+                    result_reset_pos.end = len(relevant_text)
+                    
+                    #print("result_reset_pos:", result_reset_pos)
+                    #print("relevant_line_ocr_result:", relevant_line_ocr_result)
+                    #print("ocr_results_with_children_line_level:", ocr_results_with_children_line_level)
+
+                    # Map the analyzer results to bounding boxes for this line
+                    line_results = self.map_analyzer_results_to_bounding_boxes(
+                        [result_reset_pos], [relevant_line_ocr_result], relevant_line_ocr_result.text, allow_list, ocr_results_with_children_line_level
+                    )
+
+                    #print("line_results:", line_results)
+                    
+                    combined_results.extend(line_results)
 
         return combined_results, comprehend_query_number
 

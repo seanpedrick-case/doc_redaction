@@ -133,7 +133,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
-        print("First_loop_state is True")
+        #print("First_loop_state is True")
         latest_file_completed = 0
         current_loop_page = 0
         out_file_paths = []
@@ -835,7 +835,7 @@ def redact_image_pdf(file_path:str,
     else: page_min = page_min - 1
 
     print("Page range:", str(page_min + 1), "to", str(page_max))
-    print("Current_loop_page:", current_loop_page)
+    #print("Current_loop_page:", current_loop_page)
     
     if analysis_type == "Quick image analysis - typed text": ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + ".csv"
     elif analysis_type == "Complex image analysis - docs with handwriting/signatures (AWS Textract)": ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + "_textract.csv"    
@@ -1300,70 +1300,7 @@ def merge_text_bounding_boxes(analyser_results:CustomImageRecognizerResult, char
     
     return analysed_bounding_boxes
 
-def identify_pii_in_text_container(text_container:OCRResult, language:str, chosen_redact_entities:List[str], chosen_redact_comprehend_entities:List[str], score_threshold:float, allow_list:List[str], pii_identification_method:str="Local") -> List[RecognizerResult]:
-    '''
-    Take text and bounding boxes in OCRResult format and analyze it for PII using spacy and the Microsoft Presidio package, or the AWS Comprehend service.
-    '''
-    comprehend_query_number = 0
-    analyser_results = []
-    response = []
 
-    #text_to_analyse = initial_clean(text_container.text).strip()
-
-    text_to_analyse = text_container.text
-
-    if chosen_redact_entities:
-        if pii_identification_method == "Local":
-            analyser_results = nlp_analyser.analyze(text=text_to_analyse,
-                                                    language=language, 
-                                                    entities=chosen_redact_entities,
-                                                    score_threshold=score_threshold,
-                                                    return_decision_process=True,
-                                                    allow_list=allow_list)
-        
-        elif pii_identification_method == "AWS Comprehend":
-
-
-            if len(text_to_analyse) >= 3:
-
-                    try:
-                        # Call the detect_pii_entities method
-                        response = comprehend_client.detect_pii_entities(
-                        Text=text_to_analyse,
-                        LanguageCode=language  # Specify the language of the text
-                        )
-                    except Exception as e:
-                        print(e)
-                        time.sleep(3)
-
-                        response = comprehend_client.detect_pii_entities(
-                        Text=text_to_analyse,
-                        LanguageCode=language  # Specify the language of the text
-                        )
-
-            comprehend_query_number += 1
-
-            if response:
-                for result in response["Entities"]:
-
-                    result_text = text_to_analyse[result["BeginOffset"]:result["EndOffset"]+1]
-
-                    if result_text not in allow_list:
-                        if result.get("Type") in chosen_redact_comprehend_entities:
-
-                            recogniser_entity = recognizer_result_from_dict(result)
-
-                            analyser_results.append(recogniser_entity)
-            else:
-                analyser_results = []
-
-        else:
-            analyser_results = []
-    else:
-        analyser_results = []
-    
-         
-    return analyser_results, comprehend_query_number
 
 def create_text_redaction_process_results(analyser_results, analysed_bounding_boxes, page_num):
     decision_process_table = pd.DataFrame()
@@ -1531,27 +1468,103 @@ def redact_text_pdf(
 
                             page_text_outputs = pd.concat([page_text_outputs, line_level_text_results_df])
 
-                        # Analyse each line of text in turn for PII and add to list
-                        for i, text_line in enumerate(line_level_text_results_list):
+                        # Initialize batching variables
+                        current_batch = ""
+                        current_batch_mapping = []  # List of (start_pos, line_index, OCRResult) tuples
+                        all_text_line_results = []  # Store results for all lines
 
+                        # First pass: collect all lines into batches
+                        for i, text_line in enumerate(line_level_text_results_list):
+                            if chosen_redact_entities:
+                                if pii_identification_method == "Local":
+                                    # Process immediately for local analysis
+                                    text_line_analyser_result = nlp_analyser.analyze(
+                                        text=text_line.text,
+                                        language=language,
+                                        entities=chosen_redact_entities,
+                                        score_threshold=score_threshold,
+                                        return_decision_process=True,
+                                        allow_list=allow_list
+                                    )
+                                    all_text_line_results.append((i, text_line_analyser_result))
+                                
+                                elif pii_identification_method == "AWS Comprehend":
+                                    if len(text_line.text) >= 3:
+                                        # Add separator between lines
+                                        if current_batch:
+                                            current_batch += " | "
+                                        
+                                        start_pos = len(current_batch)
+                                        current_batch += text_line.text
+                                        current_batch_mapping.append((start_pos, i, text_line))
+
+                                        # Process batch if approaching 300 characters or last line
+                                        if len(current_batch) >= 200 or i == len(line_level_text_results_list) - 1:
+                                            print("length of text for Comprehend:", len(current_batch))
+                                            
+                                            try:
+                                                response = comprehend_client.detect_pii_entities(
+                                                    Text=current_batch,
+                                                    LanguageCode=language
+                                                )
+                                            except Exception as e:
+                                                print(e)
+                                                time.sleep(3)
+                                                response = comprehend_client.detect_pii_entities(
+                                                    Text=current_batch,
+                                                    LanguageCode=language
+                                                )
+
+                                            comprehend_query_number += 1
+
+                                            # Process response and map back to original lines
+                                            if response and "Entities" in response:
+                                                for entity in response["Entities"]:
+                                                    entity_start = entity["BeginOffset"]
+                                                    entity_end = entity["EndOffset"]
+
+                                                    # Find which line this entity belongs to
+                                                    for batch_start, line_idx, original_line in current_batch_mapping:
+                                                        batch_end = batch_start + len(original_line.text)
+
+                                                        # Check if entity belongs to this line
+                                                        if batch_start <= entity_start < batch_end:
+                                                            # Adjust offsets relative to original line
+                                                            relative_start = entity_start - batch_start
+                                                            relative_end = min(entity_end - batch_start, len(original_line.text))
+                                                            
+                                                            result_text = original_line.text[relative_start:relative_end]
+
+                                                            if result_text not in allow_list:
+                                                                if entity.get("Type") in chosen_redact_comprehend_entities:
+                                                                    # Create adjusted entity
+                                                                    adjusted_entity = entity.copy()
+                                                                    adjusted_entity["BeginOffset"] = relative_start
+                                                                    adjusted_entity["EndOffset"] = relative_end
+
+                                                                    recogniser_entity = recognizer_result_from_dict(adjusted_entity)
+                                                                    
+                                                                    # Add to results for this line
+                                                                    existing_results = next((results for idx, results in all_text_line_results if idx == line_idx), [])
+                                                                    if not existing_results:
+                                                                        all_text_line_results.append((line_idx, [recogniser_entity]))
+                                                                    else:
+                                                                        existing_results.append(recogniser_entity)
+
+                                            # Reset batch
+                                            current_batch = ""
+                                            current_batch_mapping = []
+
+                        # Second pass: process results for each line
+                        for i, text_line in enumerate(line_level_text_results_list):
                             text_line_analyser_result = []
                             text_line_bounding_boxes = []
 
-                            # text_line_analyser_result = identify_pii_in_text_container(text_line, language, chosen_redact_entities, score_threshold, allow_list)
-
-                            #pii_identification_method="AWS Comprehend"#"Local"
-
-                            if chosen_redact_entities:
-
-                                text_line_analyser_result, comprehend_query_number_new = identify_pii_in_text_container(text_line, language, chosen_redact_entities, chosen_redact_comprehend_entities, score_threshold, allow_list, pii_identification_method)
-
-                                comprehend_query_number = comprehend_query_number + comprehend_query_number_new
-                                
-                            else:
-                                text_line_analyser_result = []
-
-                            # Merge bounding boxes for the line if multiple found close together                    
-                            if text_line_analyser_result:
+                            # Get results for this line
+                            line_results = next((results for idx, results in all_text_line_results if idx == i), [])
+                            
+                            if line_results:
+                                text_line_analyser_result = line_results
 
                                 #print("Analysed text container, now merging bounding boxes")
 
