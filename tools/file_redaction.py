@@ -309,7 +309,7 @@ def choose_and_run_redactor(file_paths:List[str],
             latest_file_completed += 1
             current_loop_page = 999
 
-            if latest_file_completed != len(file_paths):
+            if latest_file_completed != len(file_paths_list):
                 print("Completed file number:", str(latest_file_completed), "there are more files to do")                    
 
             # Save file
@@ -384,15 +384,6 @@ def choose_and_run_redactor(file_paths:List[str],
             #     if isinstance(out_message, list):
             #         out_message.append(out_message_new)  # Ensure out_message is a list of strings
 
-            if latest_file_completed != len(file_paths):
-                print("Completed file number:", str(latest_file_completed), " there are more files to do")
-                
-
-            # Make a combined message for the file
-            if isinstance(out_message, list):
-                combined_out_message = '\n'.join(out_message)  # Ensure out_message is a list of strings
-            else: combined_out_message = out_message
-
 
    # If textract requests made, write to logging file
     if all_request_metadata:
@@ -409,7 +400,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
     if combined_out_message: out_message = combined_out_message
     
-    print("\nout_message at choose_and_run_redactor end is:", out_message)
+    #print("\nout_message at choose_and_run_redactor end is:", out_message)
 
     # Ensure no duplicated output files
     log_files_output_paths = list(set(log_files_output_paths))

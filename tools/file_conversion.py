@@ -113,8 +113,6 @@ def process_file(file_path):
         # Run your function for processing PDF files here
         img_object = convert_pdf_to_images(file_path)
 
-        print("img_object has length", len(img_object), "and contains", img_object)
-
     else:
         print(f"{file_path} is not an image or PDF file.")
         img_object = ['']
