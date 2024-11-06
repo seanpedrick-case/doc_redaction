@@ -952,7 +952,7 @@ def redact_image_pdf(file_path:str,
                     score_threshold=score_threshold
                 )                
 
-                comprehend_query_number = comprehend_query_number_new
+                comprehend_query_number = comprehend_query_number + comprehend_query_number_new
 
                 # redaction_bboxes = choose_redaction_method_and_analyse_pii(line_level_ocr_results,
                 #     line_level_ocr_results_with_children,
@@ -1385,7 +1385,6 @@ def redact_text_pdf(
     '''
 
     tic = time.perf_counter()
-    comprehend_query_number_new = 0
 
     # Open with Pikepdf to get text lines
     pikepdf_pdf = Pdf.open(filename)
