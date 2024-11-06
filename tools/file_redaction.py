@@ -41,7 +41,7 @@ from tools.presidio_analyzer_custom import recognizer_result_from_dict
 page_break_value = get_or_create_env_var('page_break_value', '500')
 print(f'The value of page_break_value is {page_break_value}')
 
-max_time_value = get_or_create_env_var('max_time_value', '105')
+max_time_value = get_or_create_env_var('max_time_value', '30')
 print(f'The value of max_time_value is {max_time_value}')
 
 
@@ -160,9 +160,9 @@ def choose_and_run_redactor(file_paths:List[str],
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
     if latest_file_completed >= number_of_files:
 
-        print("latest_file_completed is equal to or greater than the number of files")
+        print("Completed last file")
         # Set to a very high number so as not to mix up with subsequent file processing by the user
-        latest_file_completed = 99
+        # latest_file_completed = 99
         current_loop_page = 0
 
         if isinstance(out_message, list):
@@ -383,6 +383,10 @@ def choose_and_run_redactor(file_paths:List[str],
 
             #     if isinstance(out_message, list):
             #         out_message.append(out_message_new)  # Ensure out_message is a list of strings
+        else:
+            toc = time.perf_counter()
+            time_taken = toc - tic
+            estimated_time_taken_state = estimated_time_taken_state + time_taken
 
 
    # If textract requests made, write to logging file

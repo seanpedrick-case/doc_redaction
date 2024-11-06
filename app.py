@@ -353,7 +353,7 @@ with app:
     # Log processing time/token usage when making a query
     usage_callback = gr.CSVLogger(dataset_file_name=log_file_name)
     usage_callback.setup([session_hash_textbox, doc_file_name_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], usage_logs_folder)
-    estimated_time_taken_number.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, doc_file_name_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], None, preprocess=False).\
+    latest_file_completed_text.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, doc_file_name_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Launch the Gradio app
