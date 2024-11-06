@@ -41,7 +41,7 @@ from tools.presidio_analyzer_custom import recognizer_result_from_dict
 page_break_value = get_or_create_env_var('page_break_value', '500')
 print(f'The value of page_break_value is {page_break_value}')
 
-max_time_value = get_or_create_env_var('max_time_value', '30')
+max_time_value = get_or_create_env_var('max_time_value', '105')
 print(f'The value of max_time_value is {max_time_value}')
 
 
