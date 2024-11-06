@@ -4,6 +4,9 @@ import gradio as gr
 import pandas as pd
 import unicodedata
 
+def reset_state_vars():
+    return [], [], pd.DataFrame(), pd.DataFrame(), 0, ""
+
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists
     value = os.environ.get(var_name)
@@ -183,64 +186,60 @@ def wipe_logs(feedback_logs_loc, usage_logs_loc):
 async def get_connection_params(request: gr.Request):
     base_folder = ""
 
-    if request:
-        #print("request user:", request.username)
+    #print("request user:", request.username)
 
-        #request_data = await request.json()  # Parse JSON body
-        #print("All request data:", request_data)
-        #context_value = request_data.get('context') 
-        #if 'context' in request_data:
-        #     print("Request context dictionary:", request_data['context'])
+    #request_data = await request.json()  # Parse JSON body
+    #print("All request data:", request_data)
+    #context_value = request_data.get('context') 
+    #if 'context' in request_data:
+    #     print("Request context dictionary:", request_data['context'])
 
-        # print("Request headers dictionary:", request.headers)
-        # print("All host elements", request.client)           
-        # print("IP address:", request.client.host)
-        # print("Query parameters:", dict(request.query_params))
-        # To get the underlying FastAPI items you would need to use await and some fancy @ stuff for a live query: https://fastapi.tiangolo.com/vi/reference/request/
-        #print("Request dictionary to object:", request.request.body())
-        print("Session hash:", request.session_hash)
+    # print("Request headers dictionary:", request.headers)
+    # print("All host elements", request.client)           
+    # print("IP address:", request.client.host)
+    # print("Query parameters:", dict(request.query_params))
+    # To get the underlying FastAPI items you would need to use await and some fancy @ stuff for a live query: https://fastapi.tiangolo.com/vi/reference/request/
+    #print("Request dictionary to object:", request.request.body())
+    print("Session hash:", request.session_hash)
 
-        # Retrieving or setting CUSTOM_CLOUDFRONT_HEADER
-        CUSTOM_CLOUDFRONT_HEADER_var = get_or_create_env_var('CUSTOM_CLOUDFRONT_HEADER', '')
-        #print(f'The value of CUSTOM_CLOUDFRONT_HEADER is {CUSTOM_CLOUDFRONT_HEADER_var}')
+    # Retrieving or setting CUSTOM_CLOUDFRONT_HEADER
+    CUSTOM_CLOUDFRONT_HEADER_var = get_or_create_env_var('CUSTOM_CLOUDFRONT_HEADER', '')
+    #print(f'The value of CUSTOM_CLOUDFRONT_HEADER is {CUSTOM_CLOUDFRONT_HEADER_var}')
 
-        # Retrieving or setting CUSTOM_CLOUDFRONT_HEADER_VALUE
-        CUSTOM_CLOUDFRONT_HEADER_VALUE_var = get_or_create_env_var('CUSTOM_CLOUDFRONT_HEADER_VALUE', '')
-        #print(f'The value of CUSTOM_CLOUDFRONT_HEADER_VALUE_var is {CUSTOM_CLOUDFRONT_HEADER_VALUE_var}')
+    # Retrieving or setting CUSTOM_CLOUDFRONT_HEADER_VALUE
+    CUSTOM_CLOUDFRONT_HEADER_VALUE_var = get_or_create_env_var('CUSTOM_CLOUDFRONT_HEADER_VALUE', '')
+    #print(f'The value of CUSTOM_CLOUDFRONT_HEADER_VALUE_var is {CUSTOM_CLOUDFRONT_HEADER_VALUE_var}')
 
-        if CUSTOM_CLOUDFRONT_HEADER_var and CUSTOM_CLOUDFRONT_HEADER_VALUE_var:
-            if CUSTOM_CLOUDFRONT_HEADER_var in request.headers:
-                supplied_cloudfront_custom_value = request.headers[CUSTOM_CLOUDFRONT_HEADER_var]
-                if supplied_cloudfront_custom_value == CUSTOM_CLOUDFRONT_HEADER_VALUE_var:
-                    print("Custom Cloudfront header found:", supplied_cloudfront_custom_value)
-                else:
-                    raise(ValueError, "Custom Cloudfront header value does not match expected value.")
+    if CUSTOM_CLOUDFRONT_HEADER_var and CUSTOM_CLOUDFRONT_HEADER_VALUE_var:
+        if CUSTOM_CLOUDFRONT_HEADER_var in request.headers:
+            supplied_cloudfront_custom_value = request.headers[CUSTOM_CLOUDFRONT_HEADER_var]
+            if supplied_cloudfront_custom_value == CUSTOM_CLOUDFRONT_HEADER_VALUE_var:
+                print("Custom Cloudfront header found:", supplied_cloudfront_custom_value)
+            else:
+                raise(ValueError, "Custom Cloudfront header value does not match expected value.")
 
-        # Get output save folder from 1 - username passed in from direct Cognito login, 2 - Cognito ID header passed through a Lambda authenticator, 3 - the session hash.
+    # Get output save folder from 1 - username passed in from direct Cognito login, 2 - Cognito ID header passed through a Lambda authenticator, 3 - the session hash.
 
-        if request.username:
-            out_session_hash = request.username
-            base_folder = "user-files/"
-            print("Request username found:", out_session_hash)
+    if request.username:
+        out_session_hash = request.username
+        base_folder = "user-files/"
+        print("Request username found:", out_session_hash)
 
-        elif 'x-cognito-id' in request.headers:
-            out_session_hash = request.headers['x-cognito-id']
-            base_folder = "user-files/"
-            print("Cognito ID found:", out_session_hash)
+    elif 'x-cognito-id' in request.headers:
+        out_session_hash = request.headers['x-cognito-id']
+        base_folder = "user-files/"
+        print("Cognito ID found:", out_session_hash)
 
-        else:
-            out_session_hash = request.session_hash
-            base_folder = "temp-files/"
-            # print("Cognito ID not found. Using session hash as save folder:", out_session_hash)
-
-        output_folder = base_folder + out_session_hash + "/"
-        #if bucket_name:
-        #    print("S3 output folder is: " + "s3://" + bucket_name + "/" + output_folder)
-
-        return out_session_hash, output_folder, out_session_hash
     else:
-        print("No session parameters found.")
-        return "",""
+        out_session_hash = request.session_hash
+        base_folder = "temp-files/"
+        # print("Cognito ID not found. Using session hash as save folder:", out_session_hash)
+
+    output_folder = base_folder + out_session_hash + "/"
+    #if bucket_name:
+    #    print("S3 output folder is: " + "s3://" + bucket_name + "/" + output_folder)
+
+    return out_session_hash, output_folder, out_session_hash
     
 
 def clean_unicode_text(text):

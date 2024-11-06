@@ -471,6 +471,7 @@ class CustomImageAnalyzerEngine:
 
         horizontal_buffer = 0 # add pixels to right of width
         height_buffer = 2 # add pixels to bounding box height
+        comprehend_query_number = 0
         
         allow_list = text_analyzer_kwargs.get('allow_list', [])
 
@@ -493,6 +494,8 @@ class CustomImageAnalyzerEngine:
                     Text=line_level_ocr_result.text,
                     LanguageCode=text_analyzer_kwargs["language"] # Specify the language of the text
                 )
+
+                comprehend_query_number += 1
 
                 for result in response["Entities"]:
                     result_text = line_level_ocr_result.text[result["BeginOffset"]:result["EndOffset"]+1]
@@ -577,7 +580,7 @@ class CustomImageAnalyzerEngine:
                 
                 combined_results.extend(line_results)
 
-        return combined_results
+        return combined_results, comprehend_query_number
 
     @staticmethod
     def map_analyzer_results_to_bounding_boxes(

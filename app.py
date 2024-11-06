@@ -4,20 +4,20 @@ import socket
 # By default TLDExtract will try to pull files from the internet. I have instead downloaded this file locally to avoid the requirement for an internet connection.
 os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
 
+import gradio as gr
+import pandas as pd
+from datetime import datetime
 from gradio_image_annotation import image_annotator
 
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, custom_regex_load
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, custom_regex_load, reset_state_vars
 from tools.aws_functions import upload_file_to_s3, RUN_AWS_FUNCTIONS
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
 from tools.redaction_review import apply_redactions, crop, get_boxes_json, modify_existing_page_redactions, decrease_page, increase_page, update_annotator
 from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
-#from tools.aws_functions import load_data_from_aws
-import gradio as gr
-import pandas as pd
 
-from datetime import datetime
+
 today_rev = datetime.now().strftime("%Y%m%d")
 
 add_folder_to_path("tesseract/")
@@ -36,11 +36,9 @@ full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREET
 language = 'en'
 
 host_name = socket.gethostname()
-
 feedback_logs_folder = 'feedback/' + today_rev + '/' + host_name + '/'
 access_logs_folder = 'logs/' + today_rev + '/' + host_name + '/'
 usage_logs_folder = 'usage/' + today_rev + '/' + host_name + '/'
-
 
 text_ocr_option = "Simple text analysis - PDFs with selectable text"
 tesseract_ocr_option = "Quick image analysis - typed text"
@@ -70,10 +68,6 @@ with app:
     all_line_level_ocr_results_df_state = gr.State(pd.DataFrame())
     all_decision_process_table_state = gr.State(pd.DataFrame())
 
-    def reset_state_vars():
-        return [], [], pd.DataFrame(), pd.DataFrame()
-
-
     in_allow_list_state = gr.State(pd.DataFrame())
 
     session_hash_state = gr.State()
@@ -88,25 +82,32 @@ with app:
     output_image_files_state = gr.State([])
     output_file_list_state = gr.State([])
     text_output_file_list_state = gr.State([])
-    log_files_output_list_state = gr.State([]) 
+    log_files_output_list_state = gr.State([])
 
+    
     # Logging state
-    feedback_logs_state = gr.State(feedback_logs_folder + 'dataset1.csv') #'log.csv')
-    feedback_s3_logs_loc_state = gr.State(feedback_logs_folder)
-    access_logs_state = gr.State(access_logs_folder + 'dataset1.csv') #'log.csv')
-    access_s3_logs_loc_state = gr.State(access_logs_folder)
-    usage_logs_state = gr.State(usage_logs_folder + 'dataset1.csv') #'log.csv')
-    usage_s3_logs_loc_state = gr.State(usage_logs_folder)    
+    log_file_name = 'log.csv'
 
-    # Invisible elements effectively used as state variables
-    session_hash_textbox = gr.Textbox(value="", visible=False) # Invisible text box to hold the session hash/username, Textract request metadata, data file names just for logging purposes.
-    textract_metadata_textbox = gr.Textbox(value="", visible=False)
-    doc_file_name_textbox = gr.Textbox(value="", visible=False)
-    doc_file_name_with_extension_textbox = gr.Textbox(value="", visible=False)
-    data_file_name_textbox = gr.Textbox(value="", visible=False)
-    s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
-    estimated_time_taken_number = gr.Number(value=0.0, precision=1, visible=False) # This keeps track of the time taken to redact files for logging purposes.
+    feedback_logs_state = gr.State(feedback_logs_folder + log_file_name)
+    feedback_s3_logs_loc_state = gr.State(feedback_logs_folder)
+    access_logs_state = gr.State(access_logs_folder + log_file_name)
+    access_s3_logs_loc_state = gr.State(access_logs_folder)
+    usage_logs_state = gr.State(usage_logs_folder + log_file_name)
+    usage_s3_logs_loc_state = gr.State(usage_logs_folder)    
+    
+    # Invisible text boxes to hold the session hash/username, Textract request metadata, data file names just for logging purposes.
+    session_hash_textbox = gr.Textbox(label= "session_hash_textbox", value="", visible=False)
+    textract_metadata_textbox = gr.Textbox(label = "textract_metadata_textbox", value="", visible=False)
+    comprehend_query_number = gr.Number(label = "comprehend_query_number", value=0, visible=False)
+
+    doc_file_name_textbox = gr.Textbox(label = "doc_file_name_textbox", value="", visible=False)
+    doc_file_name_with_extension_textbox = gr.Textbox(label = "doc_file_name_with_extension_textbox", value="", visible=False)
+    data_file_name_textbox = gr.Textbox(label = "data_file_name_textbox", value="", visible=False)
+    
+    estimated_time_taken_number = gr.Number(label = "estimated_time_taken_number", value=0.0, precision=1, visible=False) # This keeps track of the time taken to redact files for logging purposes.
     annotate_previous_page = gr.Number(value=0, label="Previous page", precision=0, visible=False) # Keeps track of the last page that the annotator was on
+
+    s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
 
 
     ###
@@ -114,17 +115,17 @@ with app:
     ###
 
     gr.Markdown(
-    """
-    # Document redaction
+    """# Document redaction
 
-    Redact personal information from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Documents/images can be redacted using 'Quick' image analysis that works fine for typed text, but not handwriting/signatures. On the Redaction settings tab, choose 'Complex image analysis' OCR using AWS Textract (if you are using AWS) to redact these more complex elements (this service has a cost, so please only use for more complex redaction tasks). Also see the 'Redaction settings' tab to choose which pages to redact, the type of information to redact (e.g. people, places), or terms to exclude from redaction.
+    Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Documents/images can be redacted using 'Quick' image analysis that works fine for typed text, but not handwriting/signatures. On the Redaction settings tab, choose 'Complex image analysis' OCR using AWS Textract (if you are using AWS) to redact these more complex elements (this service has a cost). Addtionally you can choose the method for PII identification. 'Local' gives quick, lower quality results, AWS Comprehend gives better results but has a cost.
+    
+    See the 'Redaction settings' tab to choose which pages to redact, the type of information to redact (e.g. people, places), or terms to exclude from redaction.
 
     You can also review suggested redactions on the 'Review redactions' tab using a point and click visual interface. Please see the [User Guide](https://github.com/seanpedrick-case/doc_redaction/blob/main/README.md) for a walkthrough on how to use this and all other features in the app.
 
     NOTE: In testing the app seems to find about 60% of personal information on a given (typed) page of text. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed.
 
-    This app accepts a maximum file size of 100mb. Please consider giving feedback for the quality of the answers underneath the redact buttons when the option appears, this will help to improve the app.
-    """)
+    This app accepts a maximum file size of 100mb. Please consider giving feedback for the quality of the answers underneath the redact buttons when the option appears, this will help to improve the app.""")
 
     # PDF / IMAGES TAB
     with gr.Tab("PDFs/images"):
@@ -148,7 +149,7 @@ with app:
 
         # Feedback elements are invisible until revealed by redaction action
         pdf_feedback_title = gr.Markdown(value="## Please give feedback", visible=False)
-        pdf_feedback_radio = gr.Radio(choices=["The results were good", "The results were not good"], visible=False)
+        pdf_feedback_radio = gr.Radio(label = "Quality of results", choices=["The results were good", "The results were not good"], visible=False)
         pdf_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
         pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
         
@@ -226,9 +227,6 @@ with app:
                 page_max = gr.Number(precision=0,minimum=0,maximum=9999, label="Highest page to redact")
             
             
-
-
-
         with gr.Accordion("Settings for documents and open text/xlsx/csv files", open = True):
             with gr.Row():
                     in_allow_list = gr.UploadButton(label="Import allow list file", file_count="multiple")    
@@ -257,15 +255,15 @@ with app:
     ###
     in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_textbox, doc_file_name_with_extension_textbox])
 
-    document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state]).\
+    document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox]).\
     then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state], api_name="prepare_doc").\
-    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop],
-                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state], api_name="redact_doc")#.\
+    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number], api_name="redact_doc")#.\
                     #then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page])
     
     # If the app has completed a batch of pages, it will run this until the end of all pages in the document
-    current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop],
-                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state])
+    current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number])
     
     # If a file has been completed, the function will continue onto the next document
     latest_file_completed_text.change(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page, annotate_current_page_bottom]).\
@@ -321,27 +319,27 @@ with app:
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
-    access_callback = gr.CSVLogger()
+    access_callback = gr.CSVLogger(dataset_file_name=log_file_name)
     access_callback.setup([session_hash_textbox], access_logs_folder)
     session_hash_textbox.change(lambda *args: access_callback.flag(list(args)), [session_hash_textbox], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
     # User submitted feedback for pdf redactions
-    pdf_callback = gr.CSVLogger()
-    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text, in_doc_files], feedback_logs_folder)
-    pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text, in_doc_files], None, preprocess=False).\
+    pdf_callback = gr.CSVLogger(dataset_file_name=log_file_name)
+    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text, doc_file_name_textbox], feedback_logs_folder)
+    pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text, doc_file_name_textbox], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[pdf_further_details_text])
 
     # User submitted feedback for data redactions
-    data_callback = gr.CSVLogger()
-    data_callback.setup([data_feedback_radio, data_further_details_text, in_data_files], feedback_logs_folder)
-    data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args)), [data_feedback_radio, data_further_details_text, in_data_files], None, preprocess=False).\
+    data_callback = gr.CSVLogger(dataset_file_name=log_file_name)
+    data_callback.setup([data_feedback_radio, data_further_details_text, data_file_name_textbox], feedback_logs_folder)
+    data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args)), [data_feedback_radio, data_further_details_text, data_file_name_textbox], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[data_further_details_text])
 
     # Log processing time/token usage when making a query
-    usage_callback = gr.CSVLogger()
-    usage_callback.setup([session_hash_textbox, doc_file_name_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox], usage_logs_folder)
-    estimated_time_taken_number.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, doc_file_name_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox], None, preprocess=False).\
+    usage_callback = gr.CSVLogger(dataset_file_name=log_file_name)
+    usage_callback.setup([session_hash_textbox, doc_file_name_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], usage_logs_folder)
+    estimated_time_taken_number.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, doc_file_name_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Launch the Gradio app
