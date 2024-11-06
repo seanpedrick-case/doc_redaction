@@ -49,7 +49,7 @@ aws_pii_detector  = "AWS Comprehend"
 
 if RUN_AWS_FUNCTIONS == "1":
     default_ocr_val = textract_option
-    default_pii_detector = aws_pii_detector
+    default_pii_detector = local_pii_detector
 else:
     default_ocr_val = text_ocr_option
     default_pii_detector = local_pii_detector
@@ -83,7 +83,6 @@ with app:
     output_file_list_state = gr.State([])
     text_output_file_list_state = gr.State([])
     log_files_output_list_state = gr.State([])
-
     
     # Logging state
     log_file_name = 'log.csv'
@@ -131,7 +130,7 @@ with app:
     with gr.Tab("PDFs/images"):
         with gr.Accordion("Redact document", open = True):
             in_doc_files = gr.File(label="Choose a document or image file (PDF, JPG, PNG)", file_count= "single", file_types=['.pdf', '.jpg', '.png', '.json'])
-            in_redaction_method = gr.Radio(label="Choose document redaction method. AWS Textract has a cost per page so please only use when needed.", value = text_ocr_option, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
+            in_redaction_method = gr.Radio(label="Choose document redaction method. AWS Textract has a cost per page so please only use when needed.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
             pii_identification_method_drop = gr.Radio(label = "Choose PII detection method", value = default_pii_detector, choices=[local_pii_detector, aws_pii_detector])
 
             gr.Markdown("""If you only want to redact certain pages, or certain entities (e.g. just email addresses), please go to the redaction settings tab.""")

@@ -946,8 +946,6 @@ def redact_image_pdf(file_path:str,
             # Step 2: Analyze text and identify PII
             if chosen_redact_entities:
 
-                pii_identification_method= "AWS Comprehend" #"Local"
-
                 redaction_bboxes, comprehend_query_number_new = image_analyser.analyze_text(
                     line_level_ocr_results,
                     line_level_ocr_results_with_children,
