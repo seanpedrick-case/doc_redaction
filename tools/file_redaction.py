@@ -1306,6 +1306,7 @@ def identify_pii_in_text_container(text_container:OCRResult, language:str, chose
     '''
     comprehend_query_number = 0
     analyser_results = []
+    response = []
 
     #text_to_analyse = initial_clean(text_container.text).strip()
 
@@ -1322,24 +1323,39 @@ def identify_pii_in_text_container(text_container:OCRResult, language:str, chose
         
         elif pii_identification_method == "AWS Comprehend":
 
-            # Call the detect_pii_entities method
-            response = comprehend_client.detect_pii_entities(
-                Text=text_to_analyse,
-                LanguageCode=language  # Specify the language of the text
-            )
+
+            if len(text_to_analyse) >= 3:
+
+                    try:
+                        # Call the detect_pii_entities method
+                        response = comprehend_client.detect_pii_entities(
+                        Text=text_to_analyse,
+                        LanguageCode=language  # Specify the language of the text
+                        )
+                    except Exception as e:
+                        print(e)
+                        time.sleep(3)
+
+                        response = comprehend_client.detect_pii_entities(
+                        Text=text_to_analyse,
+                        LanguageCode=language  # Specify the language of the text
+                        )
 
             comprehend_query_number += 1
 
-            for result in response["Entities"]:
+            if response:
+                for result in response["Entities"]:
 
-                result_text = text_to_analyse[result["BeginOffset"]:result["EndOffset"]+1]
+                    result_text = text_to_analyse[result["BeginOffset"]:result["EndOffset"]+1]
 
-                if result_text not in allow_list:
-                    if result.get("Type") in chosen_redact_comprehend_entities:
+                    if result_text not in allow_list:
+                        if result.get("Type") in chosen_redact_comprehend_entities:
 
-                        recogniser_entity = recognizer_result_from_dict(result)
+                            recogniser_entity = recognizer_result_from_dict(result)
 
-                        analyser_results.append(recogniser_entity)
+                            analyser_results.append(recogniser_entity)
+            else:
+                analyser_results = []
 
         else:
             analyser_results = []

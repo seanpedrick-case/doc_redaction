@@ -38,9 +38,7 @@ def get_assumed_role_info():
 if RUN_AWS_FUNCTIONS == "1":
     try:
         bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
-        session = boto3.Session()
-        # Initialize the Boto3 client for Comprehend
-        
+        session = boto3.Session()       
             
     except Exception as e:
         print(e)    
@@ -54,15 +52,12 @@ if RUN_AWS_FUNCTIONS == "1":
     except Exception as e:
         print(e)
 
-
-
-
 # Download direct from S3 - requires login credentials
-def download_file_from_s3(bucket_name, key, local_file_path):
+def download_file_from_s3(bucket_name, key, local_file_path_and_name):
 
     s3 = boto3.client('s3')
-    s3.download_file(bucket_name, key, local_file_path)
-    print(f"File downloaded from S3: s3://{bucket_name}/{key} to {local_file_path}")
+    s3.download_file(bucket_name, key, local_file_path_and_name)
+    print(f"File downloaded from S3: s3://{bucket_name}/{key} to {local_file_path_and_name}")
                          
 def download_folder_from_s3(bucket_name, s3_folder, local_folder):
     """

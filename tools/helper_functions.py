@@ -25,6 +25,12 @@ default_value = 'output/'
 output_folder = get_or_create_env_var(env_var_name, default_value)
 print(f'The value of {env_var_name} is {output_folder}')
 
+def load_in_default_allow_list(allow_list_file_path):
+    if isinstance(allow_list_file_path, str):
+        allow_list_file_path = [allow_list_file_path]
+    return allow_list_file_path
+
+
 def get_file_path_end(file_path):
     # First, get the basename of the file (e.g., "example.txt" from "/path/to/example.txt")
     basename = os.path.basename(file_path)
@@ -85,16 +91,18 @@ def custom_regex_load(in_file):
 
     custom_regex = pd.DataFrame()
 
-    file_list = [string.name for string in in_file]
+    if in_file:
 
-    regex_file_names = [string for string in file_list if "csv" in string.lower()]
-    if regex_file_names:
-        regex_file_name = regex_file_names[0]
-        custom_regex = pd.read_csv(regex_file_name, low_memory=False, header=None)
-        #regex_file_name_no_ext = get_file_path_end(regex_file_name)
+        file_list = [string.name for string in in_file]
 
-        output_text = "Allow list file loaded."
-        print(output_text)
+        regex_file_names = [string for string in file_list if "csv" in string.lower()]
+        if regex_file_names:
+            regex_file_name = regex_file_names[0]
+            custom_regex = pd.read_csv(regex_file_name, low_memory=False, header=None)
+            #regex_file_name_no_ext = get_file_path_end(regex_file_name)
+
+            output_text = "Allow list file loaded."
+            print(output_text)
     else:
         error = "No allow list file provided."
         print(error)

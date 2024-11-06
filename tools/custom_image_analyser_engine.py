@@ -4,6 +4,7 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 #from presidio_image_redactor import ImagePreprocessor
 from typing import List, Dict, Optional, Union, Tuple
 from dataclasses import dataclass
+import time
 import cv2
 import PIL
 from PIL import ImageDraw, ImageFont, Image
@@ -479,6 +480,7 @@ class CustomImageAnalyzerEngine:
         for i, line_level_ocr_result in enumerate(line_level_ocr_results):
 
             analyzer_result = []
+            response = []
 
             # Analyze each OCR result (line) individually
 
@@ -489,23 +491,35 @@ class CustomImageAnalyzerEngine:
 
             elif pii_identification_method == "AWS Comprehend":
 
-                # Call the detect_pii_entities method
-                response = comprehend_client.detect_pii_entities(
-                    Text=line_level_ocr_result.text,
-                    LanguageCode=text_analyzer_kwargs["language"] # Specify the language of the text
-                )
+                if len(line_level_ocr_result.text) >= 3:
 
-                comprehend_query_number += 1
+                    try:
+                        # Call the detect_pii_entities method
+                        response = comprehend_client.detect_pii_entities(
+                            Text=line_level_ocr_result.text,
+                            LanguageCode=text_analyzer_kwargs["language"] # Specify the language of the text
+                        )
+                    except Exception as e:
+                        print(e)
+                        time.sleep(3)
 
-                for result in response["Entities"]:
-                    result_text = line_level_ocr_result.text[result["BeginOffset"]:result["EndOffset"]+1]
+                        response = comprehend_client.detect_pii_entities(
+                            Text=line_level_ocr_result.text,
+                            LanguageCode=text_analyzer_kwargs["language"] # Specify the language of the text
+                        )
 
-                    if result_text not in allow_list:
+                    comprehend_query_number += 1
 
-                        if result.get("Type") in chosen_redact_comprehend_entities:
+                if response:
+                    for result in response["Entities"]:
+                        result_text = line_level_ocr_result.text[result["BeginOffset"]:result["EndOffset"]+1]
 
-                            recogniser_entity = recognizer_result_from_dict(result)
-                            analyzer_result.append(recogniser_entity)
+                        if result_text not in allow_list:
+
+                            if result.get("Type") in chosen_redact_comprehend_entities:
+
+                                recogniser_entity = recognizer_result_from_dict(result)
+                                analyzer_result.append(recogniser_entity)
 
 
             if i < len(ocr_results_with_children):  # Check if i is a valid index

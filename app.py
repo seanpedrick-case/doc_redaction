@@ -9,8 +9,8 @@ import pandas as pd
 from datetime import datetime
 from gradio_image_annotation import image_annotator
 
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, custom_regex_load, reset_state_vars
-from tools.aws_functions import upload_file_to_s3, RUN_AWS_FUNCTIONS
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, custom_regex_load, reset_state_vars, load_in_default_allow_list
+from tools.aws_functions import upload_file_to_s3, download_file_from_s3, RUN_AWS_FUNCTIONS, bucket_name
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
 from tools.redaction_review import apply_redactions, crop, get_boxes_json, modify_existing_page_redactions, decrease_page, increase_page, update_annotator
@@ -108,6 +108,14 @@ with app:
 
     s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
 
+    ## S3 default bucket and allow list file state
+    default_allow_list_file_name = "default_allow_list.csv"
+    default_allow_list_loc = output_folder + "/" + default_allow_list_file_name
+
+    s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=bucket_name, visible=False)
+    s3_default_allow_list_file = gr.Textbox(label = "Default allow list file", value=default_allow_list_file_name, visible=False)
+    default_allow_list_output_folder_location = gr.Textbox(label = "Output default allow list location", value=default_allow_list_loc, visible=False)
+
 
     ###
     # UI DESIGN
@@ -139,8 +147,8 @@ with app:
             page_break_return = gr.Checkbox(value = False, label="Page break reached", visible=False)
         
         with gr.Row():
-            output_summary = gr.Textbox(label="Output summary")
-            output_file = gr.File(label="Output files")
+            output_summary = gr.Textbox(label="Output summary", scale=1)
+            output_file = gr.File(label="Output files", scale = 2)
             latest_file_completed_text = gr.Number(value=0, label="Number of documents redacted", interactive=False, visible=False)
 
         with gr.Row():
@@ -228,13 +236,15 @@ with app:
             
         with gr.Accordion("Settings for documents and open text/xlsx/csv files", open = True):
             with gr.Row():
-                    in_allow_list = gr.UploadButton(label="Import allow list file", file_count="multiple")    
+                in_allow_list = gr.File(label="Import allow list file", file_count="multiple")
+                with gr.Column():   
                     gr.Markdown("""Import allow list file - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will not be redacted.""")
                     in_allow_list_text = gr.Textbox(label="Custom allow list load status")
 
-            in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact - local PII identification model (click close to down arrow for full list)")
-            
-            in_redact_comprehend_entities = gr.Dropdown(value=chosen_comprehend_entities, choices=full_comprehend_entity_list, multiselect=True, label="Entities to redact - AWS Comprehend PII identification model (click close to down arrow for full list)")
+            with gr.Accordion("Add or remove entity types to redact", open = False):
+                in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact - local PII identification model (click close to down arrow for full list)")
+                
+                in_redact_comprehend_entities = gr.Dropdown(value=chosen_comprehend_entities, choices=full_comprehend_entity_list, multiselect=True, label="Entities to redact - AWS Comprehend PII identification model (click close to down arrow for full list)")
             
             handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract settings", choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting", "Redact all identified signatures"])
             #with gr.Row():
@@ -247,7 +257,7 @@ with app:
         log_files_output = gr.File(label="Log file output", interactive=False)
 
     # If a custom allow list is uploaded
-    in_allow_list.upload(fn=custom_regex_load, inputs=[in_allow_list], outputs=[in_allow_list_text, in_allow_list_state])
+    in_allow_list.change(fn=custom_regex_load, inputs=[in_allow_list], outputs=[in_allow_list_text, in_allow_list_state])
 
     ###
     # PDF/IMAGE REDACTION
@@ -316,6 +326,15 @@ with app:
 
     # Get connection details on app load
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
+
+    # If running on AWS, load in the default allow list file from S3
+    if RUN_AWS_FUNCTIONS == "1":
+        print("default_allow_list_output_folder_location:", default_allow_list_output_folder_location)
+        if not os.path.exists(default_allow_list_loc):
+            app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_allow_list_file, default_allow_list_output_folder_location]).\
+            then(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
+        else:
+            app.load(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     access_callback = gr.CSVLogger(dataset_file_name=log_file_name)
