@@ -27,8 +27,8 @@ from collections import defaultdict  # For efficient grouping
 from presidio_analyzer import RecognizerResult
 
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult
-from tools.file_conversion import process_file
-from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
+from tools.file_conversion import process_file, image_dpi
+from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities
 from tools.helper_functions import get_file_path_end, output_folder, clean_unicode_text, get_or_create_env_var
 from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
 # from tools.data_anonymise import generate_decision_process_output
@@ -314,8 +314,8 @@ def choose_and_run_redactor(file_paths:List[str],
 
             # Save file
             if is_pdf(file_path) == False:
-                out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_img.pdf"
-                pymupdf_doc[0].save(out_image_file_path, "PDF" ,resolution=100.0, save_all=True, append_images=pymupdf_doc[1:])
+                out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_pdf.pdf"
+                pymupdf_doc[0].save(out_image_file_path, "PDF" ,resolution=image_dpi, save_all=False)#, append_images=pymupdf_doc[:1])
             
             else:
                 out_image_file_path = output_folder + file_path_without_ext + "_redacted.pdf"
@@ -413,35 +413,40 @@ def choose_and_run_redactor(file_paths:List[str],
 
     return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
 
-def convert_pikepdf_coords_to_pymudf(pymupdf_page, annot):
+def convert_pikepdf_coords_to_pymupdf(pymupdf_page, pikepdf_bbox):
     '''
-    Convert annotations from pikepdf to pymupdf format
+    Convert annotations from pikepdf to pymupdf format, handling the mediabox larger than rect.
     '''
+    # Use cropbox if available, otherwise use mediabox
+    reference_box = pymupdf_page.rect
+    mediabox = pymupdf_page.mediabox
 
-    mediabox_height = pymupdf_page.mediabox[3] - pymupdf_page.mediabox[1]
-    mediabox_width = pymupdf_page.mediabox[2] - pymupdf_page.mediabox[0]
-    rect_height = pymupdf_page.rect.height
-    rect_width = pymupdf_page.rect.width  
+    reference_box_height = reference_box.height
+    reference_box_width = reference_box.width
+    
+    # Convert PyMuPDF coordinates back to PDF coordinates (bottom-left origin)
+    media_height = mediabox.height
+    media_width = mediabox.width
 
-    # Adjust coordinates based on scaling factors
-    page_x_adjust = (rect_width - mediabox_width) / 2  # Center adjustment
-    page_y_adjust = (rect_height - mediabox_height) / 2  # Center adjustment
+    media_reference_y_diff = media_height - reference_box_height
+    media_reference_x_diff = media_width - reference_box_width
 
-    #print("In the pikepdf conversion function")
-    # Extract the /Rect field
-    rect_field = annot["/Rect"]
+    y_diff_ratio = media_reference_y_diff / reference_box_height
+    x_diff_ratio = media_reference_x_diff / reference_box_width
+    
+    # Extract the annotation rectangle field
+    rect_field = pikepdf_bbox["/Rect"]
+    rect_coordinates = [float(coord) for coord in rect_field]  # Convert to floats
 
-    # Convert the extracted /Rect field to a list of floats (since pikepdf uses Decimal objects)
-    rect_coordinates = [float(coord) for coord in rect_field]
-
-    # Convert the Y-coordinates (flip using the page height)
+    # Unpack coordinates
     x1, y1, x2, y2 = rect_coordinates
-    x1 = x1 + page_x_adjust
-    new_y1 = (rect_height - y2) - page_y_adjust
-    x2 = x2 + page_x_adjust
-    new_y2 = (rect_height - y1) - page_y_adjust
-
-    return x1, new_y1, x2, new_y2
+    
+    new_x1 = x1 - (media_reference_x_diff * x_diff_ratio)
+    new_y1 = media_height - y2 - (media_reference_y_diff * y_diff_ratio)
+    new_x2 = x2 - (media_reference_x_diff * x_diff_ratio)
+    new_y2 = media_height - y1 - (media_reference_y_diff * y_diff_ratio)
+    
+    return new_x1, new_y1, new_x2, new_y2
 
 def convert_pikepdf_to_image_coords(pymupdf_page, annot, image:Image):
     '''
@@ -495,6 +500,64 @@ def convert_image_coords_to_pymupdf(pymupdf_page, annot:CustomImageRecognizerRes
     new_y2 = ((annot.top + annot.height) * scale_height)# - page_y_adjust  # Calculate y1 correctly
 
     return x1, new_y1, x2, new_y2
+
+# def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
+#     '''
+#     Converts coordinates from pymupdf format to image coordinates.
+#     '''
+
+#     rect_height = pymupdf_page.rect.height
+#     rect_width = pymupdf_page.rect.width 
+
+#     image_page_width, image_page_height = image.size
+
+#     # Calculate scaling factors between pymupdf and PIL image
+#     scale_width = image_page_width / rect_width
+#     scale_height = image_page_height / rect_height
+
+#     x1_image = x1 * scale_width
+#     y1_image = ((rect_height - y2) * scale_height)
+#     x2_image = x2 * scale_width
+#     y2_image = ((rect_height - y1) * scale_height)
+
+#     return x1_image, y1_image, x2_image, y2_image
+
+def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
+    '''
+    Converts coordinates from pymupdf format to image coordinates,
+    accounting for mediabox dimensions.
+    '''
+    
+    rect_height = pymupdf_page.rect.height
+    rect_width = pymupdf_page.rect.width
+    
+    # Get mediabox dimensions
+    mediabox = pymupdf_page.mediabox
+    mediabox_width = mediabox.width
+    mediabox_height = mediabox.height
+    
+    image_page_width, image_page_height = image.size
+
+    # Calculate scaling factors using mediabox dimensions
+    scale_width = image_page_width / mediabox_width
+    scale_height = image_page_height / mediabox_height
+
+    print("scale_width:", scale_width)
+    print("scale_height:", scale_height)
+
+    rect_to_mediabox_x_scale = mediabox_width / rect_width
+    rect_to_mediabox_y_scale = mediabox_height / rect_height 
+
+    print("rect_to_mediabox_x_scale:", rect_to_mediabox_x_scale)
+    print("rect_to_mediabox_y_scale:", rect_to_mediabox_y_scale)
+
+    # Adjust coordinates based on scaling factors
+    x1_image = (x1 * scale_width) * rect_to_mediabox_x_scale
+    y1_image = (y1 * scale_height) * rect_to_mediabox_y_scale
+    x2_image = (x2 * scale_width) * rect_to_mediabox_x_scale
+    y2_image = (y2 * scale_height) * rect_to_mediabox_y_scale
+
+    return x1_image, y1_image, x2_image, y2_image
 
 def convert_gradio_annotation_coords_to_pymupdf(pymupdf_page:Page, annot:dict, image:Image):
     '''
@@ -587,25 +650,25 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
 
         # Else it should be a pikepdf annotation object
         else:           
-            x1, pymupdf_y1, x2, pymupdf_y2 = convert_pikepdf_coords_to_pymudf(page, annot)
+            x1, pymupdf_y1, x2, pymupdf_y2 = convert_pikepdf_coords_to_pymupdf(page, annot)
 
             rect = Rect(x1, pymupdf_y1, x2, pymupdf_y2)
 
             img_annotation_box = {}
 
             if image:
-                image_x1, image_y1, image_x2, image_y2 = convert_pikepdf_to_image_coords(page, annot, image)
-                
-                img_annotation_box["xmin"] = image_x1
-                img_annotation_box["ymin"] = image_y1
-                img_annotation_box["xmax"] = image_x2
-                img_annotation_box["ymax"] = image_y2
-                img_annotation_box["color"] = (0,0,0)
+                img_width, img_height = image.size
+
+                x1, image_y1, x2, image_y2 = convert_pymupdf_to_image_coords(page, x1, pymupdf_y1, x2, pymupdf_y2, image)
+
+                img_annotation_box["xmin"] = x1  #* (img_width / rect_width) # Use adjusted x1
+                img_annotation_box["ymin"] = image_y1  #* (img_width / rect_width) # Use adjusted y1
+                img_annotation_box["xmax"] = x2# * (img_height / rect_height) # Use adjusted x2
+                img_annotation_box["ymax"] = image_y2 #* (img_height / rect_height) # Use adjusted y2
+                img_annotation_box["color"] = (0, 0, 0)
 
                 if isinstance(annot, Dictionary):
-                    #print("Trying to get label out of annotation", annot["/T"])
                     img_annotation_box["label"] = str(annot["/T"])
-                    #print("Label is:", img_annotation_box["label"])
                 else:
                     img_annotation_box["label"] = "REDACTION"
 
@@ -645,6 +708,18 @@ def bounding_boxes_overlap(box1, box2):
 def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_results=[], handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Redact all identified handwriting", "Redact all identified signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
     merged_bboxes = []
     grouped_bboxes = defaultdict(list)
+
+    
+        # Process signature and handwriting results
+    if signature_recogniser_results or handwriting_recogniser_results:
+        if "Redact all identified handwriting" in handwrite_signature_checkbox:
+            #print("Handwriting boxes exist at merge:", handwriting_recogniser_results)
+            merged_bboxes.extend(handwriting_recogniser_results)
+
+        if "Redact all identified signatures" in handwrite_signature_checkbox:
+            #print("Signature boxes exist at merge:", signature_recogniser_results)
+            merged_bboxes.extend(signature_recogniser_results)
+
 
     # Reconstruct bounding boxes for substrings of interest
     reconstructed_bboxes = []
@@ -734,16 +809,6 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
                 merged_box = next_box  
 
         merged_bboxes.append(merged_box)
-
-        # Process signature and handwriting results
-    if signature_recogniser_results or handwriting_recogniser_results:
-        if "Redact all identified handwriting" in handwrite_signature_checkbox:
-            #print("Handwriting boxes exist at merge:", handwriting_recogniser_results)
-            merged_bboxes.extend(handwriting_recogniser_results)
-
-        if "Redact all identified signatures" in handwrite_signature_checkbox:
-            #print("Signature boxes exist at merge:", signature_recogniser_results)
-            merged_bboxes.extend(signature_recogniser_results)
 
     #print("bboxes:", bboxes)
 
@@ -1483,6 +1548,21 @@ def redact_text_pdf(
                                     all_text_line_results.append((i, text_line_analyser_result))
                                 
                                 elif pii_identification_method == "AWS Comprehend":
+
+                                    # First use the local Spacy model to pick up custom entities that AWS Comprehend can't search for.
+                                    custom_redact_entities = [entity for entity in chosen_redact_comprehend_entities if entity in custom_entities]
+
+                                    text_line_analyser_result = nlp_analyser.analyze(
+                                        text=text_line.text,
+                                        language=language,
+                                        entities=custom_redact_entities,
+                                        score_threshold=score_threshold,
+                                        return_decision_process=True,
+                                        allow_list=allow_list
+                                    )
+                                    all_text_line_results.append((i, text_line_analyser_result))
+
+
                                     if len(text_line.text) >= 3:
                                         # Add separator between lines
                                         if current_batch:

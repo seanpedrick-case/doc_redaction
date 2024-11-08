@@ -11,6 +11,8 @@ import pymupdf
 from gradio import Progress
 from typing import List, Optional
 
+image_dpi = 300.0
+
 def is_pdf_or_image(filename):
     """
     Check if a file name is a PDF or an image file.
@@ -42,7 +44,7 @@ def is_pdf(filename):
 # %%
 ## Convert pdf to image if necessary
 
-def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(track_tqdm=True)):
+def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = image_dpi, progress=Progress(track_tqdm=True)):
 
     # Get the number of pages in the PDF
     page_count = pdfinfo_from_path(pdf_path)['Pages']
@@ -70,7 +72,7 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, progress=Progress(trac
 
 
         else:
-            image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=300, use_cropbox=True, use_pdftocairo=False)
+            image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
 
             image = image_l[0]
 
@@ -334,7 +336,7 @@ def prepare_image_or_pdf(
     
     return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
 
-def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
+def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi):
     file_path_without_ext = get_file_path_end(in_file_path)
 
     out_file_paths = out_text_file_path
@@ -344,7 +346,7 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str]):
     
     pdf_text_image_paths = process_file(out_text_file_path[0])
     out_text_image_file_path = output_folder + file_path_without_ext + "_text_redacted_as_img.pdf"
-    pdf_text_image_paths[0].save(out_text_image_file_path, "PDF" ,resolution=300.0, save_all=True, append_images=pdf_text_image_paths[1:])
+    pdf_text_image_paths[0].save(out_text_image_file_path, "PDF" ,resolution=image_dpi, save_all=True, append_images=pdf_text_image_paths[1:])
 
     # out_file_paths.append(out_text_image_file_path)
 

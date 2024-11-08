@@ -13,6 +13,7 @@ from copy import deepcopy
 from tools.helper_functions import clean_unicode_text
 from tools.aws_functions import comprehend_client
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
+from tools.load_spacy_model_custom_recognisers import custom_entities
 #import string  # Import string to get a list of common punctuation characters
 
 @dataclass
@@ -491,6 +492,14 @@ class CustomImageAnalyzerEngine:
                 analyzer_results_by_line[i] = analyzer_result
 
             elif pii_identification_method == "AWS Comprehend":
+
+                # If using AWS Comprehend, Spacy model is only used to identify the custom entities created. Comprehend can't pick up Titles, Streetnames, and UKPostcodes specifically
+                text_analyzer_kwargs["entities"] = [entity for entity in chosen_redact_comprehend_entities if entity in custom_entities]
+
+                spacy_analyzer_result = self.analyzer_engine.analyze(
+                text=line_level_ocr_result.text, **text_analyzer_kwargs)
+                analyzer_results_by_line[i].extend(spacy_analyzer_result)
+
                 if len(line_level_ocr_result.text) >= 3:
                     # Add line to current batch with a separator
                     if current_batch:
@@ -509,6 +518,7 @@ class CustomImageAnalyzerEngine:
                                 Text=current_batch,
                                 LanguageCode=text_analyzer_kwargs["language"]
                             )
+
                         except Exception as e:
                             print(e)
                             time.sleep(3)

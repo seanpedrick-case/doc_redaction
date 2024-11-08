@@ -3,9 +3,20 @@ import re
 import gradio as gr
 import pandas as pd
 import unicodedata
+from gradio_image_annotation import image_annotator
 
 def reset_state_vars():
-    return [], [], pd.DataFrame(), pd.DataFrame(), 0, ""
+    return [], [], pd.DataFrame(), pd.DataFrame(), 0, "", image_annotator(
+            label="Modify redaction boxes",
+            label_list=["Redaction"],
+            label_colors=[(0, 0, 0)],
+            show_label=False,
+            sources=None,#["upload"],
+            show_clear_button=False,
+            show_share_button=False,
+            show_remove_button=False,
+            interactive=False
+        )
 
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists

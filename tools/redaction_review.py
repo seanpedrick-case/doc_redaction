@@ -37,8 +37,21 @@ def increase_page(number:int, image_annotator_object:AnnotatedImageData):
     else:
         return max_pages, max_pages
 
-def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int):
+def update_zoom(current_zoom_level:int, decrease:bool=True):
+    if decrease == False:
+        if current_zoom_level >= 50:
+            current_zoom_level -= 10
+    else:    
+        if current_zoom_level < 100:
+            current_zoom_level += 10
+        
+    return current_zoom_level
+
+
+def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zoom:int=100):
     # print("\nImage annotator object:", image_annotator_object)
+
+    zoom_str = str(zoom) + '%'
 
     if not image_annotator_object:
         return image_annotator(
@@ -76,8 +89,8 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int):
         #label_list=["Redaction"],
         #label_colors=[(0, 0, 0)],
         show_label=False,
-        height='100%',
-        width='100%',
+        height=zoom_str,
+        width=zoom_str,
         box_min_size=1,
         box_selected_thickness=2,
         handle_size=4,

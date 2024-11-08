@@ -10,6 +10,7 @@ import re
 # %%
 model_name = "en_core_web_lg" #"en_core_web_trf"
 score_threshold = 0.001
+custom_entities = ["TITLES", "UKPOSTCODE", "STREETNAME"]
 
 # %% [markdown]
 # #### Custom recognisers

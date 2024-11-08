@@ -13,9 +13,10 @@ from tools.helper_functions import ensure_output_folder_exists, add_folder_to_pa
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3, RUN_AWS_FUNCTIONS, bucket_name
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
-from tools.redaction_review import apply_redactions, crop, get_boxes_json, modify_existing_page_redactions, decrease_page, increase_page, update_annotator
+from tools.redaction_review import apply_redactions, crop, get_boxes_json, modify_existing_page_redactions, decrease_page, increase_page, update_annotator, update_zoom
 from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
+from tools.load_spacy_model_custom_recognisers import custom_entities
 
 
 today_rev = datetime.now().strftime("%Y%m%d")
@@ -28,6 +29,10 @@ ensure_output_folder_exists()
 chosen_comprehend_entities = ['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD', 'IP_ADDRESS','MAC_ADDRESS', 'LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER', 'INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER']
 
 full_comprehend_entity_list = ['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE','SSN','DATE_TIME','PASSPORT_NUMBER','DRIVER_ID','URL','AGE','USERNAME','PASSWORD','AWS_ACCESS_KEY','AWS_SECRET_KEY','IP_ADDRESS','MAC_ADDRESS','ALL','LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER','CA_SOCIAL_INSURANCE_NUMBER','US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER','UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER','IN_PERMANENT_ACCOUNT_NUMBER','IN_NREGA','INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER','CA_HEALTH_NUMBER','IN_AADHAAR','IN_VOTER_NUMBER']
+
+# Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
+chosen_comprehend_entities.extend(custom_entities)
+full_comprehend_entity_list.extend(custom_entities)
 
 chosen_redact_entities = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE"]
 
@@ -117,6 +122,12 @@ with app:
     default_allow_list_output_folder_location = gr.Textbox(label = "Output default allow list location", value=default_allow_list_loc, visible=False)
 
 
+    ## Annotator zoom value
+    annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=100, precision=0, visible=False)
+    zoom_true_bool = gr.State(True)
+    zoom_false_bool = gr.State(False)
+
+
     ###
     # UI DESIGN
     ###
@@ -164,6 +175,9 @@ with app:
             annotate_current_page = gr.Number(value=1, label="Page (press enter to change)", precision=0, scale = 2)
             annotate_max_pages = gr.Number(value=1, label="Total pages", precision=0, interactive=False, scale = 1)
             annotation_next_page_button = gr.Button("Next page", scale = 3)
+        with gr.Row():
+            annotate_zoom_in = gr.Button("Zoom in")
+            annotate_zoom_out = gr.Button("Zoom out")
 
         annotation_button_apply = gr.Button("Apply revised redactions", variant="primary")
 
@@ -238,9 +252,9 @@ with app:
                     in_allow_list_text = gr.Textbox(label="Custom allow list load status")
 
             with gr.Accordion("Add or remove entity types to redact", open = False):
-                in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact - local PII identification model (click close to down arrow for full list)")
-                
                 in_redact_comprehend_entities = gr.Dropdown(value=chosen_comprehend_entities, choices=full_comprehend_entity_list, multiselect=True, label="Entities to redact - AWS Comprehend PII identification model (click close to down arrow for full list)")
+
+                in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact - local PII identification model (click close to down arrow for full list)")
             
             handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract settings", choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting", "Redact all identified signatures"])
             #with gr.Row():
@@ -260,18 +274,19 @@ with app:
     ###
     in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_textbox, doc_file_name_with_extension_textbox])
 
-    document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox]).\
+    document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator]).\
     then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state], api_name="prepare_doc").\
     then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
-                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number], api_name="redact_doc")#.\
-                    #then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page])
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number], api_name="redact_doc").\
+                    then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom])
     
     # If the app has completed a batch of pages, it will run this until the end of all pages in the document
     current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
-                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number])
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number]).\
+                    then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom])
     
     # If a file has been completed, the function will continue onto the next document
-    latest_file_completed_text.change(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page, annotate_current_page_bottom]).\
+    latest_file_completed_text.change(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom]).\
                     then(fn=reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
         # latest_file_completed_text.change(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, current_loop_page_number], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state]).\
     # then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return],
@@ -284,12 +299,20 @@ with app:
     # Page controls at top
     annotate_current_page.submit(
         modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
     
     annotation_last_page_button.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
     annotation_next_page_button.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+    
+    # Zoom in and out on annotator
+    annotate_zoom_in.click(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
+        then(update_zoom, inputs=[annotator_zoom_number, zoom_true_bool], outputs=[annotator_zoom_number]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+    annotate_zoom_out.click(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
+        then(update_zoom, inputs=[annotator_zoom_number, zoom_false_bool], outputs=[annotator_zoom_number]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
 
     #annotation_button_get.click(get_boxes_json, annotator, json_boxes)
     annotation_button_apply.click(apply_redactions, inputs=[annotator, in_doc_files, pdf_doc_state, all_image_annotations_state, annotate_current_page], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files], scroll_to_output=True)
@@ -297,12 +320,12 @@ with app:
     # Page controls at bottom
     annotate_current_page_bottom.submit(
         modify_existing_page_redactions, inputs = [annotator, annotate_current_page_bottom, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
 
     annotation_last_page_button_bottom.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
     annotation_next_page_button_bottom.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
 
     ###
     # TABULAR DATA REDACTION
