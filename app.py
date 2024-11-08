@@ -308,11 +308,12 @@ with app:
     
     # Zoom in and out on annotator
     annotate_zoom_in.click(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
-        then(update_zoom, inputs=[annotator_zoom_number, zoom_true_bool], outputs=[annotator_zoom_number]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_zoom, inputs=[annotator_zoom_number, annotate_current_page, zoom_true_bool], outputs=[annotator_zoom_number, annotate_current_page])
+        
     annotate_zoom_out.click(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
-        then(update_zoom, inputs=[annotator_zoom_number, zoom_false_bool], outputs=[annotator_zoom_number]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_zoom, inputs=[annotator_zoom_number, annotate_current_page, zoom_false_bool], outputs=[annotator_zoom_number, annotate_current_page])
+    
+    annotator_zoom_number.change(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
 
     #annotation_button_get.click(get_boxes_json, annotator, json_boxes)
     annotation_button_apply.click(apply_redactions, inputs=[annotator, in_doc_files, pdf_doc_state, all_image_annotations_state, annotate_current_page], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files], scroll_to_output=True)

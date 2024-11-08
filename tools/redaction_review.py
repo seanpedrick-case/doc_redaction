@@ -37,7 +37,7 @@ def increase_page(number:int, image_annotator_object:AnnotatedImageData):
     else:
         return max_pages, max_pages
 
-def update_zoom(current_zoom_level:int, decrease:bool=True):
+def update_zoom(current_zoom_level:int, annotate_current_page:int, decrease:bool=True):
     if decrease == False:
         if current_zoom_level >= 50:
             current_zoom_level -= 10
@@ -45,7 +45,7 @@ def update_zoom(current_zoom_level:int, decrease:bool=True):
         if current_zoom_level < 100:
             current_zoom_level += 10
         
-    return current_zoom_level
+    return current_zoom_level, annotate_current_page
 
 
 def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zoom:int=100):
@@ -110,12 +110,14 @@ def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_
     '''
     Overwrite current image annotations with modifications
     '''
-    #If no previous page or is 0, i.e. first time run, then make no changes
-    if not previous_page:
-        return all_image_annotations, current_page, current_page
-
+    
     if not current_page:
         current_page = 1
+
+    #If no previous page or is 0, i.e. first time run, then rewrite current page
+    if not previous_page:
+        previous_page = current_page
+        #return all_image_annotations, current_page, current_page
 
     #print("all_image_annotations before:",all_image_annotations)
     
