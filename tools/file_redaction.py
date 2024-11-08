@@ -625,10 +625,10 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
             # Should already be in correct format if img_annotator_box is an input
             if isinstance(annot, dict):
                 img_annotation_box = annot
-                try:
-                    img_annotation_box["label"] = annot.entity_type
-                except:
-                    img_annotation_box["label"] = "Redaction"
+                #try:
+                #    img_annotation_box["label"] = annot["label"]
+                #except:
+                #    img_annotation_box["label"] = "Redaction"
 
                 x1, pymupdf_y1, x2, pymupdf_y2 = convert_gradio_annotation_coords_to_pymupdf(page, annot, image)
 
