@@ -11,7 +11,6 @@ from PIL import ImageDraw, ImageFont, Image
 from typing import Optional, Tuple, Union
 from copy import deepcopy
 from tools.helper_functions import clean_unicode_text
-from tools.aws_functions import comprehend_client
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.load_spacy_model_custom_recognisers import custom_entities
 #import string  # Import string to get a list of common punctuation characters
@@ -464,7 +463,8 @@ class CustomImageAnalyzerEngine:
         line_level_ocr_results: List[OCRResult], 
         ocr_results_with_children: Dict[str, Dict],
         chosen_redact_comprehend_entities:List[str],
-        pii_identification_method:str="Local",        
+        pii_identification_method:str="Local",
+        comprehend_client="",      
         **text_analyzer_kwargs
     ) -> List[CustomImageRecognizerResult]:
         # Define English as default language, if not specified

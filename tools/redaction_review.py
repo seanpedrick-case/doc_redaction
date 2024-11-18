@@ -47,24 +47,32 @@ def update_zoom(current_zoom_level:int, annotate_current_page:int, decrease:bool
         
     return current_zoom_level, annotate_current_page
 
-
 def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zoom:int=100):
-    # print("\nImage annotator object:", image_annotator_object)
+    '''
+    Update a gradio_image_annotation object with new annotation data
+    '''
 
     zoom_str = str(zoom) + '%'
 
     if not image_annotator_object:
-        return image_annotator(
+        out_image_annotator = image_annotator(
         label="Modify redaction boxes",
         #label_list=["Redaction"],
         #label_colors=[(0, 0, 0)],
+        height=zoom_str,
+        width=zoom_str,
         show_label=False,
-        sources=["upload"],
+        sources=None,
         show_clear_button=False,
         show_share_button=False,
         show_remove_button=False,
-        interactive=False
-    ), gr.Number(label = "Page (press enter to change)", value=1, precision=0)
+        interactive=False)
+
+        number_reported = gr.Number(label = "Page (press enter to change)", value=1, precision=0)
+
+        return out_image_annotator, number_reported, number_reported
+    
+    print("page_num at start of update_annotator function:", page_num)
 
     if page_num is None:
         page_num = 0
@@ -72,8 +80,9 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zo
     # Check bounding values for current page and page max
     if page_num > 0:
         page_num_reported = page_num
-        #page_num = page_num - 1
+
     elif page_num == 0: page_num_reported = 1
+
     else: 
         page_num = 0   
         page_num_reported = 1 
@@ -83,7 +92,9 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zo
     if page_num_reported > page_max_reported:
         page_num_reported = page_max_reported
 
-    out_image_annotator = image_annotator(value = image_annotator_object[page_num_reported - 1],
+
+    out_image_annotator = image_annotator(
+        value = image_annotator_object[page_num_reported - 1],
         boxes_alpha=0.1,
         box_thickness=1,
         #label_list=["Redaction"],
@@ -104,30 +115,26 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zo
 
     number_reported = gr.Number(label = "Page (press enter to change)", value=page_num_reported, precision=0)
 
-    return out_image_annotator, number_reported, number_reported
+    return out_image_annotator, number_reported, number_reported, page_num_reported
 
-def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_page:int, previous_page:int, all_image_annotations:List[AnnotatedImageData]):
+def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_page:int, previous_page:int, all_image_annotations:List[AnnotatedImageData], clear_all:bool=False):
     '''
     Overwrite current image annotations with modifications
     '''
-    
+
     if not current_page:
         current_page = 1
 
     #If no previous page or is 0, i.e. first time run, then rewrite current page
-    if not previous_page:
-        previous_page = current_page
-        #return all_image_annotations, current_page, current_page
-
-    #print("all_image_annotations before:",all_image_annotations)
+    #if not previous_page:
+    #    previous_page = current_page
     
     image_annotated['image'] = all_image_annotations[previous_page - 1]["image"]
 
-    #print("image_annotated:", image_annotated)
-
-    all_image_annotations[previous_page - 1] = image_annotated
-
-    #print("all_image_annotations after:",all_image_annotations)
+    if clear_all == False:
+        all_image_annotations[previous_page - 1] = image_annotated
+    else:
+        all_image_annotations[previous_page - 1]["boxes"] = []
 
     return all_image_annotations, current_page, current_page
 
@@ -178,7 +185,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
 
             draw.rectangle(coords, fill=fill)
 
-            image.save(output_folder + file_base + "_redacted_mod.png")
+            image.save(output_folder + file_base + "_redacted.png")
 
         doc = [image]
 
@@ -213,13 +220,13 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
             pymupdf_page = redact_page_with_pymupdf(pymupdf_page, all_image_annotations[i], image)
               
     #try:
-    out_pdf_file_path = output_folder + file_base + "_redacted_mod.pdf"
+    out_pdf_file_path = output_folder + file_base + "_redacted.pdf"
     unredacted_doc.save(out_pdf_file_path)
     output_files.append(out_pdf_file_path)
 
     # Save the gradio_annotation_boxes to a JSON file
     try:
-        out_annotation_file_path = output_folder + file_base + '_modified_redactions.json'
+        out_annotation_file_path = output_folder + file_base + '_redactions.json'
         with open(out_annotation_file_path, 'w') as f:
             json.dump(all_image_annotations, f)
         output_files.append(out_annotation_file_path)

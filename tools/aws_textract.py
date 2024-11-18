@@ -23,15 +23,16 @@ def extract_textract_metadata(response):
         #'NumberOfPages': number_of_pages
     })
 
-def analyse_page_with_textract(pdf_page_bytes, page_no):
+def analyse_page_with_textract(pdf_page_bytes, page_no, client=""):
     '''
     Analyse page with AWS Textract
     '''
-    try:
-        client = boto3.client('textract')
-    except:
-        print("Cannot connect to AWS Textract")
-        return [], ""  # Return an empty list and an empty string
+    if client == "":
+        try:
+            client = boto3.client('textract')
+        except:
+            print("Cannot connect to AWS Textract")
+            return [], ""  # Return an empty list and an empty string
 
     print("Analysing page with AWS Textract")
     

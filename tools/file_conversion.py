@@ -1,9 +1,10 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
-from tools.helper_functions import get_file_path_end, output_folder, detect_file_type
+from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 import os
+import re
 import gradio as gr
 import time
 import json
@@ -96,8 +97,7 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = imag
 
     return images
 
-
-# %% Function to take in a file path, decide if it is an image or pdf, then process appropriately.
+# Function to take in a file path, decide if it is an image or pdf, then process appropriately.
 def process_file(file_path):
     # Get the file extension
     file_extension = os.path.splitext(file_path)[1].lower()
@@ -127,11 +127,15 @@ def get_input_file_names(file_input):
     '''
 
     all_relevant_files = []
+    file_name_with_extension = ""
+    full_file_name = ""
 
     #print("file_input:", file_input)
 
     if isinstance(file_input, str):
         file_input_list = [file_input]
+    else:
+        file_input_list = file_input
 
     for file in file_input_list:
         if isinstance(file, str):
@@ -141,21 +145,19 @@ def get_input_file_names(file_input):
 
         file_path_without_ext = get_file_path_end(file_path)
 
-        #print("file:", file_path)
-
         file_extension = os.path.splitext(file_path)[1].lower()
-
-        file_name_with_extension = file_path_without_ext + file_extension
 
         # Check if the file is an image type
         if file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet']:
             all_relevant_files.append(file_path_without_ext)
+            file_name_with_extension = file_path_without_ext + file_extension
+            full_file_name = file_path
     
     all_relevant_files_str = ", ".join(all_relevant_files)
 
-    #print("all_relevant_files_str:", all_relevant_files_str)
+    print("all_relevant_files_str:", all_relevant_files_str)
 
-    return all_relevant_files_str, file_name_with_extension
+    return all_relevant_files_str, file_name_with_extension, full_file_name
 
 def prepare_image_or_pdf(
     file_paths: List[str],
@@ -166,6 +168,8 @@ def prepare_image_or_pdf(
     first_loop_state: bool = False,
     number_of_pages:int = 1,
     current_loop_page_number:int=0,
+    all_annotations_object:List = [],
+    prepare_for_review:bool = False,
     progress: Progress = Progress(track_tqdm=True)
 ) -> tuple[List[str], List[str]]:
     """
@@ -182,7 +186,10 @@ def prepare_image_or_pdf(
         out_message (List[str]): List to store output messages.
         first_loop_state (bool): Flag indicating if this is the first iteration.
         number_of_pages (int): integer indicating the number of pages in the document
+        all_annotations_object(List of annotation objects): All annotations for current document
+        prepare_for_review(bool): Is this preparation step preparing pdfs and json files to review current redactions?
         progress (Progress): Progress tracker for the operation.
+        
 
     Returns:
         tuple[List[str], List[str]]: A tuple containing the output messages and processed file paths.
@@ -194,7 +201,8 @@ def prepare_image_or_pdf(
     if first_loop_state==True:
         print("first_loop_state is True")
         latest_file_completed = 0
-        out_message = []   
+        out_message = []
+        all_annotations_object = []
     else:
         print("Now attempting file:", str(latest_file_completed))
     
@@ -222,7 +230,7 @@ def prepare_image_or_pdf(
     else:
         file_path_number = len(file_paths)
 
-    print("Current_loop_page_number at start of prepare_image_or_pdf function is:", current_loop_page_number)
+    #print("Current_loop_page_number at start of prepare_image_or_pdf function is:", current_loop_page_number)
     print("Number of file paths:", file_path_number)
     print("Latest_file_completed:", latest_file_completed)
     
@@ -235,7 +243,7 @@ def prepare_image_or_pdf(
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
+        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
 
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
@@ -245,13 +253,16 @@ def prepare_image_or_pdf(
         file_paths_list = [file_paths]
         file_paths_loop = file_paths_list
     else:
-        file_paths_list = file_paths
-        file_paths_loop = [file_paths_list[int(latest_file_completed)]]
+        if prepare_for_review == False:
+            file_paths_list = file_paths
+            file_paths_loop = [file_paths_list[int(latest_file_completed)]]
+        else:
+            file_paths_list = file_paths
+            file_paths_loop = file_paths
+             # Sort files to prioritise PDF files first, then JSON files. This means that the pdf can be loaded in, and pdf page path locations can be added to the json
+            file_paths_loop = sorted(file_paths_loop, key=lambda x: (os.path.splitext(x)[1] != '.pdf', os.path.splitext(x)[1] != '.json'))      
 
-    
-    #print("file_paths_loop:", str(file_paths_loop))
-
-    #for file in progress.tqdm(file_paths, desc="Preparing files"):
+    # Loop through files to load in
     for file in file_paths_loop:
         if isinstance(file, str):
             file_path = file
@@ -259,50 +270,87 @@ def prepare_image_or_pdf(
             file_path = file.name
         file_path_without_ext = get_file_path_end(file_path)
 
-        #print("file:", file_path)
+        if not file_path:
+            out_message = "Please select a file."
+            print(out_message)
+            return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
         # Check if the file is an image type
         if file_extension in ['.jpg', '.jpeg', '.png']:
-            in_redact_method = "Quick image analysis - typed text"
+            in_redact_method = tesseract_ocr_option
 
-        # If the file loaded in is json, assume this is a textract response object. Save this to the output folder so it can be found later during redaction and go to the next file.
-        if file_extension in ['.json']:
-            json_contents = json.load(file_path)
-            # Write the response to a JSON file
-            out_folder = output_folder + file_path
-            with open(file_path, 'w') as json_file:
-                json.dump(json_contents, out_folder, indent=4)  # indent=4 makes the JSON file pretty-printed
-            continue
 
-        #if file_path:
-        #    file_path_without_ext = get_file_path_end(file_path)
-        if not file_path:
-            out_message = "No file selected"
-            print(out_message)
-            return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
+        # If the file name ends with redactions.json, assume it is an annoations object, overwrite the current variable
+        if file_path.endswith(".json"):
 
-        if in_redact_method == "Quick image analysis - typed text" or in_redact_method == "Complex image analysis - docs with handwriting/signatures (AWS Textract)":
-            # Analyse and redact image-based pdf or image
+            if prepare_for_review == True:
+                if isinstance(file_path, str):
+                    with open(file_path, 'r') as json_file:
+                        all_annotations_object = json.load(json_file)
+                else:
+                    # Assuming file_path is a NamedString or similar
+                    all_annotations_object = json.loads(file_path)  # Use loads for string content
+
+                # Get list of page numbers
+                image_file_paths_pages = [
+                int(re.search(r'_(\d+)\.png$', os.path.basename(s)).group(1)) 
+                for s in image_file_paths 
+                if re.search(r'_(\d+)\.png$', os.path.basename(s))
+                ]
+                image_file_paths_pages = [int(i) for i in image_file_paths_pages]
+                
+
+                # If PDF pages have been converted to image files, replace the current image paths in the json to this
+                if image_file_paths:
+                    for i, annotation in enumerate(all_annotations_object):
+                        annotation_page_number = int(re.search(r'_(\d+)\.png$', annotation["image"]).group(1))
+
+                        # Check if the annotation page number exists in the image file paths pages
+                        if annotation_page_number in image_file_paths_pages:
+
+                            # Set the correct image page directly since we know it's in the list
+                            correct_image_page = annotation_page_number
+                            annotation["image"] = image_file_paths[correct_image_page]
+                        else:
+                            print("Page not found.")
+
+                    #print("all_annotations_object:", all_annotations_object)
+
+                # Write the response to a JSON file in output folder
+                out_folder = output_folder + file_path_without_ext + file_extension
+                with open(out_folder, 'w') as json_file:
+                    json.dump(all_annotations_object, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+                continue
+
+            else:
+                # If the file loaded has end textract.json, assume this is a textract response object. Save this to the output folder so it can be found later during redaction and go to the next file.
+                json_contents = json.load(file_path)
+                # Write the response to a JSON file in output folder
+                out_folder = output_folder + file_path_without_ext + file_extension
+                with open(out_folder, 'w') as json_file:
+                    json.dump(json_contents, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+                continue
+
+        # Convert pdf/image file to correct format for redaction
+        if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
             if is_pdf_or_image(file_path) == False:
                 out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
                 print(out_message)
-                return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
+                return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
             
             converted_file_path = process_file(file_path)
             image_file_path = converted_file_path
-            #print("Out file path at image conversion step:", converted_file_path)
 
-        elif in_redact_method == "Simple text analysis - PDFs with selectable text":
+        elif in_redact_method == text_ocr_option:
             if is_pdf(file_path) == False:
                 out_message = "Please upload a PDF file for text analysis."
                 print(out_message)
-                return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
+                return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
             
             converted_file_path = file_path # Pikepdf works with the basic unconverted pdf file
             image_file_path = process_file(file_path)
-            
 
         converted_file_paths.append(converted_file_path)
         image_file_paths.extend(image_file_path)
@@ -310,7 +358,7 @@ def prepare_image_or_pdf(
         # If a pdf, load as a pymupdf document
         if is_pdf(file_path):
             pymupdf_doc = pymupdf.open(file_path)
-            #print("pymupdf_doc:", pymupdf_doc)
+
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
             # Convert image to a pymupdf document
             pymupdf_doc = pymupdf.open()  # Create a new empty document
@@ -318,9 +366,7 @@ def prepare_image_or_pdf(
             rect = pymupdf.Rect(0, 0, img.width, img.height)  # Create a rectangle for the image
             page = pymupdf_doc.new_page(width=img.width, height=img.height)  # Add a new page
             page.insert_image(rect, filename=file_path)  # Insert the image into the page
-            # Ensure to save the document after processing
-            #pymupdf_doc.save(output_path)  # Uncomment and specify output_path if needed
-            #pymupdf_doc.close()  # Close the PDF document
+
 
         toc = time.perf_counter()
         out_time = f"File '{file_path_without_ext}' prepared in {toc - tic:0.1f} seconds."
@@ -332,9 +378,8 @@ def prepare_image_or_pdf(
 
         number_of_pages = len(image_file_paths)
 
-        print("At end of prepare_image_or_pdf function - current_loop_page_number:", current_loop_page_number)
-    
-    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc
+        
+    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi):
     file_path_without_ext = get_file_path_end(in_file_path)

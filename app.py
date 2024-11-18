@@ -9,11 +9,11 @@ import pandas as pd
 from datetime import datetime
 from gradio_image_annotation import image_annotator
 
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, custom_regex_load, reset_state_vars, load_in_default_allow_list
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3, RUN_AWS_FUNCTIONS, bucket_name
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
-from tools.redaction_review import apply_redactions, crop, get_boxes_json, modify_existing_page_redactions, decrease_page, increase_page, update_annotator, update_zoom
+from tools.redaction_review import apply_redactions, modify_existing_page_redactions, decrease_page, increase_page, update_annotator, update_zoom
 from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
 from tools.load_spacy_model_custom_recognisers import custom_entities
@@ -45,12 +45,6 @@ feedback_logs_folder = 'feedback/' + today_rev + '/' + host_name + '/'
 access_logs_folder = 'logs/' + today_rev + '/' + host_name + '/'
 usage_logs_folder = 'usage/' + today_rev + '/' + host_name + '/'
 
-text_ocr_option = "Simple text analysis - PDFs with selectable text"
-tesseract_ocr_option = "Quick image analysis - typed text"
-textract_option = "Complex image analysis - docs with handwriting/signatures (AWS Textract)"
-
-local_pii_detector = "Local"
-aws_pii_detector  = "AWS Comprehend"
 
 if RUN_AWS_FUNCTIONS == "1":
     default_ocr_val = textract_option
@@ -104,7 +98,8 @@ with app:
     textract_metadata_textbox = gr.Textbox(label = "textract_metadata_textbox", value="", visible=False)
     comprehend_query_number = gr.Number(label = "comprehend_query_number", value=0, visible=False)
 
-    doc_file_name_textbox = gr.Textbox(label = "doc_file_name_textbox", value="", visible=False)
+    doc_full_file_name_textbox = gr.Textbox(label = "doc_full_file_name_textbox", value="", visible=False)
+    doc_file_name_no_extension_textbox = gr.Textbox(label = "doc_full_file_name_textbox", value="", visible=False)
     doc_file_name_with_extension_textbox = gr.Textbox(label = "doc_file_name_with_extension_textbox", value="", visible=False)
     data_file_name_textbox = gr.Textbox(label = "data_file_name_textbox", value="", visible=False)
     
@@ -127,6 +122,9 @@ with app:
     zoom_true_bool = gr.State(True)
     zoom_false_bool = gr.State(False)
 
+    clear_all_page_redactions = gr.State(True)
+    prepare_for_review_bool = gr.Checkbox(value=True, visible=False)
+
 
     ###
     # UI DESIGN
@@ -145,8 +143,12 @@ with app:
     with gr.Tab("PDFs/images"):
         with gr.Accordion("Redact document", open = True):
             in_doc_files = gr.File(label="Choose a document or image file (PDF, JPG, PNG)", file_count= "single", file_types=['.pdf', '.jpg', '.png', '.json'])
-            in_redaction_method = gr.Radio(label="Choose text extract method. AWS Textract has a cost per page.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
-            pii_identification_method_drop = gr.Radio(label = "Choose PII detection method. AWS Comprehend has a cost per 100 characters.", value = default_pii_detector, choices=[local_pii_detector, aws_pii_detector])
+            if RUN_AWS_FUNCTIONS == "1":
+                in_redaction_method = gr.Radio(label="Choose text extraction method. AWS Textract has a cost per page.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
+                pii_identification_method_drop = gr.Radio(label = "Choose PII detection method. AWS Comprehend has a cost per 100 characters.", value = default_pii_detector, choices=[local_pii_detector, aws_pii_detector])
+            else:
+                in_redaction_method = gr.Radio(label="Choose text extraction method.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option])
+                pii_identification_method_drop = gr.Radio(label = "Choose PII detection method.", value = default_pii_detector, choices=[local_pii_detector], visible=False)
 
             gr.Markdown("""If you only want to redact certain pages, or certain entities (e.g. just email addresses), please go to the redaction settings tab.""")
             document_redact_btn = gr.Button("Redact document(s)", variant="primary")
@@ -178,6 +180,8 @@ with app:
         with gr.Row():
             annotate_zoom_in = gr.Button("Zoom in")
             annotate_zoom_out = gr.Button("Zoom out")
+        with gr.Row():
+            clear_all_redactions_on_page_btn = gr.Button("Clear all redactions on page")
 
         annotation_button_apply = gr.Button("Apply revised redactions", variant="primary")
 
@@ -199,7 +203,8 @@ with app:
             annotate_max_pages_bottom = gr.Number(value=1, label="Total pages", precision=0, interactive=False, scale = 1)
             annotation_next_page_button_bottom = gr.Button("Next page", scale = 3)
 
-        output_review_files = gr.File(label="Review output files")
+        output_review_files = gr.File(label="Review output files", file_count='multiple')
+        upload_previous_review_file_btn = gr.Button("Review previously created redaction file (upload original PDF and ...redactions.json)")
 
     # TEXT / TABULAR DATA TAB
     with gr.Tab(label="Open text or Excel/csv files"):
@@ -230,6 +235,8 @@ with app:
                 choices=["The results were good", "The results were not good"], visible=False, show_label=True)
         data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
         data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
+
+
 
     # SETTINGS TAB
     with gr.Tab(label="Redaction settings"):
@@ -272,10 +279,10 @@ with app:
     ###
     # PDF/IMAGE REDACTION
     ###
-    in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_textbox, doc_file_name_with_extension_textbox])
+    in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox])
 
     document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator]).\
-    then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state], api_name="prepare_doc").\
+    then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state], api_name="prepare_doc").\
     then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
                     outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number], api_name="redact_doc").\
                     then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom])
@@ -283,10 +290,10 @@ with app:
     # If the app has completed a batch of pages, it will run this until the end of all pages in the document
     current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
                     outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number]).\
-                    then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom])
+                    then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
     
     # If a file has been completed, the function will continue onto the next document
-    latest_file_completed_text.change(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom]).\
+    latest_file_completed_text.change(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page]).\
                     then(fn=reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
         # latest_file_completed_text.change(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, current_loop_page_number], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state]).\
     # then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return],
@@ -299,12 +306,12 @@ with app:
     # Page controls at top
     annotate_current_page.submit(
         modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
     
     annotation_last_page_button.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
     annotation_next_page_button.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
     
     # Zoom in and out on annotator
     annotate_zoom_in.click(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
@@ -313,20 +320,28 @@ with app:
     annotate_zoom_out.click(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
         then(update_zoom, inputs=[annotator_zoom_number, annotate_current_page, zoom_false_bool], outputs=[annotator_zoom_number, annotate_current_page])
     
-    annotator_zoom_number.change(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+    annotator_zoom_number.change(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
+
+    clear_all_redactions_on_page_btn.click(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, clear_all_page_redactions], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
 
     #annotation_button_get.click(get_boxes_json, annotator, json_boxes)
-    annotation_button_apply.click(apply_redactions, inputs=[annotator, in_doc_files, pdf_doc_state, all_image_annotations_state, annotate_current_page], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files], scroll_to_output=True)
+    annotation_button_apply.click(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files], scroll_to_output=True)
 
     # Page controls at bottom
     annotate_current_page_bottom.submit(
         modify_existing_page_redactions, inputs = [annotator, annotate_current_page_bottom, annotate_previous_page, all_image_annotations_state], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
 
     annotation_last_page_button_bottom.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
     annotation_next_page_button_bottom.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page, annotate_current_page_bottom]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
+    
+    # Upload previous files for modifying redactions
+    upload_previous_review_file_btn.click(fn=get_input_file_names, inputs=[output_review_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox]).\
+        then(fn = prepare_image_or_pdf, inputs=[output_review_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state, prepare_for_review_bool], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state]).\
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
 
     ###
     # TABULAR DATA REDACTION
@@ -364,8 +379,8 @@ with app:
 
     # User submitted feedback for pdf redactions
     pdf_callback = gr.CSVLogger(dataset_file_name=log_file_name)
-    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text, doc_file_name_textbox], feedback_logs_folder)
-    pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text, doc_file_name_textbox], None, preprocess=False).\
+    pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text, doc_file_name_no_extension_textbox], feedback_logs_folder)
+    pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text, doc_file_name_no_extension_textbox], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[pdf_further_details_text])
 
     # User submitted feedback for data redactions
@@ -376,8 +391,8 @@ with app:
 
     # Log processing time/token usage when making a query
     usage_callback = gr.CSVLogger(dataset_file_name=log_file_name)
-    usage_callback.setup([session_hash_textbox, doc_file_name_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], usage_logs_folder)
-    latest_file_completed_text.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, doc_file_name_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], None, preprocess=False).\
+    usage_callback.setup([session_hash_textbox, doc_file_name_no_extension_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], usage_logs_folder)
+    latest_file_completed_text.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, doc_file_name_no_extension_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Launch the Gradio app

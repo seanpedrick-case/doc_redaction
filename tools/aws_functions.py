@@ -10,17 +10,13 @@ PandasDataFrame = Type[pd.DataFrame]
 # Get AWS credentials
 bucket_name=""
 
-RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "1")
+RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
 print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
 
 AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
 print(f'The value of AWS_REGION is {AWS_REGION}')
 
-try:
-    comprehend_client = boto3.client('comprehend', region_name=AWS_REGION) 
-except Exception as e:
-    print(e)
-    comprehend_client = ""
+
 
 def get_assumed_role_info():
         sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'

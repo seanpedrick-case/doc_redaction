@@ -29,6 +29,16 @@ def get_or_create_env_var(var_name, default_value):
     
     return value
 
+
+# Names for options labels
+text_ocr_option = "Simple text analysis - docs with selectable text"
+tesseract_ocr_option = "OCR analysis for documents without selectable text - best for typed text"
+textract_option = "Complex image analysis - docs with handwriting/signatures (AWS Textract)"
+
+local_pii_detector = "Local"
+aws_pii_detector  = "AWS Comprehend"
+
+
 # Retrieving or setting output folder
 env_var_name = 'GRADIO_OUTPUT_FOLDER'
 default_value = 'output/'
