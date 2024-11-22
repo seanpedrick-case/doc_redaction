@@ -4,6 +4,7 @@ import subprocess
 from urllib.parse import unquote_plus
 
 s3_client = boto3.client("s3")
+TMP_DIR = "/tmp"  # Use absolute path
 
 def download_file_from_s3(bucket_name, key, download_path):
     """Download a file from S3 to the local filesystem."""
@@ -16,38 +17,56 @@ def upload_file_to_s3(file_path, bucket_name, key):
     print(f"Uploaded {file_path} to {key}")
 
 def lambda_handler(event, context):
-    """Main Lambda function handler."""
-    # Parse the S3 event
-    for record in event["Records"]:
-        bucket_name = record["s3"]["bucket"]["name"]
-        input_key = unquote_plus(record["s3"]["object"]["key"])
+    # Create necessary directories
+    os.makedirs(os.path.join(TMP_DIR, "input"), exist_ok=True)
+    os.makedirs(os.path.join(TMP_DIR, "output"), exist_ok=True)
+
+    # Extract S3 bucket and object key from the Records
+    for record in event.get("Records", [{}]):
+        bucket_name = record.get("s3", {}).get("bucket", {}).get("name")
+        input_key = record.get("s3", {}).get("object", {}).get("key")
         print(f"Processing file {input_key} from bucket {bucket_name}")
 
-        # Prepare paths
-        input_file_path = f"/tmp/{os.path.basename(input_key)}"
-        allow_list_path = f"/tmp/allow_list.csv"  # Adjust this as needed
-        output_dir = "/tmp/output"
-        os.makedirs(output_dir, exist_ok=True)
+        # Extract additional arguments
+        arguments = event.get("arguments", {})
+
+        if not input_key:
+            input_key = arguments.get("input_file", "")
+
+        ocr_method = arguments.get("ocr_method", "Complex image analysis - docs with handwriting/signatures (AWS Textract)")
+        pii_detector = arguments.get("pii_detector", "AWS Comprehend")
+        page_min = str(arguments.get("page_min", 0))
+        page_max = str(arguments.get("page_max", 0))
+        allow_list = arguments.get("allow_list", None)
+        output_dir = arguments.get("output_dir", os.path.join(TMP_DIR, "output"))
+        
+        print(f"OCR Method: {ocr_method}")
+        print(f"PII Detector: {pii_detector}")
+        print(f"Page Range: {page_min} - {page_max}")
+        print(f"Allow List: {allow_list}")
+        print(f"Output Directory: {output_dir}")
 
         # Download input file
+        input_file_path = os.path.join(TMP_DIR, "input", os.path.basename(input_key))
         download_file_from_s3(bucket_name, input_key, input_file_path)
 
-        # (Optional) Download allow_list if needed
-        allow_list_key = "path/to/allow_list.csv"  # Adjust path as required
-        download_file_from_s3(bucket_name, allow_list_key, allow_list_path)
-
-        # Construct and run the command
+        # Construct command
         command = [
             "python",
             "app.py",
             "--input_file", input_file_path,
-            "--ocr_method", "Complex image analysis - docs with handwriting/signatures (AWS Textract)",
-            "--pii_detector", "AWS Comprehend",
-            "--page_min", "0",
-            "--page_max", "0",
-            "--allow_list", allow_list_path,
+            "--ocr_method", ocr_method,
+            "--pii_detector", pii_detector,
+            "--page_min", page_min,
+            "--page_max", page_max,
             "--output_dir", output_dir,
         ]
+
+        # Add allow_list only if provided
+        if allow_list:
+            allow_list_path = os.path.join(TMP_DIR, "allow_list.csv")
+            download_file_from_s3(bucket_name, allow_list, allow_list_path)
+            command.extend(["--allow_list", allow_list_path])
 
         try:
             result = subprocess.run(command, capture_output=True, text=True, check=True)
