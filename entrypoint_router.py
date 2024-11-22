@@ -15,9 +15,9 @@ if __name__ == "__main__":
         print(response)
     else:
         # Gradio App execution
-        from app import app  # Replace with actual import if needed
+        from app import app, max_queue_size, max_file_size  # Replace with actual import if needed
 
         if os.getenv("COGNITO_AUTH", "0") == "1":
-            app.queue(max_size=app.max_queue_size).launch(show_error=True, auth=app.authenticate_user, max_file_size=app.max_file_size)
+            app.queue(max_size=max_queue_size).launch(show_error=True, auth=app.authenticate_user, max_file_size=max_file_size)
         else:
-            app.queue(max_size=app.max_queue_size).launch(show_error=True, inbrowser=True, max_file_size=app.max_file_size)
+            app.queue(max_size=max_queue_size).launch(show_error=True, inbrowser=True, max_file_size=max_file_size)

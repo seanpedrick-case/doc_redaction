@@ -402,12 +402,13 @@ print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 RUN_DIRECT_MODE = get_or_create_env_var('RUN_DIRECT_MODE', '0')
 print(f'The value of RUN_DIRECT_MODE is {RUN_DIRECT_MODE}')
 
+max_queue_size = 5
+max_file_size = '100mb'
+
 if __name__ == "__main__":
 
     if RUN_DIRECT_MODE == "0":
-        max_queue_size = 5
-        max_file_size = '100mb'
-
+        
         if os.environ['COGNITO_AUTH'] == "1":
             app.queue(max_size=max_queue_size).launch(show_error=True, auth=authenticate_user, max_file_size=max_file_size)
         else:
