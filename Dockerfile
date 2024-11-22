@@ -69,6 +69,6 @@ WORKDIR $HOME/app
 COPY --chown=user . $HOME/app
 
 # Keep the default entrypoint as flexible
-ENTRYPOINT ["python", "-u", "entrypoint_router.py"]
+ENTRYPOINT ["python", "-u", "lambda_entrypoint.py"]
 
 #CMD ["python", "app.py"]
