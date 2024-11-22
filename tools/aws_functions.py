@@ -10,7 +10,7 @@ PandasDataFrame = Type[pd.DataFrame]
 # Get AWS credentials
 bucket_name=""
 
-RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
+RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "1")
 print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
 
 AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')

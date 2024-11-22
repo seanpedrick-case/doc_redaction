@@ -364,7 +364,7 @@ with app:
 
     # If running on AWS, load in the default allow list file from S3
     if RUN_AWS_FUNCTIONS == "1":
-        print("default_allow_list_output_folder_location:", default_allow_list_output_folder_location)
+        print("default_allow_list_output_folder_location:", default_allow_list_loc)
         if not os.path.exists(default_allow_list_loc):
             app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_allow_list_file, default_allow_list_output_folder_location]).\
             then(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
@@ -399,11 +399,26 @@ with app:
 COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
 print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
+RUN_DIRECT_MODE = get_or_create_env_var('RUN_DIRECT_MODE', '0')
+print(f'The value of RUN_DIRECT_MODE is {RUN_DIRECT_MODE}')
+
 if __name__ == "__main__":
-    if os.environ['COGNITO_AUTH'] == "1":
-        app.queue(max_size=5).launch(show_error=True, auth=authenticate_user, max_file_size='100mb')
+
+    if RUN_DIRECT_MODE == "0":
+        max_queue_size = 5
+        max_file_size = '100mb'
+
+        if os.environ['COGNITO_AUTH'] == "1":
+            app.queue(max_size=max_queue_size).launch(show_error=True, auth=authenticate_user, max_file_size=max_file_size)
+        else:
+            app.queue(max_size=max_queue_size).launch(show_error=True, inbrowser=True, max_file_size=max_file_size)
+    
     else:
-        app.queue(max_size=5).launch(show_error=True, inbrowser=True, max_file_size='100mb')
+        from tools.cli_redact import main
+
+        main(first_loop_state, latest_file_completed=0, output_summary="", output_file_list=None, 
+         log_files_list=None, estimated_time=0, textract_metadata="", comprehend_query_num=0, 
+         current_loop_page=0, page_break=False, pdf_doc_state = [], all_image_annotations = [], all_line_level_ocr_results = pd.DataFrame(), all_decision_process_table = pd.DataFrame(),chosen_comprehend_entities = chosen_comprehend_entities, chosen_redact_entities = chosen_redact_entities, handwrite_signature_checkbox = ["Redact all identified handwriting", "Redact all identified signatures"])
 
 
 # AWS options - placeholder for possibility of storing data on s3 and retrieving it in app

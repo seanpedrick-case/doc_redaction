@@ -72,7 +72,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zo
 
         return out_image_annotator, number_reported, number_reported
     
-    print("page_num at start of update_annotator function:", page_num)
+    #print("page_num at start of update_annotator function:", page_num)
 
     if page_num is None:
         page_num = 0

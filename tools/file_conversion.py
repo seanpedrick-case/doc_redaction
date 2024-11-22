@@ -9,6 +9,7 @@ import gradio as gr
 import time
 import json
 import pymupdf
+from tqdm import tqdm
 from gradio import Progress
 from typing import List, Optional
 
@@ -47,6 +48,8 @@ def is_pdf(filename):
 
 def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = image_dpi, progress=Progress(track_tqdm=True)):
 
+    print("pdf_path in convert_pdf_to_images:", pdf_path)
+
     # Get the number of pages in the PDF
     page_count = pdfinfo_from_path(pdf_path)['Pages']
     print("Number of pages in PDF: ", str(page_count))
@@ -55,7 +58,9 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = imag
 
     # Open the PDF file
     #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"): range(page_min,page_count): #
-    for page_num in progress.tqdm(range(page_min,page_count), total=page_count, unit="pages", desc="Preparing pages"):
+    for page_num in tqdm(range(page_min,page_count), total=page_count, unit="pages", desc="Preparing pages"):
+
+        print("page_num in convert_pdf_to_images:", page_num)
         
         print("Converting page: ", str(page_num + 1))
 
@@ -98,7 +103,7 @@ def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = imag
     return images
 
 # Function to take in a file path, decide if it is an image or pdf, then process appropriately.
-def process_file(file_path):
+def process_file(file_path:str):
     # Get the file extension
     file_extension = os.path.splitext(file_path)[1].lower()
 
@@ -130,7 +135,9 @@ def get_input_file_names(file_input):
     file_name_with_extension = ""
     full_file_name = ""
 
-    #print("file_input:", file_input)
+    print("file_input in input file names:", file_input)
+    if isinstance(file_input, dict):
+        file_input = os.path.abspath(file_input["name"])
 
     if isinstance(file_input, str):
         file_input_list = [file_input]
@@ -225,6 +232,9 @@ def prepare_image_or_pdf(
     if not file_paths:
         file_paths = []
 
+    if isinstance(file_paths, dict):
+        file_paths = os.path.abspath(file_paths["name"])
+
     if isinstance(file_paths, str):
         file_path_number = 1
     else:
@@ -277,8 +287,9 @@ def prepare_image_or_pdf(
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
-        # Check if the file is an image type
-        if file_extension in ['.jpg', '.jpeg', '.png']:
+
+        # Check if the file is an image type and the user selected text ocr option
+        if file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
             in_redact_method = tesseract_ocr_option
 
 
@@ -333,6 +344,9 @@ def prepare_image_or_pdf(
                     json.dump(json_contents, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
                 continue
 
+        
+        print("in_redact_method:", in_redact_method)
+
         # Convert pdf/image file to correct format for redaction
         if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
             if is_pdf_or_image(file_path) == False:
@@ -340,6 +354,9 @@ def prepare_image_or_pdf(
                 print(out_message)
                 return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
             
+            print("In correct preparation area.")
+
+            print("file_path at process_file:", file_path)
             converted_file_path = process_file(file_path)
             image_file_path = converted_file_path
 

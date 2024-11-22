@@ -180,8 +180,12 @@ def choose_and_run_redactor(file_paths:List[str],
         return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
 
     # Create allow list
+    # If string, assume file path
+    if isinstance(in_allow_list, str):
+        in_allow_list = pd.read_csv(in_allow_list)
+
     if not in_allow_list.empty:
-        in_allow_list_flat = in_allow_list[0].tolist()
+        in_allow_list_flat = in_allow_list.iloc[:,0].tolist()
         print("In allow list:", in_allow_list_flat)
     else:
         in_allow_list_flat = []
@@ -215,11 +219,17 @@ def choose_and_run_redactor(file_paths:List[str],
     progress(0.5, desc="Redacting file")
     
     if isinstance(file_paths, str):
-        file_paths_list = [file_paths]
+        file_paths_list = [os.path.abspath(file_paths)]
+        file_paths_loop = file_paths_list
+    elif isinstance(file_paths, dict):
+        file_paths = file_paths["name"]
+        file_paths_list = [os.path.abspath(file_paths)]
         file_paths_loop = file_paths_list
     else:
         file_paths_list = file_paths
         file_paths_loop = [file_paths_list[int(latest_file_completed)]]    
+
+    print("file_paths_list in choose_redactor function:", file_paths_list)
 
 
     for file in file_paths_loop:

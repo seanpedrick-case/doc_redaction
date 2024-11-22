@@ -14,6 +14,9 @@ RUN pip install --no-cache-dir --target=/install -r requirements.txt
 
 RUN rm requirements.txt
 
+# Add lambda_entrypoint.py to the container
+COPY lambda_entrypoint.py .
+
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
 
@@ -62,4 +65,7 @@ WORKDIR $HOME/app
 # Copy the current directory contents into the container at $HOME/app setting the owner to the user
 COPY --chown=user . $HOME/app
 
-CMD ["python", "app.py"]
+# Keep the default entrypoint as flexible
+ENTRYPOINT ["python", "-u", "entrypoint_router.py"]
+
+#CMD ["python", "app.py"]
