@@ -1,9 +1,13 @@
 import boto3
 import os
 import subprocess
-from urllib.parse import unquote_plus
+
+print("In lambda_entrypoint function")
 
 s3_client = boto3.client("s3")
+
+print("s3_client is:", s3_client
+      )
 TMP_DIR = "/tmp"  # Use absolute path
 
 def download_file_from_s3(bucket_name, key, download_path):
@@ -17,9 +21,13 @@ def upload_file_to_s3(file_path, bucket_name, key):
     print(f"Uploaded {file_path} to {key}")
 
 def lambda_handler(event, context):
+    print("In lambda_handler function")
     # Create necessary directories
     os.makedirs(os.path.join(TMP_DIR, "input"), exist_ok=True)
     os.makedirs(os.path.join(TMP_DIR, "output"), exist_ok=True)
+
+    print("Got to record loop")
+    print("Event records is:", event["Records"])
 
     # Extract S3 bucket and object key from the Records
     for record in event.get("Records", [{}]):

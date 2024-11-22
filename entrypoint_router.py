@@ -5,8 +5,12 @@ if __name__ == "__main__":
     run_direct_mode = os.getenv("RUN_DIRECT_MODE", "0")
 
     if run_direct_mode == "1":
+
+        print("Attempting to import lambda_handler from lambda_entrypoint")
         # Invoke the lambda handler
         from lambda_entrypoint import lambda_handler
+
+        print("Imported lambda_handler from lambda_entrypoint")
 
     else:
         # Gradio App execution
