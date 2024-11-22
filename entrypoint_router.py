@@ -1,5 +1,4 @@
 import os
-import subprocess
 
 if __name__ == "__main__":
     run_direct_mode = os.getenv("RUN_DIRECT_MODE", "0")

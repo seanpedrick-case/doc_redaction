@@ -4,11 +4,14 @@ import subprocess
 
 print("In lambda_entrypoint function")
 
-s3_client = boto3.client("s3")
+try:
+    s3_client = boto3.client("s3", region_name="eu-west-2")
+    print("s3_client is initialized:", s3_client)
+except Exception as e:
+    print(f"Error initializing s3_client: {e}")
+    raise e
 
-print("s3_client is:", s3_client
-      )
-TMP_DIR = "/tmp"  # Use absolute path
+TMP_DIR = "/tmp/"
 
 def download_file_from_s3(bucket_name, key, download_path):
     """Download a file from S3 to the local filesystem."""

@@ -20,6 +20,9 @@ COPY lambda_entrypoint.py .
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
 
+# Install Lambda web adapter in case you want to run with with an AWS Lamba function URL (not essential if not using Lambda)
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+
 # Install system dependencies. Need to specify -y for poppler to get it to install
 RUN apt-get update \
     && apt-get install -y \
