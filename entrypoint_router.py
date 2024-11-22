@@ -5,14 +5,9 @@ if __name__ == "__main__":
     run_direct_mode = os.getenv("RUN_DIRECT_MODE", "0")
 
     if run_direct_mode == "1":
-        # Lambda execution or CLI invocation (Direct Mode)
+        # Invoke the lambda handler
         from lambda_entrypoint import lambda_handler
 
-        # Simulate the Lambda event and context for local testing
-        event = os.getenv("LAMBDA_TEST_EVENT", '{}')
-        context = None  # Add mock context if needed
-        response = lambda_handler(eval(event), context)
-        print(response)
     else:
         # Gradio App execution
         from app import app, max_queue_size, max_file_size  # Replace with actual import if needed
