@@ -51,6 +51,13 @@ RUN mkdir -p /home/user/app/output \
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 
+# Use a conditional entrypoint based on the APP_MODE argument
+RUN if [ "$APP_MODE" = "gradio" ]; then \
+        echo '#!/bin/sh\nexec python app.py' > /entrypoint.sh; \
+    else \
+        echo '#!/bin/sh\nexec python -m awslambdaric' > /entrypoint.sh; \
+    fi && chmod +x /entrypoint.sh
+
 # Switch to the "user" user
 USER user
 
@@ -77,12 +84,7 @@ COPY --chown=user . $HOME/app
 # Default entrypoint (can be overridden by build argument)
 ARG APP_MODE=gradio
 
-# Use a conditional entrypoint based on the APP_MODE argument
-RUN if [ "$APP_MODE" = "gradio" ]; then \
-        echo '#!/bin/sh\nexec python app.py' > /entrypoint.sh; \
-    else \
-        echo '#!/bin/sh\nexec python -m awslambdaric' > /entrypoint.sh; \
-    fi && chmod +x /entrypoint.sh
+
 
 ENTRYPOINT [ "/entrypoint.sh" ]
 
