@@ -97,7 +97,8 @@ def lambda_handler(event, context):
         
         try:
             result = subprocess.run(command, capture_output=True, text=True, check=True)
-            print("Processing succeeded:", result.stdout)
+            print("Processing succeeded.")
+            #print("Processing succeeded:", result.stdout)
         except subprocess.CalledProcessError as e:
             print("Error during processing:", e.stderr)
             raise e
