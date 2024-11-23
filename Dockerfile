@@ -1,5 +1,3 @@
-
-
 # Stage 1: Build dependencies and download models
 FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm AS builder
 
@@ -82,9 +80,6 @@ WORKDIR $HOME/app
 
 # Copy the app code to the container
 COPY --chown=user . $HOME/app
-
-# Default entrypoint (can be overridden by build argument)
-ARG APP_MODE=gradio
 
 ENTRYPOINT [ "/entrypoint.sh" ]
 

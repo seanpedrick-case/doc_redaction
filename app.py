@@ -17,6 +17,7 @@ from tools.redaction_review import apply_redactions, modify_existing_page_redact
 from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
 from tools.load_spacy_model_custom_recognisers import custom_entities
+from tools.custom_csvlogger import CSVLogger_custom
 
 
 today_rev = datetime.now().strftime("%Y%m%d")
@@ -372,25 +373,25 @@ with app:
             app.load(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
-    access_callback = gr.CSVLogger(dataset_file_name=log_file_name)
+    access_callback = CSVLogger_custom(dataset_file_name=log_file_name)
     access_callback.setup([session_hash_textbox], access_logs_folder)
     session_hash_textbox.change(lambda *args: access_callback.flag(list(args)), [session_hash_textbox], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
     # User submitted feedback for pdf redactions
-    pdf_callback = gr.CSVLogger(dataset_file_name=log_file_name)
+    pdf_callback = CSVLogger_custom(dataset_file_name=log_file_name)
     pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text, doc_file_name_no_extension_textbox], feedback_logs_folder)
     pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text, doc_file_name_no_extension_textbox], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[pdf_further_details_text])
 
     # User submitted feedback for data redactions
-    data_callback = gr.CSVLogger(dataset_file_name=log_file_name)
+    data_callback = CSVLogger_custom(dataset_file_name=log_file_name)
     data_callback.setup([data_feedback_radio, data_further_details_text, data_file_name_textbox], feedback_logs_folder)
     data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args)), [data_feedback_radio, data_further_details_text, data_file_name_textbox], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[data_further_details_text])
 
     # Log processing time/token usage when making a query
-    usage_callback = gr.CSVLogger(dataset_file_name=log_file_name)
+    usage_callback = CSVLogger_custom(dataset_file_name=log_file_name)
     usage_callback.setup([session_hash_textbox, doc_file_name_no_extension_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], usage_logs_folder)
     latest_file_completed_text.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, doc_file_name_no_extension_textbox, data_file_name_textbox, estimated_time_taken_number, textract_metadata_textbox, pii_identification_method_drop, comprehend_query_number], None, preprocess=False).\
     then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
