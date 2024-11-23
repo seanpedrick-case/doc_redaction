@@ -76,7 +76,7 @@ def main(first_loop_state=True, latest_file_completed=0, output_summary="", outp
         current_loop_page, page_break, args.pii_detector, comprehend_query_num
     )
 
-    print(f"\nRedaction complete. Output summary:\n{output_summary}")
+    print(f"\nRedaction complete. Output file_list:\n{output_file_list}")
     print(f"\nOutput files saved to: {args.output_dir}")
 
 if __name__ == "__main__":

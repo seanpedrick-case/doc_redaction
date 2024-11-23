@@ -93,11 +93,16 @@ def lambda_handler(event, context):
             download_file_from_s3(bucket_name, allow_list, allow_list_path)
             command.extend(["--allow_list", allow_list_path])
 
+        print(f"Running command: {command}")
+        
         try:
             result = subprocess.run(command, capture_output=True, text=True, check=True)
             print("Processing succeeded:", result.stdout)
         except subprocess.CalledProcessError as e:
             print("Error during processing:", e.stderr)
+            raise e
+        except Exception as e:
+            print(f"Unexpected error: {str(e)}")
             raise e
 
         # Upload output files back to S3
