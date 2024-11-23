@@ -17,6 +17,7 @@ openpyxl==3.1.2
 Faker==22.2.0
 gradio_image_annotation==0.2.5
 numpy==1.26.4
+awslambdaric==3.0.0
 
 
 

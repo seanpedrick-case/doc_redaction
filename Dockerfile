@@ -1,8 +1,17 @@
+# Define a build argument for the mode (gradio or lambda)
+ARG APP_MODE=gradio
+
 # Stage 1: Build dependencies and download models
 FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm AS builder
 
 # Install system dependencies. Need to specify -y for poppler to get it to install
 RUN apt-get update \
+    && apt-get install -y \
+        g++ \
+        make \
+        cmake \
+        unzip \
+        libcurl4-openssl-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -20,10 +29,7 @@ COPY lambda_entrypoint.py .
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
 
-# Install Lambda web adapter in case you want to run with with an AWS Lamba function URL (not essential if not using Lambda)
-COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
-
-# Install system dependencies. Need to specify -y for poppler to get it to install
+# Install system dependencies
 RUN apt-get update \
     && apt-get install -y \
         tesseract-ocr \
@@ -36,11 +42,11 @@ RUN apt-get update \
 # Set up a new user named "user" with user ID 1000
 RUN useradd -m -u 1000 user
 
-# Make output folder
+# Create required directories
 RUN mkdir -p /home/user/app/output \
-&& mkdir -p /home/user/app/tld \
-&& mkdir -p /home/user/app/logs \
-&& chown -R user:user /home/user/app
+    && mkdir -p /home/user/app/tld \
+    && mkdir -p /home/user/app/logs \
+    && chown -R user:user /home/user/app
 
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
@@ -50,25 +56,35 @@ USER user
 
 # Set environmental variables
 ENV HOME=/home/user \
-	PATH=/home/user/.local/bin:$PATH \
+    PATH=/home/user/.local/bin:$PATH \
     PYTHONPATH=/home/user/app \
-	PYTHONUNBUFFERED=1 \
+    PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-	GRADIO_ALLOW_FLAGGING=never \
-	GRADIO_NUM_PORTS=1 \
-	GRADIO_SERVER_NAME=0.0.0.0 \
-	GRADIO_SERVER_PORT=7860 \
-	GRADIO_THEME=huggingface \
-	TLDEXTRACT_CACHE=$HOME/app/tld/.tld_set_snapshot \
-	SYSTEM=spaces
- 
+    GRADIO_ALLOW_FLAGGING=never \
+    GRADIO_NUM_PORTS=1 \
+    GRADIO_SERVER_NAME=0.0.0.0 \
+    GRADIO_SERVER_PORT=7860 \
+    GRADIO_THEME=huggingface \
+    TLDEXTRACT_CACHE=$HOME/app/tld/.tld_set_snapshot \
+    SYSTEM=spaces
+
 # Set the working directory to the user's home directory
 WORKDIR $HOME/app
 
-# Copy the current directory contents into the container at $HOME/app setting the owner to the user
+# Copy the app code to the container
 COPY --chown=user . $HOME/app
 
-# Keep the default entrypoint as flexible
-ENTRYPOINT ["python", "-u", "lambda_entrypoint.py"]
+# Default entrypoint (can be overridden by build argument)
+ARG APP_MODE=gradio
 
-#CMD ["python", "app.py"]
+# Use a conditional entrypoint based on the APP_MODE argument
+RUN if [ "$APP_MODE" = "gradio" ]; then \
+        echo '#!/bin/sh\nexec python app.py' > /entrypoint.sh; \
+    else \
+        echo '#!/bin/sh\nexec python -m awslambdaric' > /entrypoint.sh; \
+    fi && chmod +x /entrypoint.sh
+
+ENTRYPOINT [ "/entrypoint.sh" ]
+
+# Default command for Lambda mode
+CMD [ "lambda_entrypoint.lambda_handler" ]
