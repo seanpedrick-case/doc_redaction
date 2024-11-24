@@ -106,11 +106,15 @@ def lambda_handler(event, context):
             print(f"Unexpected error: {str(e)}")
             raise e
 
+        print("Now uploading files from:", output_dir)
+        
         # Upload output files back to S3
         for root, _, files in os.walk(output_dir):
             for file_name in files:
+                print("file_name:", file_name)
                 local_file_path = os.path.join(root, file_name)
-                output_key = f"{os.path.dirname(input_key)}/output/{file_name}"
+                output_key = f"output/{file_name}"
+                print("Output location is:", output_key)
                 upload_file_to_s3(local_file_path, bucket_name, output_key)
 
     return {"statusCode": 200, "body": "Processing complete."}
