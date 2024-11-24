@@ -37,7 +37,7 @@ def main(first_loop_state=True, latest_file_completed=0, output_summary="", outp
     parser.add_argument('--page_min', type=int, default=0, help='First page to redact')
     parser.add_argument('--page_max', type=int, default=0, help='Last page to redact')
     parser.add_argument('--allow_list', help='Path to allow list CSV file')
-    parser.add_argument('--output_dir', default='output', help='Output directory')
+    parser.add_argument('--output_dir', default='output/', help='Output directory')
 
     args = parser.parse_args()
 
@@ -73,7 +73,7 @@ def main(first_loop_state=True, latest_file_completed=0, output_summary="", outp
         first_loop_state, args.page_min, args.page_max, estimated_time,
         handwrite_signature_checkbox, textract_metadata, all_image_annotations,
         all_line_level_ocr_results, all_decision_process_table, pdf_doc_state,
-        current_loop_page, page_break, args.pii_detector, comprehend_query_num
+        current_loop_page, page_break, args.pii_detector, comprehend_query_num, args.output_dir
     )
 
     print(f"\nRedaction complete. Output file_list:\n{output_file_list}")

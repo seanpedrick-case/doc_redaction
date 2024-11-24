@@ -86,6 +86,7 @@ def choose_and_run_redactor(file_paths:List[str],
  page_break_return:bool=False,
  pii_identification_method:str="Local",
  comprehend_query_number:int=0,
+ output_folder:str=output_folder,
  progress=gr.Progress(track_tqdm=True)):
     '''
     This function orchestrates the redaction process based on the specified method and parameters. It takes the following inputs:
@@ -116,6 +117,7 @@ def choose_and_run_redactor(file_paths:List[str],
     - page_break_return (bool, optional): A flag indicating if the function should return after a page break. Defaults to False.
     - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
+    - output_folder (str, optional): Output folder for results.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
     The function returns a redacted document along with processing logs.
@@ -216,6 +218,11 @@ def choose_and_run_redactor(file_paths:List[str],
     else:
         textract_client = ""
 
+    # Check if output_folder exists, create it if it doesn't
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+
     progress(0.5, desc="Redacting file")
     
     if isinstance(file_paths, str):
@@ -254,8 +261,6 @@ def choose_and_run_redactor(file_paths:List[str],
             return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
 
         if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
-
-            
 
             #Analyse and redact image-based pdf or image
             if is_pdf_or_image(file_path) == False:

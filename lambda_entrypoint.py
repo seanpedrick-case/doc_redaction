@@ -98,7 +98,7 @@ def lambda_handler(event, context):
         try:
             result = subprocess.run(command, capture_output=True, text=True, check=True)
             print("Processing succeeded.")
-            #print("Processing succeeded:", result.stdout)
+            print(result.stdout)
         except subprocess.CalledProcessError as e:
             print("Error during processing:", e.stderr)
             raise e
@@ -107,7 +107,7 @@ def lambda_handler(event, context):
             raise e
 
         print("Now uploading files from:", output_dir)
-        
+
         # Upload output files back to S3
         for root, _, files in os.walk(output_dir):
             for file_name in files:
