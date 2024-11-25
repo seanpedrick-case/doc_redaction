@@ -63,6 +63,8 @@ COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 # Entrypoint helps to switch between Gradio and Lambda mode
 COPY entrypoint.sh /entrypoint.sh
 
+RUN chmod +x /entrypoint.sh
+
 # Switch to the "user" user
 USER user
 
@@ -87,7 +89,7 @@ WORKDIR $HOME/app
 # Copy the app code to the container
 COPY --chown=user . $HOME/app
 
-RUN chmod +x /entrypoint.sh
+
 
 ENTRYPOINT [ "/entrypoint.sh" ]
 
