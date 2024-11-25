@@ -61,7 +61,7 @@ COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 #     fi && chmod +x /entrypoint.sh
 
 # Entrypoint helps to switch between Gradio and Lambda mode
-#COPY entrypoint.sh /entrypoint.sh
+COPY entrypoint.sh /entrypoint.sh
 
 # Switch to the "user" user
 USER user
