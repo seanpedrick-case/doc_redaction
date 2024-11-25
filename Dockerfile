@@ -23,6 +23,8 @@ RUN rm requirements.txt
 # Add lambda_entrypoint.py to the container
 COPY lambda_entrypoint.py .
 
+COPY entrypoint.sh .
+
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
 
@@ -59,7 +61,7 @@ COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 #     fi && chmod +x /entrypoint.sh
 
 # Entrypoint helps to switch between Gradio and Lambda mode
-COPY entrypoint.sh /entrypoint.sh
+#COPY entrypoint.sh /entrypoint.sh
 
 # Switch to the "user" user
 USER user

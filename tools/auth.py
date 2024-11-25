@@ -9,8 +9,6 @@ print(f'The value of AWS_CLIENT_ID is {client_id}')
 user_pool_id = get_or_create_env_var('AWS_USER_POOL_ID', '')
 print(f'The value of AWS_USER_POOL_ID is {user_pool_id}')
 
-
-
 def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id, client_id:str=client_id):
     """Authenticates a user against an AWS Cognito user pool.
 
