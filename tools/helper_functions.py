@@ -213,11 +213,11 @@ def wipe_logs(feedback_logs_loc, usage_logs_loc):
         print("Could not remove usage logs file", e)
 
 # Retrieving or setting CUSTOM_HEADER
-CUSTOM_HEADER = get_or_create_env_var('CUSTOM_HEADER', 'custom_header')
+CUSTOM_HEADER = get_or_create_env_var('CUSTOM_HEADER', '')
 print(f'CUSTOM_HEADER found')
 
 # Retrieving or setting CUSTOM_HEADER_VALUE
-CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', 'custom_header_value')
+CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', '')
 print(f'CUSTOM_HEADER_VALUE found')
 
 async def get_connection_params(request: gr.Request):
