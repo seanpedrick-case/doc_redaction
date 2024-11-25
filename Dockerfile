@@ -51,12 +51,15 @@ RUN mkdir -p /home/user/app/output \
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 
-# Use a conditional entrypoint based on the APP_MODE argument
-RUN if [ "$APP_MODE" = "lambda" ]; then \
-        echo '#!/bin/sh\nexec python -m awslambdaric' > /entrypoint.sh; \
-    else \        
-        echo '#!/bin/sh\nexec python app.py' > /entrypoint.sh; \
-    fi && chmod +x /entrypoint.sh
+# Use a conditional entrypoint based on the APP_MODE argument (deprecated, now created beforehand in folder)
+# RUN if [ "$APP_MODE" = "lambda" ]; then \
+#         echo '#!/bin/sh\nexec python -m awslambdaric' > /entrypoint.sh; \
+#     else \        
+#         echo '#!/bin/sh\nexec python app.py' > /entrypoint.sh; \
+#     fi && chmod +x /entrypoint.sh
+
+# Entrypoint helps to switch between Gradio and Lambda mode
+COPY entrypoint.sh /entrypoint.sh
 
 # Switch to the "user" user
 USER user
@@ -71,6 +74,7 @@ ENV HOME=/home/user \
     GRADIO_NUM_PORTS=1 \
     GRADIO_SERVER_NAME=0.0.0.0 \
     GRADIO_SERVER_PORT=7860 \
+    GRADIO_ANALYTICS_ENABLED=False \
     GRADIO_THEME=huggingface \
     TLDEXTRACT_CACHE=$HOME/app/tld/.tld_set_snapshot \
     SYSTEM=spaces
@@ -80,6 +84,8 @@ WORKDIR $HOME/app
 
 # Copy the app code to the container
 COPY --chown=user . $HOME/app
+
+RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT [ "/entrypoint.sh" ]
 

@@ -211,7 +211,15 @@ def wipe_logs(feedback_logs_loc, usage_logs_loc):
         os.remove(usage_logs_loc)
     except Exception as e:
         print("Could not remove usage logs file", e)
-    
+
+# Retrieving or setting CUSTOM_HEADER
+CUSTOM_HEADER = get_or_create_env_var('CUSTOM_HEADER', 'custom_header')
+print(f'CUSTOM_HEADER found')
+
+# Retrieving or setting CUSTOM_HEADER_VALUE
+CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', 'custom_header_value')
+print(f'CUSTOM_HEADER_VALUE found')
+
 async def get_connection_params(request: gr.Request):
     base_folder = ""
 
@@ -223,29 +231,25 @@ async def get_connection_params(request: gr.Request):
     #if 'context' in request_data:
     #     print("Request context dictionary:", request_data['context'])
 
-    # print("Request headers dictionary:", request.headers)
-    # print("All host elements", request.client)           
-    # print("IP address:", request.client.host)
-    # print("Query parameters:", dict(request.query_params))
+    print("Request headers dictionary:", request.headers)
+    print("All host elements", request.client)           
+    print("IP address:", request.client.host)
+    print("Query parameters:", dict(request.query_params))
     # To get the underlying FastAPI items you would need to use await and some fancy @ stuff for a live query: https://fastapi.tiangolo.com/vi/reference/request/
     #print("Request dictionary to object:", request.request.body())
     print("Session hash:", request.session_hash)
 
-    # Retrieving or setting CUSTOM_CLOUDFRONT_HEADER
-    CUSTOM_CLOUDFRONT_HEADER_var = get_or_create_env_var('CUSTOM_CLOUDFRONT_HEADER', '')
-    #print(f'The value of CUSTOM_CLOUDFRONT_HEADER is {CUSTOM_CLOUDFRONT_HEADER_var}')
-
-    # Retrieving or setting CUSTOM_CLOUDFRONT_HEADER_VALUE
-    CUSTOM_CLOUDFRONT_HEADER_VALUE_var = get_or_create_env_var('CUSTOM_CLOUDFRONT_HEADER_VALUE', '')
-    #print(f'The value of CUSTOM_CLOUDFRONT_HEADER_VALUE_var is {CUSTOM_CLOUDFRONT_HEADER_VALUE_var}')
-
-    if CUSTOM_CLOUDFRONT_HEADER_var and CUSTOM_CLOUDFRONT_HEADER_VALUE_var:
-        if CUSTOM_CLOUDFRONT_HEADER_var in request.headers:
-            supplied_cloudfront_custom_value = request.headers[CUSTOM_CLOUDFRONT_HEADER_var]
-            if supplied_cloudfront_custom_value == CUSTOM_CLOUDFRONT_HEADER_VALUE_var:
-                print("Custom Cloudfront header found:", supplied_cloudfront_custom_value)
+    if CUSTOM_HEADER and CUSTOM_HEADER_VALUE:
+            if CUSTOM_HEADER in request.headers:
+                supplied_custom_header_value = request.headers[CUSTOM_HEADER]
+                if supplied_custom_header_value == CUSTOM_HEADER_VALUE:
+                    print("Custom header supplied and matches CUSTOM_HEADER_VALUE")
+                else:
+                    print("Custom header value does not match expected value.")
+                    raise ValueError("Custom header value does not match expected value.")
             else:
-                raise(ValueError, "Custom Cloudfront header value does not match expected value.")
+                print("Custom header value not found.")
+                raise ValueError("Custom header value not found.")   
 
     # Get output save folder from 1 - username passed in from direct Cognito login, 2 - Cognito ID header passed through a Lambda authenticator, 3 - the session hash.
 
