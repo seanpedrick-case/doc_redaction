@@ -28,8 +28,14 @@ COPY entrypoint.sh .
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
 
-# Define a build argument for the mode (gradio or lambda)
+# Define a build argument with a default value
 ARG APP_MODE=gradio
+
+# Echo the APP_MODE during the build to confirm its value
+RUN echo "APP_MODE is set to: ${APP_MODE}"
+
+# Set APP_MODE as an environment variable for runtime
+ENV APP_MODE=${APP_MODE}
 
 # Install system dependencies
 RUN apt-get update \
@@ -52,13 +58,6 @@ RUN mkdir -p /home/user/app/output \
 
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
-
-# Use a conditional entrypoint based on the APP_MODE argument (deprecated, now created beforehand in folder)
-# RUN if [ "$APP_MODE" = "lambda" ]; then \
-#         echo '#!/bin/sh\nexec python -m awslambdaric' > /entrypoint.sh; \
-#     else \        
-#         echo '#!/bin/sh\nexec python app.py' > /entrypoint.sh; \
-#     fi && chmod +x /entrypoint.sh
 
 # Entrypoint helps to switch between Gradio and Lambda mode
 COPY entrypoint.sh /entrypoint.sh
