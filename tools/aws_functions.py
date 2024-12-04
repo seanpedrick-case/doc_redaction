@@ -207,5 +207,3 @@ def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=buck
         else: final_out_message_str = "Could not connect to AWS."
 
     return final_out_message_str
-        
-    

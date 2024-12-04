@@ -88,8 +88,6 @@ WORKDIR $HOME/app
 # Copy the app code to the container
 COPY --chown=user . $HOME/app
 
-
-
 ENTRYPOINT [ "/entrypoint.sh" ]
 
 # Default command for Lambda mode
