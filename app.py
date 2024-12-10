@@ -396,7 +396,7 @@ with app:
     then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Get some environment variables and Launch the Gradio app
-COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '1')
+COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
 print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
 RUN_DIRECT_MODE = get_or_create_env_var('RUN_DIRECT_MODE', '0')
@@ -411,14 +411,17 @@ print(f'The value of MAX_FILE_SIZE is {MAX_FILE_SIZE}')
 GRADIO_SERVER_PORT = int(get_or_create_env_var('GRADIO_SERVER_PORT', '7860'))
 print(f'The value of GRADIO_SERVER_PORT is {GRADIO_SERVER_PORT}')
 
+ROOT_PATH = get_or_create_env_var('ROOT_PATH', '')
+print(f'The value of ROOT_PATH is {ROOT_PATH}')
+
 if __name__ == "__main__":
 
     if RUN_DIRECT_MODE == "0":
         
         if os.environ['COGNITO_AUTH'] == "1":
-            app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT)
+            app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
         else:
-            app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT)
+            app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
     
     else:
         from tools.cli_redact import main

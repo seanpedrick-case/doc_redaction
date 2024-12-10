@@ -70,7 +70,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zo
 
         number_reported = gr.Number(label = "Page (press enter to change)", value=1, precision=0)
 
-        return out_image_annotator, number_reported, number_reported
+        return out_image_annotator, number_reported, number_reported, page_num_reported
     
     #print("page_num at start of update_annotator function:", page_num)
 

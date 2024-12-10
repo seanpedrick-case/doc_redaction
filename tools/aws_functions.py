@@ -19,25 +19,27 @@ print(f'The value of AWS_REGION is {AWS_REGION}')
 
 
 def get_assumed_role_info():
-        sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'
-        sts = boto3.client('sts', region_name=AWS_REGION, endpoint_url=sts_endpoint)
-        response = sts.get_caller_identity()
+    sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'
+    sts = boto3.client('sts', region_name=AWS_REGION, endpoint_url=sts_endpoint)
+    response = sts.get_caller_identity()
 
-        # Extract ARN of the assumed role
-        assumed_role_arn = response['Arn']
-        
-        # Extract the name of the assumed role from the ARN
-        assumed_role_name = assumed_role_arn.split('/')[-1]
-        
-        return assumed_role_arn, assumed_role_name
+    # Extract ARN of the assumed role
+    assumed_role_arn = response['Arn']
+    
+    # Extract the name of the assumed role from the ARN
+    assumed_role_name = assumed_role_arn.split('/')[-1]
+    
+    return assumed_role_arn, assumed_role_name
 
 if RUN_AWS_FUNCTIONS == "1":
     try:
         bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
-        session = boto3.Session()       
+        session = boto3.Session()   
+
+        print("session:", session)    
             
     except Exception as e:
-        print(e)    
+        print("Could not start boto3 session:", e)    
 
     try:
         assumed_role_arn, assumed_role_name = get_assumed_role_info()
@@ -46,7 +48,7 @@ if RUN_AWS_FUNCTIONS == "1":
         print("Assumed Role Name:", assumed_role_name)
 
     except Exception as e:
-        print(e)
+        print("Could not get assumed role from STS:", e)
 
 # Download direct from S3 - requires login credentials
 def download_file_from_s3(bucket_name, key, local_file_path_and_name):
