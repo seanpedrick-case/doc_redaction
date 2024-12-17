@@ -2,7 +2,6 @@ from pdf2image import convert_from_path, pdfinfo_from_path
 from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-
 import os
 import re
 import gradio as gr
@@ -12,6 +11,7 @@ import pymupdf
 from tqdm import tqdm
 from gradio import Progress
 from typing import List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 image_dpi = 300.0
 
@@ -46,61 +46,129 @@ def is_pdf(filename):
 # %%
 ## Convert pdf to image if necessary
 
-def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = image_dpi, progress=Progress(track_tqdm=True)):
 
-    print("pdf_path in convert_pdf_to_images:", pdf_path)
 
-    # Get the number of pages in the PDF
-    page_count = pdfinfo_from_path(pdf_path)['Pages']
-    print("Number of pages in PDF: ", str(page_count))
-
-    images = []
-
-    # Open the PDF file
-    #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"): range(page_min,page_count): #
-    for page_num in tqdm(range(page_min,page_count), total=page_count, unit="pages", desc="Preparing pages"):
-
-        print("page_num in convert_pdf_to_images:", page_num)
-        
-        print("Converting page: ", str(page_num + 1))
-
-        # Convert one page to image
-        out_path  = pdf_path + "_" + str(page_num) + ".png"
+def process_single_page(pdf_path: str, page_num: int, image_dpi: float) -> str:
+    """
+    Convert a single page of a PDF to an image and save it as a PNG.
+    Returns the path to the saved image.
+    """
+    try:
+        out_path = f"{pdf_path}_{page_num}.png"
         
         # Ensure the directory exists
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
+        
         # Check if the image already exists
         if os.path.exists(out_path):
-            #print(f"Loading existing image from {out_path}.")
-            image = Image.open(out_path)  # Load the existing image
-
-
-
+            # Load the existing image
+            print(f"Loading existing image for page {page_num + 1}")
+            image = Image.open(out_path)
         else:
-            image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
-
+            # Convert the page to an image
+            print(f"Converting page {page_num + 1}")
+            image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, 
+                                        dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
             image = image_l[0]
-
+            
             # Convert to greyscale
             image = image.convert("L")
+            image.save(out_path, format="PNG")
+        
+        return out_path
+    
+    except Exception as e:
+        print(f"Error processing page {page_num + 1}: {e}")
+        return None
 
-            image.save(out_path, format="PNG")  # Save the new image
+def convert_pdf_to_images(pdf_path: str, page_min: int = 0, image_dpi: float = 200, num_threads: int = 8):
+    """
+    Convert pages of a PDF to images using multithreading.
+    """
+    # Get the number of pages in the PDF
+    page_count = pdfinfo_from_path(pdf_path)['Pages']
+    print(f"Number of pages in PDF: {page_count}")
 
-        # If no images are returned, break the loop
-        if not image:
-            print("Conversion of page", str(page_num), "to file failed.")
-            break
-
-        # print("Conversion of page", str(page_num), "to file succeeded.")
-        # print("image:", image)
-
-        images.append(out_path)
-
+    images = []
+    
+    # Use ThreadPoolExecutor to process pages in parallel
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = []
+        for page_num in range(page_min, page_count):
+            futures.append(executor.submit(process_single_page, pdf_path, page_num, image_dpi))
+        
+        # Display progress using tqdm
+        for future in tqdm(as_completed(futures), total=len(futures), unit="pages", desc="Converting pages"):
+            result = future.result()
+            if result:
+                images.append(result)
+            else:
+                print("A page failed to process.")
+    
     print("PDF has been converted to images.")
-    # print("Images:", images)
-
     return images
+
+# Example usage
+if __name__ == "__main__":
+    pdf_path = "example.pdf"
+    image_dpi = 200
+    output_images = convert_pdf_to_images(pdf_path, image_dpi=image_dpi, num_threads=8)
+    print("Images saved:", output_images)
+
+
+# def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = image_dpi, progress=Progress(track_tqdm=True)):
+
+#     print("pdf_path in convert_pdf_to_images:", pdf_path)
+
+#     # Get the number of pages in the PDF
+#     page_count = pdfinfo_from_path(pdf_path)['Pages']
+#     print("Number of pages in PDF: ", str(page_count))
+
+#     images = []
+
+#     # Open the PDF file
+#     #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"): range(page_min,page_count): #
+#     for page_num in tqdm(range(page_min,page_count), total=page_count, unit="pages", desc="Preparing pages"):
+
+#         #print("page_num in convert_pdf_to_images:", page_num)
+        
+#         print("Converting page: ", str(page_num + 1))
+
+#         # Convert one page to image
+#         out_path  = pdf_path + "_" + str(page_num) + ".png"
+        
+#         # Ensure the directory exists
+#         os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+#         # Check if the image already exists
+#         if os.path.exists(out_path):
+#             #print(f"Loading existing image from {out_path}.")
+#             image = Image.open(out_path)  # Load the existing image
+
+#         else:
+#             image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
+
+#             image = image_l[0]
+
+#             # Convert to greyscale
+#             image = image.convert("L")
+
+#             image.save(out_path, format="PNG")  # Save the new image
+
+#         # If no images are returned, break the loop
+#         if not image:
+#             print("Conversion of page", str(page_num), "to file failed.")
+#             break
+
+#         # print("Conversion of page", str(page_num), "to file succeeded.")
+#         # print("image:", image)
+
+#         images.append(out_path)
+
+#     print("PDF has been converted to images.")
+#     # print("Images:", images)
+
+#     return images
 
 # Function to take in a file path, decide if it is an image or pdf, then process appropriately.
 def process_file(file_path:str):

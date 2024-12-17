@@ -1,10 +1,11 @@
 import boto3
-from PIL import Image
+#from PIL import Image
+from typing import List
 import io
-import json
+#import json
 import pikepdf
 # Example: converting this single page to an image
-from pdf2image import convert_from_bytes
+#from pdf2image import convert_from_bytes
 from tools.custom_image_analyser_engine import OCRResult, CustomImageRecognizerResult
 
 def extract_textract_metadata(response):
@@ -23,7 +24,7 @@ def extract_textract_metadata(response):
         #'NumberOfPages': number_of_pages
     })
 
-def analyse_page_with_textract(pdf_page_bytes, page_no, client=""):
+def analyse_page_with_textract(pdf_page_bytes, page_no, client="", handwrite_signature_checkbox:List[str]=["Redact all identified handwriting", "Redact all identified signatures"]):
     '''
     Analyse page with AWS Textract
     '''
@@ -36,7 +37,14 @@ def analyse_page_with_textract(pdf_page_bytes, page_no, client=""):
 
     print("Analysing page with AWS Textract")
     
-    response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
+    # Redact signatures if specified
+    if "Redact all identified signatures" in handwrite_signature_checkbox:
+        print("Analysing document with signature detection")
+        response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
+    else:
+        print("Analysing document without signature detection")
+        # Call detect_document_text to extract plain text
+        response = client.detect_document_text(Document={'Bytes': pdf_page_bytes})
 
     # Wrap the response with the page number in the desired format
     wrapped_response = {

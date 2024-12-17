@@ -36,7 +36,7 @@ from tools.presidio_analyzer_custom import recognizer_result_from_dict
 page_break_value = get_or_create_env_var('page_break_value', '500')
 print(f'The value of page_break_value is {page_break_value}')
 
-max_time_value = get_or_create_env_var('max_time_value', '105')
+max_time_value = get_or_create_env_var('max_time_value', '999999')
 print(f'The value of max_time_value is {max_time_value}')
 
 def sum_numbers_before_seconds(string:str):
@@ -689,7 +689,8 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
     merged_bboxes = []
     grouped_bboxes = defaultdict(list)
 
-    
+    print("handwrite_signature_checkbox:", handwrite_signature_checkbox)
+
         # Process signature and handwriting results
     if signature_recogniser_results or handwriting_recogniser_results:
         if "Redact all identified handwriting" in handwrite_signature_checkbox:
@@ -954,7 +955,7 @@ def redact_image_pdf(file_path:str,
                 json_file_path = output_folder + file_name + "_textract.json"
                 
                 if not os.path.exists(json_file_path):
-                    text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client)  # Analyse page with Textract
+                    text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
                     logging_file_paths.append(json_file_path)
                     request_metadata = request_metadata + "\n" + new_request_metadata
 
@@ -974,7 +975,7 @@ def redact_image_pdf(file_path:str,
 
                         if not page_exists:  # If the page does not exist, analyze again
                             print(f"Page number {reported_page_number} not found in existing data. Analyzing again.")
-                            text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number)  # Analyse page with Textract
+                            text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, handwrite_signature_checkbox)  # Analyse page with Textract
 
                             # Check if "pages" key exists, if not, initialize it as an empty list
                             if "pages" not in existing_data:
