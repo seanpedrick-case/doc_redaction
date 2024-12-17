@@ -520,7 +520,7 @@ class CustomImageAnalyzerEngine:
                             )
 
                         except Exception as e:
-                            print(e)
+                            print("AWS Comprehend call failed due to:", e, "waiting three seconds to try again.")
                             time.sleep(3)
                             response = comprehend_client.detect_pii_entities(
                                 Text=current_batch,

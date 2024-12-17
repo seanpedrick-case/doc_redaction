@@ -10,17 +10,37 @@ import re
 # %%
 model_name = "en_core_web_lg" #"en_core_web_trf"
 score_threshold = 0.001
-custom_entities = ["TITLES", "UKPOSTCODE", "STREETNAME"]
+custom_entities = ["TITLES", "UKPOSTCODE", "STREETNAME", "CUSTOM"]
 
-# %% [markdown]
+#Load spacy model
+try:
+	import en_core_web_lg
+	nlp = en_core_web_lg.load()
+	print("Successfully imported spaCy model")
+
+except:
+	download(model_name)
+	nlp = spacy.load(model_name)
+	print("Successfully downloaded and imported spaCy model")
+
 # #### Custom recognisers
+# Allow user to create their own recogniser
+def custom_word_list_recogniser(custom_list:List[str]=[]):
+    custom_regex = '\\b' + '\\b|\\b'.join(rf"{re.escape(term)}" for term in custom_list) + '\\b'
+    custom_pattern = Pattern(name="custom_pattern",regex=custom_regex, score = 1)
+    custom_recogniser = PatternRecognizer(supported_entity="CUSTOM", name="CUSTOM", patterns = [custom_pattern], 
+    global_regex_flags=re.DOTALL | re.MULTILINE)
 
-# %%
+    return custom_recogniser
+
+# Initialise custom recogniser that will be overwritten later
+custom_recogniser = custom_word_list_recogniser()
+
 # Custom title recogniser
 titles_list = ["Sir", "Ma'am", "Madam", "Mr", "Mr.", "Mrs", "Mrs.", "Ms", "Ms.", "Miss", "Dr", "Dr.", "Professor"]
 titles_regex = '\\b' + '\\b|\\b'.join(rf"{re.escape(title)}" for title in titles_list) + '\\b'
 titles_pattern = Pattern(name="titles_pattern",regex=titles_regex, score = 1)
-titles_recogniser = PatternRecognizer(supported_entity="TITLES", patterns = [titles_pattern],
+titles_recogniser = PatternRecognizer(supported_entity="TITLES", name="TITLES", patterns = [titles_pattern], 
     global_regex_flags=re.DOTALL | re.MULTILINE)
 
 # %%
@@ -34,7 +54,7 @@ ukpostcode_pattern = Pattern(
 )
 
 # Define the recognizer with one or more patterns
-ukpostcode_recogniser = PatternRecognizer(supported_entity="UKPOSTCODE", patterns = [ukpostcode_pattern])
+ukpostcode_recogniser = PatternRecognizer(supported_entity="UKPOSTCODE", name = "UKPOSTCODE", patterns = [ukpostcode_pattern])
 
 # %%
 # Examples for testing
@@ -134,49 +154,27 @@ class StreetNameRecognizer(EntityRecognizer):
     
 street_recogniser = StreetNameRecognizer(supported_entities=["STREETNAME"])
 
-# %%
 # Create a class inheriting from SpacyNlpEngine
 class LoadedSpacyNlpEngine(SpacyNlpEngine):
     def __init__(self, loaded_spacy_model):
         super().__init__()
         self.nlp = {"en": loaded_spacy_model}
 
-# %%
-#Load spacy model
-try:
-	import en_core_web_lg
-	nlp = en_core_web_lg.load()
-	print("Successfully imported spaCy model")
 
-except:
-	download("en_core_web_lg")
-	nlp = spacy.load("en_core_web_lg")
-	print("Successfully downloaded and imported spaCy model")
-     
-# try:
-# 	import en_core_web_sm
-# 	nlp = en_core_web_sm.load()
-# 	print("Successfully imported spaCy model")
-
-# except:
-# 	download("en_core_web_sm")
-# 	nlp = spacy.load("en_core_web_sm")
-# 	print("Successfully downloaded and imported spaCy model")
 
 # Pass the loaded model to the new LoadedSpacyNlpEngine
 loaded_nlp_engine = LoadedSpacyNlpEngine(loaded_spacy_model = nlp)
 
 
-
-# %%
 nlp_analyser = AnalyzerEngine(nlp_engine=loaded_nlp_engine,
                 default_score_threshold=score_threshold,
                 supported_languages=["en"],
                 log_decision_process=False,
                 )
 
-# %%
+# Add custom recognisers to nlp_analyser
 nlp_analyser.registry.add_recognizer(street_recogniser)
 nlp_analyser.registry.add_recognizer(ukpostcode_recogniser)
 nlp_analyser.registry.add_recognizer(titles_recogniser)
+nlp_analyser.registry.add_recognizer(custom_recogniser)
 

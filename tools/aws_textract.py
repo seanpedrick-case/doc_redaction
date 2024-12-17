@@ -4,6 +4,7 @@ from typing import List
 import io
 #import json
 import pikepdf
+import time
 # Example: converting this single page to an image
 #from pdf2image import convert_from_bytes
 from tools.custom_image_analyser_engine import OCRResult, CustomImageRecognizerResult
@@ -11,7 +12,7 @@ from tools.custom_image_analyser_engine import OCRResult, CustomImageRecognizerR
 def extract_textract_metadata(response):
     """Extracts metadata from an AWS Textract response."""
 
-    print("Document metadata:", response['DocumentMetadata'])
+    #print("Document metadata:", response['DocumentMetadata'])
 
     request_id = response['ResponseMetadata']['RequestId']
     pages = response['DocumentMetadata']['Pages']
@@ -35,16 +36,28 @@ def analyse_page_with_textract(pdf_page_bytes, page_no, client="", handwrite_sig
             print("Cannot connect to AWS Textract")
             return [], ""  # Return an empty list and an empty string
 
-    print("Analysing page with AWS Textract")
+    #print("Analysing page with AWS Textract")
+    #print("pdf_page_bytes:", pdf_page_bytes)
+    #print("handwrite_signature_checkbox:", handwrite_signature_checkbox)
     
     # Redact signatures if specified
     if "Redact all identified signatures" in handwrite_signature_checkbox:
-        print("Analysing document with signature detection")
-        response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
+        #print("Analysing document with signature detection")
+        try:
+            response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
+        except Exception as e:
+            print("Textract call failed due to:", e, "trying again in 5 seconds.")
+            time.sleep(5)
+            response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
     else:
-        print("Analysing document without signature detection")
+        #print("Analysing document without signature detection")
         # Call detect_document_text to extract plain text
-        response = client.detect_document_text(Document={'Bytes': pdf_page_bytes})
+        try:
+            response = client.detect_document_text(Document={'Bytes': pdf_page_bytes})
+        except Exception as e:
+            print("Textract call failed due to:", e, "trying again in 5 seconds.")
+            time.sleep(5)
+            response = client.detect_document_text(Document={'Bytes': pdf_page_bytes})
 
     # Wrap the response with the page number in the desired format
     wrapped_response = {

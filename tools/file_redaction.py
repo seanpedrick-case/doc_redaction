@@ -26,14 +26,14 @@ from presidio_analyzer import RecognizerResult
 from tools.aws_functions import RUN_AWS_FUNCTIONS
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult
 from tools.file_conversion import process_file, image_dpi
-from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities
+from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser
 from tools.helper_functions import get_file_path_end, output_folder, clean_unicode_text, get_or_create_env_var, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
 from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 
 # Number of pages to loop through before breaking. Currently set very high, as functions are breaking on time metrics (e.g. every 105 seconds), rather than on number of pages redacted.
-page_break_value = get_or_create_env_var('page_break_value', '500')
+page_break_value = get_or_create_env_var('page_break_value', '50000')
 print(f'The value of page_break_value is {page_break_value}')
 
 max_time_value = get_or_create_env_var('max_time_value', '999999')
@@ -526,14 +526,14 @@ def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
     scale_width = image_page_width / mediabox_width
     scale_height = image_page_height / mediabox_height
 
-    print("scale_width:", scale_width)
-    print("scale_height:", scale_height)
+    #print("scale_width:", scale_width)
+    #print("scale_height:", scale_height)
 
     rect_to_mediabox_x_scale = mediabox_width / rect_width
     rect_to_mediabox_y_scale = mediabox_height / rect_height 
 
-    print("rect_to_mediabox_x_scale:", rect_to_mediabox_x_scale)
-    print("rect_to_mediabox_y_scale:", rect_to_mediabox_y_scale)
+    #print("rect_to_mediabox_x_scale:", rect_to_mediabox_x_scale)
+    #print("rect_to_mediabox_y_scale:", rect_to_mediabox_y_scale)
 
     # Adjust coordinates based on scaling factors
     x1_image = (x1 * scale_width) * rect_to_mediabox_x_scale
@@ -815,8 +815,10 @@ def redact_image_pdf(file_path:str,
                      pymupdf_doc = [],
                      pii_identification_method:str="Local",
                      comprehend_query_number:int=0,
-                     comprehend_client="",
-                     textract_client="",
+                     comprehend_client:str="",
+                     textract_client:str="",
+                     custom_recogniser_word_list:List[str]=[],
+                     redact_whole_page_list:List[str]=[],
                      page_break_val:int=int(page_break_value),
                      logging_file_paths:List=[],
                      max_time:int=int(max_time_value),                                       
@@ -847,6 +849,8 @@ def redact_image_pdf(file_path:str,
     - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
     - comprehend_client (optional): A connection to the AWS Comprehend service via the boto3 package.
     - textract_client (optional): A connection to the AWS Textract service via the boto3 package.
+    - custom_recogniser_word_list (optional): A list of custom words that the user has chosen specifically to redact.
+    - redact_whole_page_list (optional, List[str]): A list of pages to fully redact.
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to 3.
     - logging_file_paths (List, optional): List of file paths used for saving redaction process logging results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.      
@@ -855,9 +859,18 @@ def redact_image_pdf(file_path:str,
     The function returns a fully or partially-redacted PDF document.
     '''
     file_name = get_file_path_end(file_path)
-    fill = (0, 0, 0)   # Fill colour
-    image_analyser = CustomImageAnalyzerEngine(nlp_analyser)
+    fill = (0, 0, 0)   # Fill colour for redactions
     comprehend_query_number_new = 0
+
+    # Update custom word list analyser object with any new words that have been added to the custom deny list
+    if custom_recogniser_word_list:
+        nlp_analyser.registry.remove_recognizer("CUSTOM")
+        new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
+        nlp_analyser.registry.add_recognizer(new_custom_recogniser)
+
+
+    image_analyser = CustomImageAnalyzerEngine(nlp_analyser)
+    
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         print("Connection to AWS Comprehend service unsuccessful.")
@@ -913,8 +926,7 @@ def redact_image_pdf(file_path:str,
             image = prepared_pdf_file_paths[page_no]#.copy()
             #print("image:", image)
         except Exception as e:
-            print("Could not redact page:", reported_page_number, "due to:")
-            print(e)            
+            print("Could not redact page:", reported_page_number, "due to:", e)    
             continue
 
         image_annotations = {"image": image, "boxes": []}        
@@ -975,7 +987,7 @@ def redact_image_pdf(file_path:str,
 
                         if not page_exists:  # If the page does not exist, analyze again
                             print(f"Page number {reported_page_number} not found in existing data. Analyzing again.")
-                            text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, handwrite_signature_checkbox)  # Analyse page with Textract
+                            text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
 
                             # Check if "pages" key exists, if not, initialize it as an empty list
                             if "pages" not in existing_data:
@@ -1405,6 +1417,8 @@ def redact_text_pdf(
     pii_identification_method: str = "Local",
     comprehend_query_number:int = 0,
     comprehend_client="",
+    custom_recogniser_word_list:List[str]=[],
+    redact_whole_page_list:List[str]=[],
     page_break_val: int = int(page_break_value),  # Value for page break
     max_time: int = int(max_time_value),    
     progress: Progress = Progress(track_tqdm=True)  # Progress tracking object
@@ -1431,7 +1445,9 @@ def redact_text_pdf(
     - pymupdf_doc: List of PyMuPDF documents
     - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
-    - comprehend_client (optional): A connection to the AWS Comprehend service via the boto3 package. 
+    - comprehend_client (optional): A connection to the AWS Comprehend service via the boto3 package.
+    - custom_recogniser_word_list (optional, List[str]): A list of custom words that the user has chosen specifically to redact.
+    - redact_whole_page_list (optional, List[str]): A list of pages to fully redact.
     - page_break_val: Value for page break
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.     
     - progress: Progress tracking object
@@ -1441,6 +1457,12 @@ def redact_text_pdf(
         print("Connection to AWS Comprehend service not found.")
 
         return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
+    
+    # Update custom word list analyser object with any new words that have been added to the custom deny list
+    if custom_recogniser_word_list:
+        nlp_analyser.registry.remove_recognizer("CUSTOM")
+        new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
+        nlp_analyser.registry.add_recognizer(new_custom_recogniser)
 
     tic = time.perf_counter()
 
