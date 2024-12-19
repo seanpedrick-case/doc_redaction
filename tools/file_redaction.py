@@ -689,8 +689,6 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
     merged_bboxes = []
     grouped_bboxes = defaultdict(list)
 
-    print("handwrite_signature_checkbox:", handwrite_signature_checkbox)
-
         # Process signature and handwriting results
     if signature_recogniser_results or handwriting_recogniser_results:
         if "Redact all identified handwriting" in handwrite_signature_checkbox:
@@ -906,6 +904,30 @@ def redact_image_pdf(file_path:str,
     if analysis_type == tesseract_ocr_option: ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + ".csv"
     elif analysis_type == textract_option: ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + "_textract.csv"    
     
+    # If running Textract, check if file already exists. If it does, load in existing data
+    # Import results from json and convert
+    if analysis_type == textract_option:
+                
+        json_file_path = output_folder + file_name + "_textract.json"
+        logging_file_paths.append(json_file_path)
+        
+        if not os.path.exists(json_file_path):
+            no_textract_file = True
+            print("No existing Textract results file found.")
+            existing_data = {}
+            #text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
+            #logging_file_paths.append(json_file_path)
+            #request_metadata = request_metadata + "\n" + new_request_metadata
+            #wrapped_text_blocks = {"pages":[text_blocks]}
+        else:
+            # Open the file and load the JSON data
+            no_textract_file = False
+            print("Found existing Textract json results file.")
+            with open(json_file_path, 'r') as json_file:
+                existing_data = json.load(json_file)
+
+    ###
+
     if current_loop_page == 0: page_loop_start = 0
     else: page_loop_start = current_loop_page
 
@@ -919,7 +941,7 @@ def redact_image_pdf(file_path:str,
         page_break_return = False
 
         reported_page_number = str(page_no + 1)
-        print("Redacting page:", reported_page_number)
+        #print("Redacting page:", reported_page_number)
         
         # Assuming prepared_pdf_file_paths[page_no] is a PIL image object
         try:
@@ -962,49 +984,72 @@ def redact_image_pdf(file_path:str,
                 image_buffer = io.BytesIO()
                 image.save(image_buffer, format='PNG')  # Save as PNG, or adjust format if needed
                 pdf_page_as_bytes = image_buffer.getvalue()
-                
-                #json_file_path = output_folder + file_name + "_page_" + reported_page_number + "_textract.json"
-                json_file_path = output_folder + file_name + "_textract.json"
-                
-                if not os.path.exists(json_file_path):
+
+                if not existing_data:
                     text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
                     logging_file_paths.append(json_file_path)
                     request_metadata = request_metadata + "\n" + new_request_metadata
 
-                    wrapped_text_blocks = {"pages":[text_blocks]}
+                    existing_data = {"pages":[text_blocks]}
 
-                    # Write the updated existing_data back to the JSON file
-                    with open(json_file_path, 'w') as json_file:
-                        json.dump(wrapped_text_blocks, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
                 else:
-                    # Open the file and load the JSON data
-                    print("Found existing Textract json results file.")
-                    with open(json_file_path, 'r') as json_file:
-                        existing_data = json.load(json_file)
+                    # Check if the current reported_page_number exists in the loaded JSON
+                    page_exists = any(page['page_no'] == reported_page_number for page in existing_data.get("pages", []))
 
-                        # Check if the current reported_page_number exists in the loaded JSON
-                        page_exists = any(page['page_no'] == reported_page_number for page in existing_data.get("pages", []))
+                    if not page_exists:  # If the page does not exist, analyze again
+                        print(f"Page number {reported_page_number} not found in existing Textract data. Analysing.")
+                        text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
 
-                        if not page_exists:  # If the page does not exist, analyze again
-                            print(f"Page number {reported_page_number} not found in existing data. Analyzing again.")
-                            text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
+                        # Check if "pages" key exists, if not, initialize it as an empty list
+                        if "pages" not in existing_data:
+                            existing_data["pages"] = []
 
-                            # Check if "pages" key exists, if not, initialize it as an empty list
-                            if "pages" not in existing_data:
-                                existing_data["pages"] = []
+                        # Append the new page data
+                        existing_data["pages"].append(text_blocks)
+                        
+                        request_metadata = request_metadata + "\n" + new_request_metadata
+                    else:
+                        # If the page exists, retrieve the data
+                        text_blocks = next(page['data'] for page in existing_data["pages"] if page['page_no'] == reported_page_number)
+                
+                
+                # if not os.path.exists(json_file_path):
+                #     text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
+                #     logging_file_paths.append(json_file_path)
+                #     request_metadata = request_metadata + "\n" + new_request_metadata
 
-                            # Append the new page data
-                            existing_data["pages"].append(text_blocks)
+                #     existing_data = {"pages":[text_blocks]}
 
-                            # Write the updated existing_data back to the JSON file
-                            with open(json_file_path, 'w') as json_file:
-                                json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
 
-                            logging_file_paths.append(json_file_path)
-                            request_metadata = request_metadata + "\n" + new_request_metadata
-                        else:
-                            # If the page exists, retrieve the data
-                            text_blocks = next(page['data'] for page in existing_data["pages"] if page['page_no'] == reported_page_number)
+                # else:
+                #     # Open the file and load the JSON data
+                #     print("Found existing Textract json results file.")
+                #     with open(json_file_path, 'r') as json_file:
+                #         existing_data = json.load(json_file)
+
+                #         # Check if the current reported_page_number exists in the loaded JSON
+                #         page_exists = any(page['page_no'] == reported_page_number for page in existing_data.get("pages", []))
+
+                #         if not page_exists:  # If the page does not exist, analyze again
+                #             print(f"Page number {reported_page_number} not found in existing data. Analyzing again.")
+                #             text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
+
+                #             # Check if "pages" key exists, if not, initialize it as an empty list
+                #             if "pages" not in existing_data:
+                #                 existing_data["pages"] = []
+
+                #             # Append the new page data
+                #             existing_data["pages"].append(text_blocks)
+
+                #             # Write the updated existing_data back to the JSON file
+                #             with open(json_file_path, 'w') as json_file:
+                #                 json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+
+                #             logging_file_paths.append(json_file_path)
+                #             request_metadata = request_metadata + "\n" + new_request_metadata
+                #         else:
+                #             # If the page exists, retrieve the data
+                #             text_blocks = next(page['data'] for page in existing_data["pages"] if page['page_no'] == reported_page_number)
 
                 line_level_ocr_results, handwriting_or_signature_boxes, signature_recogniser_results, handwriting_recogniser_results, line_level_ocr_results_with_children = json_to_ocrresult(text_blocks, page_width, page_height, reported_page_number)
 
@@ -1124,6 +1169,11 @@ def redact_image_pdf(file_path:str,
 
                 annotations_all_pages.append(image_annotations)
 
+                if analysis_type == textract_option:
+                    # Write the updated existing textract data back to the JSON file
+                    with open(json_file_path, 'w') as json_file:
+                        json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+
                 current_loop_page += 1
 
                 return pymupdf_doc, all_decision_process_table, logging_file_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
@@ -1142,7 +1192,18 @@ def redact_image_pdf(file_path:str,
             progress.close(_tqdm=progress_bar)
             tqdm._instances.clear()
 
+            if analysis_type == textract_option:
+                # Write the updated existing textract data back to the JSON file
+                with open(json_file_path, 'w') as json_file:
+                    json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+
             return pymupdf_doc, all_decision_process_table, logging_file_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+        
+    if analysis_type == textract_option:
+        # Write the updated existing textract data back to the JSON file
+        
+        with open(json_file_path, 'w') as json_file:
+            json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
 
     return pymupdf_doc, all_decision_process_table, logging_file_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
 
@@ -1675,8 +1736,8 @@ def redact_text_pdf(
                 pymupdf_page, image_annotations = redact_page_with_pymupdf(pymupdf_page, annotations_on_page, image)
 
                 #print("Did redact_page_with_pymupdf function")
-
-                print("For page number:", page_no, "there are", len(image_annotations["boxes"]), "annotations")
+                reported_page_no = page_no + 1
+                print("For page number:", reported_page_no, "there are", len(image_annotations["boxes"]), "annotations")
 
                 # Write logs
                 # Create decision process table

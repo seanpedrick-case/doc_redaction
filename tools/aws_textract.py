@@ -46,8 +46,8 @@ def analyse_page_with_textract(pdf_page_bytes, page_no, client="", handwrite_sig
         try:
             response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
         except Exception as e:
-            print("Textract call failed due to:", e, "trying again in 5 seconds.")
-            time.sleep(5)
+            print("Textract call failed due to:", e, "trying again in 3 seconds.")
+            time.sleep(3)
             response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
     else:
         #print("Analysing document without signature detection")
@@ -185,7 +185,7 @@ def json_to_ocrresult(json_data, page_width, page_height, page_no):
 
                                         if recogniser_result not in handwriting:
                                             handwriting.append(recogniser_result)
-                                            print("Handwriting found:", handwriting[-1]) 
+                                            #print("Handwriting found:", handwriting[-1]) 
 
             # If handwriting or signature, add to bounding box               
 

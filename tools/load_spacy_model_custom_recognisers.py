@@ -8,20 +8,20 @@ from spacy.cli.download import download
 import re
 
 # %%
-model_name = "en_core_web_lg" #"en_core_web_trf"
+model_name = "en_core_web_sm" #"en_core_web_trf"
 score_threshold = 0.001
 custom_entities = ["TITLES", "UKPOSTCODE", "STREETNAME", "CUSTOM"]
 
 #Load spacy model
 try:
-	import en_core_web_lg
-	nlp = en_core_web_lg.load()
+	import en_core_web_sm
+	nlp = en_core_web_sm.load()
 	print("Successfully imported spaCy model")
 
 except:
 	download(model_name)
 	nlp = spacy.load(model_name)
-	print("Successfully downloaded and imported spaCy model")
+	print("Successfully downloaded and imported spaCy model", model_name)
 
 # #### Custom recognisers
 # Allow user to create their own recogniser

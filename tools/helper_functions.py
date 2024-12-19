@@ -31,9 +31,9 @@ def get_or_create_env_var(var_name, default_value):
 
 
 # Names for options labels
-text_ocr_option = "Simple text analysis - docs with selectable text"
-tesseract_ocr_option = "OCR analysis for documents without selectable text - best for typed text"
-textract_option = "Complex image analysis - docs with handwriting/signatures (AWS Textract)"
+text_ocr_option = "Local model - selectable text"
+tesseract_ocr_option = "Local OCR model - PDFs without selectable text"
+textract_option = "AWS Textract service - all PDF types"
 
 local_pii_detector = "Local"
 aws_pii_detector  = "AWS Comprehend"
@@ -260,6 +260,11 @@ async def get_connection_params(request: gr.Request):
 
     elif 'x-cognito-id' in request.headers:
         out_session_hash = request.headers['x-cognito-id']
+        base_folder = "user-files/"
+        print("Cognito ID found:", out_session_hash)
+
+    elif 'x-amzn-oidc-identity' in request.headers:
+        out_session_hash = request.headers['x-amzn-oidc-identity']
         base_folder = "user-files/"
         print("Cognito ID found:", out_session_hash)
 

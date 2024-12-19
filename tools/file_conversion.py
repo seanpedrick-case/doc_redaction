@@ -48,122 +48,112 @@ def is_pdf(filename):
 
 
 
-# def process_single_page(pdf_path: str, page_num: int, image_dpi: float) -> str:
-#     """
-#     Convert a single page of a PDF to an image and save it as a PNG.
-#     Returns the path to the saved image.
-#     """
-#     try:
-#         out_path = f"{pdf_path}_{page_num}.png"
+def process_single_page(pdf_path: str, page_num: int, image_dpi: float) -> tuple[int, str]:
+    try:
+        out_path = f"{pdf_path}_{page_num}.png"
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        if os.path.exists(out_path):
+            print(f"Loading existing image for page {page_num + 1}")
+            image = Image.open(out_path)
+        else:
+            print(f"Converting page {page_num + 1}")
+            image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, 
+                                        dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
+            image = image_l[0]
+            image = image.convert("L")
+            image.save(out_path, format="PNG")
+        return page_num, out_path
+    except Exception as e:
+        print(f"Error processing page {page_num + 1}: {e}")
+        return page_num, None
+
+def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min: int = 0, image_dpi: float = 200, num_threads: int = 8):
+
+    # If preparing for review, just load the first page
+    if prepare_for_review == True:
+        page_count = pdfinfo_from_path(pdf_path)['Pages'] #1
+    else:
+        page_count = pdfinfo_from_path(pdf_path)['Pages']
+
+    print(f"Number of pages in PDF: {page_count}")
+
+    results = []
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = []
+        for page_num in range(page_min, page_count):
+            futures.append(executor.submit(process_single_page, pdf_path, page_num, image_dpi))
+        
+        for future in tqdm(as_completed(futures), total=len(futures), unit="pages", desc="Converting pages"):
+            page_num, result = future.result()
+            if result:
+                results.append((page_num, result))
+            else:
+                print(f"Page {page_num + 1} failed to process.")
+    
+    # Sort results by page number
+    results.sort(key=lambda x: x[0])
+    images = [result[1] for result in results]
+
+    print("PDF has been converted to images.")
+    return images
+
+
+# def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = image_dpi, progress=Progress(track_tqdm=True)):
+
+#     print("pdf_path in convert_pdf_to_images:", pdf_path)
+
+#     # Get the number of pages in the PDF
+#     page_count = pdfinfo_from_path(pdf_path)['Pages']
+#     print("Number of pages in PDF: ", str(page_count))
+
+#     images = []
+
+#     # Open the PDF file
+#     #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"): range(page_min,page_count): #
+#     for page_num in tqdm(range(page_min,page_count), total=page_count, unit="pages", desc="Preparing pages"):
+
+#         #print("page_num in convert_pdf_to_images:", page_num)
+        
+#         print("Converting page: ", str(page_num + 1))
+
+#         # Convert one page to image
+#         out_path  = pdf_path + "_" + str(page_num) + ".png"
         
 #         # Ensure the directory exists
 #         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        
+
 #         # Check if the image already exists
 #         if os.path.exists(out_path):
-#             # Load the existing image
-#             print(f"Loading existing image for page {page_num + 1}")
-#             image = Image.open(out_path)
+#             #print(f"Loading existing image from {out_path}.")
+#             image = Image.open(out_path)  # Load the existing image
+
 #         else:
-#             # Convert the page to an image
-#             print(f"Converting page {page_num + 1}")
-#             image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, 
-#                                         dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
+#             image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
+
 #             image = image_l[0]
-            
+
 #             # Convert to greyscale
 #             image = image.convert("L")
-#             image.save(out_path, format="PNG")
-        
-#         return out_path
-    
-#     except Exception as e:
-#         print(f"Error processing page {page_num + 1}: {e}")
-#         return None
 
-# def convert_pdf_to_images(pdf_path: str, page_min: int = 0, image_dpi: float = 200, num_threads: int = 8):
-#     """
-#     Convert pages of a PDF to images using multithreading.
-#     """
-#     # Get the number of pages in the PDF
-#     page_count = pdfinfo_from_path(pdf_path)['Pages']
-#     print(f"Number of pages in PDF: {page_count}")
+#             image.save(out_path, format="PNG")  # Save the new image
 
-#     images = []
-    
-#     # Use ThreadPoolExecutor to process pages in parallel
-#     with ThreadPoolExecutor(max_workers=num_threads) as executor:
-#         futures = []
-#         for page_num in range(page_min, page_count):
-#             futures.append(executor.submit(process_single_page, pdf_path, page_num, image_dpi))
-        
-#         # Display progress using tqdm
-#         for future in tqdm(as_completed(futures), total=len(futures), unit="pages", desc="Converting pages"):
-#             result = future.result()
-#             if result:
-#                 images.append(result)
-#             else:
-#                 print("A page failed to process.")
-    
+#         # If no images are returned, break the loop
+#         if not image:
+#             print("Conversion of page", str(page_num), "to file failed.")
+#             break
+
+#         # print("Conversion of page", str(page_num), "to file succeeded.")
+#         # print("image:", image)
+
+#         images.append(out_path)
+
 #     print("PDF has been converted to images.")
+#     # print("Images:", images)
+
 #     return images
 
-def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = image_dpi, progress=Progress(track_tqdm=True)):
-
-    print("pdf_path in convert_pdf_to_images:", pdf_path)
-
-    # Get the number of pages in the PDF
-    page_count = pdfinfo_from_path(pdf_path)['Pages']
-    print("Number of pages in PDF: ", str(page_count))
-
-    images = []
-
-    # Open the PDF file
-    #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"): range(page_min,page_count): #
-    for page_num in tqdm(range(page_min,page_count), total=page_count, unit="pages", desc="Preparing pages"):
-
-        #print("page_num in convert_pdf_to_images:", page_num)
-        
-        print("Converting page: ", str(page_num + 1))
-
-        # Convert one page to image
-        out_path  = pdf_path + "_" + str(page_num) + ".png"
-        
-        # Ensure the directory exists
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
-        # Check if the image already exists
-        if os.path.exists(out_path):
-            #print(f"Loading existing image from {out_path}.")
-            image = Image.open(out_path)  # Load the existing image
-
-        else:
-            image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
-
-            image = image_l[0]
-
-            # Convert to greyscale
-            image = image.convert("L")
-
-            image.save(out_path, format="PNG")  # Save the new image
-
-        # If no images are returned, break the loop
-        if not image:
-            print("Conversion of page", str(page_num), "to file failed.")
-            break
-
-        # print("Conversion of page", str(page_num), "to file succeeded.")
-        # print("image:", image)
-
-        images.append(out_path)
-
-    print("PDF has been converted to images.")
-    # print("Images:", images)
-
-    return images
-
 # Function to take in a file path, decide if it is an image or pdf, then process appropriately.
-def process_file(file_path:str):
+def process_file(file_path:str, prepare_for_review:bool=False):
     # Get the file extension
     file_extension = os.path.splitext(file_path)[1].lower()
 
@@ -178,7 +168,7 @@ def process_file(file_path:str):
     elif file_extension == '.pdf':
         print(f"{file_path} is a PDF file. Converting to image set")
         # Run your function for processing PDF files here
-        img_object = convert_pdf_to_images(file_path)
+        img_object = convert_pdf_to_images(file_path, prepare_for_review)
 
     else:
         print(f"{file_path} is not an image or PDF file.")
@@ -195,7 +185,7 @@ def get_input_file_names(file_input):
     file_name_with_extension = ""
     full_file_name = ""
 
-    print("file_input in input file names:", file_input)
+    #print("file_input in input file names:", file_input)
     if isinstance(file_input, dict):
         file_input = os.path.abspath(file_input["name"])
 
@@ -221,8 +211,6 @@ def get_input_file_names(file_input):
             full_file_name = file_path
     
     all_relevant_files_str = ", ".join(all_relevant_files)
-
-    print("all_relevant_files_str:", all_relevant_files_str)
 
     return all_relevant_files_str, file_name_with_extension, full_file_name
 
@@ -253,6 +241,7 @@ def prepare_image_or_pdf(
         out_message (List[str]): List to store output messages.
         first_loop_state (bool): Flag indicating if this is the first iteration.
         number_of_pages (int): integer indicating the number of pages in the document
+        current_loop_page_number (int): Current number of loop
         all_annotations_object(List of annotation objects): All annotations for current document
         prepare_for_review(bool): Is this preparation step preparing pdfs and json files to review current redactions?
         progress (Progress): Progress tracker for the operation.
@@ -352,11 +341,11 @@ def prepare_image_or_pdf(
         if file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
             in_redact_method = tesseract_ocr_option
 
-
         # If the file name ends with redactions.json, assume it is an annoations object, overwrite the current variable
         if file_path.endswith(".json"):
 
             if prepare_for_review == True:
+                print("Preparing file for review")
                 if isinstance(file_path, str):
                     with open(file_path, 'r') as json_file:
                         all_annotations_object = json.load(json_file)
@@ -372,11 +361,12 @@ def prepare_image_or_pdf(
                 ]
                 image_file_paths_pages = [int(i) for i in image_file_paths_pages]
                 
-
-                # If PDF pages have been converted to image files, replace the current image paths in the json to this
+                # If PDF pages have been converted to image files, replace the current image paths in the json to this. 
                 if image_file_paths:
+
                     for i, annotation in enumerate(all_annotations_object):
                         annotation_page_number = int(re.search(r'_(\d+)\.png$', annotation["image"]).group(1))
+                        #print("Annotation page number:", annotation_page_number)
 
                         # Check if the annotation page number exists in the image file paths pages
                         if annotation_page_number in image_file_paths_pages:
@@ -385,7 +375,7 @@ def prepare_image_or_pdf(
                             correct_image_page = annotation_page_number
                             annotation["image"] = image_file_paths[correct_image_page]
                         else:
-                            print("Page not found.")
+                            print("Page", annotation_page_number, "image file not found.")
 
                     #print("all_annotations_object:", all_annotations_object)
 
@@ -404,30 +394,24 @@ def prepare_image_or_pdf(
                     json.dump(json_contents, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
                 continue
 
-        
-        print("in_redact_method:", in_redact_method)
+        # Must be a pdf or image at this point
+        else:
 
-        # Convert pdf/image file to correct format for redaction
-        if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
-            if is_pdf_or_image(file_path) == False:
-                out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
-                print(out_message)
-                return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
-            
-            print("In correct preparation area.")
+            # Convert pdf/image file to correct format for redaction
+            if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
+                if is_pdf_or_image(file_path) == False:
+                    out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
+                    print(out_message)
+                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
 
-            print("file_path at process_file:", file_path)
-            converted_file_path = process_file(file_path)
-            image_file_path = converted_file_path
-
-        elif in_redact_method == text_ocr_option:
-            if is_pdf(file_path) == False:
-                out_message = "Please upload a PDF file for text analysis."
-                print(out_message)
-                return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
-            
+            elif in_redact_method == text_ocr_option:
+                if is_pdf(file_path) == False:
+                    out_message = "Please upload a PDF file for text analysis."
+                    print(out_message)
+                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object                
+               
             converted_file_path = file_path # Pikepdf works with the basic unconverted pdf file
-            image_file_path = process_file(file_path)
+            image_file_path = process_file(file_path, prepare_for_review)
 
         converted_file_paths.append(converted_file_path)
         image_file_paths.extend(image_file_path)
@@ -453,7 +437,10 @@ def prepare_image_or_pdf(
         out_message.append(out_time)
         out_message_out = '\n'.join(out_message)
 
+    if prepare_for_review == False:
         number_of_pages = len(image_file_paths)
+    else:
+        number_of_pages = len(all_annotations_object)
 
         
     return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
