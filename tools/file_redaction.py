@@ -585,6 +585,9 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
     rect_height = page.rect.height
     rect_width = page.rect.width    
 
+    pymupdf_x1 = None
+    pymupdf_x2 = None
+
     out_annotation_boxes = {}
     all_image_annotation_boxes = []
     image_path = ""
@@ -610,11 +613,17 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
             if isinstance(annot, dict):
                 img_annotation_box = annot
 
-                x1, pymupdf_y1, x2, pymupdf_y2 = convert_gradio_annotation_coords_to_pymupdf(page, annot, image)
+                pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = convert_gradio_annotation_coords_to_pymupdf(page, annot, image)
+
+                x1 = pymupdf_x1
+                x2 = pymupdf_x2
 
             # Else should be CustomImageRecognizerResult
             else:
-                x1, pymupdf_y1, x2, pymupdf_y2 = convert_image_coords_to_pymupdf(page, annot, image)
+                pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = convert_image_coords_to_pymupdf(page, annot, image)
+
+                x1 = pymupdf_x1
+                x2 = pymupdf_x2
 
                 img_annotation_box["xmin"] = annot.left
                 img_annotation_box["ymin"] = annot.top 
@@ -630,7 +639,10 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
 
         # Else it should be a pikepdf annotation object
         else:           
-            x1, pymupdf_y1, x2, pymupdf_y2 = convert_pikepdf_coords_to_pymupdf(page, annot)
+            pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = convert_pikepdf_coords_to_pymupdf(page, annot)
+
+            x1 = pymupdf_x1
+            x2 = pymupdf_x2
 
             rect = Rect(x1, pymupdf_y1, x2, pymupdf_y2)
 
@@ -657,17 +669,29 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
 
         all_image_annotation_boxes.append(img_annotation_box)
 
-        # Calculate the middle y value and set height to 1 pixel
+        # Calculate the middle y value and set a small height (not used)
+        #print("Rect:", rect)
         middle_y = (pymupdf_y1 + pymupdf_y2) / 2
-        rect_single_pixel_height = Rect(x1, middle_y - 2, x2, middle_y + 2)  # Small height in middle of word to remove text
+        rect_small_pixel_height = Rect(pymupdf_x1, middle_y - 2, pymupdf_x2, middle_y + 2)  # Small height in middle of line
 
         # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
-        page.add_redact_annot(rect_single_pixel_height)
+        #page.add_redact_annot(rect)#rect_small_pixel_height)
+        page.add_redact_annot(rect_small_pixel_height)
 
         # Set up drawing a black box over the whole rect
         shape = page.new_shape()
         shape.draw_rect(rect)
-        shape.finish(color=(0, 0, 0), fill=(0, 0, 0))  # Black fill for the rectangle
+
+        def convert_color_to_range_0_1(color):
+            return tuple(component / 255 for component in color)
+
+        if img_annotation_box["color"][0] > 1:
+            out_colour = convert_color_to_range_0_1(img_annotation_box["color"])
+        else:
+            out_colour = img_annotation_box["color"]
+
+        shape.finish(color=out_colour, fill=out_colour)  # Black fill for the rectangle
+        #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle
         shape.commit()
 
     out_annotation_boxes = {

@@ -36,7 +36,7 @@ if RUN_AWS_FUNCTIONS == "1":
         bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
         session = boto3.Session()   
 
-        print("session:", session)    
+        #print("session:", session)    
             
     except Exception as e:
         print("Could not start boto3 session:", e)    

@@ -164,16 +164,16 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
     
     # If working with image docs
     if is_pdf(file_path) == False:
-        unredacted_doc = Image.open(file_paths[-1])
+        pdf_doc = Image.open(file_paths[-1])
 
-        image = unredacted_doc
+        image = pdf_doc
 
         # try:
         #     image = Image.open(image_annotated['image'])
         # except:
         #     image = Image.fromarray(image_annotated['image'].astype('uint8'))
 
-        draw = ImageDraw.Draw(unredacted_doc)
+        draw = ImageDraw.Draw(pdf_doc)
 
         for img_annotation_box in image_annotated['boxes']:
             coords = [img_annotation_box["xmin"],
@@ -191,9 +191,9 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
 
     # If working with pdfs
     else:
-        unredacted_doc = pymupdf.open(file_path)
+        pdf_doc = pymupdf.open(file_path)
 
-        number_of_pages = unredacted_doc.page_count
+        number_of_pages = pdf_doc.page_count
 
         print("Saving pages to file.")
 
@@ -216,12 +216,12 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:str, doc:Doc
             elif isinstance(image_loc, str):
                 image = Image.open(image_loc)
 
-            pymupdf_page = unredacted_doc.load_page(i) #doc.load_page(current_page -1)
+            pymupdf_page = pdf_doc.load_page(i) #doc.load_page(current_page -1)
             pymupdf_page = redact_page_with_pymupdf(pymupdf_page, all_image_annotations[i], image)
               
     #try:
     out_pdf_file_path = output_folder + file_base + "_redacted.pdf"
-    unredacted_doc.save(out_pdf_file_path)
+    pdf_doc.save(out_pdf_file_path)
     output_files.append(out_pdf_file_path)
 
     # Save the gradio_annotation_boxes to a JSON file
