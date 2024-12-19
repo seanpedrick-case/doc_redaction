@@ -578,7 +578,7 @@ def move_page_info(file_path: str) -> str:
     
     return new_file_path
 
-def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
+def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None, custom_colours=False):
 
     mediabox_height = page.mediabox[3] - page.mediabox[1]
     mediabox_width = page.mediabox[2] - page.mediabox[0]
@@ -671,8 +671,8 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
 
         # Calculate the middle y value and set a small height (not used)
         #print("Rect:", rect)
-        middle_y = (pymupdf_y1 + pymupdf_y2) / 2
-        rect_small_pixel_height = Rect(pymupdf_x1, middle_y - 2, pymupdf_x2, middle_y + 2)  # Small height in middle of line
+        #middle_y = (pymupdf_y1 + pymupdf_y2) / 2
+        rect_small_pixel_height = Rect(pymupdf_x1, pymupdf_y1 + 2, pymupdf_x2, pymupdf_y2 - 2)  # Slightly smaller than outside box
 
         # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
         #page.add_redact_annot(rect)#rect_small_pixel_height)
@@ -682,13 +682,17 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None):
         shape = page.new_shape()
         shape.draw_rect(rect)
 
-        def convert_color_to_range_0_1(color):
-            return tuple(component / 255 for component in color)
+        if custom_colours == True:
 
-        if img_annotation_box["color"][0] > 1:
-            out_colour = convert_color_to_range_0_1(img_annotation_box["color"])
+            def convert_color_to_range_0_1(color):
+                return tuple(component / 255 for component in color)
+
+            if img_annotation_box["color"][0] > 1:
+                out_colour = convert_color_to_range_0_1(img_annotation_box["color"])
+            else:
+                out_colour = img_annotation_box["color"]
         else:
-            out_colour = img_annotation_box["color"]
+            out_colour = (0,0,0)
 
         shape.finish(color=out_colour, fill=out_colour)  # Black fill for the rectangle
         #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle
