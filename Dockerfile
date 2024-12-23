@@ -52,6 +52,7 @@ RUN useradd -m -u 1000 user
 
 # Create required directories
 RUN mkdir -p /home/user/app/output \
+    && mkdir -p /home/user/app/input \
     && mkdir -p /home/user/app/tld \
     && mkdir -p /home/user/app/logs \
     && chown -R user:user /home/user/app

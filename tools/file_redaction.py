@@ -4,6 +4,7 @@ import json
 import io
 import os
 import boto3
+import copy
 
 from tqdm import tqdm
 from PIL import Image, ImageChops, ImageFile, ImageDraw
@@ -25,7 +26,7 @@ from collections import defaultdict  # For efficient grouping
 from presidio_analyzer import RecognizerResult
 from tools.aws_functions import RUN_AWS_FUNCTIONS
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult
-from tools.file_conversion import process_file, image_dpi
+from tools.file_conversion import process_file, image_dpi, convert_review_json_to_pandas_df
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser
 from tools.helper_functions import get_file_path_end, output_folder, clean_unicode_text, get_or_create_env_var, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
@@ -68,6 +69,8 @@ def choose_and_run_redactor(file_paths:List[str],
  chosen_redact_comprehend_entities:List[str],
  in_redact_method:str,
  in_allow_list:List[List[str]]=None,
+ in_deny_list:List[List[str]]=None, 
+ in_fully_redacted_list:List[List[str]]=None,
  latest_file_completed:int=0,
  out_message:list=[],
  out_file_paths:list=[],
@@ -99,6 +102,8 @@ def choose_and_run_redactor(file_paths:List[str],
     - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service
     - in_redact_method (str): The method to use for redaction.
     - in_allow_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
+    - in_deny_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
+    - in_fully_redacted_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
     - latest_file_completed (int, optional): The index of the last completed file. Defaults to 0.
     - out_message (list, optional): A list to store output messages. Defaults to an empty list.
     - out_file_paths (list, optional): A list to store paths to the output files. Defaults to an empty list.
@@ -188,7 +193,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
     if not in_allow_list.empty:
         in_allow_list_flat = in_allow_list.iloc[:,0].tolist()
-        print("In allow list:", in_allow_list_flat)
+        #print("In allow list:", in_allow_list_flat)
     else:
         in_allow_list_flat = []
 
@@ -236,7 +241,7 @@ def choose_and_run_redactor(file_paths:List[str],
         file_paths_list = file_paths
         file_paths_loop = [file_paths_list[int(latest_file_completed)]]    
 
-    print("file_paths_list in choose_redactor function:", file_paths_list)
+    # print("file_paths_list in choose_redactor function:", file_paths_list)
 
 
     for file in file_paths_loop:
@@ -269,7 +274,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
             print("Redacting file " + file_path_without_ext + " as an image-based file")
 
-            pymupdf_doc,all_decision_process_table,logging_file_paths,new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number = redact_image_pdf(file_path,
+            pymupdf_doc,all_decision_process_table,log_files_output_paths,new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number = redact_image_pdf(file_path,
              prepared_pdf_image_paths,
              language,
              chosen_redact_entities,
@@ -300,7 +305,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
         elif in_redact_method == text_ocr_option:
 
-            logging_file_paths = ""
+            #log_files_output_paths = []
             
             if is_pdf(file_path) == False:
                 out_message = "Please upload a PDF file for text analysis. If you have an image, select 'Image analysis'."
@@ -353,12 +358,12 @@ def choose_and_run_redactor(file_paths:List[str],
 
             out_file_paths.append(out_image_file_path)
 
-            if logging_file_paths:
-                log_files_output_paths.extend(logging_file_paths)
+            #if log_files_output_paths:
+            #    log_files_output_paths.extend(log_files_output_paths)
 
             logs_output_file_name = out_image_file_path + "_decision_process_output.csv"
             all_decision_process_table.to_csv(logs_output_file_name, index = None, encoding="utf-8")
-            out_file_paths.append(logs_output_file_name)
+            log_files_output_paths.append(logs_output_file_name)
 
             all_text_output_file_name = out_image_file_path + "_ocr_output.csv"
             all_line_level_ocr_results_df.to_csv(all_text_output_file_name, index = None, encoding="utf-8")
@@ -366,12 +371,23 @@ def choose_and_run_redactor(file_paths:List[str],
 
             # Save the gradio_annotation_boxes to a JSON file
             try:
-                out_annotation_file_path = out_image_file_path + '_redactions.json'
+                print("Saving annotations to JSON")
+
+                out_annotation_file_path = out_image_file_path + '_review_file.json'
                 with open(out_annotation_file_path, 'w') as f:
                     json.dump(annotations_all_pages, f)
-                out_file_paths.append(out_annotation_file_path)
-            except:
-                print("Could not save annotations to json file.")
+                log_files_output_paths.append(out_annotation_file_path)
+
+                print("Saving annotations to CSV")
+
+                # Convert json to csv and also save this
+                review_df = convert_review_json_to_pandas_df(annotations_all_pages)
+                out_review_file_file_path = out_image_file_path + '_review_file.csv'
+                review_df.to_csv(out_review_file_file_path, index=None)
+                out_file_paths.append(out_review_file_file_path)
+
+            except Exception as e:
+                print("Could not save annotations to json file:", e)
 
             # Make a combined message for the file                
             if isinstance(out_message, list):
@@ -578,7 +594,50 @@ def move_page_info(file_path: str) -> str:
     
     return new_file_path
 
-def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None, custom_colours=False):
+def convert_color_to_range_0_1(color):
+    return tuple(component / 255 for component in color)
+
+def redact_single_box(pymupdf_page:Page, pymupdf_rect:Rect, img_annotation_box:dict, custom_colours:bool=False):
+    pymupdf_x1 = pymupdf_rect[0]
+    pymupdf_y1 = pymupdf_rect[1]
+    pymupdf_x2 = pymupdf_rect[2]
+    pymupdf_y2 = pymupdf_rect[3]
+
+    # Calculate area to actually remove text from the pdf (different from black box size)     
+    redact_bottom_y = pymupdf_y1 + 2
+    redact_top_y = pymupdf_y2 - 2
+
+    # Calculate the middle y value and set a small height if default values are too close together
+    if (redact_top_y - redact_bottom_y) < 1:        
+        middle_y = (pymupdf_y1 + pymupdf_y2) / 2
+        redact_bottom_y = middle_y - 1
+        redact_top_y = middle_y + 1
+
+    #print("Rect:", rect)
+
+    rect_small_pixel_height = Rect(pymupdf_x1, redact_bottom_y, pymupdf_x2, redact_top_y)  # Slightly smaller than outside box
+
+    # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
+    #page.add_redact_annot(rect)#rect_small_pixel_height)
+    pymupdf_page.add_redact_annot(rect_small_pixel_height)
+
+    # Set up drawing a black box over the whole rect
+    shape = pymupdf_page.new_shape()
+    shape.draw_rect(pymupdf_rect)
+
+    if custom_colours == True:
+        if img_annotation_box["color"][0] > 1:
+            out_colour = convert_color_to_range_0_1(img_annotation_box["color"])
+        else:
+            out_colour = img_annotation_box["color"]
+    else:
+        out_colour = (0,0,0)
+
+    shape.finish(color=out_colour, fill=out_colour)  # Black fill for the rectangle
+    #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle
+    shape.commit()
+
+def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Image=None, custom_colours:bool=False, redact_whole_page:bool=False):
 
     mediabox_height = page.mediabox[3] - page.mediabox[1]
     mediabox_width = page.mediabox[2] - page.mediabox[0]
@@ -669,39 +728,41 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page, image = None, custo
 
         all_image_annotation_boxes.append(img_annotation_box)
 
-        # Calculate the middle y value and set a small height (not used)
-        #print("Rect:", rect)
-        #middle_y = (pymupdf_y1 + pymupdf_y2) / 2
-        rect_small_pixel_height = Rect(pymupdf_x1, pymupdf_y1 + 2, pymupdf_x2, pymupdf_y2 - 2)  # Slightly smaller than outside box
+        redact_single_box(page, rect, img_annotation_box, custom_colours)
 
-        # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
-        #page.add_redact_annot(rect)#rect_small_pixel_height)
-        page.add_redact_annot(rect_small_pixel_height)
+    # If whole page is to be redacted, do that here
+    if redact_whole_page == True:
+        # Small border to page that remains white
+        border = 5
+        # Define the coordinates for the Rect
+        whole_page_x1, whole_page_y1 = 0 + border, 0 + border  # Bottom-left corner
+        whole_page_x2, whole_page_y2 = rect_width - border, rect_height - border  # Top-right corner
 
-        # Set up drawing a black box over the whole rect
-        shape = page.new_shape()
-        shape.draw_rect(rect)
+        whole_page_image_x1, whole_page_image_y1, whole_page_image_x2, whole_page_image_y2 = convert_pymupdf_to_image_coords(page, whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2, image)
 
-        if custom_colours == True:
+        # Create new image annotation element based on whole page coordinates
+        whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
 
-            def convert_color_to_range_0_1(color):
-                return tuple(component / 255 for component in color)
+        # Write whole page annotation to annotation boxes
+        whole_page_img_annotation_box = {}
+        whole_page_img_annotation_box["xmin"] = whole_page_image_x1
+        whole_page_img_annotation_box["ymin"] = whole_page_image_y1
+        whole_page_img_annotation_box["xmax"] = whole_page_image_x2
+        whole_page_img_annotation_box["ymax"] = whole_page_image_y2
+        whole_page_img_annotation_box["color"] = (0,0,0)
+        whole_page_img_annotation_box["label"] = "Whole page"
 
-            if img_annotation_box["color"][0] > 1:
-                out_colour = convert_color_to_range_0_1(img_annotation_box["color"])
-            else:
-                out_colour = img_annotation_box["color"]
-        else:
-            out_colour = (0,0,0)
+        redact_single_box(page, whole_page_rect, whole_page_img_annotation_box, custom_colours)
 
-        shape.finish(color=out_colour, fill=out_colour)  # Black fill for the rectangle
-        #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle
-        shape.commit()
+        all_image_annotation_boxes.append(whole_page_img_annotation_box)
 
     out_annotation_boxes = {
         "image": image_path, #Image.open(image_path), #image_path,
         "boxes": all_image_annotation_boxes
     }
+
+    
+
 
     page.apply_redactions(images=0, graphics=0)
     page.clean_contents()
@@ -713,33 +774,38 @@ def bounding_boxes_overlap(box1, box2):
     return (box1[0] < box2[2] and box2[0] < box1[2] and
             box1[1] < box2[3] and box2[1] < box1[3])
 
+from collections import defaultdict
+from typing import List, Dict
+import copy
+
 def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_results=[], handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Redact all identified handwriting", "Redact all identified signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
+
+    all_bboxes = []
     merged_bboxes = []
     grouped_bboxes = defaultdict(list)
 
-        # Process signature and handwriting results
+    # Deep copy original bounding boxes to retain them
+    original_bboxes = copy.deepcopy(bboxes)
+
+    # Process signature and handwriting results
     if signature_recogniser_results or handwriting_recogniser_results:
         if "Redact all identified handwriting" in handwrite_signature_checkbox:
-            #print("Handwriting boxes exist at merge:", handwriting_recogniser_results)
-            merged_bboxes.extend(handwriting_recogniser_results)
+            merged_bboxes.extend(copy.deepcopy(handwriting_recogniser_results))
 
         if "Redact all identified signatures" in handwrite_signature_checkbox:
-            #print("Signature boxes exist at merge:", signature_recogniser_results)
-            merged_bboxes.extend(signature_recogniser_results)
-
+            merged_bboxes.extend(copy.deepcopy(signature_recogniser_results))
 
     # Reconstruct bounding boxes for substrings of interest
     reconstructed_bboxes = []
     for bbox in bboxes:
-        #print("bbox:", bbox)
         bbox_box = (bbox.left, bbox.top, bbox.left + bbox.width, bbox.top + bbox.height)
         for line_text, line_info in combined_results.items():
             line_box = line_info['bounding_box']
-            if bounding_boxes_overlap(bbox_box, line_box): 
+            if bounding_boxes_overlap(bbox_box, line_box):
                 if bbox.text in line_text:
                     start_char = line_text.index(bbox.text)
                     end_char = start_char + len(bbox.text)
-                    
+
                     relevant_words = []
                     current_char = 0
                     for word in line_info['words']:
@@ -753,16 +819,13 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
                             current_char += 1  # +1 for space if the word doesn't already end with a space
 
                     if relevant_words:
-                        #print("Relevant words:", relevant_words)
                         left = min(word['bounding_box'][0] for word in relevant_words)
                         top = min(word['bounding_box'][1] for word in relevant_words)
                         right = max(word['bounding_box'][2] for word in relevant_words)
                         bottom = max(word['bounding_box'][3] for word in relevant_words)
-                        
-                        # Combine the text of all relevant words
+
                         combined_text = " ".join(word['text'] for word in relevant_words)
 
-                        # Calculate new dimensions for the merged box
                         reconstructed_bbox = CustomImageRecognizerResult(
                             bbox.entity_type,
                             bbox.start,
@@ -771,13 +834,13 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
                             left,
                             top,
                             right - left,  # width
-                            bottom - top,  # height
+                            bottom - top,  # height,
                             combined_text
                         )
-                        reconstructed_bboxes.append(reconstructed_bbox)
+                        #reconstructed_bboxes.append(bbox)  # Add original bbox
+                        reconstructed_bboxes.append(reconstructed_bbox)  # Add merged bbox
                         break
         else:
-            # If the bbox text is not found in any line in combined_results, keep the original bbox
             reconstructed_bboxes.append(bbox)
 
     # Group reconstructed bboxes by approximate vertical proximity
@@ -791,35 +854,141 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
         merged_box = group[0]
         for next_box in group[1:]:
             if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
-                # Calculate new dimensions for the merged box
-                if merged_box.text == next_box.text:
-                    new_text = merged_box.text
-                else:
-                    new_text = merged_box.text + " " + next_box.text
-
-                if merged_box.text == next_box.text:
-                    new_text = merged_box.text
-                    new_entity_type = merged_box.entity_type  # Keep the original entity type
-                else:
-                    new_text = merged_box.text + " " + next_box.text
-                    new_entity_type = merged_box.entity_type + " - " + next_box.entity_type  # Concatenate entity types
+                new_text = merged_box.text + " " + next_box.text
+                new_entity_type = merged_box.entity_type + " - " + next_box.entity_type
 
                 new_left = min(merged_box.left, next_box.left)
                 new_top = min(merged_box.top, next_box.top)
                 new_width = max(merged_box.left + merged_box.width, next_box.left + next_box.width) - new_left
                 new_height = max(merged_box.top + merged_box.height, next_box.top + next_box.height) - new_top
+
                 merged_box = CustomImageRecognizerResult(
                     new_entity_type, merged_box.start, merged_box.end, merged_box.score, new_left, new_top, new_width, new_height, new_text
                 )
             else:
                 merged_bboxes.append(merged_box)
-                merged_box = next_box  
+                merged_box = next_box
 
         merged_bboxes.append(merged_box)
 
-    #print("bboxes:", bboxes)
+    all_bboxes.extend(original_bboxes)
+    #all_bboxes.extend(reconstructed_bboxes)
+    all_bboxes.extend(merged_bboxes)
 
-    return merged_bboxes
+    # Return the unique original and merged bounding boxes
+    unique_bboxes = list({(bbox.left, bbox.top, bbox.width, bbox.height): bbox for bbox in all_bboxes}.values())
+    return unique_bboxes
+
+
+# def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_results=[], handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Redact all identified handwriting", "Redact all identified signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
+#     merged_bboxes = []
+#     grouped_bboxes = defaultdict(list)
+
+#         # Process signature and handwriting results
+#     if signature_recogniser_results or handwriting_recogniser_results:
+#         if "Redact all identified handwriting" in handwrite_signature_checkbox:
+#             #print("Handwriting boxes exist at merge:", handwriting_recogniser_results)
+#             merged_bboxes.extend(handwriting_recogniser_results)
+
+#         if "Redact all identified signatures" in handwrite_signature_checkbox:
+#             #print("Signature boxes exist at merge:", signature_recogniser_results)
+#             merged_bboxes.extend(signature_recogniser_results)
+
+
+#     # Reconstruct bounding boxes for substrings of interest
+#     reconstructed_bboxes = []
+#     for bbox in bboxes:
+#         #print("bbox:", bbox)
+#         bbox_box = (bbox.left, bbox.top, bbox.left + bbox.width, bbox.top + bbox.height)
+#         for line_text, line_info in combined_results.items():
+#             line_box = line_info['bounding_box']
+#             if bounding_boxes_overlap(bbox_box, line_box): 
+#                 if bbox.text in line_text:
+#                     start_char = line_text.index(bbox.text)
+#                     end_char = start_char + len(bbox.text)
+                    
+#                     relevant_words = []
+#                     current_char = 0
+#                     for word in line_info['words']:
+#                         word_end = current_char + len(word['text'])
+#                         if current_char <= start_char < word_end or current_char < end_char <= word_end or (start_char <= current_char and word_end <= end_char):
+#                             relevant_words.append(word)
+#                         if word_end >= end_char:
+#                             break
+#                         current_char = word_end
+#                         if not word['text'].endswith(' '):
+#                             current_char += 1  # +1 for space if the word doesn't already end with a space
+
+#                     if relevant_words:
+#                         #print("Relevant words:", relevant_words)
+#                         left = min(word['bounding_box'][0] for word in relevant_words)
+#                         top = min(word['bounding_box'][1] for word in relevant_words)
+#                         right = max(word['bounding_box'][2] for word in relevant_words)
+#                         bottom = max(word['bounding_box'][3] for word in relevant_words)
+                        
+#                         # Combine the text of all relevant words
+#                         combined_text = " ".join(word['text'] for word in relevant_words)
+
+#                         # Calculate new dimensions for the merged box
+#                         reconstructed_bbox = CustomImageRecognizerResult(
+#                             bbox.entity_type,
+#                             bbox.start,
+#                             bbox.end,
+#                             bbox.score,
+#                             left,
+#                             top,
+#                             right - left,  # width
+#                             bottom - top,  # height
+#                             combined_text
+#                         )
+#                         # Add both the original and the merged bounding box
+#                         reconstructed_bboxes.append(bbox)  # Retain the original bbox
+#                         reconstructed_bboxes.append(reconstructed_bbox)  # Add the merged bbox
+#                         break
+#         else:
+#             # If the bbox text is not found in any line in combined_results, keep the original bbox
+#             reconstructed_bboxes.append(bbox)
+
+#     # Group reconstructed bboxes by approximate vertical proximity
+#     for box in reconstructed_bboxes:
+#         grouped_bboxes[round(box.top / vertical_threshold)].append(box)
+
+#     # Merge within each group
+#     for _, group in grouped_bboxes.items():
+#         group.sort(key=lambda box: box.left)
+
+#         merged_box = group[0]
+#         for next_box in group[1:]:
+#             if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
+#                 # Calculate new dimensions for the merged box
+#                 if merged_box.text == next_box.text:
+#                     new_text = merged_box.text
+#                 else:
+#                     new_text = merged_box.text + " " + next_box.text
+
+#                 if merged_box.text == next_box.text:
+#                     new_text = merged_box.text
+#                     new_entity_type = merged_box.entity_type  # Keep the original entity type
+#                 else:
+#                     new_text = merged_box.text + " " + next_box.text
+#                     new_entity_type = merged_box.entity_type + " - " + next_box.entity_type  # Concatenate entity types
+
+#                 new_left = min(merged_box.left, next_box.left)
+#                 new_top = min(merged_box.top, next_box.top)
+#                 new_width = max(merged_box.left + merged_box.width, next_box.left + next_box.width) - new_left
+#                 new_height = max(merged_box.top + merged_box.height, next_box.top + next_box.height) - new_top
+#                 merged_box = CustomImageRecognizerResult(
+#                     new_entity_type, merged_box.start, merged_box.end, merged_box.score, new_left, new_top, new_width, new_height, new_text
+#                 )
+#             else:
+#                 merged_bboxes.append(merged_box)
+#                 merged_box = next_box  
+
+#         merged_bboxes.append(merged_box)
+
+#     #print("bboxes:", bboxes)
+
+#     return merged_bboxes
 
 def redact_image_pdf(file_path:str,
                      prepared_pdf_file_paths:List[str],
@@ -846,7 +1015,7 @@ def redact_image_pdf(file_path:str,
                      custom_recogniser_word_list:List[str]=[],
                      redact_whole_page_list:List[str]=[],
                      page_break_val:int=int(page_break_value),
-                     logging_file_paths:List=[],
+                     log_files_output_paths:List=[],
                      max_time:int=int(max_time_value),                                       
                      progress=Progress(track_tqdm=True)):
 
@@ -878,7 +1047,7 @@ def redact_image_pdf(file_path:str,
     - custom_recogniser_word_list (optional): A list of custom words that the user has chosen specifically to redact.
     - redact_whole_page_list (optional, List[str]): A list of pages to fully redact.
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to 3.
-    - logging_file_paths (List, optional): List of file paths used for saving redaction process logging results.
+    - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.      
     - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
@@ -901,12 +1070,12 @@ def redact_image_pdf(file_path:str,
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         print("Connection to AWS Comprehend service unsuccessful.")
 
-        return pymupdf_doc, all_decision_process_table, logging_file_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+        return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
     
     if analysis_type == textract_option and textract_client == "":
         print("Connection to AWS Textract service unsuccessful.")
 
-        return pymupdf_doc, all_decision_process_table, logging_file_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+        return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
 
     tic = time.perf_counter()
 
@@ -937,14 +1106,14 @@ def redact_image_pdf(file_path:str,
     if analysis_type == textract_option:
                 
         json_file_path = output_folder + file_name + "_textract.json"
-        logging_file_paths.append(json_file_path)
+        log_files_output_paths.append(json_file_path)
         
         if not os.path.exists(json_file_path):
             no_textract_file = True
             print("No existing Textract results file found.")
             existing_data = {}
             #text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
-            #logging_file_paths.append(json_file_path)
+            #log_files_output_paths.append(json_file_path)
             #request_metadata = request_metadata + "\n" + new_request_metadata
             #wrapped_text_blocks = {"pages":[text_blocks]}
         else:
@@ -1015,7 +1184,7 @@ def redact_image_pdf(file_path:str,
 
                 if not existing_data:
                     text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
-                    logging_file_paths.append(json_file_path)
+                    log_files_output_paths.append(json_file_path)
                     request_metadata = request_metadata + "\n" + new_request_metadata
 
                     existing_data = {"pages":[text_blocks]}
@@ -1043,7 +1212,7 @@ def redact_image_pdf(file_path:str,
                 
                 # if not os.path.exists(json_file_path):
                 #     text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
-                #     logging_file_paths.append(json_file_path)
+                #     log_files_output_paths.append(json_file_path)
                 #     request_metadata = request_metadata + "\n" + new_request_metadata
 
                 #     existing_data = {"pages":[text_blocks]}
@@ -1073,7 +1242,7 @@ def redact_image_pdf(file_path:str,
                 #             with open(json_file_path, 'w') as json_file:
                 #                 json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
 
-                #             logging_file_paths.append(json_file_path)
+                #             log_files_output_paths.append(json_file_path)
                 #             request_metadata = request_metadata + "\n" + new_request_metadata
                 #         else:
                 #             # If the page exists, retrieve the data
@@ -1204,7 +1373,7 @@ def redact_image_pdf(file_path:str,
 
                 current_loop_page += 1
 
-                return pymupdf_doc, all_decision_process_table, logging_file_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+                return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
 
         if is_pdf(file_path) == False:
             images.append(image)
@@ -1225,7 +1394,7 @@ def redact_image_pdf(file_path:str,
                 with open(json_file_path, 'w') as json_file:
                     json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
 
-            return pymupdf_doc, all_decision_process_table, logging_file_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+            return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
         
     if analysis_type == textract_option:
         # Write the updated existing textract data back to the JSON file
@@ -1233,7 +1402,7 @@ def redact_image_pdf(file_path:str,
         with open(json_file_path, 'w') as json_file:
             json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
 
-    return pymupdf_doc, all_decision_process_table, logging_file_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+    return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
 
 
 ###
@@ -1349,16 +1518,18 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
 
     return line_level_results_out, line_level_characters_out  # Return both results and character objects
 
-def merge_text_bounding_boxes(analyser_results:CustomImageRecognizerResult, characters:List[LTChar], combine_pixel_dist:int=20, vertical_padding:int=0):
+def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combine_pixel_dist: int = 20, vertical_padding: int = 0):
     '''
     Merge identified bounding boxes containing PII that are very close to one another
     '''
     analysed_bounding_boxes = []
+    original_bounding_boxes = []  # List to hold original bounding boxes
+
     if len(analyser_results) > 0 and len(characters) > 0:
         # Extract bounding box coordinates for sorting
         bounding_boxes = []
-        text_out = []
         for result in analyser_results:
+            #print("Result:", result)
             char_boxes = [char.bbox for char in characters[result.start:result.end] if isinstance(char, LTChar)]
             char_text = [char._text for char in characters[result.start:result.end] if isinstance(char, LTChar)]
             if char_boxes:
@@ -1367,9 +1538,12 @@ def merge_text_bounding_boxes(analyser_results:CustomImageRecognizerResult, char
                 bottom = min(box[1] for box in char_boxes)
                 right = max(box[2] for box in char_boxes)
                 top = max(box[3] for box in char_boxes) + vertical_padding
-                bounding_boxes.append((bottom, left, result, [left, bottom, right, top], char_text))  # (y, x, result, bbox, text)
+                bbox = [left, bottom, right, top]
+                bounding_boxes.append((bottom, left, result, bbox, char_text))  # (y, x, result, bbox, text)
 
-        char_text = "".join(char_text)
+                # Store original bounding boxes
+                original_bounding_boxes.append({"text": "".join(char_text), "boundingBox": bbox, "result": copy.deepcopy(result)})
+                #print("Original bounding boxes:", original_bounding_boxes)
 
         # Sort the results by y-coordinate and then by x-coordinate
         bounding_boxes.sort()
@@ -1380,73 +1554,162 @@ def merge_text_bounding_boxes(analyser_results:CustomImageRecognizerResult, char
         current_result = None
         current_text = []
 
-        for y, x, result, char_box, text in bounding_boxes:
-            #print(f"Considering result: {result}")
-            #print(f"Character box: {char_box}")
-
+        for y, x, result, next_box, text in bounding_boxes:
             if current_y is None or current_box is None:
-                current_box = char_box
-                current_y = char_box[1]
+                # Initialize the first bounding box
+                current_box = next_box
+                current_y = next_box[1]
                 current_result = result
                 current_text = list(text)
-                #print(f"Starting new box: {current_box}")
             else:
-                vertical_diff_bboxes = abs(char_box[1] - current_y)
-                horizontal_diff_bboxes = abs(char_box[0] - current_box[2])
+                vertical_diff_bboxes = abs(next_box[1] - current_y)
+                horizontal_diff_bboxes = abs(next_box[0] - current_box[2])
 
-                #print(f"Comparing boxes: current_box={current_box}, char_box={char_box}, current_text={current_text}, char_text={text}")
-                #print(f"Vertical diff: {vertical_diff_bboxes}, Horizontal diff: {horizontal_diff_bboxes}")
+                if vertical_diff_bboxes <= 5 and horizontal_diff_bboxes <= combine_pixel_dist:
+                    # Merge bounding boxes
+                    #print("Merging boxes")
+                    merged_box = current_box.copy()
+                    merged_result = current_result
+                    merged_text = current_text.copy()
 
-                if (
-                    vertical_diff_bboxes <= 5 and horizontal_diff_bboxes <= combine_pixel_dist
-                ):
-                    #print("box is being extended")
-                    current_box[2] = char_box[2]  # Extend the current box horizontally
-                    current_box[3] = max(current_box[3], char_box[3])  # Ensure the top is the highest
-                    current_result.end = max(current_result.end, result.end)  # Extend the text range
+                    #print("current_box_max_x:", current_box[2])
+                    #print("char_max_x:", next_box[2])
+
+                    merged_box[2] = next_box[2]  # Extend horizontally
+                    merged_box[3] = max(current_box[3], next_box[3])  # Adjust the top
+                    merged_result.end = max(current_result.end, result.end)  # Extend text range
                     try:
-                        current_result.entity_type = current_result.entity_type + " - " + result.entity_type
+                        merged_result.entity_type = current_result.entity_type + " - " + result.entity_type
                     except Exception as e:
-                        print("Unable to combine result entity types:")
-                        print(e)
-                    # Add a space if current_text is not empty
+                        print("Unable to combine result entity types:", e)
                     if current_text:
-                        current_text.append(" ")  # Add space between texts
-                    current_text.extend(text)
+                        merged_text.append(" ")  # Add space between texts
+                    merged_text.extend(text)
 
-                    #print(f"Latest merged box: {current_box[-1]}")
+                    merged_bounding_boxes.append({
+                        "text": "".join(merged_text),
+                        "boundingBox": merged_box,
+                        "result": merged_result
+                    })
+
                 else:
-                    merged_bounding_boxes.append(
-                        {"text":"".join(current_text),"boundingBox": current_box, "result": current_result})
-                    #print(f"Appending merged box: {current_box}")
-                    #print(f"Latest merged box: {merged_bounding_boxes[-1]}")
-
-                    # Reset current_box and current_y after appending
-                    current_box = char_box
-                    current_y = char_box[1]
+                    # Save the current merged box before starting a new one
+                    # merged_bounding_boxes.append({
+                    #     "text": "".join(current_text),
+                    #     "boundingBox": current_box,
+                    #     "result": current_result
+                    # })
+                    # Start a new bounding box
+                    current_box = next_box
+                    current_y = next_box[1]
                     current_result = result
                     current_text = list(text)
-                    #print(f"Starting new box: {current_box}")
 
-        # After finishing with the current result, add the last box for this result
-        if current_box:
-            merged_bounding_boxes.append({"text":"".join(current_text), "boundingBox": current_box, "result": current_result})
-            #print(f"Appending final box for result: {current_box}")
+        # Handle the last box
+        # if current_box is not None:
+        #     merged_bounding_boxes.append({
+        #         "text": "".join(current_text),
+        #         "boundingBox": current_box,
+        #         "result": current_result
+        #     })
 
-        if not merged_bounding_boxes:
-            analysed_bounding_boxes.extend(
-                {"text":text, "boundingBox": char.bbox, "result": result} 
-                for result in analyser_results 
-                for char in characters[result.start:result.end] 
-                if isinstance(char, LTChar)
-            )
-        else:
-            analysed_bounding_boxes.extend(merged_bounding_boxes)
+        # Combine original and merged bounding boxes
+        analysed_bounding_boxes.extend(original_bounding_boxes)
+        analysed_bounding_boxes.extend(merged_bounding_boxes)
 
-        #print("Analyzed bounding boxes:\n\n", analysed_bounding_boxes)
-    
+        #print("Analysed bounding boxes:", analysed_bounding_boxes)
+
     return analysed_bounding_boxes
 
+
+# def merge_text_bounding_boxes(analyser_results, characters:List[LTChar], combine_pixel_dist:int=20, vertical_padding:int=0):
+#     '''
+#     Merge identified bounding boxes containing PII that are very close to one another
+#     '''
+#     analysed_bounding_boxes = []
+#     if len(analyser_results) > 0 and len(characters) > 0:
+#         # Extract bounding box coordinates for sorting
+#         bounding_boxes = []
+#         text_out = []
+#         for result in analyser_results:
+#             char_boxes = [char.bbox for char in characters[result.start:result.end] if isinstance(char, LTChar)]
+#             char_text = [char._text for char in characters[result.start:result.end] if isinstance(char, LTChar)]
+#             if char_boxes:
+#                 # Calculate the bounding box that encompasses all characters
+#                 left = min(box[0] for box in char_boxes)
+#                 bottom = min(box[1] for box in char_boxes)
+#                 right = max(box[2] for box in char_boxes)
+#                 top = max(box[3] for box in char_boxes) + vertical_padding
+#                 bounding_boxes.append((bottom, left, result, [left, bottom, right, top], char_text))  # (y, x, result, bbox, text)
+
+#         char_text = "".join(char_text)
+
+#         # Sort the results by y-coordinate and then by x-coordinate
+#         bounding_boxes.sort()
+
+#         merged_bounding_boxes = []
+#         current_box = None
+#         current_y = None
+#         current_result = None
+#         current_text = []
+
+#         for y, x, result, char_box, text in bounding_boxes:
+#             #print(f"Considering result: {result}")
+#             #print(f"Character box: {char_box}")
+
+#             if current_y is None or current_box is None:
+#                 current_box = char_box
+#                 current_y = char_box[1]
+#                 current_result = result
+#                 current_text = list(text)
+#                 #print(f"Starting new box: {current_box}")
+#             else:
+#                 vertical_diff_bboxes = abs(char_box[1] - current_y)
+#                 horizontal_diff_bboxes = abs(char_box[0] - current_box[2])
+
+#                 if (
+#                     vertical_diff_bboxes <= 5 and horizontal_diff_bboxes <= combine_pixel_dist
+#                 ):
+#                     #print("box is being extended")
+#                     current_box[2] = char_box[2]  # Extend the current box horizontally
+#                     current_box[3] = max(current_box[3], char_box[3])  # Ensure the top is the highest
+#                     current_result.end = max(current_result.end, result.end)  # Extend the text range
+#                     try:
+#                         current_result.entity_type = current_result.entity_type + " - " + result.entity_type
+#                     except Exception as e:
+#                         print("Unable to combine result entity types:")
+#                         print(e)
+#                     # Add a space if current_text is not empty
+#                     if current_text:
+#                         current_text.append(" ")  # Add space between texts
+#                     current_text.extend(text)
+
+#                     #print(f"Latest merged box: {current_box[-1]}")
+#                 else:
+#                     merged_bounding_boxes.append(
+#                         {"text":"".join(current_text),"boundingBox": current_box, "result": current_result})
+
+#                     # Reset current_box and current_y after appending
+#                     current_box = char_box
+#                     current_y = char_box[1]
+#                     current_result = result
+#                     current_text = list(text)
+
+#         # After finishing with the current result, add the last box for this result
+#         if current_box:
+#             merged_bounding_boxes.append({"text":"".join(current_text), "boundingBox": current_box, "result": current_result})
+
+#         if not merged_bounding_boxes:
+#             analysed_bounding_boxes.extend(
+#                 {"text":text, "boundingBox": char.bbox, "result": result} 
+#                 for result in analyser_results 
+#                 for char in characters[result.start:result.end] 
+#                 if isinstance(char, LTChar)
+#             )
+#         else:
+#             analysed_bounding_boxes.extend(merged_bounding_boxes)
+    
+#     return analysed_bounding_boxes
 
 
 def create_text_redaction_process_results(analyser_results, analysed_bounding_boxes, page_num):

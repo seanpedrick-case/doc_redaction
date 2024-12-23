@@ -6,6 +6,7 @@
 *.ipynb
 examples/*
 processing/*
+input/*
 output/*
 tools/__pycache__/*
 old_code/*

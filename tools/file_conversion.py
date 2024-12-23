@@ -1,13 +1,13 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
-from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
+from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, read_file
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import os
 import re
-import gradio as gr
 import time
 import json
 import pymupdf
+import pandas as pd
 from tqdm import tqdm
 from gradio import Progress
 from typing import List, Optional
@@ -48,10 +48,15 @@ def is_pdf(filename):
 
 
 
-def process_single_page(pdf_path: str, page_num: int, image_dpi: float) -> tuple[int, str]:
+def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_dir: str = 'input') -> tuple[int, str]:
     try:
-        out_path = f"{pdf_path}_{page_num}.png"
+        # Construct the full output directory path relative to the current working directory
+        output_dir = os.path.join(os.getcwd(), output_dir)
+        
+        # Use the output_dir to construct the out_path
+        out_path = os.path.join(output_dir, f"{os.path.basename(pdf_path)}_{page_num}.png")
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        
         if os.path.exists(out_path):
             print(f"Loading existing image for page {page_num + 1}")
             image = Image.open(out_path)
@@ -67,7 +72,7 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float) -> tuple
         print(f"Error processing page {page_num + 1}: {e}")
         return page_num, None
 
-def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min: int = 0, image_dpi: float = 200, num_threads: int = 8):
+def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min: int = 0, image_dpi: float = 200, num_threads: int = 8, output_dir: str = '/input'):
 
     # If preparing for review, just load the first page
     if prepare_for_review == True:
@@ -252,6 +257,7 @@ def prepare_image_or_pdf(
     """
 
     tic = time.perf_counter()
+    json_from_csv = False
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -341,10 +347,15 @@ def prepare_image_or_pdf(
         if file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
             in_redact_method = tesseract_ocr_option
 
-        # If the file name ends with redactions.json, assume it is an annoations object, overwrite the current variable
-        if file_path.endswith(".json"):
+        if file_extension in ['.csv']:
+            review_file_csv = read_file(file)
+            all_annotations_object = convert_pandas_df_to_review_json(review_file_csv)
+            json_from_csv = True
 
-            if prepare_for_review == True:
+        # If the file name ends with redactions.json, assume it is an annoations object, overwrite the current variable
+        if (file_extension in ['.json']) | (json_from_csv == True):
+
+            if (file_extension in ['.json']) &  (prepare_for_review == True):
                 print("Preparing file for review")
                 if isinstance(file_path, str):
                     with open(file_path, 'r') as json_file:
@@ -352,6 +363,20 @@ def prepare_image_or_pdf(
                 else:
                     # Assuming file_path is a NamedString or similar
                     all_annotations_object = json.loads(file_path)  # Use loads for string content
+
+            # Assume it's a textract json
+            elif (file_extension in ['.json']) & (prepare_for_review != True):
+                # If the file loaded has end textract.json, assume this is a textract response object. Save this to the output folder so it can be found later during redaction and go to the next file.
+                json_contents = json.load(file_path)
+                # Write the response to a JSON file in output folder
+                out_folder = output_folder + file_path_without_ext + ".json"
+                with open(out_folder, 'w') as json_file:
+                    json.dump(json_contents, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+                continue
+
+            # If you have an annotations object from the above code
+            if all_annotations_object:
+                #print("out_annotations_object found:", all_annotations_object)
 
                 # Get list of page numbers
                 image_file_paths_pages = [
@@ -380,19 +405,11 @@ def prepare_image_or_pdf(
                     #print("all_annotations_object:", all_annotations_object)
 
                 # Write the response to a JSON file in output folder
-                out_folder = output_folder + file_path_without_ext + file_extension
+                out_folder = output_folder + file_path_without_ext + ".json"
                 with open(out_folder, 'w') as json_file:
                     json.dump(all_annotations_object, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
                 continue
-
-            else:
-                # If the file loaded has end textract.json, assume this is a textract response object. Save this to the output folder so it can be found later during redaction and go to the next file.
-                json_contents = json.load(file_path)
-                # Write the response to a JSON file in output folder
-                out_folder = output_folder + file_path_without_ext + file_extension
-                with open(out_folder, 'w') as json_file:
-                    json.dump(json_contents, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
-                continue
+            
 
         # Must be a pdf or image at this point
         else:
@@ -427,7 +444,6 @@ def prepare_image_or_pdf(
             rect = pymupdf.Rect(0, 0, img.width, img.height)  # Create a rectangle for the image
             page = pymupdf_doc.new_page(width=img.width, height=img.height)  # Add a new page
             page.insert_image(rect, filename=file_path)  # Insert the image into the page
-
 
         toc = time.perf_counter()
         out_time = f"File '{file_path_without_ext}' prepared in {toc - tic:0.1f} seconds."
@@ -467,3 +483,55 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], 
     #print("Out file paths:", out_file_paths)
 
     return out_message, out_file_paths
+
+
+def convert_review_json_to_pandas_df(data:List[dict]) -> pd.DataFrame:
+    # Flatten the data
+    flattened_data = []
+
+    for entry in data:
+        #print("entry:", entry)
+        #print("flattened_data:", flattened_data)
+        image_path = entry["image"]
+
+        # Use regex to find the number before .png
+        match = re.search(r'_(\d+)\.png$', image_path)
+        if match:
+            number = match.group(1)  # Extract the number
+            print(number)  # Output: 0
+            reported_number = int(number) + 1
+        else:
+            print("No number found before .png")
+
+        for box in entry["boxes"]:
+            data_to_add = {"image": image_path, "page":reported_number, **box}
+            #print("data_to_add:", data_to_add)
+            flattened_data.append(data_to_add)
+
+    # Convert to a DataFrame
+    df = pd.DataFrame(flattened_data)
+
+    return df
+
+def convert_pandas_df_to_review_json(df: pd.DataFrame) -> List[dict]:
+    # Keep only necessary columns
+    df = df[["image", "page", "xmin", "ymin", "xmax", "ymax", "color", "label"]]
+
+    # Group the DataFrame by the 'image' column
+    grouped = df.groupby('image')
+
+    # Create a list to hold the JSON data
+    json_data = []
+
+    # Iterate over each group
+    for image_path, group in grouped:
+        # Convert each group to a list of box dictionaries
+        boxes = group.drop(columns=['image', 'page']).to_dict(orient='records')
+        
+        # Append the structured data to the json_data list
+        json_data.append({
+            "image": image_path,
+            "boxes": boxes
+        })
+
+    return json_data

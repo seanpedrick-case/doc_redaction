@@ -3,6 +3,7 @@ import re
 import gradio as gr
 import pandas as pd
 import unicodedata
+from typing import List
 from gradio_image_annotation import image_annotator
 
 def reset_state_vars():
@@ -38,13 +39,11 @@ textract_option = "AWS Textract service - all PDF types"
 local_pii_detector = "Local"
 aws_pii_detector  = "AWS Comprehend"
 
+output_folder = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/')
+print(f'The value of GRADIO_OUTPUT_FOLDER is {output_folder}')
 
-# Retrieving or setting output folder
-env_var_name = 'GRADIO_OUTPUT_FOLDER'
-default_value = 'output/'
-
-output_folder = get_or_create_env_var(env_var_name, default_value)
-print(f'The value of {env_var_name} is {output_folder}')
+input_folder = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/')
+print(f'The value of GRADIO_INPUT_FOLDER is {input_folder}')
 
 def load_in_default_allow_list(allow_list_file_path):
     if isinstance(allow_list_file_path, str):
@@ -105,7 +104,7 @@ def ensure_output_folder_exists():
     else:
         print(f"The 'output/' folder already exists.")
 
-def custom_regex_load(in_file):
+def custom_regex_load(in_file:List[str], file_type:str = "Allow list"):
     '''
     When file is loaded, update the column dropdown choices and write to relevant data states.
     '''
@@ -113,6 +112,7 @@ def custom_regex_load(in_file):
     custom_regex = pd.DataFrame()
 
     if in_file:
+        print("File type:", file_type)
 
         file_list = [string.name for string in in_file]
 
@@ -122,13 +122,13 @@ def custom_regex_load(in_file):
             custom_regex = pd.read_csv(regex_file_name, low_memory=False, header=None)
             #regex_file_name_no_ext = get_file_path_end(regex_file_name)
 
-            output_text = "Allow list file loaded."
+            output_text = file_type + " file loaded."
+
             print(output_text)
     else:
-        error = "No allow list file provided."
-        print(error)
-        output_text = error
-        return error, custom_regex
+        output_text = "No file provided."
+        print(output_text)
+        return output_text, custom_regex
        
     return output_text, custom_regex
 

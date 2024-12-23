@@ -54,7 +54,7 @@ else:
     default_pii_detector = local_pii_detector
 
 # Create the gradio interface
-app = gr.Blocks(theme = gr.themes.Base())
+app = gr.Blocks(theme = gr.themes.Base(), fill_width=True)
 
 with app:
 
@@ -67,7 +67,7 @@ with app:
     all_line_level_ocr_results_df_state = gr.State(pd.DataFrame())
     all_decision_process_table_state = gr.State(pd.DataFrame())
 
-    in_allow_list_state = gr.State(pd.DataFrame())
+    
 
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
@@ -106,15 +106,7 @@ with app:
     estimated_time_taken_number = gr.Number(label = "estimated_time_taken_number", value=0.0, precision=1, visible=False) # This keeps track of the time taken to redact files for logging purposes.
     annotate_previous_page = gr.Number(value=0, label="Previous page", precision=0, visible=False) # Keeps track of the last page that the annotator was on
 
-    s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
-
-    ## S3 default bucket and allow list file state
-    default_allow_list_file_name = "default_allow_list.csv"
-    default_allow_list_loc = output_folder + "/" + default_allow_list_file_name
-
-    s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=bucket_name, visible=False)
-    s3_default_allow_list_file = gr.Textbox(label = "Default allow list file", value=default_allow_list_file_name, visible=False)
-    default_allow_list_output_folder_location = gr.Textbox(label = "Output default allow list location", value=default_allow_list_loc, visible=False)
+    s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)  
 
 
     ## Annotator zoom value
@@ -125,6 +117,25 @@ with app:
     clear_all_page_redactions = gr.State(True)
     prepare_for_review_bool = gr.Checkbox(value=True, visible=False)
 
+    ## Settings page variables
+    default_allow_list_file_name = "default_allow_list.csv"
+    default_allow_list_loc = output_folder + "/" + default_allow_list_file_name
+    in_allow_list_state = gr.State(pd.DataFrame())
+
+    default_deny_list_file_name = "default_deny_list.csv"
+    default_deny_list_loc = output_folder + "/" + default_deny_list_file_name
+    in_deny_list_state = gr.State(pd.DataFrame())
+    in_deny_list_text_in = gr.Textbox(value="Deny list", visible=False)
+
+    fully_redacted_list_file_name = "default_fully_redacted_list.csv"
+    fully_redacted_list_loc = output_folder + "/" + fully_redacted_list_file_name
+    in_fully_redacted_list_state = gr.State(pd.DataFrame())
+    in_fully_redacted_text_in = gr.Textbox(value="Fully redacted page list", visible=False)
+
+    # S3 settings for default allow list load
+    s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=bucket_name, visible=False)
+    s3_default_allow_list_file = gr.Textbox(label = "Default allow list file", value=default_allow_list_file_name, visible=False)
+    default_allow_list_output_folder_location = gr.Textbox(label = "Output default allow list location", value=default_allow_list_loc, visible=False)
 
     ###
     # UI DESIGN
@@ -172,6 +183,10 @@ with app:
     # Object annotation
     with gr.Tab("Review redactions", id="tab_object_annotation"):
 
+        with gr.Accordion(label = "Review previous redactions", open=True):
+            output_review_files = gr.File(label="Review output files", file_count='multiple')
+            upload_previous_review_file_btn = gr.Button("Review previously created redaction file (upload original PDF and ...review_file.csv)")
+
         with gr.Row():
             annotation_last_page_button = gr.Button("Previous page", scale = 3)
             annotate_current_page = gr.Number(value=1, label="Page (press enter to change)", precision=0, scale = 2)
@@ -203,9 +218,7 @@ with app:
             annotate_max_pages_bottom = gr.Number(value=1, label="Total pages", precision=0, interactive=False, scale = 1)
             annotation_next_page_button_bottom = gr.Button("Next page", scale = 3)
 
-        output_review_files = gr.File(label="Review output files", file_count='multiple')
-        upload_previous_review_file_btn = gr.Button("Review previously created redaction file (upload original PDF and ...redactions.json)")
-
+        
     # TEXT / TABULAR DATA TAB
     with gr.Tab(label="Open text or Excel/csv files"):
         gr.Markdown(
@@ -236,8 +249,6 @@ with app:
         data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
         data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
-
-
     # SETTINGS TAB
     with gr.Tab(label="Redaction settings"):
         gr.Markdown(
@@ -250,14 +261,18 @@ with app:
                 page_min = gr.Number(precision=0,minimum=0,maximum=9999, label="Lowest page to redact")
                 page_max = gr.Number(precision=0,minimum=0,maximum=9999, label="Highest page to redact")
             
-            
         with gr.Accordion("Settings for documents and open text/xlsx/csv files", open = True):
             with gr.Row():
-                in_allow_list = gr.File(label="Import allow list file", file_count="multiple")
-                with gr.Column():   
-                    gr.Markdown("""Import allow list file - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will not be redacted.""")
+                with gr.Column():
+                    in_allow_list = gr.File(label="Import allow list file - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will not be redacted.", file_count="multiple", height=50)
                     in_allow_list_text = gr.Textbox(label="Custom allow list load status")
-
+                with gr.Column():
+                    in_deny_list = gr.File(label="Import custom deny list - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will always be redacted.", file_count="multiple", height=50)
+                    in_deny_list_text = gr.Textbox(label="Custom deny list load status")
+                with gr.Column():
+                    in_fully_redacted_list = gr.File(label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.", file_count="multiple", height=50)
+                    in_fully_redacted_list_text = gr.Textbox(label="Fully redacted page list load status")
+            
             with gr.Accordion("Add or remove entity types to redact", open = False):
                 in_redact_comprehend_entities = gr.Dropdown(value=chosen_comprehend_entities, choices=full_comprehend_entity_list, multiselect=True, label="Entities to redact - AWS Comprehend PII identification model (click close to down arrow for full list)")
 
@@ -266,15 +281,11 @@ with app:
             handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract settings", choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting"])
             #with gr.Row():
             in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language (only English currently supported)", multiselect=False, visible=False)
-                
 
         with gr.Accordion("Settings for open text or xlsx/csv files", open = True):
             anon_strat = gr.Radio(choices=["replace with <REDACTED>", "replace with <ENTITY_NAME>", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace with <REDACTED>")
             
-        log_files_output = gr.File(label="Log file output", interactive=False)
-
-    # If a custom allow list is uploaded
-    in_allow_list.change(fn=custom_regex_load, inputs=[in_allow_list], outputs=[in_allow_list_text, in_allow_list_state])
+        log_files_output = gr.File(label="Log file output", interactive=False)   
 
     ###
     # PDF/IMAGE REDACTION
@@ -283,25 +294,22 @@ with app:
 
     document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator]).\
     then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state], api_name="prepare_doc").\
-    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
+    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
                     outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number], api_name="redact_doc").\
                     then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
     
     # If the app has completed a batch of pages, it will run this until the end of all pages in the document
-    current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
+    current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
                     outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number]).\
                     then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
     
     # If a file has been completed, the function will continue onto the next document
     latest_file_completed_text.change(fn=update_annotator, inputs=[all_image_annotations_state, page_min, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page]).\
                     then(fn=reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
-        # latest_file_completed_text.change(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, current_loop_page_number], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state]).\
-    # then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redaction_method, in_allow_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return],
-                    # outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state]).\
-                    #then(fn=update_annotator, inputs=[all_image_annotations_state, page_min], outputs=[annotator, annotate_current_page]).\
-                    #then(fn=reveal_feedback_buttons, outputs=[pdf_feedback_radio, pdf_further_details_text, pdf_submit_feedback_btn, pdf_feedback_title])
     
-    ### REVIEW REDACTIONS
+    ###
+    # REVIEW PDF REDACTIONS
+    ###
 
     # Page controls at top
     annotate_current_page.submit(
@@ -326,7 +334,7 @@ with app:
         then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page])
 
     #annotation_button_get.click(get_boxes_json, annotator, json_boxes)
-    annotation_button_apply.click(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files], scroll_to_output=True)
+    annotation_button_apply.click(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output], scroll_to_output=True)
 
     # Page controls at bottom
     annotate_current_page_bottom.submit(
@@ -354,6 +362,16 @@ with app:
     # If the output file count text box changes, keep going with redacting each data file until done
     text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, second_loop_state], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state]).\
     then(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title])
+
+    ###
+    # SETTINGS PAGE INPUT / OUTPUT
+    ###
+    # If a custom allow list is uploaded
+    in_allow_list.change(fn=custom_regex_load, inputs=[in_allow_list], outputs=[in_allow_list_text, in_allow_list_state])
+    in_deny_list.change(fn=custom_regex_load, inputs=[in_deny_list, in_deny_list_text_in], outputs=[in_deny_list_text, in_deny_list_state])
+    in_fully_redacted_list.change(fn=custom_regex_load, inputs=[in_fully_redacted_list, in_fully_redacted_text_in], outputs=[in_fully_redacted_list_text, in_fully_redacted_list_state])
+
+    
 
     ###
     # APP LOAD AND LOGGING
