@@ -130,28 +130,33 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
     if page_num_reported > page_max_reported:
         page_num_reported = page_max_reported
 
-
+    from collections import defaultdict
 
     # Remove duplicate elements that are blank
     def remove_duplicate_images_with_blank_boxes(data: List[AnnotatedImageData]) -> List[AnnotatedImageData]:
-        seen_images = set()
-        filtered_data = []
-
+        # Group items by 'image'
+        image_groups = defaultdict(list)
         for item in data:
-            # Check if 'image' is unique
-            if item['image'] not in seen_images:
-                filtered_data.append(item)
-                seen_images.add(item['image'])
-            # If 'boxes' is empty but 'image' is unique, keep the entry
-            elif item['boxes']:
-                filtered_data.append(item)
+            image_groups[item['image']].append(item)
 
-        return filtered_data
+        # Process each group to remove duplicates
+        result = []
+        for image, items in image_groups.items():
+            # Filter items with non-empty boxes
+            non_empty_boxes = [item for item in items if item['boxes']]
+            if non_empty_boxes:
+                # Add only the first one with non-empty boxes
+                result.append(non_empty_boxes[0])
+            else:
+                # If all boxes are empty, add the first one
+                result.append(items[0])
+
+        return result
 
     image_annotator_object = remove_duplicate_images_with_blank_boxes(image_annotator_object)
 
-    #print("image_annotator_object in update_annotator:", image_annotator_object)
-    #print("image_annotator_object[page_num_reported - 1]:", image_annotator_object[page_num_reported - 1])
+    print("image_annotator_object in update_annotator:", image_annotator_object)
+    print("image_annotator_object[page_num_reported - 1]:", image_annotator_object[page_num_reported - 1])
 
     out_image_annotator = image_annotator(
         value = image_annotator_object[page_num_reported - 1],
