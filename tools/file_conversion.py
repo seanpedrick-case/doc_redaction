@@ -468,8 +468,8 @@ def prepare_image_or_pdf(
             converted_file_path = file_path
             image_file_paths = process_file(file_path, prepare_for_review)
 
-            # Create base version of the annotation object that doesn't have any annotations in it
-            if not all_annotations_object:
+            #Create base version of the annotation object that doesn't have any annotations in it
+            if (not all_annotations_object) & (prepare_for_review == True):
                 all_annotations_object = []
 
                 for image_path in image_file_paths:
@@ -478,7 +478,7 @@ def prepare_image_or_pdf(
 
                     all_annotations_object.append(annotation)
 
-                #print("all_annotations_object:", all_annotations_object)
+                print("all_annotations_object:", all_annotations_object)
             
             
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image

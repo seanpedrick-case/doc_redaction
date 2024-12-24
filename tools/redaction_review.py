@@ -76,6 +76,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
             recogniser_entities_drop = gr.Dropdown(value=recogniser_entities[0], choices=recogniser_entities, allow_custom_value=True, interactive=True)
         except Exception as e:
             print("Could not extract recogniser information:", e)
+            recogniser_dataframe_out = recogniser_dataframe_gr
 
     else:        
         review_dataframe = update_entities_df(recogniser_entities_drop, recogniser_dataframe_gr)
@@ -139,24 +140,28 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
         for item in data:
             image_groups[item['image']].append(item)
 
-        # Process each group to remove duplicates
+        # Process each group to retain only the entry with non-empty boxes, if available
         result = []
         for image, items in image_groups.items():
             # Filter items with non-empty boxes
             non_empty_boxes = [item for item in items if item['boxes']]
             if non_empty_boxes:
-                # Add only the first one with non-empty boxes
+                # Keep the first entry with non-empty boxes
                 result.append(non_empty_boxes[0])
             else:
-                # If all boxes are empty, add the first one
+                # If no non-empty boxes, keep the first item with empty boxes
                 result.append(items[0])
 
+        #print("result:", result)
+
         return result
+    
+    #print("image_annotator_object in update_annotator before function:", image_annotator_object)
 
     image_annotator_object = remove_duplicate_images_with_blank_boxes(image_annotator_object)
 
-    print("image_annotator_object in update_annotator:", image_annotator_object)
-    print("image_annotator_object[page_num_reported - 1]:", image_annotator_object[page_num_reported - 1])
+    #print("image_annotator_object in update_annotator after function:", image_annotator_object)
+    #print("image_annotator_object[page_num_reported - 1]:", image_annotator_object[page_num_reported - 1])
 
     out_image_annotator = image_annotator(
         value = image_annotator_object[page_num_reported - 1],

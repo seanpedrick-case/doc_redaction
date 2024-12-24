@@ -1322,7 +1322,15 @@ def redact_image_pdf(file_path:str,
                     images.append(image)
                     pymupdf_doc = images
 
-                annotations_all_pages.append(image_annotations)
+                # Check if the image already exists in annotations_all_pages
+                print("annotations_all_pages:", annotations_all_pages)
+                existing_index = next((index for index, ann in enumerate(annotations_all_pages) if ann["image"] == image_annotations["image"]), None)
+                if existing_index is not None:
+                    # Replace the existing annotation
+                    annotations_all_pages[existing_index] = image_annotations
+                else:
+                    # Append new annotation if it doesn't exist
+                    annotations_all_pages.append(image_annotations)
 
                 if analysis_type == textract_option:
                     # Write the updated existing textract data back to the JSON file
@@ -1337,7 +1345,15 @@ def redact_image_pdf(file_path:str,
             images.append(image)
             pymupdf_doc = images
 
-        annotations_all_pages.append(image_annotations)
+        # Check if the image already exists in annotations_all_pages
+        print("annotations_all_pages:", annotations_all_pages)
+        existing_index = next((index for index, ann in enumerate(annotations_all_pages) if ann["image"] == image_annotations["image"]), None)
+        if existing_index is not None:
+            # Replace the existing annotation
+            annotations_all_pages[existing_index] = image_annotations
+        else:
+            # Append new annotation if it doesn't exist
+            annotations_all_pages.append(image_annotations)
 
         current_loop_page += 1
 
@@ -1871,6 +1887,8 @@ def redact_text_pdf(
                             if chosen_redact_entities:
                                 if pii_identification_method == "Local":
 
+                                    #print("chosen_redact_entities:", chosen_redact_entities)
+
                                     # Process immediately for local analysis
                                     text_line_analyser_result = nlp_analyser.analyze(
                                         text=text_line.text,
@@ -1881,11 +1899,14 @@ def redact_text_pdf(
                                         allow_list=allow_list
                                     )
                                     all_text_line_results.append((i, text_line_analyser_result))
+
+                                    print("all_text_line_results:", all_text_line_results)
                                 
                                 elif pii_identification_method == "AWS Comprehend":
 
                                     # First use the local Spacy model to pick up custom entities that AWS Comprehend can't search for.
                                     custom_redact_entities = [entity for entity in chosen_redact_comprehend_entities if entity in custom_entities]
+
 
                                     text_line_analyser_result = nlp_analyser.analyze(
                                         text=text_line.text,
@@ -1984,12 +2005,18 @@ def redact_text_pdf(
 
                                 text_container_analyser_results.extend(text_line_analyser_result)
                                 text_container_analysed_bounding_boxes.extend(text_line_bounding_boxes)
-                                                    
-                        page_analyser_results.extend(text_container_analyser_results)
-                        page_analysed_bounding_boxes.extend(text_container_analysed_bounding_boxes)
+
+                                print("text_container_analyser_results:", text_container_analyser_results)
+
+                                page_analysed_bounding_boxes.extend(text_line_bounding_boxes)  # Add this line
+
+
+                print("page_analysed_bounding_boxes:", page_analysed_bounding_boxes)
 
                 # Annotate redactions on page
                 annotations_on_page = create_annotations_for_bounding_boxes(page_analysed_bounding_boxes)
+
+                print("annotations_on_page:", annotations_on_page)
 
                 # Make pymupdf page redactions
                 #print("redact_whole_page_list:", redact_whole_page_list)
@@ -2028,14 +2055,28 @@ def redact_text_pdf(
                     progress.close(_tqdm=progress_bar)
                     tqdm._instances.clear()
 
-                    annotations_all_pages.append(image_annotations)
+                    # Check if the image already exists in annotations_all_pages
+                    existing_index = next((index for index, ann in enumerate(annotations_all_pages) if ann["image"] == image_annotations["image"]), None)
+                    if existing_index is not None:
+                        # Replace the existing annotation
+                        annotations_all_pages[existing_index] = image_annotations
+                    else:
+                        # Append new annotation if it doesn't exist
+                        annotations_all_pages.append(image_annotations)
 
                     current_loop_page += 1
 
                     return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
                 
 
-        annotations_all_pages.append(image_annotations)
+        # Check if the image already exists in annotations_all_pages
+        existing_index = next((index for index, ann in enumerate(annotations_all_pages) if ann["image"] == image_annotations["image"]), None)
+        if existing_index is not None:
+            # Replace the existing annotation
+            annotations_all_pages[existing_index] = image_annotations
+        else:
+            # Append new annotation if it doesn't exist
+            annotations_all_pages.append(image_annotations)
 
         current_loop_page += 1
 
