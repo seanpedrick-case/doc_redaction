@@ -49,30 +49,66 @@ def update_zoom(current_zoom_level:int, annotate_current_page:int, decrease:bool
         
     return current_zoom_level, annotate_current_page
 
-def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zoom:int=100):
+def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, recogniser_entities_drop=gr.Dropdown(value="ALL", allow_custom_value=True), recogniser_dataframe_gr=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]})), zoom:int=80):
     '''
     Update a gradio_image_annotation object with new annotation data
     '''
+    recogniser_entities = []
+    recogniser_dataframe = pd.DataFrame()
+    #recogniser_entities_drop = gr.Dropdown(value="ALL", allow_custom_value=True)
+    #recogniser_dataframe_gr = gr.Dataframe(pd.DataFrame(data={"page":[""], "label":[""]}))
+
+    #print("recogniser_dataframe_gr", recogniser_dataframe_gr)
+    #print("recogniser_dataframe_gr shape", recogniser_dataframe_gr.shape)
+    #print("recogniser_dataframe_gr.iloc[0,0]:",  recogniser_dataframe_gr.iloc[0,0])
+
+    if recogniser_dataframe_gr.iloc[0,0] == "":
+        try:
+            review_dataframe = convert_review_json_to_pandas_df(image_annotator_object)[["page", "label"]]
+            #print("review_dataframe['label']", review_dataframe["label"])
+            recogniser_entities = review_dataframe["label"].unique().tolist()
+            recogniser_entities.append("ALL")
+
+            #print("recogniser_entities:", recogniser_entities)
+
+            recogniser_dataframe_out = gr.Dataframe(review_dataframe)
+            recogniser_dataframe_gr = gr.Dataframe(review_dataframe)
+            recogniser_entities_drop = gr.Dropdown(value=recogniser_entities[0], choices=recogniser_entities, allow_custom_value=True, interactive=True)
+        except Exception as e:
+            print("Could not extract recogniser information:", e)
+
+    else:        
+        review_dataframe = update_entities_df(recogniser_entities_drop, recogniser_dataframe_gr)
+        recogniser_dataframe_out = gr.Dataframe(review_dataframe)
+
 
     zoom_str = str(zoom) + '%'
 
     if not image_annotator_object:
+        page_num_reported = 1
+
         out_image_annotator = image_annotator(
-        label="Modify redaction boxes",
+        image_annotator_object[page_num_reported - 1],
+        boxes_alpha=0.1,
+        box_thickness=1,
         #label_list=["Redaction"],
         #label_colors=[(0, 0, 0)],
+        show_label=False,
         height=zoom_str,
         width=zoom_str,
-        show_label=False,
-        sources=None,
+        box_min_size=1,
+        box_selected_thickness=2,
+        handle_size=4,
+        sources=None,#["upload"],
         show_clear_button=False,
         show_share_button=False,
         show_remove_button=False,
-        interactive=False)
+        handles_cursor=True,
+        interactive=True
+    )        
+        number_reported = gr.Number(label = "Page (press enter to change)", value=page_num_reported, precision=0)
 
-        number_reported = gr.Number(label = "Page (press enter to change)", value=1, precision=0)
-
-        return out_image_annotator, number_reported, number_reported, page_num_reported
+        return out_image_annotator, number_reported, number_reported, page_num_reported, recogniser_entities_drop, recogniser_dataframe_out, recogniser_dataframe_gr
     
     #print("page_num at start of update_annotator function:", page_num)
 
@@ -94,6 +130,28 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zo
     if page_num_reported > page_max_reported:
         page_num_reported = page_max_reported
 
+
+
+    # Remove duplicate elements that are blank
+    def remove_duplicate_images_with_blank_boxes(data: List[AnnotatedImageData]) -> List[AnnotatedImageData]:
+        seen_images = set()
+        filtered_data = []
+
+        for item in data:
+            # Check if 'image' is unique
+            if item['image'] not in seen_images:
+                filtered_data.append(item)
+                seen_images.add(item['image'])
+            # If 'boxes' is empty but 'image' is unique, keep the entry
+            elif item['boxes']:
+                filtered_data.append(item)
+
+        return filtered_data
+
+    image_annotator_object = remove_duplicate_images_with_blank_boxes(image_annotator_object)
+
+    #print("image_annotator_object in update_annotator:", image_annotator_object)
+    #print("image_annotator_object[page_num_reported - 1]:", image_annotator_object[page_num_reported - 1])
 
     out_image_annotator = image_annotator(
         value = image_annotator_object[page_num_reported - 1],
@@ -117,7 +175,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, zo
 
     number_reported = gr.Number(label = "Page (press enter to change)", value=page_num_reported, precision=0)
 
-    return out_image_annotator, number_reported, number_reported, page_num_reported
+    return out_image_annotator, number_reported, number_reported, page_num_reported, recogniser_entities_drop, recogniser_dataframe_out, recogniser_dataframe_gr
 
 def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_page:int, previous_page:int, all_image_annotations:List[AnnotatedImageData], clear_all:bool=False):
     '''
@@ -148,6 +206,8 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
 
     output_files = []
     output_log_files = []
+
+    #print("File paths in apply_redactions:", file_paths)
 
     image_annotated['image'] = all_image_annotations[current_page - 1]["image"]
 
@@ -252,32 +312,19 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
 
     return doc, all_image_annotations, output_files, output_log_files
 
-def crop(annotations:AnnotatedImageData):
-    if annotations["boxes"]:
-        box = annotations["boxes"][0]
-        return annotations["image"][
-            box["ymin"]:box["ymax"],
-            box["xmin"]:box["xmax"]
-        ]
-    return None
-
 def get_boxes_json(annotations:AnnotatedImageData):
     return annotations["boxes"]
-    # Group the DataFrame by the 'image' column
-    grouped = df.groupby('image')
 
-    # Create a list to hold the JSON data
-    json_data = []
+def update_entities_df(choice:str, df:pd.DataFrame):
+    if choice=="ALL":
+        return df
+    else:
+        return df.loc[df["label"]==choice,:]
+    
+def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
+        #print("index", evt.index)
+        #print("value", evt.value)
+        #print("row_value", evt.row_value)
+        row_value_page = evt.row_value[0] # This is the page number value
+        return row_value_page
 
-    # Iterate over each group
-    for image_path, group in grouped:
-        # Convert each group to a list of box dictionaries
-        boxes = group.drop(columns='image').to_dict(orient='records')
-        
-        # Append the structured data to the json_data list
-        json_data.append({
-            "image": image_path,
-            "boxes": boxes
-        })
-
-    return json_data

@@ -18,7 +18,7 @@ from pdfminer.layout import LTTextContainer, LTChar, LTTextLine, LTTextLineHoriz
 from pikepdf import Pdf, Dictionary, Name
 import pymupdf
 from pymupdf import Rect
-from fitz import Document, Page
+from fitz import Page
 import gradio as gr
 from gradio import Progress
 from collections import defaultdict  # For efficient grouping
@@ -26,7 +26,7 @@ from collections import defaultdict  # For efficient grouping
 from presidio_analyzer import RecognizerResult
 from tools.aws_functions import RUN_AWS_FUNCTIONS
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult
-from tools.file_conversion import process_file, image_dpi, convert_review_json_to_pandas_df
+from tools.file_conversion import process_file, image_dpi, convert_review_json_to_pandas_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser
 from tools.helper_functions import get_file_path_end, output_folder, clean_unicode_text, get_or_create_env_var, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
@@ -69,8 +69,8 @@ def choose_and_run_redactor(file_paths:List[str],
  chosen_redact_comprehend_entities:List[str],
  in_redact_method:str,
  in_allow_list:List[List[str]]=None,
- in_deny_list:List[List[str]]=None, 
- in_fully_redacted_list:List[List[str]]=None,
+ custom_recogniser_word_list:List[str]=None, 
+ redact_whole_page_list:List[str]=None,
  latest_file_completed:int=0,
  out_message:list=[],
  out_file_paths:list=[],
@@ -102,8 +102,8 @@ def choose_and_run_redactor(file_paths:List[str],
     - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service
     - in_redact_method (str): The method to use for redaction.
     - in_allow_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
-    - in_deny_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
-    - in_fully_redacted_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
+    - custom_recogniser_word_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
+    - redact_whole_page_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
     - latest_file_completed (int, optional): The index of the last completed file. Defaults to 0.
     - out_message (list, optional): A list to store output messages. Defaults to an empty list.
     - out_file_paths (list, optional): A list to store paths to the output files. Defaults to an empty list.
@@ -130,6 +130,15 @@ def choose_and_run_redactor(file_paths:List[str],
     combined_out_message = ""
     tic = time.perf_counter()
     all_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
+
+    if isinstance(custom_recogniser_word_list, pd.DataFrame):
+        custom_recogniser_word_list = custom_recogniser_word_list.iloc[:,0].tolist()
+
+        # Sort the strings in order from the longest string to the shortest
+        custom_recogniser_word_list = sorted(custom_recogniser_word_list, key=len, reverse=True)
+
+    if isinstance(redact_whole_page_list, pd.DataFrame):
+        redact_whole_page_list = redact_whole_page_list.iloc[:,0].tolist()
 
 
     # If this is the first time around, set variables to 0/blank
@@ -296,7 +305,9 @@ def choose_and_run_redactor(file_paths:List[str],
              pii_identification_method,
              comprehend_query_number,
              comprehend_client,
-             textract_client)
+             textract_client,
+             custom_recogniser_word_list,
+             redact_whole_page_list)
 
             # Save Textract request metadata (if exists)
             if new_request_metadata:
@@ -330,7 +341,9 @@ def choose_and_run_redactor(file_paths:List[str],
             pymupdf_doc,
             pii_identification_method,
             comprehend_query_number,
-            comprehend_client)
+            comprehend_client,
+            custom_recogniser_word_list,
+            redact_whole_page_list)
 
         else:
             out_message = "No redaction method selected"
@@ -378,13 +391,18 @@ def choose_and_run_redactor(file_paths:List[str],
                     json.dump(annotations_all_pages, f)
                 log_files_output_paths.append(out_annotation_file_path)
 
-                print("Saving annotations to CSV")
+                #print("Saving annotations to CSV")
 
                 # Convert json to csv and also save this
+                #print("annotations_all_pages:", annotations_all_pages)
+
                 review_df = convert_review_json_to_pandas_df(annotations_all_pages)
+
                 out_review_file_file_path = out_image_file_path + '_review_file.csv'
                 review_df.to_csv(out_review_file_file_path, index=None)
                 out_file_paths.append(out_review_file_file_path)
+
+                print("Saved review file to csv")
 
             except Exception as e:
                 print("Could not save annotations to json file:", e)
@@ -522,42 +540,7 @@ def convert_image_coords_to_pymupdf(pymupdf_page, annot:CustomImageRecognizerRes
 
     return x1, new_y1, x2, new_y2
 
-def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
-    '''
-    Converts coordinates from pymupdf format to image coordinates,
-    accounting for mediabox dimensions.
-    '''
-    
-    rect_height = pymupdf_page.rect.height
-    rect_width = pymupdf_page.rect.width
-    
-    # Get mediabox dimensions
-    mediabox = pymupdf_page.mediabox
-    mediabox_width = mediabox.width
-    mediabox_height = mediabox.height
-    
-    image_page_width, image_page_height = image.size
 
-    # Calculate scaling factors using mediabox dimensions
-    scale_width = image_page_width / mediabox_width
-    scale_height = image_page_height / mediabox_height
-
-    #print("scale_width:", scale_width)
-    #print("scale_height:", scale_height)
-
-    rect_to_mediabox_x_scale = mediabox_width / rect_width
-    rect_to_mediabox_y_scale = mediabox_height / rect_height 
-
-    #print("rect_to_mediabox_x_scale:", rect_to_mediabox_x_scale)
-    #print("rect_to_mediabox_y_scale:", rect_to_mediabox_y_scale)
-
-    # Adjust coordinates based on scaling factors
-    x1_image = (x1 * scale_width) * rect_to_mediabox_x_scale
-    y1_image = (y1 * scale_height) * rect_to_mediabox_y_scale
-    x2_image = (x2 * scale_width) * rect_to_mediabox_x_scale
-    y2_image = (y2 * scale_height) * rect_to_mediabox_y_scale
-
-    return x1_image, y1_image, x2_image, y2_image
 
 def convert_gradio_annotation_coords_to_pymupdf(pymupdf_page:Page, annot:dict, image:Image):
     '''
@@ -593,49 +576,6 @@ def move_page_info(file_path: str) -> str:
     new_file_path = f"{new_base}_page_{page_info}.png"
     
     return new_file_path
-
-def convert_color_to_range_0_1(color):
-    return tuple(component / 255 for component in color)
-
-def redact_single_box(pymupdf_page:Page, pymupdf_rect:Rect, img_annotation_box:dict, custom_colours:bool=False):
-    pymupdf_x1 = pymupdf_rect[0]
-    pymupdf_y1 = pymupdf_rect[1]
-    pymupdf_x2 = pymupdf_rect[2]
-    pymupdf_y2 = pymupdf_rect[3]
-
-    # Calculate area to actually remove text from the pdf (different from black box size)     
-    redact_bottom_y = pymupdf_y1 + 2
-    redact_top_y = pymupdf_y2 - 2
-
-    # Calculate the middle y value and set a small height if default values are too close together
-    if (redact_top_y - redact_bottom_y) < 1:        
-        middle_y = (pymupdf_y1 + pymupdf_y2) / 2
-        redact_bottom_y = middle_y - 1
-        redact_top_y = middle_y + 1
-
-    #print("Rect:", rect)
-
-    rect_small_pixel_height = Rect(pymupdf_x1, redact_bottom_y, pymupdf_x2, redact_top_y)  # Slightly smaller than outside box
-
-    # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
-    #page.add_redact_annot(rect)#rect_small_pixel_height)
-    pymupdf_page.add_redact_annot(rect_small_pixel_height)
-
-    # Set up drawing a black box over the whole rect
-    shape = pymupdf_page.new_shape()
-    shape.draw_rect(pymupdf_rect)
-
-    if custom_colours == True:
-        if img_annotation_box["color"][0] > 1:
-            out_colour = convert_color_to_range_0_1(img_annotation_box["color"])
-        else:
-            out_colour = img_annotation_box["color"]
-    else:
-        out_colour = (0,0,0)
-
-    shape.finish(color=out_colour, fill=out_colour)  # Black fill for the rectangle
-    #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle
-    shape.commit()
 
 def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Image=None, custom_colours:bool=False, redact_whole_page:bool=False):
 
@@ -732,28 +672,31 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Im
 
     # If whole page is to be redacted, do that here
     if redact_whole_page == True:
-        # Small border to page that remains white
-        border = 5
-        # Define the coordinates for the Rect
-        whole_page_x1, whole_page_y1 = 0 + border, 0 + border  # Bottom-left corner
-        whole_page_x2, whole_page_y2 = rect_width - border, rect_height - border  # Top-right corner
+        # # Small border to page that remains white
+        # border = 5
+        # # Define the coordinates for the Rect
+        # whole_page_x1, whole_page_y1 = 0 + border, 0 + border  # Bottom-left corner
+        # whole_page_x2, whole_page_y2 = rect_width - border, rect_height - border  # Top-right corner
 
-        whole_page_image_x1, whole_page_image_y1, whole_page_image_x2, whole_page_image_y2 = convert_pymupdf_to_image_coords(page, whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2, image)
+        # whole_page_image_x1, whole_page_image_y1, whole_page_image_x2, whole_page_image_y2 = convert_pymupdf_to_image_coords(page, whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2, image)
 
-        # Create new image annotation element based on whole page coordinates
-        whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
+        # # Create new image annotation element based on whole page coordinates
+        # whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
 
-        # Write whole page annotation to annotation boxes
-        whole_page_img_annotation_box = {}
-        whole_page_img_annotation_box["xmin"] = whole_page_image_x1
-        whole_page_img_annotation_box["ymin"] = whole_page_image_y1
-        whole_page_img_annotation_box["xmax"] = whole_page_image_x2
-        whole_page_img_annotation_box["ymax"] = whole_page_image_y2
-        whole_page_img_annotation_box["color"] = (0,0,0)
-        whole_page_img_annotation_box["label"] = "Whole page"
+        # # Write whole page annotation to annotation boxes
+        # whole_page_img_annotation_box = {}
+        # whole_page_img_annotation_box["xmin"] = whole_page_image_x1
+        # whole_page_img_annotation_box["ymin"] = whole_page_image_y1
+        # whole_page_img_annotation_box["xmax"] = whole_page_image_x2
+        # whole_page_img_annotation_box["ymax"] = whole_page_image_y2
+        # whole_page_img_annotation_box["color"] = (0,0,0)
+        # whole_page_img_annotation_box["label"] = "Whole page"
 
-        redact_single_box(page, whole_page_rect, whole_page_img_annotation_box, custom_colours)
+        # redact_single_box(page, whole_page_rect, whole_page_img_annotation_box, custom_colours)
 
+        # all_image_annotation_boxes.append(whole_page_img_annotation_box)
+
+        whole_page_img_annotation_box = redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colours, border = 5)
         all_image_annotation_boxes.append(whole_page_img_annotation_box)
 
     out_annotation_boxes = {
@@ -1058,10 +1001,19 @@ def redact_image_pdf(file_path:str,
     comprehend_query_number_new = 0
 
     # Update custom word list analyser object with any new words that have been added to the custom deny list
-    if custom_recogniser_word_list:
+    #print("custom_recogniser_word_list:", custom_recogniser_word_list)
+    if custom_recogniser_word_list:        
         nlp_analyser.registry.remove_recognizer("CUSTOM")
         new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
+        #print("new_custom_recogniser:", new_custom_recogniser)
         nlp_analyser.registry.add_recognizer(new_custom_recogniser)
+
+        # List all elements currently in the nlp_analyser registry
+        #print("Current recognizers in nlp_analyser registry:")
+        for recognizer_name in nlp_analyser.registry.recognizers:
+            print(recognizer_name)
+
+        
 
 
     image_analyser = CustomImageAnalyzerEngine(nlp_analyser)
@@ -1315,9 +1267,15 @@ def redact_image_pdf(file_path:str,
 
                 image_annotations = {"image": file_path, "boxes": all_image_annotations_boxes}
 
-            ## Apply annotations with pymupdf
+            ## Apply annotations with pymupdf            
             else:
-                pymupdf_page, image_annotations = redact_page_with_pymupdf(pymupdf_page, merged_redaction_bboxes, image)
+                #print("redact_whole_page_list:", redact_whole_page_list)
+                if redact_whole_page_list:
+                    if current_loop_page in redact_whole_page_list: redact_whole_page = True
+                    else: redact_whole_page = False
+                else: redact_whole_page = False
+
+                pymupdf_page, image_annotations = redact_page_with_pymupdf(pymupdf_page, merged_redaction_bboxes, image, redact_whole_page=redact_whole_page)
 
             # Convert decision process to table
             decision_process_table = pd.DataFrame([{
@@ -1811,10 +1769,19 @@ def redact_text_pdf(
         return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
     
     # Update custom word list analyser object with any new words that have been added to the custom deny list
-    if custom_recogniser_word_list:
+    #print("custom_recogniser_word_list:", custom_recogniser_word_list)
+    if custom_recogniser_word_list:        
         nlp_analyser.registry.remove_recognizer("CUSTOM")
         new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
+        #print("new_custom_recogniser:", new_custom_recogniser)
         nlp_analyser.registry.add_recognizer(new_custom_recogniser)
+
+        # List all elements currently in the nlp_analyser registry
+        #print("Current recognizers in nlp_analyser registry:")
+        #for recognizer_name in nlp_analyser.registry.recognizers:
+        #    print(recognizer_name)
+
+        #print("Custom recogniser:", nlp_analyser.registry.)
 
     tic = time.perf_counter()
 
@@ -1903,6 +1870,7 @@ def redact_text_pdf(
                         for i, text_line in enumerate(line_level_text_results_list):
                             if chosen_redact_entities:
                                 if pii_identification_method == "Local":
+
                                     # Process immediately for local analysis
                                     text_line_analyser_result = nlp_analyser.analyze(
                                         text=text_line.text,
@@ -2024,7 +1992,13 @@ def redact_text_pdf(
                 annotations_on_page = create_annotations_for_bounding_boxes(page_analysed_bounding_boxes)
 
                 # Make pymupdf page redactions
-                pymupdf_page, image_annotations = redact_page_with_pymupdf(pymupdf_page, annotations_on_page, image)
+                #print("redact_whole_page_list:", redact_whole_page_list)
+                if redact_whole_page_list:                    
+                    if current_loop_page in redact_whole_page_list: redact_whole_page = True
+                    else: redact_whole_page = False
+                else: redact_whole_page = False
+
+                pymupdf_page, image_annotations = redact_page_with_pymupdf(pymupdf_page, annotations_on_page, image, redact_whole_page=redact_whole_page)
 
                 #print("Did redact_page_with_pymupdf function")
                 reported_page_no = page_no + 1

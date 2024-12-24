@@ -112,8 +112,6 @@ def custom_regex_load(in_file:List[str], file_type:str = "Allow list"):
     custom_regex = pd.DataFrame()
 
     if in_file:
-        print("File type:", file_type)
-
         file_list = [string.name for string in in_file]
 
         regex_file_names = [string for string in file_list if "csv" in string.lower()]

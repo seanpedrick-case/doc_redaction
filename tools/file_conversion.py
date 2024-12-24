@@ -8,6 +8,8 @@ import time
 import json
 import pymupdf
 import pandas as pd
+from pymupdf import Rect
+from fitz import Page
 from tqdm import tqdm
 from gradio import Progress
 from typing import List, Optional
@@ -58,10 +60,10 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         
         if os.path.exists(out_path):
-            print(f"Loading existing image for page {page_num + 1}")
+            #print(f"Loading existing image for page {page_num + 1}")
             image = Image.open(out_path)
         else:
-            print(f"Converting page {page_num + 1}")
+            #print(f"Converting page {page_num + 1}")
             image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, 
                                         dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
             image = image_l[0]
@@ -181,7 +183,7 @@ def process_file(file_path:str, prepare_for_review:bool=False):
 
     return img_object
 
-def get_input_file_names(file_input):
+def get_input_file_names(file_input:List[str]):
     '''
     Get list of input files to report to logs.
     '''
@@ -210,14 +212,123 @@ def get_input_file_names(file_input):
         file_extension = os.path.splitext(file_path)[1].lower()
 
         # Check if the file is an image type
-        if file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet']:
+        if (file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet']) & ("review_file" not in file_path_without_ext):
             all_relevant_files.append(file_path_without_ext)
             file_name_with_extension = file_path_without_ext + file_extension
             full_file_name = file_path
     
     all_relevant_files_str = ", ".join(all_relevant_files)
 
-    return all_relevant_files_str, file_name_with_extension, full_file_name
+    #print("all_relevant_files_str in input_file_names", all_relevant_files_str)
+    #print("all_relevant_files in input_file_names", all_relevant_files)
+
+    return all_relevant_files_str, file_name_with_extension, full_file_name, all_relevant_files
+
+def convert_color_to_range_0_1(color):
+    return tuple(component / 255 for component in color)
+
+def redact_single_box(pymupdf_page:Page, pymupdf_rect:Rect, img_annotation_box:dict, custom_colours:bool=False):
+    pymupdf_x1 = pymupdf_rect[0]
+    pymupdf_y1 = pymupdf_rect[1]
+    pymupdf_x2 = pymupdf_rect[2]
+    pymupdf_y2 = pymupdf_rect[3]
+
+    # Calculate area to actually remove text from the pdf (different from black box size)     
+    redact_bottom_y = pymupdf_y1 + 2
+    redact_top_y = pymupdf_y2 - 2
+
+    # Calculate the middle y value and set a small height if default values are too close together
+    if (redact_top_y - redact_bottom_y) < 1:        
+        middle_y = (pymupdf_y1 + pymupdf_y2) / 2
+        redact_bottom_y = middle_y - 1
+        redact_top_y = middle_y + 1
+
+    #print("Rect:", rect)
+
+    rect_small_pixel_height = Rect(pymupdf_x1, redact_bottom_y, pymupdf_x2, redact_top_y)  # Slightly smaller than outside box
+
+    # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
+    #page.add_redact_annot(rect)#rect_small_pixel_height)
+    pymupdf_page.add_redact_annot(rect_small_pixel_height)
+
+    # Set up drawing a black box over the whole rect
+    shape = pymupdf_page.new_shape()
+    shape.draw_rect(pymupdf_rect)
+
+    if custom_colours == True:
+        if img_annotation_box["color"][0] > 1:
+            out_colour = convert_color_to_range_0_1(img_annotation_box["color"])
+        else:
+            out_colour = img_annotation_box["color"]
+    else:
+        out_colour = (0,0,0)
+
+    shape.finish(color=out_colour, fill=out_colour)  # Black fill for the rectangle
+    #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle
+    shape.commit()
+
+def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
+    '''
+    Converts coordinates from pymupdf format to image coordinates,
+    accounting for mediabox dimensions.
+    '''
+    
+    rect_height = pymupdf_page.rect.height
+    rect_width = pymupdf_page.rect.width
+    
+    # Get mediabox dimensions
+    mediabox = pymupdf_page.mediabox
+    mediabox_width = mediabox.width
+    mediabox_height = mediabox.height
+    
+    image_page_width, image_page_height = image.size
+
+    # Calculate scaling factors using mediabox dimensions
+    scale_width = image_page_width / mediabox_width
+    scale_height = image_page_height / mediabox_height
+
+    #print("scale_width:", scale_width)
+    #print("scale_height:", scale_height)
+
+    rect_to_mediabox_x_scale = mediabox_width / rect_width
+    rect_to_mediabox_y_scale = mediabox_height / rect_height 
+
+    #print("rect_to_mediabox_x_scale:", rect_to_mediabox_x_scale)
+    #print("rect_to_mediabox_y_scale:", rect_to_mediabox_y_scale)
+
+    # Adjust coordinates based on scaling factors
+    x1_image = (x1 * scale_width) * rect_to_mediabox_x_scale
+    y1_image = (y1 * scale_height) * rect_to_mediabox_y_scale
+    x2_image = (x2 * scale_width) * rect_to_mediabox_x_scale
+    y2_image = (y2 * scale_height) * rect_to_mediabox_y_scale
+
+    return x1_image, y1_image, x2_image, y2_image
+
+
+def redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colours, border = 5):
+    # Small border to page that remains white
+    border = 5
+    # Define the coordinates for the Rect
+    whole_page_x1, whole_page_y1 = 0 + border, 0 + border  # Bottom-left corner
+    whole_page_x2, whole_page_y2 = rect_width - border, rect_height - border  # Top-right corner
+
+    whole_page_image_x1, whole_page_image_y1, whole_page_image_x2, whole_page_image_y2 = convert_pymupdf_to_image_coords(page, whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2, image)
+
+    # Create new image annotation element based on whole page coordinates
+    whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
+
+    # Write whole page annotation to annotation boxes
+    whole_page_img_annotation_box = {}
+    whole_page_img_annotation_box["xmin"] = whole_page_image_x1
+    whole_page_img_annotation_box["ymin"] = whole_page_image_y1
+    whole_page_img_annotation_box["xmax"] = whole_page_image_x2
+    whole_page_img_annotation_box["ymax"] = whole_page_image_y2
+    whole_page_img_annotation_box["color"] = (0,0,0)
+    whole_page_img_annotation_box["label"] = "Whole page"
+
+    redact_single_box(page, whole_page_rect, whole_page_img_annotation_box, custom_colours)
+
+    return whole_page_img_annotation_box
 
 def prepare_image_or_pdf(
     file_paths: List[str],
@@ -230,6 +341,7 @@ def prepare_image_or_pdf(
     current_loop_page_number:int=0,
     all_annotations_object:List = [],
     prepare_for_review:bool = False,
+    in_fully_redacted_list:List[int]=[],
     progress: Progress = Progress(track_tqdm=True)
 ) -> tuple[List[str], List[str]]:
     """
@@ -241,15 +353,16 @@ def prepare_image_or_pdf(
     Args:
         file_paths (List[str]): List of file paths to process.
         in_redact_method (str): The redaction method to use.
-        in_allow_list (Optional[List[List[str]]]): List of allowed terms for redaction.
-        latest_file_completed (int): Index of the last completed file.
-        out_message (List[str]): List to store output messages.
-        first_loop_state (bool): Flag indicating if this is the first iteration.
-        number_of_pages (int): integer indicating the number of pages in the document
-        current_loop_page_number (int): Current number of loop
-        all_annotations_object(List of annotation objects): All annotations for current document
-        prepare_for_review(bool): Is this preparation step preparing pdfs and json files to review current redactions?
-        progress (Progress): Progress tracker for the operation.
+        in_allow_list (optional, Optional[List[List[str]]]): List of allowed terms for redaction.
+        latest_file_completed (optional, int): Index of the last completed file.
+        out_message (optional, List[str]): List to store output messages.
+        first_loop_state (optional, bool): Flag indicating if this is the first iteration.
+        number_of_pages (optional, int): integer indicating the number of pages in the document
+        current_loop_page_number (optional, int): Current number of loop
+        all_annotations_object(optional, List of annotation objects): All annotations for current document
+        prepare_for_review(optional, bool): Is this preparation step preparing pdfs and json files to review current redactions?
+        in_fully_redacted_list(optional, List of int): A list of pages to fully redact
+        progress (optional, Progress): Progress tracker for the operation.
         
 
     Returns:
@@ -258,6 +371,9 @@ def prepare_image_or_pdf(
 
     tic = time.perf_counter()
     json_from_csv = False
+
+    if isinstance(in_fully_redacted_list, pd.DataFrame):
+        in_fully_redacted_list = in_fully_redacted_list.iloc[:,0].tolist()
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -329,6 +445,9 @@ def prepare_image_or_pdf(
 
     # Loop through files to load in
     for file in file_paths_loop:
+        converted_file_path = []
+        image_file_path = []
+
         if isinstance(file, str):
             file_path = file
         else:
@@ -342,15 +461,45 @@ def prepare_image_or_pdf(
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
+        # If a pdf, load as a pymupdf document
+        if is_pdf(file_path):
+            pymupdf_doc = pymupdf.open(file_path)
+
+            converted_file_path = file_path
+            image_file_paths = process_file(file_path, prepare_for_review)
+
+            # Create base version of the annotation object that doesn't have any annotations in it
+            if not all_annotations_object:
+                all_annotations_object = []
+
+                for image_path in image_file_paths:
+                    annotation = {}
+                    annotation["image"] = image_path
+
+                    all_annotations_object.append(annotation)
+
+                #print("all_annotations_object:", all_annotations_object)
+            
+            
+        elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
+            # Convert image to a pymupdf document
+            pymupdf_doc = pymupdf.open()  # Create a new empty document
+
+            img = Image.open(file_path)  # Open the image file
+            rect = pymupdf.Rect(0, 0, img.width, img.height)  # Create a rectangle for the image
+            page = pymupdf_doc.new_page(width=img.width, height=img.height)  # Add a new page
+            page.insert_image(rect, filename=file_path)  # Insert the image into the page
+
 
         # Check if the file is an image type and the user selected text ocr option
-        if file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
+        elif file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
             in_redact_method = tesseract_ocr_option
 
-        if file_extension in ['.csv']:
+        elif file_extension in ['.csv']:
             review_file_csv = read_file(file)
             all_annotations_object = convert_pandas_df_to_review_json(review_file_csv)
             json_from_csv = True
+            print("Converted CSV review file to json")
 
         # If the file name ends with redactions.json, assume it is an annoations object, overwrite the current variable
         if (file_extension in ['.json']) | (json_from_csv == True):
@@ -376,7 +525,7 @@ def prepare_image_or_pdf(
 
             # If you have an annotations object from the above code
             if all_annotations_object:
-                #print("out_annotations_object found:", all_annotations_object)
+                #print("out_annotations_object before reloading images:", all_annotations_object)
 
                 # Get list of page numbers
                 image_file_paths_pages = [
@@ -388,9 +537,27 @@ def prepare_image_or_pdf(
                 
                 # If PDF pages have been converted to image files, replace the current image paths in the json to this. 
                 if image_file_paths:
+                    #print("Image file paths found")
 
-                    for i, annotation in enumerate(all_annotations_object):
-                        annotation_page_number = int(re.search(r'_(\d+)\.png$', annotation["image"]).group(1))
+                    #print("Image_file_paths:", image_file_paths)
+
+                    #for i, annotation in enumerate(all_annotations_object):
+                    for i, image_file_path in enumerate(image_file_paths):
+
+                        if i < len(all_annotations_object): 
+                            annotation = all_annotations_object[i]
+                        else: 
+                            annotation = {}
+                            all_annotations_object.append(annotation)
+
+                        #print("annotation:", annotation, "for page:", str(i))
+
+                        if not annotation:
+                            annotation = {"image":"", "boxes": []}
+                            annotation_page_number = int(re.search(r'_(\d+)\.png$', image_file_path).group(1))
+
+                        else:
+                            annotation_page_number = int(re.search(r'_(\d+)\.png$', annotation["image"]).group(1))
                         #print("Annotation page number:", annotation_page_number)
 
                         # Check if the annotation page number exists in the image file paths pages
@@ -402,19 +569,30 @@ def prepare_image_or_pdf(
                         else:
                             print("Page", annotation_page_number, "image file not found.")
 
-                    #print("all_annotations_object:", all_annotations_object)
+                        all_annotations_object[i] = annotation
+
+                    #print("all_annotations_object at end of json/csv load part:", all_annotations_object)
+
+                # Get list of pages that are to be fully redacted and redact them
+                if in_fully_redacted_list:
+                    print("Redacting whole pages")
+
+                    for i, image in enumerate(image_file_paths):
+                        page = pymupdf_doc.load_page(i)
+                        rect_height = page.rect.height
+                        rect_width = page.rect.width 
+                        whole_page_img_annotation_box = redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colours = False, border = 5)
+
+                        all_annotations_object.append(whole_page_img_annotation_box)
 
                 # Write the response to a JSON file in output folder
                 out_folder = output_folder + file_path_without_ext + ".json"
                 with open(out_folder, 'w') as json_file:
                     json.dump(all_annotations_object, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
                 continue
-            
 
-        # Must be a pdf or image at this point
+        # Must be something else, return with error message
         else:
-
-            # Convert pdf/image file to correct format for redaction
             if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
                 if is_pdf_or_image(file_path) == False:
                     out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
@@ -425,25 +603,11 @@ def prepare_image_or_pdf(
                 if is_pdf(file_path) == False:
                     out_message = "Please upload a PDF file for text analysis."
                     print(out_message)
-                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object                
-               
-            converted_file_path = file_path # Pikepdf works with the basic unconverted pdf file
-            image_file_path = process_file(file_path, prepare_for_review)
+                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object             
+
 
         converted_file_paths.append(converted_file_path)
-        image_file_paths.extend(image_file_path)
-
-        # If a pdf, load as a pymupdf document
-        if is_pdf(file_path):
-            pymupdf_doc = pymupdf.open(file_path)
-
-        elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
-            # Convert image to a pymupdf document
-            pymupdf_doc = pymupdf.open()  # Create a new empty document
-            img = Image.open(file_path)  # Open the image file
-            rect = pymupdf.Rect(0, 0, img.width, img.height)  # Create a rectangle for the image
-            page = pymupdf_doc.new_page(width=img.width, height=img.height)  # Add a new page
-            page.insert_image(rect, filename=file_path)  # Insert the image into the page
+        image_file_paths.extend(image_file_path)        
 
         toc = time.perf_counter()
         out_time = f"File '{file_path_without_ext}' prepared in {toc - tic:0.1f} seconds."
@@ -453,11 +617,12 @@ def prepare_image_or_pdf(
         out_message.append(out_time)
         out_message_out = '\n'.join(out_message)
 
-    if prepare_for_review == False:
-        number_of_pages = len(image_file_paths)
-    else:
-        number_of_pages = len(all_annotations_object)
+    #if prepare_for_review == False:
+    number_of_pages = len(image_file_paths)
+    #else:
+    #    number_of_pages = len(all_annotations_object)
 
+    #print("all_annotations_object at end:", all_annotations_object)
         
     return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
 
@@ -498,13 +663,17 @@ def convert_review_json_to_pandas_df(data:List[dict]) -> pd.DataFrame:
         match = re.search(r'_(\d+)\.png$', image_path)
         if match:
             number = match.group(1)  # Extract the number
-            print(number)  # Output: 0
+            #print(number)  # Output: 0
             reported_number = int(number) + 1
         else:
             print("No number found before .png")
 
+        # Check if 'boxes' is in the entry, if not, add an empty list
+        if 'boxes' not in entry:
+            entry['boxes'] = []
+
         for box in entry["boxes"]:
-            data_to_add = {"image": image_path, "page":reported_number, **box}
+            data_to_add = {"image": image_path, "page": reported_number, **box}
             #print("data_to_add:", data_to_add)
             flattened_data.append(data_to_add)
 

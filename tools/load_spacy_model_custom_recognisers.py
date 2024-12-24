@@ -28,8 +28,10 @@ except:
 def custom_word_list_recogniser(custom_list:List[str]=[]):
     custom_regex = '\\b' + '\\b|\\b'.join(rf"{re.escape(term)}" for term in custom_list) + '\\b'
     custom_pattern = Pattern(name="custom_pattern",regex=custom_regex, score = 1)
+
+    #print("custom_pattern:", custom_pattern)
     custom_recogniser = PatternRecognizer(supported_entity="CUSTOM", name="CUSTOM", patterns = [custom_pattern], 
-    global_regex_flags=re.DOTALL | re.MULTILINE)
+    global_regex_flags=re.DOTALL | re.MULTILINE | re.IGNORECASE)
 
     return custom_recogniser
 
