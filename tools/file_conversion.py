@@ -399,6 +399,7 @@ def prepare_image_or_pdf(
     converted_file_paths = []
     image_file_paths = []
     pymupdf_doc = []
+    review_file_csv = pd.DataFrame()
 
     if not file_paths:
         file_paths = []
@@ -424,7 +425,7 @@ def prepare_image_or_pdf(
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
+        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
 
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
@@ -457,7 +458,7 @@ def prepare_image_or_pdf(
         if not file_path:
             out_message = "Please select a file."
             print(out_message)
-            return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
+            return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
@@ -478,7 +479,7 @@ def prepare_image_or_pdf(
 
                     all_annotations_object.append(annotation)
 
-                print("all_annotations_object:", all_annotations_object)
+                #print("all_annotations_object:", all_annotations_object)
             
             
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
@@ -597,13 +598,13 @@ def prepare_image_or_pdf(
                 if is_pdf_or_image(file_path) == False:
                     out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
                     print(out_message)
-                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
+                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
 
             elif in_redact_method == text_ocr_option:
                 if is_pdf(file_path) == False:
                     out_message = "Please upload a PDF file for text analysis."
                     print(out_message)
-                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object             
+                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv        
 
 
         converted_file_paths.append(converted_file_path)
@@ -624,7 +625,7 @@ def prepare_image_or_pdf(
 
     #print("all_annotations_object at end:", all_annotations_object)
         
-    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object
+    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi):
     file_path_without_ext = get_file_path_end(in_file_path)
@@ -650,7 +651,7 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], 
     return out_message, out_file_paths
 
 
-def convert_review_json_to_pandas_df(data:List[dict]) -> pd.DataFrame:
+def convert_review_json_to_pandas_df(data:List[dict], text_join_data=pd.DataFrame) -> pd.DataFrame:
     # Flatten the data
     flattened_data = []
 
@@ -670,15 +671,39 @@ def convert_review_json_to_pandas_df(data:List[dict]) -> pd.DataFrame:
 
         # Check if 'boxes' is in the entry, if not, add an empty list
         if 'boxes' not in entry:
-            entry['boxes'] = []
+            entry['boxes'] = []        
 
         for box in entry["boxes"]:
-            data_to_add = {"image": image_path, "page": reported_number, **box}
+            if 'text' not in box:
+                data_to_add = {"image": image_path, "page": reported_number,  **box} # "text": entry['text'],
+            else:
+                data_to_add = {"image": image_path, "page": reported_number, "text": entry['text'], **box}
             #print("data_to_add:", data_to_add)
             flattened_data.append(data_to_add)
 
     # Convert to a DataFrame
     df = pd.DataFrame(flattened_data)
+
+    # Join on additional text data from decision output results if included
+    if not text_join_data.empty:
+        #print("text_join_data:", text_join_data)
+        #print("df:", df)
+        text_join_data['page'] = text_join_data['page'].astype(str)
+        df['page'] = df['page'].astype(str)
+        text_join_data = text_join_data[['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page', 'text']]
+        text_join_data[['xmin', 'ymin', 'xmax', 'ymax']] = text_join_data[['xmin', 'ymin', 'xmax', 'ymax']].astype(float).round(0)
+        df[['xmin1', 'ymin1', 'xmax1', 'ymax1']] = df[['xmin', 'ymin', 'xmax', 'ymax']].astype(float).round(0)
+
+        df = df.merge(text_join_data, left_on = ['xmin1', 'ymin1', 'xmax1', 'ymax1', 'label', 'page'], right_on = ['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page'], how = "left", suffixes=("", "_y"))
+
+        df = df.drop(['xmin1', 'ymin1', 'xmax1', 'ymax1', 'xmin_y', 'ymin_y', 'xmax_y', 'ymax_y'], axis=1, errors="ignore")
+
+        df = df[["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]]
+
+    if 'text' not in df.columns:
+        df['text'] = ''
+
+    df = df.sort_values(['page', 'ymin', 'xmin', 'label'])
 
     return df
 

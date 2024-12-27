@@ -40,6 +40,11 @@ print(f'The value of page_break_value is {page_break_value}')
 max_time_value = get_or_create_env_var('max_time_value', '999999')
 print(f'The value of max_time_value is {max_time_value}')
 
+def bounding_boxes_overlap(box1, box2):
+    """Check if two bounding boxes overlap."""
+    return (box1[0] < box2[2] and box2[0] < box1[2] and
+            box1[1] < box2[3] and box2[1] < box1[3])
+
 def sum_numbers_before_seconds(string:str):
     """Extracts numbers that precede the word 'seconds' from a string and adds them up.
 
@@ -396,7 +401,7 @@ def choose_and_run_redactor(file_paths:List[str],
                 # Convert json to csv and also save this
                 #print("annotations_all_pages:", annotations_all_pages)
 
-                review_df = convert_review_json_to_pandas_df(annotations_all_pages)
+                review_df = convert_review_json_to_pandas_df(annotations_all_pages, all_decision_process_table)
 
                 out_review_file_file_path = out_image_file_path + '_review_file.csv'
                 review_df.to_csv(out_review_file_file_path, index=None)
@@ -452,7 +457,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
     return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
 
-def convert_pikepdf_coords_to_pymupdf(pymupdf_page, pikepdf_bbox):
+def convert_pikepdf_coords_to_pymupdf(pymupdf_page, pikepdf_bbox, type="pikepdf_annot"):
     '''
     Convert annotations from pikepdf to pymupdf format, handling the mediabox larger than rect.
     '''
@@ -474,7 +479,10 @@ def convert_pikepdf_coords_to_pymupdf(pymupdf_page, pikepdf_bbox):
     x_diff_ratio = media_reference_x_diff / reference_box_width
     
     # Extract the annotation rectangle field
-    rect_field = pikepdf_bbox["/Rect"]
+    if type=="pikepdf_annot":
+        rect_field = pikepdf_bbox["/Rect"]
+    else:
+        rect_field = pikepdf_bbox
     rect_coordinates = [float(coord) for coord in rect_field]  # Convert to floats
 
     # Unpack coordinates
@@ -487,7 +495,7 @@ def convert_pikepdf_coords_to_pymupdf(pymupdf_page, pikepdf_bbox):
     
     return new_x1, new_y1, new_x2, new_y2
 
-def convert_pikepdf_to_image_coords(pymupdf_page, annot, image:Image):
+def convert_pikepdf_to_image_coords(pymupdf_page, annot, image:Image, type="pikepdf_annot"):
     '''
     Convert annotations from pikepdf coordinates to image coordinates.
     '''
@@ -504,7 +512,10 @@ def convert_pikepdf_to_image_coords(pymupdf_page, annot, image:Image):
     scale_height = image_page_height / rect_height
 
     # Extract the /Rect field
-    rect_field = annot["/Rect"]
+    if type=="pikepdf_annot":
+        rect_field = annot["/Rect"]
+    else:
+        rect_field = annot
 
     # Convert the extracted /Rect field to a list of floats
     rect_coordinates = [float(coord) for coord in rect_field]
@@ -518,9 +529,30 @@ def convert_pikepdf_to_image_coords(pymupdf_page, annot, image:Image):
 
     return x1_image, new_y1_image, x2_image, new_y2_image
 
-def convert_image_coords_to_pymupdf(pymupdf_page, annot:CustomImageRecognizerResult, image:Image):
+def convert_pikepdf_decision_output_to_image_coords(pymupdf_page, pikepdf_decision_ouput_data:List, image):
+    if isinstance(image, str):
+        image_path = image
+        image = Image.open(image_path)
+
+    # Loop through each item in the data
+    for item in pikepdf_decision_ouput_data:
+        # Extract the bounding box
+        bounding_box = item['boundingBox']
+        
+        # Create a pikepdf_bbox dictionary to match the expected input
+        pikepdf_bbox = {"/Rect": bounding_box}
+        
+        # Call the conversion function
+        new_x1, new_y1, new_x2, new_y2 = convert_pikepdf_to_image_coords(pymupdf_page, pikepdf_bbox, image, type="pikepdf_annot")
+        
+        # Update the original object with the new bounding box values
+        item['boundingBox'] = [new_x1, new_y1, new_x2, new_y2]
+
+    return pikepdf_decision_ouput_data
+
+def convert_image_coords_to_pymupdf(pymupdf_page, annot, image:Image, type="image_recognizer"):
     '''
-    Converts an image with redaction coordinates from a CustomImageRecognizerResult to pymupdf coordinates.
+    Converts an image with redaction coordinates from a CustomImageRecognizerResult or pikepdf object with image coordinates to pymupdf coordinates.
     '''
 
     rect_height = pymupdf_page.rect.height
@@ -533,14 +565,29 @@ def convert_image_coords_to_pymupdf(pymupdf_page, annot:CustomImageRecognizerRes
     scale_height = rect_height / image_page_height
 
     # Calculate scaled coordinates
-    x1 = (annot.left * scale_width)# + page_x_adjust
-    new_y1 = (annot.top * scale_height)# - page_y_adjust  # Flip Y0 (since it starts from bottom)
-    x2 = ((annot.left + annot.width) * scale_width)# + page_x_adjust  # Calculate x1
-    new_y2 = ((annot.top + annot.height) * scale_height)# - page_y_adjust  # Calculate y1 correctly
+    if type == "image_recognizer":
+        x1 = (annot.left * scale_width)# + page_x_adjust
+        new_y1 = (annot.top * scale_height)# - page_y_adjust  # Flip Y0 (since it starts from bottom)
+        x2 = ((annot.left + annot.width) * scale_width)# + page_x_adjust  # Calculate x1
+        new_y2 = ((annot.top + annot.height) * scale_height)# - page_y_adjust  # Calculate y1 correctly
+    # Else assume it is a pikepdf derived object
+    else:
+        rect_field = annot["/Rect"]
+        rect_coordinates = [float(coord) for coord in rect_field]  # Convert to floats
+
+        # Unpack coordinates
+        x1, y1, x2, y2 = rect_coordinates
+
+        #print("scale_width:", scale_width)
+        #print("scale_height:", scale_height)
+
+        x1 = (x1* scale_width)# + page_x_adjust
+        new_y1 = ((y2 + (y1 - y2))* scale_height)# - page_y_adjust  # Calculate y1 correctly        
+        x2 = ((x1 + (x2 - x1)) * scale_width)# + page_x_adjust  # Calculate x1
+        new_y2 = (y2 * scale_height)# - page_y_adjust  # Flip Y0 (since it starts from bottom)
+        
 
     return x1, new_y1, x2, new_y2
-
-
 
 def convert_gradio_annotation_coords_to_pymupdf(pymupdf_page:Page, annot:dict, image:Image):
     '''
@@ -577,7 +624,7 @@ def move_page_info(file_path: str) -> str:
     
     return new_file_path
 
-def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Image=None, custom_colours:bool=False, redact_whole_page:bool=False):
+def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custom_colours:bool=False, redact_whole_page:bool=False, convert_coords:bool=True):
 
     mediabox_height = page.mediabox[3] - page.mediabox[1]
     mediabox_width = page.mediabox[2] - page.mediabox[0]
@@ -599,10 +646,10 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Im
         image = Image.open(image_path)
 
     # Check if this is an object used in the Gradio Annotation component
-    if isinstance (annotations_on_page, dict):
-        annotations_on_page = annotations_on_page["boxes"]
+    if isinstance (page_annotations, dict):
+        page_annotations = page_annotations["boxes"]
 
-    for annot in annotations_on_page:
+    for annot in page_annotations:
         # Check if an Image recogniser result, or a Gradio annotation object
         if (isinstance(annot, CustomImageRecognizerResult)) | isinstance(annot, dict):
 
@@ -611,11 +658,15 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Im
             # Should already be in correct format if img_annotator_box is an input
             if isinstance(annot, dict):
                 img_annotation_box = annot
-
                 pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = convert_gradio_annotation_coords_to_pymupdf(page, annot, image)
 
                 x1 = pymupdf_x1
                 x2 = pymupdf_x2
+
+                # if hasattr(annot, 'text') and annot.text:
+                #     img_annotation_box["text"] = annot.text
+                # else:
+                #     img_annotation_box["text"] = ""
 
             # Else should be CustomImageRecognizerResult
             else:
@@ -633,12 +684,19 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Im
                     img_annotation_box["label"] = annot.entity_type
                 except:
                     img_annotation_box["label"] = "Redaction"
+                # if hasattr(annot, 'text') and annot.text:
+                #     img_annotation_box["text"] = annot.text
+                # else:
+                #     img_annotation_box["text"] = ""
 
             rect = Rect(x1, pymupdf_y1, x2, pymupdf_y2)  # Create the PyMuPDF Rect
 
         # Else it should be a pikepdf annotation object
-        else:           
-            pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = convert_pikepdf_coords_to_pymupdf(page, annot)
+        else:
+            if convert_coords == True:    
+                pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = convert_pikepdf_coords_to_pymupdf(page, annot)
+            else:
+                pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = convert_image_coords_to_pymupdf(page, annot, image, type="pikepdf_image_coords")
 
             x1 = pymupdf_x1
             x2 = pymupdf_x2
@@ -649,6 +707,8 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Im
 
             if image:
                 img_width, img_height = image.size
+
+                print("annot:", annot)
 
                 x1, image_y1, x2, image_y2 = convert_pymupdf_to_image_coords(page, x1, pymupdf_y1, x2, pymupdf_y2, image)
 
@@ -662,6 +722,10 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Im
                     img_annotation_box["label"] = str(annot["/T"])
                 else:
                     img_annotation_box["label"] = "REDACTION"
+                # if hasattr(annot, 'text') and annot.text:
+                #     img_annotation_box["text"] = annot.text
+                # else:
+                #     img_annotation_box["text"] = ""
 
         # Convert to a PyMuPDF Rect object
         #rect = Rect(rect_coordinates)
@@ -672,29 +736,6 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Im
 
     # If whole page is to be redacted, do that here
     if redact_whole_page == True:
-        # # Small border to page that remains white
-        # border = 5
-        # # Define the coordinates for the Rect
-        # whole_page_x1, whole_page_y1 = 0 + border, 0 + border  # Bottom-left corner
-        # whole_page_x2, whole_page_y2 = rect_width - border, rect_height - border  # Top-right corner
-
-        # whole_page_image_x1, whole_page_image_y1, whole_page_image_x2, whole_page_image_y2 = convert_pymupdf_to_image_coords(page, whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2, image)
-
-        # # Create new image annotation element based on whole page coordinates
-        # whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
-
-        # # Write whole page annotation to annotation boxes
-        # whole_page_img_annotation_box = {}
-        # whole_page_img_annotation_box["xmin"] = whole_page_image_x1
-        # whole_page_img_annotation_box["ymin"] = whole_page_image_y1
-        # whole_page_img_annotation_box["xmax"] = whole_page_image_x2
-        # whole_page_img_annotation_box["ymax"] = whole_page_image_y2
-        # whole_page_img_annotation_box["color"] = (0,0,0)
-        # whole_page_img_annotation_box["label"] = "Whole page"
-
-        # redact_single_box(page, whole_page_rect, whole_page_img_annotation_box, custom_colours)
-
-        # all_image_annotation_boxes.append(whole_page_img_annotation_box)
 
         whole_page_img_annotation_box = redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colours, border = 5)
         all_image_annotation_boxes.append(whole_page_img_annotation_box)
@@ -712,14 +753,7 @@ def redact_page_with_pymupdf(page:Page, annotations_on_page:dict, image:Image.Im
 
     return page, out_annotation_boxes
 
-def bounding_boxes_overlap(box1, box2):
-    """Check if two bounding boxes overlap."""
-    return (box1[0] < box2[2] and box2[0] < box1[2] and
-            box1[1] < box2[3] and box2[1] < box1[3])
 
-from collections import defaultdict
-from typing import List, Dict
-import copy
 
 def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_results=[], handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Redact all identified handwriting", "Redact all identified signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
 
@@ -821,117 +855,6 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
     # Return the unique original and merged bounding boxes
     unique_bboxes = list({(bbox.left, bbox.top, bbox.width, bbox.height): bbox for bbox in all_bboxes}.values())
     return unique_bboxes
-
-
-# def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_results=[], handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Redact all identified handwriting", "Redact all identified signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
-#     merged_bboxes = []
-#     grouped_bboxes = defaultdict(list)
-
-#         # Process signature and handwriting results
-#     if signature_recogniser_results or handwriting_recogniser_results:
-#         if "Redact all identified handwriting" in handwrite_signature_checkbox:
-#             #print("Handwriting boxes exist at merge:", handwriting_recogniser_results)
-#             merged_bboxes.extend(handwriting_recogniser_results)
-
-#         if "Redact all identified signatures" in handwrite_signature_checkbox:
-#             #print("Signature boxes exist at merge:", signature_recogniser_results)
-#             merged_bboxes.extend(signature_recogniser_results)
-
-
-#     # Reconstruct bounding boxes for substrings of interest
-#     reconstructed_bboxes = []
-#     for bbox in bboxes:
-#         #print("bbox:", bbox)
-#         bbox_box = (bbox.left, bbox.top, bbox.left + bbox.width, bbox.top + bbox.height)
-#         for line_text, line_info in combined_results.items():
-#             line_box = line_info['bounding_box']
-#             if bounding_boxes_overlap(bbox_box, line_box): 
-#                 if bbox.text in line_text:
-#                     start_char = line_text.index(bbox.text)
-#                     end_char = start_char + len(bbox.text)
-                    
-#                     relevant_words = []
-#                     current_char = 0
-#                     for word in line_info['words']:
-#                         word_end = current_char + len(word['text'])
-#                         if current_char <= start_char < word_end or current_char < end_char <= word_end or (start_char <= current_char and word_end <= end_char):
-#                             relevant_words.append(word)
-#                         if word_end >= end_char:
-#                             break
-#                         current_char = word_end
-#                         if not word['text'].endswith(' '):
-#                             current_char += 1  # +1 for space if the word doesn't already end with a space
-
-#                     if relevant_words:
-#                         #print("Relevant words:", relevant_words)
-#                         left = min(word['bounding_box'][0] for word in relevant_words)
-#                         top = min(word['bounding_box'][1] for word in relevant_words)
-#                         right = max(word['bounding_box'][2] for word in relevant_words)
-#                         bottom = max(word['bounding_box'][3] for word in relevant_words)
-                        
-#                         # Combine the text of all relevant words
-#                         combined_text = " ".join(word['text'] for word in relevant_words)
-
-#                         # Calculate new dimensions for the merged box
-#                         reconstructed_bbox = CustomImageRecognizerResult(
-#                             bbox.entity_type,
-#                             bbox.start,
-#                             bbox.end,
-#                             bbox.score,
-#                             left,
-#                             top,
-#                             right - left,  # width
-#                             bottom - top,  # height
-#                             combined_text
-#                         )
-#                         # Add both the original and the merged bounding box
-#                         reconstructed_bboxes.append(bbox)  # Retain the original bbox
-#                         reconstructed_bboxes.append(reconstructed_bbox)  # Add the merged bbox
-#                         break
-#         else:
-#             # If the bbox text is not found in any line in combined_results, keep the original bbox
-#             reconstructed_bboxes.append(bbox)
-
-#     # Group reconstructed bboxes by approximate vertical proximity
-#     for box in reconstructed_bboxes:
-#         grouped_bboxes[round(box.top / vertical_threshold)].append(box)
-
-#     # Merge within each group
-#     for _, group in grouped_bboxes.items():
-#         group.sort(key=lambda box: box.left)
-
-#         merged_box = group[0]
-#         for next_box in group[1:]:
-#             if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
-#                 # Calculate new dimensions for the merged box
-#                 if merged_box.text == next_box.text:
-#                     new_text = merged_box.text
-#                 else:
-#                     new_text = merged_box.text + " " + next_box.text
-
-#                 if merged_box.text == next_box.text:
-#                     new_text = merged_box.text
-#                     new_entity_type = merged_box.entity_type  # Keep the original entity type
-#                 else:
-#                     new_text = merged_box.text + " " + next_box.text
-#                     new_entity_type = merged_box.entity_type + " - " + next_box.entity_type  # Concatenate entity types
-
-#                 new_left = min(merged_box.left, next_box.left)
-#                 new_top = min(merged_box.top, next_box.top)
-#                 new_width = max(merged_box.left + merged_box.width, next_box.left + next_box.width) - new_left
-#                 new_height = max(merged_box.top + merged_box.height, next_box.top + next_box.height) - new_top
-#                 merged_box = CustomImageRecognizerResult(
-#                     new_entity_type, merged_box.start, merged_box.end, merged_box.score, new_left, new_top, new_width, new_height, new_text
-#                 )
-#             else:
-#                 merged_bboxes.append(merged_box)
-#                 merged_box = next_box  
-
-#         merged_bboxes.append(merged_box)
-
-#     #print("bboxes:", bboxes)
-
-#     return merged_bboxes
 
 def redact_image_pdf(file_path:str,
                      prepared_pdf_file_paths:List[str],
@@ -1279,17 +1202,21 @@ def redact_image_pdf(file_path:str,
 
             # Convert decision process to table
             decision_process_table = pd.DataFrame([{
-                'page': reported_page_number,
-                'entity_type': result.entity_type,
+                'text': result.text,
+                'xmin': result.left,
+                'ymin': result.top,
+                'xmax': result.left + result.width,
+                'ymax': result.top + result.height, 
+                'label': result.entity_type,
                 'start': result.start,
                 'end': result.end,
                 'score': result.score,
-                'left': result.left,
-                'top': result.top,
-                'width': result.width,
-                'height': result.height,
-                'text': result.text
-            } for result in merged_redaction_bboxes])
+                'page': reported_page_number
+                
+            } for result in merged_redaction_bboxes]) #'left': result.left,
+                #'top': result.top,
+                #'width': result.width,
+                #'height': result.height,
 
             all_decision_process_table = pd.concat([all_decision_process_table, decision_process_table])
 
@@ -1323,7 +1250,7 @@ def redact_image_pdf(file_path:str,
                     pymupdf_doc = images
 
                 # Check if the image already exists in annotations_all_pages
-                print("annotations_all_pages:", annotations_all_pages)
+                #print("annotations_all_pages:", annotations_all_pages)
                 existing_index = next((index for index, ann in enumerate(annotations_all_pages) if ann["image"] == image_annotations["image"]), None)
                 if existing_index is not None:
                     # Replace the existing annotation
@@ -1346,7 +1273,7 @@ def redact_image_pdf(file_path:str,
             pymupdf_doc = images
 
         # Check if the image already exists in annotations_all_pages
-        print("annotations_all_pages:", annotations_all_pages)
+        #print("annotations_all_pages:", annotations_all_pages)
         existing_index = next((index for index, ann in enumerate(annotations_all_pages) if ann["image"] == image_annotations["image"]), None)
         if existing_index is not None:
             # Replace the existing annotation
@@ -1595,105 +1522,25 @@ def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combin
 
     return analysed_bounding_boxes
 
-
-# def merge_text_bounding_boxes(analyser_results, characters:List[LTChar], combine_pixel_dist:int=20, vertical_padding:int=0):
-#     '''
-#     Merge identified bounding boxes containing PII that are very close to one another
-#     '''
-#     analysed_bounding_boxes = []
-#     if len(analyser_results) > 0 and len(characters) > 0:
-#         # Extract bounding box coordinates for sorting
-#         bounding_boxes = []
-#         text_out = []
-#         for result in analyser_results:
-#             char_boxes = [char.bbox for char in characters[result.start:result.end] if isinstance(char, LTChar)]
-#             char_text = [char._text for char in characters[result.start:result.end] if isinstance(char, LTChar)]
-#             if char_boxes:
-#                 # Calculate the bounding box that encompasses all characters
-#                 left = min(box[0] for box in char_boxes)
-#                 bottom = min(box[1] for box in char_boxes)
-#                 right = max(box[2] for box in char_boxes)
-#                 top = max(box[3] for box in char_boxes) + vertical_padding
-#                 bounding_boxes.append((bottom, left, result, [left, bottom, right, top], char_text))  # (y, x, result, bbox, text)
-
-#         char_text = "".join(char_text)
-
-#         # Sort the results by y-coordinate and then by x-coordinate
-#         bounding_boxes.sort()
-
-#         merged_bounding_boxes = []
-#         current_box = None
-#         current_y = None
-#         current_result = None
-#         current_text = []
-
-#         for y, x, result, char_box, text in bounding_boxes:
-#             #print(f"Considering result: {result}")
-#             #print(f"Character box: {char_box}")
-
-#             if current_y is None or current_box is None:
-#                 current_box = char_box
-#                 current_y = char_box[1]
-#                 current_result = result
-#                 current_text = list(text)
-#                 #print(f"Starting new box: {current_box}")
-#             else:
-#                 vertical_diff_bboxes = abs(char_box[1] - current_y)
-#                 horizontal_diff_bboxes = abs(char_box[0] - current_box[2])
-
-#                 if (
-#                     vertical_diff_bboxes <= 5 and horizontal_diff_bboxes <= combine_pixel_dist
-#                 ):
-#                     #print("box is being extended")
-#                     current_box[2] = char_box[2]  # Extend the current box horizontally
-#                     current_box[3] = max(current_box[3], char_box[3])  # Ensure the top is the highest
-#                     current_result.end = max(current_result.end, result.end)  # Extend the text range
-#                     try:
-#                         current_result.entity_type = current_result.entity_type + " - " + result.entity_type
-#                     except Exception as e:
-#                         print("Unable to combine result entity types:")
-#                         print(e)
-#                     # Add a space if current_text is not empty
-#                     if current_text:
-#                         current_text.append(" ")  # Add space between texts
-#                     current_text.extend(text)
-
-#                     #print(f"Latest merged box: {current_box[-1]}")
-#                 else:
-#                     merged_bounding_boxes.append(
-#                         {"text":"".join(current_text),"boundingBox": current_box, "result": current_result})
-
-#                     # Reset current_box and current_y after appending
-#                     current_box = char_box
-#                     current_y = char_box[1]
-#                     current_result = result
-#                     current_text = list(text)
-
-#         # After finishing with the current result, add the last box for this result
-#         if current_box:
-#             merged_bounding_boxes.append({"text":"".join(current_text), "boundingBox": current_box, "result": current_result})
-
-#         if not merged_bounding_boxes:
-#             analysed_bounding_boxes.extend(
-#                 {"text":text, "boundingBox": char.bbox, "result": result} 
-#                 for result in analyser_results 
-#                 for char in characters[result.start:result.end] 
-#                 if isinstance(char, LTChar)
-#             )
-#         else:
-#             analysed_bounding_boxes.extend(merged_bounding_boxes)
-    
-#     return analysed_bounding_boxes
-
-
 def create_text_redaction_process_results(analyser_results, analysed_bounding_boxes, page_num):
     decision_process_table = pd.DataFrame()
 
     if len(analyser_results) > 0:
         # Create summary df of annotations to be made
         analysed_bounding_boxes_df_new = pd.DataFrame(analysed_bounding_boxes)
+
+        # Remove brackets and split the string into four separate columns
+        #print("analysed_bounding_boxes_df_new:", analysed_bounding_boxes_df_new['boundingBox'])
+        # analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']] = analysed_bounding_boxes_df_new['boundingBox'].str.strip('[]').str.split(',', expand=True)
+
+        # Split the boundingBox list into four separate columns
+        analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']] = analysed_bounding_boxes_df_new['boundingBox'].apply(pd.Series)
+
+        # Convert the new columns to integers (if needed)
+        analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']] = analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']].astype(float)
+
         analysed_bounding_boxes_df_text = analysed_bounding_boxes_df_new['result'].astype(str).str.split(",",expand=True).replace(".*: ", "", regex=True)
-        analysed_bounding_boxes_df_text.columns = ["type", "start", "end", "score"]
+        analysed_bounding_boxes_df_text.columns = ["label", "start", "end", "score"]
         analysed_bounding_boxes_df_new = pd.concat([analysed_bounding_boxes_df_new, analysed_bounding_boxes_df_text], axis = 1)
         analysed_bounding_boxes_df_new['page'] = page_num + 1
         decision_process_table = pd.concat([decision_process_table, analysed_bounding_boxes_df_new], axis = 0).drop('result', axis=1)
@@ -1702,8 +1549,8 @@ def create_text_redaction_process_results(analyser_results, analysed_bounding_bo
     
     return decision_process_table
 
-def create_annotations_for_bounding_boxes(analysed_bounding_boxes):
-    annotations_on_page = []
+def create_pikepdf_annotations_for_bounding_boxes(analysed_bounding_boxes):
+    pikepdf_annotations_on_page = []
     for analysed_bounding_box in analysed_bounding_boxes:
         bounding_box = analysed_bounding_box["boundingBox"]
         annotation = Dictionary(
@@ -1721,8 +1568,8 @@ def create_annotations_for_bounding_boxes(analysed_bounding_boxes):
                 S=Name.S                # Border style: solid
             )
         )
-        annotations_on_page.append(annotation)
-    return annotations_on_page
+        pikepdf_annotations_on_page.append(annotation)
+    return pikepdf_annotations_on_page
 
 def redact_text_pdf(
     filename: str,  # Path to the PDF file to be redacted
@@ -1840,13 +1687,17 @@ def redact_text_pdf(
 
         if page_min <= page_no < page_max:
 
+            if isinstance(image, str):
+                image_path = image
+                image = Image.open(image_path)
+
             for page_layout in extract_pages(filename, page_numbers = [page_no], maxpages=1):
                 
                 page_analyser_results = []
                 page_analysed_bounding_boxes = []            
                 
                 characters = []
-                annotations_on_page = []
+                pikepdf_annotations_on_page = []
                 decision_process_table_on_page = pd.DataFrame()    
                 page_text_outputs = pd.DataFrame()  
 
@@ -1900,8 +1751,7 @@ def redact_text_pdf(
                                     )
                                     all_text_line_results.append((i, text_line_analyser_result))
 
-                                    print("all_text_line_results:", all_text_line_results)
-                                
+                                                                    
                                 elif pii_identification_method == "AWS Comprehend":
 
                                     # First use the local Spacy model to pick up custom entities that AWS Comprehend can't search for.
@@ -2006,17 +1856,24 @@ def redact_text_pdf(
                                 text_container_analyser_results.extend(text_line_analyser_result)
                                 text_container_analysed_bounding_boxes.extend(text_line_bounding_boxes)
 
-                                print("text_container_analyser_results:", text_container_analyser_results)
+                                #print("text_container_analyser_results:", text_container_analyser_results)
 
+                                page_analyser_results.extend(text_container_analyser_results)  # Add this line
                                 page_analysed_bounding_boxes.extend(text_line_bounding_boxes)  # Add this line
 
 
-                print("page_analysed_bounding_boxes:", page_analysed_bounding_boxes)
+                #print("page_analyser_results:", page_analyser_results)
+                #print("page_analysed_bounding_boxes:", page_analysed_bounding_boxes)
+                #print("image:", image)
+
+                page_analysed_bounding_boxes = convert_pikepdf_decision_output_to_image_coords(pymupdf_page, page_analysed_bounding_boxes, image)
+
+                #print("page_analysed_bounding_boxes_out_converted:", page_analysed_bounding_boxes)
 
                 # Annotate redactions on page
-                annotations_on_page = create_annotations_for_bounding_boxes(page_analysed_bounding_boxes)
+                pikepdf_annotations_on_page = create_pikepdf_annotations_for_bounding_boxes(page_analysed_bounding_boxes)
 
-                print("annotations_on_page:", annotations_on_page)
+                #print("pikepdf_annotations_on_page:", pikepdf_annotations_on_page)
 
                 # Make pymupdf page redactions
                 #print("redact_whole_page_list:", redact_whole_page_list)
@@ -2025,7 +1882,9 @@ def redact_text_pdf(
                     else: redact_whole_page = False
                 else: redact_whole_page = False
 
-                pymupdf_page, image_annotations = redact_page_with_pymupdf(pymupdf_page, annotations_on_page, image, redact_whole_page=redact_whole_page)
+                pymupdf_page, image_annotations = redact_page_with_pymupdf(pymupdf_page, pikepdf_annotations_on_page, image, redact_whole_page=redact_whole_page, convert_coords=False)
+
+                #print("image_annotations:", image_annotations)
 
                 #print("Did redact_page_with_pymupdf function")
                 reported_page_no = page_no + 1
@@ -2037,6 +1896,7 @@ def redact_text_pdf(
 
                 if not decision_process_table_on_page.empty:
                     all_decision_process_table = pd.concat([all_decision_process_table, decision_process_table_on_page])
+                    #print("all_decision_process_table:", all_decision_process_table)
 
                 if not page_text_outputs.empty:
                     page_text_outputs = page_text_outputs.sort_values(["top", "left"], ascending=[False, False]).reset_index(drop=True)

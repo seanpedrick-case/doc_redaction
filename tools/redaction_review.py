@@ -68,6 +68,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
             #print("review_dataframe['label']", review_dataframe["label"])
             recogniser_entities = review_dataframe["label"].unique().tolist()
             recogniser_entities.append("ALL")
+            recogniser_entities = sorted(recogniser_entities)
 
             #print("recogniser_entities:", recogniser_entities)
 
@@ -187,7 +188,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
 
     return out_image_annotator, number_reported, number_reported, page_num_reported, recogniser_entities_drop, recogniser_dataframe_out, recogniser_dataframe_gr
 
-def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_page:int, previous_page:int, all_image_annotations:List[AnnotatedImageData], clear_all:bool=False):
+def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_page:int, previous_page:int, all_image_annotations:List[AnnotatedImageData], recogniser_entities_drop=gr.Dropdown(value="ALL", allow_custom_value=True),recogniser_dataframe=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]})), clear_all:bool=False):
     '''
     Overwrite current image annotations with modifications
     '''
@@ -198,6 +199,8 @@ def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_
     #If no previous page or is 0, i.e. first time run, then rewrite current page
     #if not previous_page:
     #    previous_page = current_page
+
+    #print("image_annotated:", image_annotated)
     
     image_annotated['image'] = all_image_annotations[previous_page - 1]["image"]
 
@@ -206,9 +209,26 @@ def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_
     else:
         all_image_annotations[previous_page - 1]["boxes"] = []
 
-    return all_image_annotations, current_page, current_page
+    #print("all_image_annotations:", all_image_annotations)
 
-def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], doc:Document, all_image_annotations:List[AnnotatedImageData], current_page:int, progress=gr.Progress(track_tqdm=True)):
+    # Rewrite all_image_annotations search dataframe with latest updates
+    try:
+        review_dataframe = convert_review_json_to_pandas_df(all_image_annotations)[["page", "label"]]
+        #print("review_dataframe['label']", review_dataframe["label"])
+        recogniser_entities = review_dataframe["label"].unique().tolist()
+        recogniser_entities.append("ALL")
+        recogniser_entities = sorted(recogniser_entities)
+
+        recogniser_dataframe_out = gr.Dataframe(review_dataframe)
+        #recogniser_dataframe_gr = gr.Dataframe(review_dataframe)
+        recogniser_entities_drop = gr.Dropdown(value=recogniser_entities_drop, choices=recogniser_entities, allow_custom_value=True, interactive=True)
+    except Exception as e:
+        print("Could not extract recogniser information:", e)
+        recogniser_dataframe_out = recogniser_dataframe
+
+    return all_image_annotations, current_page, current_page, recogniser_entities_drop, recogniser_dataframe_out
+
+def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], doc:Document, all_image_annotations:List[AnnotatedImageData], current_page:int, review_file_state, progress=gr.Progress(track_tqdm=True)):
     '''
     Apply modified redactions to a pymupdf and export review files
     '''
@@ -302,7 +322,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
             output_files.append(out_pdf_file_path)
 
         try:
-            # print("Saving annotations to JSON")
+            print("Saving annotations to JSON")
 
             out_annotation_file_path = output_folder + file_base + '_review_file.json'
             with open(out_annotation_file_path, 'w') as f:
@@ -311,14 +331,16 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
 
             print("Saving annotations to CSV review file")
 
+            print("review_file_state:", review_file_state)
+
             # Convert json to csv and also save this
-            review_df = convert_review_json_to_pandas_df(all_image_annotations)
+            review_df = convert_review_json_to_pandas_df(all_image_annotations, review_file_state)
             out_review_file_file_path = output_folder + file_base + '_review_file.csv'
             review_df.to_csv(out_review_file_file_path, index=None)
             output_files.append(out_review_file_file_path)
 
         except Exception as e:
-            print("Could not save annotations to json file:", e)
+            print("Could not save annotations to json or csv file:", e)
 
     return doc, all_image_annotations, output_files, output_log_files
 
