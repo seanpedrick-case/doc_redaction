@@ -458,9 +458,9 @@ with app:
     then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Get some environment variables and Launch the Gradio app
-COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
+COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '1')
 print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
-
+1
 RUN_DIRECT_MODE = get_or_create_env_var('RUN_DIRECT_MODE', '0')
 print(f'The value of RUN_DIRECT_MODE is {RUN_DIRECT_MODE}')
 

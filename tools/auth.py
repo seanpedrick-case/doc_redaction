@@ -1,15 +1,31 @@
 
 import boto3
 import gradio as gr
+import hmac
+import hashlib
+import base64
 from tools.helper_functions import get_or_create_env_var
 
-client_id = get_or_create_env_var('AWS_CLIENT_ID', '') # This client id is borrowed from async gradio app client
+client_id = get_or_create_env_var('AWS_CLIENT_ID', '3qs30degqvip8ade8iv44c4edf')
 print(f'The value of AWS_CLIENT_ID is {client_id}')
 
-user_pool_id = get_or_create_env_var('AWS_USER_POOL_ID', '')
+client_secret = get_or_create_env_var('AWS_CLIENT_SECRET', 'cvgd27dihp88jktc71lmjaq2kgntjdkt6703m63mdfjv9j58mqo')
+print(f'The value of AWS_CLIENT_SECRET is {client_secret}')
+
+user_pool_id = get_or_create_env_var('AWS_USER_POOL_ID', 'eu-west-2_7Jhnih7D1')
 print(f'The value of AWS_USER_POOL_ID is {user_pool_id}')
 
-def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id, client_id:str=client_id):
+def calculate_secret_hash(client_id, client_secret, username):
+    message = username + client_id
+    dig = hmac.new(
+        str(client_secret).encode('utf-8'),
+        msg=str(message).encode('utf-8'),
+        digestmod=hashlib.sha256
+    ).digest()
+    secret_hash = base64.b64encode(dig).decode()
+    return secret_hash
+
+def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id, client_id:str=client_id, client_secret:str=client_secret):
     """Authenticates a user against an AWS Cognito user pool.
 
     Args:
@@ -17,6 +33,7 @@ def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id,
         client_id (str): The ID of the Cognito user pool client.
         username (str): The username of the user.
         password (str): The password of the user.
+        client_secret (str): The client secret of the app client
 
     Returns:
         bool: True if the user is authenticated, False otherwise.
@@ -24,15 +41,28 @@ def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id,
 
     client = boto3.client('cognito-idp')  # Cognito Identity Provider client
 
+    # Compute the secret hash
+    secret_hash = calculate_secret_hash(client_id, client_secret, username)
+
     try:
 
+        # response = client.initiate_auth(
+        #     AuthFlow='USER_PASSWORD_AUTH',
+        #     AuthParameters={
+        #         'USERNAME': username,
+        #         'PASSWORD': password,
+        #     },
+        #     ClientId=client_id
+        # )
+
         response = client.initiate_auth(
-            AuthFlow='USER_PASSWORD_AUTH',
-            AuthParameters={
-                'USERNAME': username,
-                'PASSWORD': password,
-            },
-            ClientId=client_id
+        AuthFlow='USER_PASSWORD_AUTH',
+        AuthParameters={
+            'USERNAME': username,
+            'PASSWORD': password,
+            'SECRET_HASH': secret_hash
+        },
+        ClientId=client_id
         )
 
         # If successful, you'll receive an AuthenticationResult in the response

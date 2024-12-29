@@ -41,7 +41,7 @@ def increase_page(number:int, image_annotator_object:AnnotatedImageData):
 
 def update_zoom(current_zoom_level:int, annotate_current_page:int, decrease:bool=True):
     if decrease == False:
-        if current_zoom_level >= 50:
+        if current_zoom_level >= 70:
             current_zoom_level -= 10
     else:    
         if current_zoom_level < 100:

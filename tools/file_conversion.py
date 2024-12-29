@@ -650,6 +650,53 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], 
 
     return out_message, out_file_paths
 
+# Example DataFrames
+# df1 = pd.DataFrame({
+#     'xmin': [10, 20, 30],
+#     'xmax': [15, 25, 35],
+#     'ymin': [40, 50, 60],
+#     'ymax': [45, 55, 65],
+#     'info1': ['A', 'B', 'C']
+# })
+
+# df2 = pd.DataFrame({
+#     'xmin': [12, 18, 32],
+#     'xmax': [14, 24, 34],
+#     'ymin': [42, 48, 62],
+#     'ymax': [44, 54, 66],
+#     'info2': ['X', 'Y', 'Z']
+# })
+
+def join_values_within_threshold(df1, df2):
+    # Threshold for matching
+    threshold = 5
+
+    # Perform a cross join
+    df1['key'] = 1
+    df2['key'] = 1
+    merged = pd.merge(df1, df2, on='key').drop(columns=['key'])
+
+    # Apply conditions for all columns
+    conditions = (
+        (abs(merged['xmin_x'] - merged['xmin_y']) <= threshold) &
+        (abs(merged['xmax_x'] - merged['xmax_y']) <= threshold) &
+        (abs(merged['ymin_x'] - merged['ymin_y']) <= threshold) &
+        (abs(merged['ymax_x'] - merged['ymax_y']) <= threshold)
+    )
+
+    # Filter rows that satisfy all conditions
+    filtered = merged[conditions]
+
+    # Drop duplicates if needed (e.g., keep only the first match for each row in df1)
+    result = filtered.drop_duplicates(subset=['xmin_x', 'xmax_x', 'ymin_x', 'ymax_x'])
+
+    # Merge back into the original DataFrame (if necessary)
+    final_df = pd.merge(df1, result, left_on=['xmin', 'xmax', 'ymin', 'ymax'], right_on=['xmin_x', 'xmax_x', 'ymin_x', 'ymax_x'], how='left')
+
+    # Clean up extra columns
+    final_df = final_df.drop(columns=['key'])
+    print(final_df)
+
 
 def convert_review_json_to_pandas_df(data:List[dict], text_join_data=pd.DataFrame) -> pd.DataFrame:
     # Flatten the data
@@ -691,8 +738,11 @@ def convert_review_json_to_pandas_df(data:List[dict], text_join_data=pd.DataFram
         text_join_data['page'] = text_join_data['page'].astype(str)
         df['page'] = df['page'].astype(str)
         text_join_data = text_join_data[['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page', 'text']]
-        text_join_data[['xmin', 'ymin', 'xmax', 'ymax']] = text_join_data[['xmin', 'ymin', 'xmax', 'ymax']].astype(float).round(0)
-        df[['xmin1', 'ymin1', 'xmax1', 'ymax1']] = df[['xmin', 'ymin', 'xmax', 'ymax']].astype(float).round(0)
+        # Round to the closest number divisible by 5
+        text_join_data[['xmin', 'ymin', 'xmax', 'ymax']] = (text_join_data[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
+        text_join_data = text_join_data.drop_duplicates(['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page'])
+        
+        df[['xmin1', 'ymin1', 'xmax1', 'ymax1']] = (df[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
 
         df = df.merge(text_join_data, left_on = ['xmin1', 'ymin1', 'xmax1', 'ymax1', 'label', 'page'], right_on = ['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page'], how = "left", suffixes=("", "_y"))
 
