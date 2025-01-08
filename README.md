@@ -143,7 +143,7 @@ The file [Partnership Agreement Toolkit (for signatures and more advanced usage)
 
 The outputs should show handwriting/signatures redacted (see pages 5 - 7), which you can inspect and modify on the 'Review redactions' tab.
 
-![Handwriting and signatures redacted example](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/Signatures and handwriting found.PNG)
+![Handwriting and signatures redacted example](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/refs/heads/main/review_redactions/Signatures%20and%20handwriting%20found.PNG)
 
 ## Reviewing and modifying suggested redactions
 
@@ -167,7 +167,7 @@ On the right of the screen there is a dropdown and table where you can filter to
 
 Note that the table currently only shows entity types, and not specific found text. So for instance if you provide a list of specific terms to redact in the [deny list](#deny-list-example), they will all be labelled just as 'CUSTOM'. A feature to include in the near term will include being able to view specific redacted text in this table to get a better sense of the PII entities found.
 
-Once you happy with your modified changes throughout the document, click 'Apply revised redactions' at the top of the page. The app will then run through all the pages in the document to update the redactions, and will output a modified PDF file. The modified PDF will appear at the top of the page in the file area.
+Once you happy with your modified changes throughout the document, click 'Apply revised redactions' at the top of the page. The app will then run through all the pages in the document to update the redactions, and will output a modified PDF file. The modified PDF will appear at the top of the page in the file area. It will also output a revised '...review_file.csv' that you can then use for future review tasks.
 
 ![Review modified outputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/review_mod_outputs.PNG)
 
