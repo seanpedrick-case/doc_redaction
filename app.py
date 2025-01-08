@@ -46,6 +46,7 @@ feedback_logs_folder = 'feedback/' + today_rev + '/' + host_name + '/'
 access_logs_folder = 'logs/' + today_rev + '/' + host_name + '/'
 usage_logs_folder = 'usage/' + today_rev + '/' + host_name + '/'
 
+file_input_height = 200
 
 if RUN_AWS_FUNCTIONS == "1":
     default_ocr_val = textract_option
@@ -153,18 +154,20 @@ with app:
     gr.Markdown(
     """# Document redaction
 
-    Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Documents/images can be redacted using 'Quick' image analysis that works fine for typed text, but not handwriting/signatures. On the Redaction settings tab, choose 'Complex image analysis' OCR using AWS Textract (if you are using AWS) to redact these more complex elements (this service has a cost). Addtionally you can choose the method for PII identification. 'Local' gives quick, lower quality results, AWS Comprehend gives better results but has a cost.
+    Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](https://github.com/seanpedrick-case/doc_redaction/blob/main/README.md) for a walkthrough on how to use the app. Below is a very brief overview.
     
-    Review suggested redactions on the 'Review redactions' tab using a point and click visual interface. Upload a pdf alone to start from scratch, or upload the original pdf alongside a '...redaction_file.csv' to continue a previous redaction/review task.
+    To identify text in documents, the 'local' text/OCR image analysis uses spacy/tesseract, and works ok for documents with typed text. If available, choose 'AWS Textract service' to redact more complex elements e.g. signatures or handwriting. 
     
-    See the 'Redaction settings' tab to choose which pages to redact, the type of information to redact (e.g. people, places), or terms to exclude from redaction. Please see the [User Guide](https://github.com/seanpedrick-case/doc_redaction/blob/main/README.md) for a walkthrough on how to use this and all other features in the app. The app accepts a maximum file size of 100mb. Please consider giving feedback for the quality of the answers underneath the redact buttons when the option appears, this will help to improve the app in future.
+    Then, choose a method for PII identification. 'Local' is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
+    
+    After redaction, review suggested redactions on the 'Review redactions' tab. The original pdf can be uploaded here alongside a '...redaction_file.csv' to continue a previous redaction/review task. See the 'Redaction settings' tab to choose which pages to redact, the type of information to redact (e.g. people, places), or custom terms to always include/ exclude from redaction.
 
-    NOTE: In testing the app seems to find about 60% of personal information on a given (typed) page of text. It is essential that all outputs are checked **by a human** to ensure that all personal information has been removed.""")
+    NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.""")
 
     # PDF / IMAGES TAB
     with gr.Tab("PDFs/images"):
         with gr.Accordion("Redact document", open = True):
-            in_doc_files = gr.File(label="Choose a document or image file (PDF, JPG, PNG)", file_count= "single", file_types=['.pdf', '.jpg', '.png', '.json'])
+            in_doc_files = gr.File(label="Choose a document or image file (PDF, JPG, PNG)", file_count= "single", file_types=['.pdf', '.jpg', '.png', '.json'], height=file_input_height)
             if RUN_AWS_FUNCTIONS == "1":
                 in_redaction_method = gr.Radio(label="Choose text extraction method. AWS Textract has a cost per page.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
                 pii_identification_method_drop = gr.Radio(label = "Choose PII detection method. AWS Comprehend has a cost per 100 characters.", value = default_pii_detector, choices=[local_pii_detector, aws_pii_detector])
@@ -172,14 +175,14 @@ with app:
                 in_redaction_method = gr.Radio(label="Choose text extraction method.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option])
                 pii_identification_method_drop = gr.Radio(label = "Choose PII detection method.", value = default_pii_detector, choices=[local_pii_detector], visible=False)
 
-            gr.Markdown("""If you only want to redact certain pages, or certain entities (e.g. just email addresses), please go to the redaction settings tab.""")
-            document_redact_btn = gr.Button("Redact document(s)", variant="primary")
+            gr.Markdown("""If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the redaction settings tab.""")
+            document_redact_btn = gr.Button("Redact document", variant="primary")
             current_loop_page_number = gr.Number(value=0,precision=0, interactive=False, label = "Last redacted page in document", visible=False)
             page_break_return = gr.Checkbox(value = False, label="Page break reached", visible=False)
         
         with gr.Row():
             output_summary = gr.Textbox(label="Output summary", scale=1)
-            output_file = gr.File(label="Output files", scale = 2)
+            output_file = gr.File(label="Output files", scale = 2, height=file_input_height)
             latest_file_completed_text = gr.Number(value=0, label="Number of documents redacted", interactive=False, visible=False)
 
         with gr.Row():
@@ -195,7 +198,7 @@ with app:
     with gr.Tab("Review redactions", id="tab_object_annotation"):
 
         with gr.Accordion(label = "Review redaction file", open=True):
-            output_review_files = gr.File(label="Review output files", file_count='multiple')
+            output_review_files = gr.File(label="Review output files", file_count='multiple', height=file_input_height)
             upload_previous_review_file_btn = gr.Button("Review previously created redaction file (upload original PDF and ...review_file.csv)")
 
         with gr.Row():
@@ -245,10 +248,6 @@ with app:
             annotate_max_pages_bottom = gr.Number(value=1, label="Total pages", precision=0, interactive=False, scale = 1)
             annotation_next_page_button_bottom = gr.Button("Next page", scale = 3)
 
-        
-  
-
-        
     # TEXT / TABULAR DATA TAB
     with gr.Tab(label="Open text or Excel/csv files"):
         gr.Markdown(
@@ -259,7 +258,7 @@ with app:
         with gr.Accordion("Paste open text", open = False):
             in_text = gr.Textbox(label="Enter open text", lines=10)
         with gr.Accordion("Upload xlsx or csv files", open = True):
-            in_data_files = gr.File(label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            in_data_files = gr.File(label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'], height=file_input_height)
         
         in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheets to anonymise"], multiselect = True, label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).", visible=False, allow_custom_value=True)
 
@@ -280,39 +279,35 @@ with app:
         data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
     # SETTINGS TAB
-    with gr.Tab(label="Redaction settings"):
-        gr.Markdown(
-    """
-    Define redaction settings that affect both document and open text redaction.
-    """)
-        with gr.Accordion("Settings for documents", open = True):
+    with gr.Tab(label="Redaction settings"):       
+        with gr.Accordion("Custom allow, deny, and full page redaction lists", open = True):
+            with gr.Row():
+                with gr.Column():
+                    in_allow_list = gr.File(label="Import allow list file - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will not be redacted.", file_count="multiple", height=file_input_height)
+                    in_allow_list_text = gr.Textbox(label="Custom allow list load status")
+                with gr.Column():
+                    in_deny_list = gr.File(label="Import custom deny list - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will always be redacted.", file_count="multiple", height=file_input_height)
+                    in_deny_list_text = gr.Textbox(label="Custom deny list load status")
+                with gr.Column():
+                    in_fully_redacted_list = gr.File(label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.", file_count="multiple", height=file_input_height)
+                    in_fully_redacted_list_text = gr.Textbox(label="Fully redacted page list load status")
             
+        with gr.Accordion("Select entity types to redact", open = True):
+                in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Local PII identification model (click empty space in box for full list)")
+
+                in_redact_comprehend_entities = gr.Dropdown(value=chosen_comprehend_entities, choices=full_comprehend_entity_list, multiselect=True, label="AWS Comprehend PII identification model (click empty space in box for full list)")
+
+        with gr.Accordion("Redact only selected pages", open = False):
             with gr.Row():
                 page_min = gr.Number(precision=0,minimum=0,maximum=9999, label="Lowest page to redact")
                 page_max = gr.Number(precision=0,minimum=0,maximum=9999, label="Highest page to redact")
-            
-        with gr.Accordion("Settings for documents and open text/xlsx/csv files", open = True):
-            with gr.Row():
-                with gr.Column():
-                    in_allow_list = gr.File(label="Import allow list file - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will not be redacted.", file_count="multiple", height=50)
-                    in_allow_list_text = gr.Textbox(label="Custom allow list load status")
-                with gr.Column():
-                    in_deny_list = gr.File(label="Import custom deny list - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will always be redacted.", file_count="multiple", height=50)
-                    in_deny_list_text = gr.Textbox(label="Custom deny list load status")
-                with gr.Column():
-                    in_fully_redacted_list = gr.File(label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.", file_count="multiple", height=50)
-                    in_fully_redacted_list_text = gr.Textbox(label="Fully redacted page list load status")
-            
-            with gr.Accordion("Add or remove entity types to redact", open = False):
-                in_redact_comprehend_entities = gr.Dropdown(value=chosen_comprehend_entities, choices=full_comprehend_entity_list, multiselect=True, label="Entities to redact - AWS Comprehend PII identification model (click close to down arrow for full list)")
 
-                in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Entities to redact - local PII identification model (click close to down arrow for full list)")
-            
+        with gr.Accordion("AWS Textract specific options", open = False):            
             handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract settings", choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting", "Redact all identified signatures"])
             #with gr.Row():
             in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language (only English currently supported)", multiselect=False, visible=False)
 
-        with gr.Accordion("Settings for open text or xlsx/csv files", open = True):
+        with gr.Accordion("Settings for open text or xlsx/csv files", open = False):
             anon_strat = gr.Radio(choices=["replace with <REDACTED>", "replace with <ENTITY_NAME>", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace with <REDACTED>")
             
         log_files_output = gr.File(label="Log file output", interactive=False)   
@@ -458,7 +453,7 @@ with app:
     then(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Get some environment variables and Launch the Gradio app
-COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '1')
+COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
 print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 1
 RUN_DIRECT_MODE = get_or_create_env_var('RUN_DIRECT_MODE', '0')
