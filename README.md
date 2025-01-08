@@ -47,7 +47,7 @@ Please refer to these example files to follow this guide:
 
 The document redaction app can detect personally-identifiable information (PII) in documents. Documents can be redacted directly, or suggested redactions can be reviewed and modified using a grapical user interface.
 
-Download the example PDFs above to your computer. Open up the redaction app at [Hugging Face](https://huggingface.co/spaces/seanpedrickcase/document_redaction) to use the public version (not for use with private documents), or the link provided by email if using with secure documents. Note that the AWS service functions will not be visible in the public Hugging Face version of the app.
+Download the example PDFs above to your computer. Open up the redaction app with the link provided by email.
 
 ![Upload files](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/file_upload_highlight.PNG)
 
