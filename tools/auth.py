@@ -46,24 +46,26 @@ def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id,
 
     try:
 
-        # response = client.initiate_auth(
-        #     AuthFlow='USER_PASSWORD_AUTH',
-        #     AuthParameters={
-        #         'USERNAME': username,
-        #         'PASSWORD': password,
-        #     },
-        #     ClientId=client_id
-        # )
+        if client_secret == '':
+            response = client.initiate_auth(
+                AuthFlow='USER_PASSWORD_AUTH',
+                AuthParameters={
+                    'USERNAME': username,
+                    'PASSWORD': password,
+                },
+                ClientId=client_id
+            )
 
-        response = client.initiate_auth(
-        AuthFlow='USER_PASSWORD_AUTH',
-        AuthParameters={
-            'USERNAME': username,
-            'PASSWORD': password,
-            'SECRET_HASH': secret_hash
-        },
-        ClientId=client_id
-        )
+        else:
+            response = client.initiate_auth(
+            AuthFlow='USER_PASSWORD_AUTH',
+            AuthParameters={
+                'USERNAME': username,
+                'PASSWORD': password,
+                'SECRET_HASH': secret_hash
+            },
+            ClientId=client_id
+            )
 
         # If successful, you'll receive an AuthenticationResult in the response
         if response.get('AuthenticationResult'):
