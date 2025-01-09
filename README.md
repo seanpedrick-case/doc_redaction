@@ -68,7 +68,7 @@ Hit 'Redact document'. After loading in the document, the app should be able to 
 
 - '...redacted.pdf' files contain the original pdf with suggested redacted text deleted and replaced by a black box on top of the document.
 - '...ocr_results.csv' files contain the line-by-line text outputs from the entire document. This file can be useful for later searching through for any terms of interest in the document (e.g. using Excel or a similar program).
-- '...review_file.csv' files are the review files that contain details and locations of all of the suggested redactions in the document. This file is key to the [review process](#reviewing-suggested-redactions-and-modifying), and should be downloaded to use later for this.
+- '...review_file.csv' files are the review files that contain details and locations of all of the suggested redactions in the document. This file is key to the [review process](#reviewing-and-modifying-suggested-redactions), and should be downloaded to use later for this.
 
 Additional outputs are available under the 'Redaction settings' tab. Scroll to the bottom and you should see more files: 
 
