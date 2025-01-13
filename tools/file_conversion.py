@@ -478,11 +478,12 @@ def prepare_image_or_pdf(
                     annotation["image"] = image_path
 
                     all_annotations_object.append(annotation)
-
-                #print("all_annotations_object:", all_annotations_object)
-            
             
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
+            # Check if the file is an image type and the user selected text ocr option
+            if file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
+                in_redact_method = tesseract_ocr_option
+
             # Convert image to a pymupdf document
             pymupdf_doc = pymupdf.open()  # Create a new empty document
 
@@ -491,10 +492,12 @@ def prepare_image_or_pdf(
             page = pymupdf_doc.new_page(width=img.width, height=img.height)  # Add a new page
             page.insert_image(rect, filename=file_path)  # Insert the image into the page
 
+            file_path_str = str(file_path)
 
-        # Check if the file is an image type and the user selected text ocr option
-        elif file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
-            in_redact_method = tesseract_ocr_option
+            image_file_paths = process_file(file_path_str, prepare_for_review)
+
+            print("Inserted image into PDF file")
+
 
         elif file_extension in ['.csv']:
             review_file_csv = read_file(file)
@@ -618,12 +621,7 @@ def prepare_image_or_pdf(
         out_message.append(out_time)
         out_message_out = '\n'.join(out_message)
 
-    #if prepare_for_review == False:
     number_of_pages = len(image_file_paths)
-    #else:
-    #    number_of_pages = len(all_annotations_object)
-
-    #print("all_annotations_object at end:", all_annotations_object)
         
     return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
 
@@ -649,23 +647,6 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], 
     #print("Out file paths:", out_file_paths)
 
     return out_message, out_file_paths
-
-# Example DataFrames
-# df1 = pd.DataFrame({
-#     'xmin': [10, 20, 30],
-#     'xmax': [15, 25, 35],
-#     'ymin': [40, 50, 60],
-#     'ymax': [45, 55, 65],
-#     'info1': ['A', 'B', 'C']
-# })
-
-# df2 = pd.DataFrame({
-#     'xmin': [12, 18, 32],
-#     'xmax': [14, 24, 34],
-#     'ymin': [42, 48, 62],
-#     'ymax': [44, 54, 66],
-#     'info2': ['X', 'Y', 'Z']
-# })
 
 def join_values_within_threshold(df1, df2):
     # Threshold for matching

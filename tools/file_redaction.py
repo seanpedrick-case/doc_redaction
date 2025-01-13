@@ -269,7 +269,7 @@ def choose_and_run_redactor(file_paths:List[str],
             print("Redacting file:", file_path_without_ext)
 
             is_a_pdf = is_pdf(file_path) == True
-            if is_a_pdf == False:
+            if is_a_pdf == False and in_redact_method == text_ocr_option:
                 # If user has not submitted a pdf, assume it's an image
                 print("File is not a pdf, assuming that image analysis needs to be used.")
                 in_redact_method = tesseract_ocr_option
@@ -753,8 +753,6 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
 
     return page, out_annotation_boxes
 
-
-
 def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_results=[], handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Redact all identified handwriting", "Redact all identified signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
 
     all_bboxes = []
@@ -767,6 +765,8 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
     # Process signature and handwriting results
     if signature_recogniser_results or handwriting_recogniser_results:
         if "Redact all identified handwriting" in handwrite_signature_checkbox:
+            print("handwriting_recogniser_results:", handwriting_recogniser_results)
+
             merged_bboxes.extend(copy.deepcopy(handwriting_recogniser_results))
 
         if "Redact all identified signatures" in handwrite_signature_checkbox:
@@ -1085,44 +1085,6 @@ def redact_image_pdf(file_path:str,
                         text_blocks = next(page['data'] for page in existing_data["pages"] if page['page_no'] == reported_page_number)
                 
                 
-                # if not os.path.exists(json_file_path):
-                #     text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
-                #     log_files_output_paths.append(json_file_path)
-                #     request_metadata = request_metadata + "\n" + new_request_metadata
-
-                #     existing_data = {"pages":[text_blocks]}
-
-
-                # else:
-                #     # Open the file and load the JSON data
-                #     print("Found existing Textract json results file.")
-                #     with open(json_file_path, 'r') as json_file:
-                #         existing_data = json.load(json_file)
-
-                #         # Check if the current reported_page_number exists in the loaded JSON
-                #         page_exists = any(page['page_no'] == reported_page_number for page in existing_data.get("pages", []))
-
-                #         if not page_exists:  # If the page does not exist, analyze again
-                #             print(f"Page number {reported_page_number} not found in existing data. Analyzing again.")
-                #             text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
-
-                #             # Check if "pages" key exists, if not, initialize it as an empty list
-                #             if "pages" not in existing_data:
-                #                 existing_data["pages"] = []
-
-                #             # Append the new page data
-                #             existing_data["pages"].append(text_blocks)
-
-                #             # Write the updated existing_data back to the JSON file
-                #             with open(json_file_path, 'w') as json_file:
-                #                 json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
-
-                #             log_files_output_paths.append(json_file_path)
-                #             request_metadata = request_metadata + "\n" + new_request_metadata
-                #         else:
-                #             # If the page exists, retrieve the data
-                #             text_blocks = next(page['data'] for page in existing_data["pages"] if page['page_no'] == reported_page_number)
-
                 line_level_ocr_results, handwriting_or_signature_boxes, signature_recogniser_results, handwriting_recogniser_results, line_level_ocr_results_with_children = json_to_ocrresult(text_blocks, page_width, page_height, reported_page_number)
 
             # Step 2: Analyze text and identify PII
