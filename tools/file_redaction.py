@@ -832,7 +832,11 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
         for next_box in group[1:]:
             if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
                 new_text = merged_box.text + " " + next_box.text
-                new_entity_type = merged_box.entity_type + " - " + next_box.entity_type
+
+                if merged_box.entity_type != next_box.entity_type:
+                    new_entity_type = merged_box.entity_type + " - " + next_box.entity_type
+                else:
+                    new_entity_type = merged_box.entity_type
 
                 new_left = min(merged_box.left, next_box.left)
                 new_top = min(merged_box.top, next_box.top)
@@ -1442,7 +1446,10 @@ def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combin
                     merged_box[3] = max(current_box[3], next_box[3])  # Adjust the top
                     merged_result.end = max(current_result.end, result.end)  # Extend text range
                     try:
-                        merged_result.entity_type = current_result.entity_type + " - " + result.entity_type
+                        if current_result.entity_type != result.entity_type:
+                            merged_result.entity_type = current_result.entity_type + " - " + result.entity_type
+                        else:
+                            merged_result.entity_type = current_result.entity_type
                     except Exception as e:
                         print("Unable to combine result entity types:", e)
                     if current_text:
