@@ -49,7 +49,7 @@ def update_zoom(current_zoom_level:int, annotate_current_page:int, decrease:bool
         
     return current_zoom_level, annotate_current_page
 
-def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, recogniser_entities_drop=gr.Dropdown(value="ALL", allow_custom_value=True), recogniser_dataframe_gr=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]})), zoom:int=80):
+def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, recogniser_entities_drop=gr.Dropdown(value="ALL", allow_custom_value=True), recogniser_dataframe_gr=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]})), zoom:int=100):
     '''
     Update a gradio_image_annotation object with new annotation data
     '''

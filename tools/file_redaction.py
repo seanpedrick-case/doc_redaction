@@ -708,8 +708,6 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
             if image:
                 img_width, img_height = image.size
 
-                print("annot:", annot)
-
                 x1, image_y1, x2, image_y2 = convert_pymupdf_to_image_coords(page, x1, pymupdf_y1, x2, pymupdf_y2, image)
 
                 img_annotation_box["xmin"] = x1  #* (img_width / rect_width) # Use adjusted x1
@@ -744,9 +742,6 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
         "image": image_path, #Image.open(image_path), #image_path,
         "boxes": all_image_annotation_boxes
     }
-
-    
-
 
     page.apply_redactions(images=0, graphics=0)
     page.clean_contents()
@@ -1160,7 +1155,8 @@ def redact_image_pdf(file_path:str,
             else:
                 #print("redact_whole_page_list:", redact_whole_page_list)
                 if redact_whole_page_list:
-                    if current_loop_page in redact_whole_page_list: redact_whole_page = True
+                    int_reported_page_number = int(reported_page_number) 
+                    if int_reported_page_number in redact_whole_page_list: redact_whole_page = True
                     else: redact_whole_page = False
                 else: redact_whole_page = False
 
@@ -1846,8 +1842,9 @@ def redact_text_pdf(
 
                 # Make pymupdf page redactions
                 #print("redact_whole_page_list:", redact_whole_page_list)
-                if redact_whole_page_list:                    
-                    if current_loop_page in redact_whole_page_list: redact_whole_page = True
+                if redact_whole_page_list:
+                    int_reported_page_number = int(reported_page_number)                    
+                    if int_reported_page_number in redact_whole_page_list: redact_whole_page = True
                     else: redact_whole_page = False
                 else: redact_whole_page = False
 

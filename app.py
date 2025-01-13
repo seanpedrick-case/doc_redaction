@@ -117,7 +117,7 @@ with app:
 
 
     ## Annotator zoom value
-    annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=80, precision=0, visible=False)
+    annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=100, precision=0, visible=False)
     zoom_true_bool = gr.State(True)
     zoom_false_bool = gr.State(False)
 
