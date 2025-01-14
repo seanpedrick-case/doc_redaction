@@ -346,8 +346,6 @@ with app:
         modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
         then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
     
-
-    
     annotation_last_page_button.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page, annotate_current_page_bottom]).\
         then(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
         then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])

@@ -26,7 +26,8 @@ except:
 # #### Custom recognisers
 # Allow user to create their own recogniser
 def custom_word_list_recogniser(custom_list:List[str]=[]):
-    custom_regex = '\\b' + '\\b|\\b'.join(rf"{re.escape(term)}" for term in custom_list) + '\\b'
+    #custom_regex = '\\b' + '\\b|\\b'.join(rf"{re.escape(term.strip())}" for term in custom_list) + '\\b'
+    custom_regex = '\\b' + '\\b|\\b'.join(rf"{re.escape(term.strip())}(?=\W|$)" for term in custom_list)
     custom_pattern = Pattern(name="custom_pattern",regex=custom_regex, score = 1)
 
     #print("custom_pattern:", custom_pattern)

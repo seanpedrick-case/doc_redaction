@@ -501,7 +501,7 @@ def prepare_image_or_pdf(
 
         elif file_extension in ['.csv']:
             review_file_csv = read_file(file)
-            all_annotations_object = convert_pandas_df_to_review_json(review_file_csv)
+            all_annotations_object = convert_pandas_df_to_review_json(review_file_csv, image_file_paths)
             json_from_csv = True
             print("Converted CSV review file to json")
 
@@ -738,25 +738,38 @@ def convert_review_json_to_pandas_df(data:List[dict], text_join_data=pd.DataFram
 
     return df
 
-def convert_pandas_df_to_review_json(df: pd.DataFrame) -> List[dict]:
+def convert_pandas_df_to_review_json(df: pd.DataFrame, image_paths: List[Image.Image]) -> List[dict]:
+    '''
+    Convert a review csv to a json file for use by the Gradio Annotation object
+    '''
     # Keep only necessary columns
     df = df[["image", "page", "xmin", "ymin", "xmax", "ymax", "color", "label"]]
 
     # Group the DataFrame by the 'image' column
-    grouped = df.groupby('image')
+    grouped_csv_pages = df.groupby('page')
 
     # Create a list to hold the JSON data
     json_data = []
 
-    # Iterate over each group
-    for image_path, group in grouped:
-        # Convert each group to a list of box dictionaries
-        boxes = group.drop(columns=['image', 'page']).to_dict(orient='records')
-        
+    for n, pdf_image_path in enumerate(image_paths):
+        reported_page_number = int(n + 1)
+
+        if reported_page_number in df["page"].values:
+
+            # Convert each relevant group to a list of box dictionaries
+            selected_csv_pages = grouped_csv_pages.get_group(reported_page_number)
+            annotation_boxes = selected_csv_pages.drop(columns=['image', 'page']).to_dict(orient='records')
+
+            annotation = {
+                "image": pdf_image_path,
+                "boxes": annotation_boxes
+            }
+
+        else:
+            annotation = {}
+            annotation["image"] = pdf_image_path
+
         # Append the structured data to the json_data list
-        json_data.append({
-            "image": image_path,
-            "boxes": boxes
-        })
+        json_data.append(annotation)
 
     return json_data

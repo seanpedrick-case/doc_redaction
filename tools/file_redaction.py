@@ -1307,8 +1307,14 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
         character_objects_out.append(char)  # Collect character objects
 
         if isinstance(char, LTAnno):
+
+            added_text = char.get_text()
+        
+            # Handle double quotes
+            added_text = added_text.replace('"', '\\"')  # Escape double quotes
+
             # Handle space separately by finalizing the word
-            full_text += char.get_text()  # Adds space or newline
+            full_text += added_text  # Adds space or newline
 
             if current_word:  # Only finalize if there is a current word
                 word_bboxes.append((current_word, current_word_bbox))
@@ -1316,7 +1322,7 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
                 current_word_bbox = [float('inf'), float('inf'), float('-inf'), float('-inf')]  # Reset for next word
 
             # Check for line break (assuming a new line is indicated by a specific character)
-            if '\n' in char.get_text():
+            if '\n' in added_text:
                 #print("char_anno:", char)
                 # Finalize the current line
                 if current_word:
@@ -1335,7 +1341,6 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
 
         # Concatenate text for LTChar
 
-
         #full_text += char.get_text()
         #added_text = re.sub(r'[^\x00-\x7F]+', ' ', char.get_text())
         added_text = char.get_text()
@@ -1343,8 +1348,6 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
             #added_text.encode('latin1', errors='replace').decode('utf-8')
             added_text = clean_unicode_text(added_text)
         full_text += added_text  # Adds space or newline, removing 
-
-        
 
         # Update overall bounding box
         x0, y0, x1, y1 = char.bbox
