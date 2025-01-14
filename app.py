@@ -197,7 +197,7 @@ with app:
     # Object annotation
     with gr.Tab("Review redactions", id="tab_object_annotation"):
 
-        with gr.Accordion(label = "Review redaction file", open=True):
+        with gr.Accordion(label = "Review redaction file", open=False):
             output_review_files = gr.File(label="Review output files", file_count='multiple', height=file_input_height)
             upload_previous_review_file_btn = gr.Button("Review previously created redaction file (upload original PDF and ...review_file.csv)")
 
@@ -418,13 +418,13 @@ with app:
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
 
     # If running on AWS, load in the default allow list file from S3
-    if RUN_AWS_FUNCTIONS == "1":
-        print("default_allow_list_output_folder_location:", default_allow_list_loc)
-        if not os.path.exists(default_allow_list_loc):
-            app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_allow_list_file, default_allow_list_output_folder_location]).\
-            then(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
-        else:
-            app.load(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
+    # if RUN_AWS_FUNCTIONS == "1":
+    #     print("default_allow_list_output_folder_location:", default_allow_list_loc)
+    #     if not os.path.exists(default_allow_list_loc):
+    #         app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_allow_list_file, default_allow_list_output_folder_location]).\
+    #         then(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
+    #     else:
+    #         app.load(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     access_callback = CSVLogger_custom(dataset_file_name=log_file_name)

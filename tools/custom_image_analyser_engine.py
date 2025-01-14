@@ -14,6 +14,7 @@ from tools.helper_functions import clean_unicode_text
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.load_spacy_model_custom_recognisers import custom_entities
 #import string  # Import string to get a list of common punctuation characters
+import re  # Add this import at the top of the file
 
 @dataclass
 class OCRResult:
@@ -493,11 +494,12 @@ class CustomImageAnalyzerEngine:
 
             elif pii_identification_method == "AWS Comprehend":
 
-                # If using AWS Comprehend, Spacy model is only used to identify the custom entities created. Comprehend can't pick up Titles, Streetnames, and UKPostcodes specifically
+                # If using AWS Comprehend, Spacy model is only used to identify the custom entities created. This is because Comprehend can't pick up Titles, Streetnames, and UKPostcodes, or a custom deny list specifically
                 text_analyzer_kwargs["entities"] = [entity for entity in chosen_redact_comprehend_entities if entity in custom_entities]
 
                 spacy_analyzer_result = self.analyzer_engine.analyze(
                 text=line_level_ocr_result.text, **text_analyzer_kwargs)
+                
                 analyzer_results_by_line[i].extend(spacy_analyzer_result)
 
                 if len(line_level_ocr_result.text) >= 3:
@@ -573,7 +575,7 @@ class CustomImageAnalyzerEngine:
                 for result in analyzer_result:
                     # Extract the relevant portion of text based on start and end
                     relevant_text = line_level_ocr_results[i].text[result.start:result.end]
-                    
+                   
                     # Find the corresponding entry in ocr_results_with_children
                     child_words = ocr_results_with_children_line_level['words']
 
@@ -583,13 +585,23 @@ class CustomImageAnalyzerEngine:
                     word_num = 0  # Initialize word count
                     total_width = 0  # Initialize total width
 
-                    for word_text in relevant_text.split():  # Iterate through each word in relevant_text
-                        #print("Looking for word_text:", word_text)
-                        for word in child_words:
-                            #if word['text'].strip(string.punctuation).strip() == word_text.strip(string.punctuation).strip():  # Check for exact match
-                            if word_text in word['text']:
+                    split_relevant_text = relevant_text.split()
+
+                    loop_child_words = child_words.copy()
+
+                    for word_text in split_relevant_text:  # Iterate through each word in relevant_text
+
+                        quote_str = '"'
+                        replace_str = '(?:"|"|")'
+
+                        word_regex = rf'(?<!\w){re.escape(word_text.strip()).replace(quote_str, replace_str)}(?!\w)'
+                    
+                        for word in loop_child_words:
+                            # Check for regex as whole word                            
+
+                            if re.search(word_regex, word['text']):
+                            #if re.search(r'\b' + re.escape(word_text) + r'\b', word['text']):
                                 found_word = word
-                                #print("found_word:", found_word)
 
                                 if word_num == 0:  # First word
                                     left = found_word['bounding_box'][0]
@@ -598,6 +610,10 @@ class CustomImageAnalyzerEngine:
                                 all_words += found_word['text'] + " "  # Concatenate words
                                 total_width = found_word['bounding_box'][2] - left  # Add each word's width
                                 word_num += 1
+
+                                # Drop the first word of child_words
+                                loop_child_words = loop_child_words[1:]  # Skip the first word                                
+
                                 break  # Move to the next word in relevant_text
 
                     width = total_width + horizontal_buffer # Set width to total width of all matched words
@@ -621,9 +637,9 @@ class CustomImageAnalyzerEngine:
                     result_reset_pos.start = 0
                     result_reset_pos.end = len(relevant_text)
                     
-                    #print("result_reset_pos:", result_reset_pos)
-                    #print("relevant_line_ocr_result:", relevant_line_ocr_result)
-                    #print("ocr_results_with_children_line_level:", ocr_results_with_children_line_level)
+                    print("result_reset_pos:", result_reset_pos)
+                    print("relevant_line_ocr_result:", relevant_line_ocr_result)
+                    print("ocr_results_with_children_line_level:", ocr_results_with_children_line_level)
 
                     # Map the analyzer results to bounding boxes for this line
                     line_results = self.map_analyzer_results_to_bounding_boxes(

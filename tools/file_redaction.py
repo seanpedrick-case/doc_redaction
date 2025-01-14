@@ -760,8 +760,6 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
     # Process signature and handwriting results
     if signature_recogniser_results or handwriting_recogniser_results:
         if "Redact all identified handwriting" in handwrite_signature_checkbox:
-            print("handwriting_recogniser_results:", handwriting_recogniser_results)
-
             merged_bboxes.extend(copy.deepcopy(handwriting_recogniser_results))
 
         if "Redact all identified signatures" in handwrite_signature_checkbox:
@@ -972,9 +970,6 @@ def redact_image_pdf(file_path:str,
     print("Page range:", str(page_min + 1), "to", str(page_max))
     #print("Current_loop_page:", current_loop_page)
     
-    if analysis_type == tesseract_ocr_option: ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + ".csv"
-    elif analysis_type == textract_option: ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + "_textract.csv"    
-    
     # If running Textract, check if file already exists. If it does, load in existing data
     # Import results from json and convert
     if analysis_type == textract_option:
@@ -983,7 +978,6 @@ def redact_image_pdf(file_path:str,
         log_files_output_paths.append(json_file_path)
         
         if not os.path.exists(json_file_path):
-            no_textract_file = True
             print("No existing Textract results file found.")
             existing_data = {}
             #text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
@@ -1041,12 +1035,8 @@ def redact_image_pdf(file_path:str,
 
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
             if analysis_type == tesseract_ocr_option:
-                
                 word_level_ocr_results = image_analyser.perform_ocr(image)
-
-                # Combine OCR results
                 line_level_ocr_results, line_level_ocr_results_with_children = combine_ocr_results(word_level_ocr_results)
-
     
             # Import results from json and convert
             if analysis_type == textract_option:
