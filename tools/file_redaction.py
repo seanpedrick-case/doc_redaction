@@ -315,11 +315,11 @@ def choose_and_run_redactor(file_paths:List[str],
              redact_whole_page_list)
 
             
-            print("log_files_output_paths at end of image redact function:", log_files_output_paths)
+            #print("log_files_output_paths at end of image redact function:", log_files_output_paths)
             
             # Save Textract request metadata (if exists)
             if new_request_metadata:
-                print("Request metadata:", new_request_metadata)
+                #print("Request metadata:", new_request_metadata)
                 all_request_metadata.append(new_request_metadata)              
 
         elif in_redact_method == text_ocr_option:

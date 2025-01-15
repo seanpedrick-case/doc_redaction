@@ -16,6 +16,7 @@ from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 image_dpi = 300.0
+Image.MAX_IMAGE_PIXELS = None
 
 def is_pdf_or_image(filename):
     """
@@ -74,14 +75,31 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
             image.save(out_path, format="PNG")
 
         # Check file size and resize if necessary
-        max_size = 5 * 1024 * 1024  # 5 MB in bytes
-        file_size = os.path.getsize(out_path)
-        if file_size >= max_size:
-            # Resize the image while maintaining aspect ratio
-            ratio = (max_size / file_size) ** 0.5
-            new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
-            image = image.resize(new_size, Image.ANTIALIAS)
-            image.save(out_path, format="PNG")  # Overwrite with resized image
+        max_size = 5 * 1024 * 1024  # 5 MB in bytes # 5
+        file_size = os.path.getsize(out_path)        
+
+        # Resize images if they are too big
+        if file_size > max_size:
+            # Start with the original image size
+            width, height = image.size
+
+            print(f"Image size before {new_width}x{new_height}, original file_size: {file_size}")
+
+            while file_size > max_size:
+                # Reduce the size by a factor (e.g., 50% of the current size)
+                new_width = int(width * 0.5)
+                new_height = int(height * 0.5)
+                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Save the resized image
+                image.save(out_path, format="PNG", optimize=True)
+                
+                # Update the file size
+                file_size = os.path.getsize(out_path)
+                print(f"Resized to {new_width}x{new_height}, new file_size: {file_size}")
+                
+                # Update the dimensions for the next iteration
+                width, height = new_width, new_height
 
         return page_num, out_path
 

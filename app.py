@@ -473,7 +473,7 @@ print(f'The value of RUN_DIRECT_MODE is {RUN_DIRECT_MODE}')
 MAX_QUEUE_SIZE = int(get_or_create_env_var('MAX_QUEUE_SIZE', '5'))
 print(f'The value of RUN_DIRECT_MODE is {MAX_QUEUE_SIZE}')
 
-MAX_FILE_SIZE = get_or_create_env_var('MAX_FILE_SIZE', '100mb')
+MAX_FILE_SIZE = get_or_create_env_var('MAX_FILE_SIZE', '250mb')
 print(f'The value of MAX_FILE_SIZE is {MAX_FILE_SIZE}')
 
 GRADIO_SERVER_PORT = int(get_or_create_env_var('GRADIO_SERVER_PORT', '7860'))
