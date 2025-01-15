@@ -56,7 +56,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
     recogniser_entities = []
     recogniser_dataframe = pd.DataFrame()
 
-    if recogniser_dataframe_gr.iloc[0,0] == "":
+    if recogniser_dataframe_gr.empty:
         try:
             review_dataframe = convert_review_json_to_pandas_df(image_annotator_object)[["page", "label"]]
             #print("review_dataframe['label']", review_dataframe["label"])

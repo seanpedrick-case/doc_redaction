@@ -637,9 +637,9 @@ class CustomImageAnalyzerEngine:
                     result_reset_pos.start = 0
                     result_reset_pos.end = len(relevant_text)
                     
-                    print("result_reset_pos:", result_reset_pos)
-                    print("relevant_line_ocr_result:", relevant_line_ocr_result)
-                    print("ocr_results_with_children_line_level:", ocr_results_with_children_line_level)
+                    #print("result_reset_pos:", result_reset_pos)
+                    #print("relevant_line_ocr_result:", relevant_line_ocr_result)
+                    #print("ocr_results_with_children_line_level:", ocr_results_with_children_line_level)
 
                     # Map the analyzer results to bounding boxes for this line
                     line_results = self.map_analyzer_results_to_bounding_boxes(

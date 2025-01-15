@@ -288,7 +288,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
             print("Redacting file " + file_path_without_ext + " as an image-based file")
 
-            pymupdf_doc,all_decision_process_table,log_files_output_paths,new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number = redact_image_pdf(file_path,
+            pymupdf_doc, all_decision_process_table, log_files_output_paths, new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number = redact_image_pdf(file_path,
              prepared_pdf_image_paths,
              language,
              chosen_redact_entities,
@@ -314,6 +314,9 @@ def choose_and_run_redactor(file_paths:List[str],
              custom_recogniser_word_list,
              redact_whole_page_list)
 
+            
+            print("log_files_output_paths at end of image redact function:", log_files_output_paths)
+            
             # Save Textract request metadata (if exists)
             if new_request_metadata:
                 print("Request metadata:", new_request_metadata)
@@ -396,10 +399,11 @@ def choose_and_run_redactor(file_paths:List[str],
                     json.dump(annotations_all_pages, f)
                 log_files_output_paths.append(out_annotation_file_path)
 
-                #print("Saving annotations to CSV")
+                print("Saving annotations to CSV")
 
                 # Convert json to csv and also save this
                 #print("annotations_all_pages:", annotations_all_pages)
+                #print("all_decision_process_table:", all_decision_process_table)
 
                 review_df = convert_review_json_to_pandas_df(annotations_all_pages, all_decision_process_table)
 
@@ -975,11 +979,11 @@ def redact_image_pdf(file_path:str,
     if analysis_type == textract_option:
                 
         json_file_path = output_folder + file_name + "_textract.json"
-        log_files_output_paths.append(json_file_path)
+        
         
         if not os.path.exists(json_file_path):
             print("No existing Textract results file found.")
-            existing_data = {}
+            textract_data = {}
             #text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
             #log_files_output_paths.append(json_file_path)
             #request_metadata = request_metadata + "\n" + new_request_metadata
@@ -988,8 +992,12 @@ def redact_image_pdf(file_path:str,
             # Open the file and load the JSON data
             no_textract_file = False
             print("Found existing Textract json results file.")
+
+            if json_file_path not in log_files_output_paths:
+                log_files_output_paths.append(json_file_path)
+
             with open(json_file_path, 'r') as json_file:
-                existing_data = json.load(json_file)
+                textract_data = json.load(json_file)
 
     ###
 
@@ -1046,32 +1054,46 @@ def redact_image_pdf(file_path:str,
                 image.save(image_buffer, format='PNG')  # Save as PNG, or adjust format if needed
                 pdf_page_as_bytes = image_buffer.getvalue()
 
-                if not existing_data:
-                    text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
-                    log_files_output_paths.append(json_file_path)
-                    request_metadata = request_metadata + "\n" + new_request_metadata
+                if not textract_data:
+                    try:
+                        text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
+                        
+                        if json_file_path not in log_files_output_paths:
+                            log_files_output_paths.append(json_file_path)
 
-                    existing_data = {"pages":[text_blocks]}
+                        textract_data = {"pages":[text_blocks]}
+                    except Exception as e:
+                        print("Textract extraction for page", reported_page_number, "failed due to:", e)
+                        textract_data = {"pages":[]}
+                        new_request_metadata = "Failed Textract API call"
+                    
+                    request_metadata = request_metadata + "\n" + new_request_metadata
 
                 else:
                     # Check if the current reported_page_number exists in the loaded JSON
-                    page_exists = any(page['page_no'] == reported_page_number for page in existing_data.get("pages", []))
+                    page_exists = any(page['page_no'] == reported_page_number for page in textract_data.get("pages", []))
 
                     if not page_exists:  # If the page does not exist, analyze again
                         print(f"Page number {reported_page_number} not found in existing Textract data. Analysing.")
-                        text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
+
+                        try:
+                            text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
+                        except Exception as e:
+                            print("Textract extraction for page", reported_page_number, "failed due to:", e)
+                            text_bocks = []
+                            new_request_metadata = "Failed Textract API call"
 
                         # Check if "pages" key exists, if not, initialize it as an empty list
-                        if "pages" not in existing_data:
-                            existing_data["pages"] = []
+                        if "pages" not in textract_data:
+                            textract_data["pages"] = []
 
                         # Append the new page data
-                        existing_data["pages"].append(text_blocks)
+                        textract_data["pages"].append(text_blocks)
                         
                         request_metadata = request_metadata + "\n" + new_request_metadata
                     else:
                         # If the page exists, retrieve the data
-                        text_blocks = next(page['data'] for page in existing_data["pages"] if page['page_no'] == reported_page_number)
+                        text_blocks = next(page['data'] for page in textract_data["pages"] if page['page_no'] == reported_page_number)
                 
                 
                 line_level_ocr_results, handwriting_or_signature_boxes, signature_recogniser_results, handwriting_recogniser_results, line_level_ocr_results_with_children = json_to_ocrresult(text_blocks, page_width, page_height, reported_page_number)
@@ -1214,7 +1236,10 @@ def redact_image_pdf(file_path:str,
                 if analysis_type == textract_option:
                     # Write the updated existing textract data back to the JSON file
                     with open(json_file_path, 'w') as json_file:
-                        json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+                        json.dump(textract_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+
+                        if json_file_path not in log_files_output_paths:
+                            log_files_output_paths.append(json_file_path)
 
                 current_loop_page += 1
 
@@ -1245,7 +1270,10 @@ def redact_image_pdf(file_path:str,
             if analysis_type == textract_option:
                 # Write the updated existing textract data back to the JSON file
                 with open(json_file_path, 'w') as json_file:
-                    json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+                    json.dump(textract_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+
+                    if json_file_path not in log_files_output_paths:
+                        log_files_output_paths.append(json_file_path)
 
             return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
         
@@ -1253,7 +1281,9 @@ def redact_image_pdf(file_path:str,
         # Write the updated existing textract data back to the JSON file
         
         with open(json_file_path, 'w') as json_file:
-            json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+            json.dump(textract_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+            if json_file_path not in log_files_output_paths:
+                log_files_output_paths.append(json_file_path)
 
     return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
 
@@ -1495,7 +1525,7 @@ def create_text_redaction_process_results(analyser_results, analysed_bounding_bo
         analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']] = analysed_bounding_boxes_df_new['boundingBox'].apply(pd.Series)
 
         # Convert the new columns to integers (if needed)
-        analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']] = analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']].astype(float)
+        analysed_bounding_boxes_df_new.loc[:, ['xmin', 'ymin', 'xmax', 'ymax']] = (analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
 
         analysed_bounding_boxes_df_text = analysed_bounding_boxes_df_new['result'].astype(str).str.split(",",expand=True).replace(".*: ", "", regex=True)
         analysed_bounding_boxes_df_text.columns = ["label", "start", "end", "score"]

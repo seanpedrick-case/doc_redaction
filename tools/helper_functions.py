@@ -17,7 +17,7 @@ def reset_state_vars():
             show_share_button=False,
             show_remove_button=False,
             interactive=False
-        )
+        ), [], []
 
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists
