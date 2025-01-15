@@ -1,5 +1,5 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
-from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, read_file
+from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, read_file, get_or_create_env_var
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import os
@@ -48,7 +48,8 @@ def is_pdf(filename):
 # %%
 ## Convert pdf to image if necessary
 
-
+CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "")
+print(f'The value of CUSTOM_BOX_COLOUR is {CUSTOM_BOX_COLOUR}')
 
 def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_dir: str = 'input') -> tuple[int, str]:
     try:
@@ -261,7 +262,10 @@ def redact_single_box(pymupdf_page:Page, pymupdf_rect:Rect, img_annotation_box:d
         else:
             out_colour = img_annotation_box["color"]
     else:
-        out_colour = (0,0,0)
+        if CUSTOM_BOX_COLOUR == "grey":
+            out_colour = (0.5, 0.5, 0.5)        
+        else:
+            out_colour = (0,0,0)
 
     shape.finish(color=out_colour, fill=out_colour)  # Black fill for the rectangle
     #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle

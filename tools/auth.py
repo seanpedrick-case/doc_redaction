@@ -7,13 +7,13 @@ import base64
 from tools.helper_functions import get_or_create_env_var
 
 client_id = get_or_create_env_var('AWS_CLIENT_ID', '')
-print(f'The value of AWS_CLIENT_ID is {client_id}')
+#print(f'The value of AWS_CLIENT_ID is {client_id}')
 
 client_secret = get_or_create_env_var('AWS_CLIENT_SECRET', '')
-print(f'The value of AWS_CLIENT_SECRET is {client_secret}')
+#print(f'The value of AWS_CLIENT_SECRET is {client_secret}')
 
 user_pool_id = get_or_create_env_var('AWS_USER_POOL_ID', '')
-print(f'The value of AWS_USER_POOL_ID is {user_pool_id}')
+#print(f'The value of AWS_USER_POOL_ID is {user_pool_id}')
 
 def calculate_secret_hash(client_id, client_secret, username):
     message = username + client_id
