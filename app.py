@@ -121,7 +121,7 @@ with app:
 
 
     ## Annotator zoom value
-    annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=100, precision=0, visible=False)
+    annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=80, precision=0, visible=False)
     zoom_true_bool = gr.State(True)
     zoom_false_bool = gr.State(False)
 
@@ -203,7 +203,7 @@ with app:
 
         with gr.Accordion(label = "Review redaction file", open=True):
             output_review_files = gr.File(label="Review output files", file_count='multiple', height=file_input_height)
-            upload_previous_review_file_btn = gr.Button("Review previously created redaction file (upload original PDF and ...review_file.csv)")
+            upload_previous_review_file_btn = gr.Button("Review previously created redaction file (upload original PDF and ...review_file.csv)", variant="primary")
 
         with gr.Row():
             annotation_last_page_button = gr.Button("Previous page", scale = 3)
@@ -215,12 +215,10 @@ with app:
             annotate_zoom_out = gr.Button("Zoom out")
         with gr.Row():
             clear_all_redactions_on_page_btn = gr.Button("Clear all redactions on page", visible=False)
-            annotation_button_apply = gr.Button("Apply revised redactions", variant="primary")
-
 
         with gr.Row():
 
-            with gr.Column(scale=4):
+            with gr.Column(scale=1):
 
                 zoom_str = str(annotator_zoom_number) + '%'
 
@@ -242,9 +240,13 @@ with app:
                     interactive=False
                 )
 
-            with gr.Column(scale=1):
-                recogniser_entity_dropdown = gr.Dropdown(label="Redaction category", value="ALL", allow_custom_value=True)
-                recogniser_entity_dataframe = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]}), col_count=2, type="pandas", label="Search results. Click to go to page")          
+        with gr.Row():
+            annotation_button_apply = gr.Button("Apply revised redactions", variant="primary")
+
+        #with gr.Column(scale=1):
+        with gr.Row():
+            recogniser_entity_dropdown = gr.Dropdown(label="Redaction category", value="ALL", allow_custom_value=True)
+            recogniser_entity_dataframe = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]}), col_count=2, type="pandas", label="Search results. Click to go to page")          
 
         with gr.Row():
             annotation_last_page_button_bottom = gr.Button("Previous page", scale = 3)

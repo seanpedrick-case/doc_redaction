@@ -45,34 +45,10 @@ def update_zoom(current_zoom_level:int, annotate_current_page:int, decrease:bool
         if current_zoom_level >= 70:
             current_zoom_level -= 10
     else:    
-        if current_zoom_level < 100:
+        if current_zoom_level < 110:
             current_zoom_level += 10
         
     return current_zoom_level, annotate_current_page
-
-
-   # Remove duplicate elements that are blank
-    # def remove_duplicate_images_with_blank_boxes(data: List[AnnotatedImageData]) -> List[AnnotatedImageData]:
-    #     # Group items by 'image'
-    #     image_groups = defaultdict(list)
-    #     for item in data:
-    #         image_groups[item['image']].append(item)
-
-    #     # Process each group to retain only the entry with non-empty boxes, if available
-    #     result = []
-    #     for image, items in image_groups.items():
-    #         # Filter items with non-empty boxes
-    #         non_empty_boxes = [item for item in items if item['boxes']]
-    #         if non_empty_boxes:
-    #             # Keep the first entry with non-empty boxes
-    #             result.append(non_empty_boxes[0])
-    #         else:
-    #             # If no non-empty boxes, keep the first item with empty boxes
-    #             result.append(items[0])
-
-    #     #print("result:", result)
-
-    #     return result
 
 def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
     '''
@@ -97,35 +73,43 @@ def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
 
     return result
 
+def get_recogniser_dataframe_out(image_annotator_object, recogniser_dataframe_gr):
+    try:
+        review_dataframe = convert_review_json_to_pandas_df(image_annotator_object)[["page", "label"]]
+        recogniser_entities = review_dataframe["label"].unique().tolist()
+        recogniser_entities.append("ALL")
+        recogniser_entities = sorted(recogniser_entities)
+
+        recogniser_dataframe_out = gr.Dataframe(review_dataframe)
+        recogniser_entities_drop = gr.Dropdown(value=recogniser_entities[0], choices=recogniser_entities, allow_custom_value=True, interactive=True)
+
+    except Exception as e:
+        print("Could not extract recogniser information:", e)
+        recogniser_dataframe_out = recogniser_dataframe_gr
+        recogniser_entities_drop = gr.Dropdown(value="", choices=[""], allow_custom_value=True, interactive=True)
+        recogniser_entities = ["Redaction"]
+
+    return recogniser_dataframe_out, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities
+
 def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, recogniser_entities_drop=gr.Dropdown(value="ALL", allow_custom_value=True), recogniser_dataframe_gr=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]})), zoom:int=100):
     '''
     Update a gradio_image_annotation object with new annotation data
-    '''
-    recogniser_entities = []
-    recogniser_dataframe = pd.DataFrame()
+    '''    
+    recogniser_entities_list = ["Redaction"]
+    recogniser_dataframe_out = pd.DataFrame()
 
     if recogniser_dataframe_gr.empty:
-        try:
-            review_dataframe = convert_review_json_to_pandas_df(image_annotator_object)[["page", "label"]]
-            #print("review_dataframe['label']", review_dataframe["label"])
-            recogniser_entities = review_dataframe["label"].unique().tolist()
-            recogniser_entities.append("ALL")
-            recogniser_entities = sorted(recogniser_entities)
-
-            #print("recogniser_entities:", recogniser_entities)
-
-            recogniser_dataframe_out = gr.Dataframe(review_dataframe)
-            recogniser_dataframe_gr = gr.Dataframe(review_dataframe)
-            recogniser_entities_drop = gr.Dropdown(value=recogniser_entities[0], choices=recogniser_entities, allow_custom_value=True, interactive=True)
-        except Exception as e:
-            print("Could not extract recogniser information:", e)
-            recogniser_dataframe_out = recogniser_dataframe_gr
-
+        recogniser_dataframe_gr, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list = get_recogniser_dataframe_out(image_annotator_object, recogniser_dataframe_gr)    
+    elif recogniser_dataframe_gr.iloc[0,0] == "":
+        recogniser_dataframe_gr, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list = get_recogniser_dataframe_out(image_annotator_object, recogniser_dataframe_gr)
     else:        
         review_dataframe = update_entities_df(recogniser_entities_drop, recogniser_dataframe_gr)
         recogniser_dataframe_out = gr.Dataframe(review_dataframe)
+        recogniser_entities_list = review_dataframe["label"].unique().tolist()
+        recogniser_entities_list = sorted(recogniser_entities_list)
 
     zoom_str = str(zoom) + '%'
+    recogniser_colour_list = [(0, 0, 0) for _ in range(len(recogniser_entities_list))]
 
     if not image_annotator_object:
         page_num_reported = 1
@@ -134,8 +118,8 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
         image_annotator_object[page_num_reported - 1],
         boxes_alpha=0.1,
         box_thickness=1,
-        #label_list=["Redaction"],
-        #label_colors=[(0, 0, 0)],
+        label_list=recogniser_entities_list,
+        label_colors=recogniser_colour_list,
         show_label=False,
         height=zoom_str,
         width=zoom_str,
@@ -179,8 +163,8 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
         value = image_annotator_object[page_num_reported - 1],
         boxes_alpha=0.1,
         box_thickness=1,
-        #label_list=["Redaction"],
-        #label_colors=[(0, 0, 0)],
+        label_list=recogniser_entities_list,
+        label_colors=recogniser_colour_list,
         show_label=False,
         height=zoom_str,
         width=zoom_str,
