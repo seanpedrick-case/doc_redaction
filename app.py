@@ -13,7 +13,7 @@ from gradio_image_annotation.image_annotator import AnnotatedImageData
 from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3, RUN_AWS_FUNCTIONS, bucket_name
 from tools.file_redaction import choose_and_run_redactor
-from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
+from tools.file_conversion import prepare_image_or_pdf, get_input_file_names, CUSTOM_BOX_COLOUR
 from tools.redaction_review import apply_redactions, modify_existing_page_redactions, decrease_page, increase_page, update_annotator, update_zoom, update_entities_df, df_select_callback
 from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
@@ -40,6 +40,8 @@ chosen_redact_entities = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "
 full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREETNAME", "UKPOSTCODE", 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS', 'CUSTOM']
 
 language = 'en'
+
+
 
 host_name = socket.gethostname()
 feedback_logs_folder = 'feedback/' + today_rev + '/' + host_name + '/'
@@ -84,6 +86,8 @@ with app:
     log_files_output_list_state = gr.State([])
 
     review_file_state = gr.State(pd.DataFrame())
+
+    do_not_save_pdf_state = gr.State(False)
     
     # Logging state
     log_file_name = 'log.csv'
@@ -117,7 +121,7 @@ with app:
 
 
     ## Annotator zoom value
-    annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=80, precision=0, visible=False)
+    annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=100, precision=0, visible=False)
     zoom_true_bool = gr.State(True)
     zoom_false_bool = gr.State(False)
 
@@ -344,16 +348,18 @@ with app:
     # Page controls at top
     annotate_current_page.submit(
         modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
-    
-
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
+        then(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, do_not_save_pdf_state], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output])
     
     annotation_last_page_button.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page, annotate_current_page_bottom]).\
         then(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
+        then(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, do_not_save_pdf_state], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output])    
+
     annotation_next_page_button.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page, annotate_current_page_bottom]).\
         then(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
+        then(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, do_not_save_pdf_state], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output])
     
     # Zoom in and out on annotator
     annotate_zoom_in.click(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
@@ -370,18 +376,23 @@ with app:
     #annotation_button_get.click(get_boxes_json, annotator, json_boxes)
     annotation_button_apply.click(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output], scroll_to_output=True)
 
+    do_not_save_pdf_state
+
     # Page controls at bottom
     annotate_current_page_bottom.submit(
         modify_existing_page_redactions, inputs = [annotator, annotate_current_page_bottom, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
+        then(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, do_not_save_pdf_state], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output])
 
     annotation_last_page_button_bottom.click(fn=decrease_page, inputs=[annotate_current_page], outputs=[annotate_current_page, annotate_current_page_bottom]).\
         then(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
+        then(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, do_not_save_pdf_state], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output])
     
     annotation_next_page_button_bottom.click(fn=increase_page, inputs=[annotate_current_page, all_image_annotations_state], outputs=[annotate_current_page, annotate_current_page_bottom]).\
         then(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
+        then(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, do_not_save_pdf_state], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output])
     
     # Review side bar controls
     recogniser_entity_dropdown.select(update_entities_df, inputs=[recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs=[recogniser_entity_dataframe])
@@ -420,13 +431,13 @@ with app:
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
 
     # If running on AWS, load in the default allow list file from S3
-    if RUN_AWS_FUNCTIONS == "1":
-        print("default_allow_list_output_folder_location:", default_allow_list_loc)
-        if not os.path.exists(default_allow_list_loc):
-            app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_allow_list_file, default_allow_list_output_folder_location]).\
-            then(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
-        else:
-            app.load(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
+    # if RUN_AWS_FUNCTIONS == "1":
+    #     print("default_allow_list_output_folder_location:", default_allow_list_loc)
+    #     if not os.path.exists(default_allow_list_loc):
+    #         app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_allow_list_file, default_allow_list_output_folder_location]).\
+    #         then(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
+    #     else:
+    #         app.load(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     access_callback = CSVLogger_custom(dataset_file_name=log_file_name)

@@ -7,13 +7,13 @@ import base64
 from tools.helper_functions import get_or_create_env_var
 
 client_id = get_or_create_env_var('AWS_CLIENT_ID', '')
-print(f'The value of AWS_CLIENT_ID is {client_id}')
+#print(f'The value of AWS_CLIENT_ID is {client_id}')
 
 client_secret = get_or_create_env_var('AWS_CLIENT_SECRET', '')
-print(f'The value of AWS_CLIENT_SECRET is {client_secret}')
+#print(f'The value of AWS_CLIENT_SECRET is {client_secret}')
 
 user_pool_id = get_or_create_env_var('AWS_USER_POOL_ID', '')
-print(f'The value of AWS_USER_POOL_ID is {user_pool_id}')
+#print(f'The value of AWS_USER_POOL_ID is {user_pool_id}')
 
 def calculate_secret_hash(client_id, client_secret, username):
     message = username + client_id
@@ -46,24 +46,26 @@ def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id,
 
     try:
 
-        # response = client.initiate_auth(
-        #     AuthFlow='USER_PASSWORD_AUTH',
-        #     AuthParameters={
-        #         'USERNAME': username,
-        #         'PASSWORD': password,
-        #     },
-        #     ClientId=client_id
-        # )
+        if client_secret == '':
+            response = client.initiate_auth(
+                AuthFlow='USER_PASSWORD_AUTH',
+                AuthParameters={
+                    'USERNAME': username,
+                    'PASSWORD': password,
+                },
+                ClientId=client_id
+            )
 
-        response = client.initiate_auth(
-        AuthFlow='USER_PASSWORD_AUTH',
-        AuthParameters={
-            'USERNAME': username,
-            'PASSWORD': password,
-            'SECRET_HASH': secret_hash
-        },
-        ClientId=client_id
-        )
+        else:
+            response = client.initiate_auth(
+            AuthFlow='USER_PASSWORD_AUTH',
+            AuthParameters={
+                'USERNAME': username,
+                'PASSWORD': password,
+                'SECRET_HASH': secret_hash
+            },
+            ClientId=client_id
+            )
 
         # If successful, you'll receive an AuthenticationResult in the response
         if response.get('AuthenticationResult'):

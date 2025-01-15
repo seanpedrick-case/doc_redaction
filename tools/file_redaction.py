@@ -269,7 +269,7 @@ def choose_and_run_redactor(file_paths:List[str],
             print("Redacting file:", file_path_without_ext)
 
             is_a_pdf = is_pdf(file_path) == True
-            if is_a_pdf == False:
+            if is_a_pdf == False and in_redact_method == text_ocr_option:
                 # If user has not submitted a pdf, assume it's an image
                 print("File is not a pdf, assuming that image analysis needs to be used.")
                 in_redact_method = tesseract_ocr_option
@@ -708,8 +708,6 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
             if image:
                 img_width, img_height = image.size
 
-                print("annot:", annot)
-
                 x1, image_y1, x2, image_y2 = convert_pymupdf_to_image_coords(page, x1, pymupdf_y1, x2, pymupdf_y2, image)
 
                 img_annotation_box["xmin"] = x1  #* (img_width / rect_width) # Use adjusted x1
@@ -745,15 +743,10 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
         "boxes": all_image_annotation_boxes
     }
 
-    
-
-
     page.apply_redactions(images=0, graphics=0)
     page.clean_contents()
 
     return page, out_annotation_boxes
-
-
 
 def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_results=[], handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Redact all identified handwriting", "Redact all identified signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
 
@@ -832,7 +825,11 @@ def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_result
         for next_box in group[1:]:
             if next_box.left - (merged_box.left + merged_box.width) <= horizontal_threshold:
                 new_text = merged_box.text + " " + next_box.text
-                new_entity_type = merged_box.entity_type + " - " + next_box.entity_type
+
+                if merged_box.entity_type != next_box.entity_type:
+                    new_entity_type = merged_box.entity_type + " - " + next_box.entity_type
+                else:
+                    new_entity_type = merged_box.entity_type
 
                 new_left = min(merged_box.left, next_box.left)
                 new_top = min(merged_box.top, next_box.top)
@@ -973,9 +970,6 @@ def redact_image_pdf(file_path:str,
     print("Page range:", str(page_min + 1), "to", str(page_max))
     #print("Current_loop_page:", current_loop_page)
     
-    if analysis_type == tesseract_ocr_option: ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + ".csv"
-    elif analysis_type == textract_option: ocr_results_file_path = output_folder + "ocr_results_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + "_textract.csv"    
-    
     # If running Textract, check if file already exists. If it does, load in existing data
     # Import results from json and convert
     if analysis_type == textract_option:
@@ -984,7 +978,6 @@ def redact_image_pdf(file_path:str,
         log_files_output_paths.append(json_file_path)
         
         if not os.path.exists(json_file_path):
-            no_textract_file = True
             print("No existing Textract results file found.")
             existing_data = {}
             #text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
@@ -1042,12 +1035,8 @@ def redact_image_pdf(file_path:str,
 
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
             if analysis_type == tesseract_ocr_option:
-                
                 word_level_ocr_results = image_analyser.perform_ocr(image)
-
-                # Combine OCR results
                 line_level_ocr_results, line_level_ocr_results_with_children = combine_ocr_results(word_level_ocr_results)
-
     
             # Import results from json and convert
             if analysis_type == textract_option:
@@ -1085,44 +1074,6 @@ def redact_image_pdf(file_path:str,
                         text_blocks = next(page['data'] for page in existing_data["pages"] if page['page_no'] == reported_page_number)
                 
                 
-                # if not os.path.exists(json_file_path):
-                #     text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
-                #     log_files_output_paths.append(json_file_path)
-                #     request_metadata = request_metadata + "\n" + new_request_metadata
-
-                #     existing_data = {"pages":[text_blocks]}
-
-
-                # else:
-                #     # Open the file and load the JSON data
-                #     print("Found existing Textract json results file.")
-                #     with open(json_file_path, 'r') as json_file:
-                #         existing_data = json.load(json_file)
-
-                #         # Check if the current reported_page_number exists in the loaded JSON
-                #         page_exists = any(page['page_no'] == reported_page_number for page in existing_data.get("pages", []))
-
-                #         if not page_exists:  # If the page does not exist, analyze again
-                #             print(f"Page number {reported_page_number} not found in existing data. Analyzing again.")
-                #             text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
-
-                #             # Check if "pages" key exists, if not, initialize it as an empty list
-                #             if "pages" not in existing_data:
-                #                 existing_data["pages"] = []
-
-                #             # Append the new page data
-                #             existing_data["pages"].append(text_blocks)
-
-                #             # Write the updated existing_data back to the JSON file
-                #             with open(json_file_path, 'w') as json_file:
-                #                 json.dump(existing_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
-
-                #             log_files_output_paths.append(json_file_path)
-                #             request_metadata = request_metadata + "\n" + new_request_metadata
-                #         else:
-                #             # If the page exists, retrieve the data
-                #             text_blocks = next(page['data'] for page in existing_data["pages"] if page['page_no'] == reported_page_number)
-
                 line_level_ocr_results, handwriting_or_signature_boxes, signature_recogniser_results, handwriting_recogniser_results, line_level_ocr_results_with_children = json_to_ocrresult(text_blocks, page_width, page_height, reported_page_number)
 
             # Step 2: Analyze text and identify PII
@@ -1194,7 +1145,8 @@ def redact_image_pdf(file_path:str,
             else:
                 #print("redact_whole_page_list:", redact_whole_page_list)
                 if redact_whole_page_list:
-                    if current_loop_page in redact_whole_page_list: redact_whole_page = True
+                    int_reported_page_number = int(reported_page_number) 
+                    if int_reported_page_number in redact_whole_page_list: redact_whole_page = True
                     else: redact_whole_page = False
                 else: redact_whole_page = False
 
@@ -1345,8 +1297,14 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
         character_objects_out.append(char)  # Collect character objects
 
         if isinstance(char, LTAnno):
+
+            added_text = char.get_text()
+        
+            # Handle double quotes
+            added_text = added_text.replace('"', '\\"')  # Escape double quotes
+
             # Handle space separately by finalizing the word
-            full_text += char.get_text()  # Adds space or newline
+            full_text += added_text  # Adds space or newline
 
             if current_word:  # Only finalize if there is a current word
                 word_bboxes.append((current_word, current_word_bbox))
@@ -1354,7 +1312,7 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
                 current_word_bbox = [float('inf'), float('inf'), float('-inf'), float('-inf')]  # Reset for next word
 
             # Check for line break (assuming a new line is indicated by a specific character)
-            if '\n' in char.get_text():
+            if '\n' in added_text:
                 #print("char_anno:", char)
                 # Finalize the current line
                 if current_word:
@@ -1373,7 +1331,6 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
 
         # Concatenate text for LTChar
 
-
         #full_text += char.get_text()
         #added_text = re.sub(r'[^\x00-\x7F]+', ' ', char.get_text())
         added_text = char.get_text()
@@ -1381,8 +1338,6 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
             #added_text.encode('latin1', errors='replace').decode('utf-8')
             added_text = clean_unicode_text(added_text)
         full_text += added_text  # Adds space or newline, removing 
-
-        
 
         # Update overall bounding box
         x0, y0, x1, y1 = char.bbox
@@ -1480,7 +1435,10 @@ def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combin
                     merged_box[3] = max(current_box[3], next_box[3])  # Adjust the top
                     merged_result.end = max(current_result.end, result.end)  # Extend text range
                     try:
-                        merged_result.entity_type = current_result.entity_type + " - " + result.entity_type
+                        if current_result.entity_type != result.entity_type:
+                            merged_result.entity_type = current_result.entity_type + " - " + result.entity_type
+                        else:
+                            merged_result.entity_type = current_result.entity_type
                     except Exception as e:
                         print("Unable to combine result entity types:", e)
                     if current_text:
@@ -1877,8 +1835,9 @@ def redact_text_pdf(
 
                 # Make pymupdf page redactions
                 #print("redact_whole_page_list:", redact_whole_page_list)
-                if redact_whole_page_list:                    
-                    if current_loop_page in redact_whole_page_list: redact_whole_page = True
+                if redact_whole_page_list:
+                    int_reported_page_number = int(reported_page_number)                    
+                    if int_reported_page_number in redact_whole_page_list: redact_whole_page = True
                     else: redact_whole_page = False
                 else: redact_whole_page = False
 

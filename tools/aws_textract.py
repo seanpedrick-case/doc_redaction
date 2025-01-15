@@ -145,8 +145,9 @@ def json_to_ocrresult(json_data, page_width, page_height, page_no):
                 
                 # Extract text and bounding box for the line
                 line_text = text_block.get('Text', '')
-
                 words = []
+                current_line_handwriting_results = []  # Track handwriting results for this line
+
                 if 'Relationships' in text_block:
                     for relationship in text_block['Relationships']:
                         if relationship['Type'] == 'CHILD':
@@ -179,35 +180,56 @@ def json_to_ocrresult(json_data, page_width, page_height, page_no):
                                     if text_type == "HANDWRITING":
                                         is_handwriting = True
                                         entity_name = "HANDWRITING"
-                                        word_end = len(entity_name)
+                                        word_end = len(word_text)
 
-                                        recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= word_text, score= confidence, start=0, end=word_end, left=word_left, top=word_top, width=word_width_abs, height=word_height_abs)
+                                        recogniser_result = CustomImageRecognizerResult(
+                                            entity_type=entity_name,
+                                            text=word_text,
+                                            score=confidence,
+                                            start=0,
+                                            end=word_end,
+                                            left=word_left,
+                                            top=word_top,
+                                            width=word_width_abs,
+                                            height=word_height_abs
+                                        )
 
-                                        if recogniser_result not in handwriting:
-                                            handwriting.append(recogniser_result)
-                                            #print("Handwriting found:", handwriting[-1]) 
+                                        # Add to handwriting collections immediately
+                                        handwriting.append(recogniser_result)
+                                        handwriting_recogniser_results.append(recogniser_result)
+                                        signature_or_handwriting_recogniser_results.append(recogniser_result)
+                                        current_line_handwriting_results.append(recogniser_result)
 
             # If handwriting or signature, add to bounding box               
 
             elif (text_block['BlockType'] == 'SIGNATURE'):
                 line_text = "SIGNATURE"
-
                 is_signature = True
                 entity_name = "SIGNATURE"
-                confidence = text_block['Confidence']
-                word_end = len(entity_name)
+                confidence = text_block.get('Confidence', 0)
+                word_end = len(line_text)
 
-                recogniser_result = CustomImageRecognizerResult(entity_type=entity_name, text= line_text, score= confidence, start=0, end=word_end, left=line_left, top=line_top, width=width_abs, height=height_abs)
+                recogniser_result = CustomImageRecognizerResult(
+                    entity_type=entity_name,
+                    text=line_text,
+                    score=confidence,
+                    start=0,
+                    end=word_end,
+                    left=line_left,
+                    top=line_top,
+                    width=width_abs,
+                    height=height_abs
+                )
 
-                if recogniser_result not in signatures:
-                    signatures.append(recogniser_result)
-                    #print("Signature found:", signatures[-1])
+                # Add to signature collections immediately
+                signatures.append(recogniser_result)
+                signature_recogniser_results.append(recogniser_result)
+                signature_or_handwriting_recogniser_results.append(recogniser_result)
 
-                words = []
-                words.append({
-                            'text': line_text,
-                            'bounding_box': (line_left, line_top, line_right, line_bottom)
-                        })
+                words = [{
+                    'text': line_text,
+                    'bounding_box': (line_left, line_top, line_right, line_bottom)
+                }]
 
             ocr_results_with_children["text_line_" + str(i)] = {
                 "line": i,

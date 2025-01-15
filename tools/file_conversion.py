@@ -1,5 +1,5 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
-from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, read_file
+from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, read_file, get_or_create_env_var
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import os
@@ -48,7 +48,8 @@ def is_pdf(filename):
 # %%
 ## Convert pdf to image if necessary
 
-
+CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "")
+print(f'The value of CUSTOM_BOX_COLOUR is {CUSTOM_BOX_COLOUR}')
 
 def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_dir: str = 'input') -> tuple[int, str]:
     try:
@@ -261,7 +262,10 @@ def redact_single_box(pymupdf_page:Page, pymupdf_rect:Rect, img_annotation_box:d
         else:
             out_colour = img_annotation_box["color"]
     else:
-        out_colour = (0,0,0)
+        if CUSTOM_BOX_COLOUR == "grey":
+            out_colour = (0.5, 0.5, 0.5)        
+        else:
+            out_colour = (0,0,0)
 
     shape.finish(color=out_colour, fill=out_colour)  # Black fill for the rectangle
     #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle
@@ -478,11 +482,12 @@ def prepare_image_or_pdf(
                     annotation["image"] = image_path
 
                     all_annotations_object.append(annotation)
-
-                #print("all_annotations_object:", all_annotations_object)
-            
             
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
+            # Check if the file is an image type and the user selected text ocr option
+            if file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
+                in_redact_method = tesseract_ocr_option
+
             # Convert image to a pymupdf document
             pymupdf_doc = pymupdf.open()  # Create a new empty document
 
@@ -491,14 +496,16 @@ def prepare_image_or_pdf(
             page = pymupdf_doc.new_page(width=img.width, height=img.height)  # Add a new page
             page.insert_image(rect, filename=file_path)  # Insert the image into the page
 
+            file_path_str = str(file_path)
 
-        # Check if the file is an image type and the user selected text ocr option
-        elif file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
-            in_redact_method = tesseract_ocr_option
+            image_file_paths = process_file(file_path_str, prepare_for_review)
+
+            print("Inserted image into PDF file")
+
 
         elif file_extension in ['.csv']:
             review_file_csv = read_file(file)
-            all_annotations_object = convert_pandas_df_to_review_json(review_file_csv)
+            all_annotations_object = convert_pandas_df_to_review_json(review_file_csv, image_file_paths)
             json_from_csv = True
             print("Converted CSV review file to json")
 
@@ -618,12 +625,7 @@ def prepare_image_or_pdf(
         out_message.append(out_time)
         out_message_out = '\n'.join(out_message)
 
-    #if prepare_for_review == False:
     number_of_pages = len(image_file_paths)
-    #else:
-    #    number_of_pages = len(all_annotations_object)
-
-    #print("all_annotations_object at end:", all_annotations_object)
         
     return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
 
@@ -649,23 +651,6 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], 
     #print("Out file paths:", out_file_paths)
 
     return out_message, out_file_paths
-
-# Example DataFrames
-# df1 = pd.DataFrame({
-#     'xmin': [10, 20, 30],
-#     'xmax': [15, 25, 35],
-#     'ymin': [40, 50, 60],
-#     'ymax': [45, 55, 65],
-#     'info1': ['A', 'B', 'C']
-# })
-
-# df2 = pd.DataFrame({
-#     'xmin': [12, 18, 32],
-#     'xmax': [14, 24, 34],
-#     'ymin': [42, 48, 62],
-#     'ymax': [44, 54, 66],
-#     'info2': ['X', 'Y', 'Z']
-# })
 
 def join_values_within_threshold(df1, df2):
     # Threshold for matching
@@ -757,25 +742,38 @@ def convert_review_json_to_pandas_df(data:List[dict], text_join_data=pd.DataFram
 
     return df
 
-def convert_pandas_df_to_review_json(df: pd.DataFrame) -> List[dict]:
+def convert_pandas_df_to_review_json(df: pd.DataFrame, image_paths: List[Image.Image]) -> List[dict]:
+    '''
+    Convert a review csv to a json file for use by the Gradio Annotation object
+    '''
     # Keep only necessary columns
     df = df[["image", "page", "xmin", "ymin", "xmax", "ymax", "color", "label"]]
 
     # Group the DataFrame by the 'image' column
-    grouped = df.groupby('image')
+    grouped_csv_pages = df.groupby('page')
 
     # Create a list to hold the JSON data
     json_data = []
 
-    # Iterate over each group
-    for image_path, group in grouped:
-        # Convert each group to a list of box dictionaries
-        boxes = group.drop(columns=['image', 'page']).to_dict(orient='records')
-        
+    for n, pdf_image_path in enumerate(image_paths):
+        reported_page_number = int(n + 1)
+
+        if reported_page_number in df["page"].values:
+
+            # Convert each relevant group to a list of box dictionaries
+            selected_csv_pages = grouped_csv_pages.get_group(reported_page_number)
+            annotation_boxes = selected_csv_pages.drop(columns=['image', 'page']).to_dict(orient='records')
+
+            annotation = {
+                "image": pdf_image_path,
+                "boxes": annotation_boxes
+            }
+
+        else:
+            annotation = {}
+            annotation["image"] = pdf_image_path
+
         # Append the structured data to the json_data list
-        json_data.append({
-            "image": image_path,
-            "boxes": boxes
-        })
+        json_data.append(annotation)
 
     return json_data

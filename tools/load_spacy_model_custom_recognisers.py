@@ -24,14 +24,22 @@ except:
 	print("Successfully downloaded and imported spaCy model", model_name)
 
 # #### Custom recognisers
-# Allow user to create their own recogniser
 def custom_word_list_recogniser(custom_list:List[str]=[]):
-    custom_regex = '\\b' + '\\b|\\b'.join(rf"{re.escape(term)}" for term in custom_list) + '\\b'
-    custom_pattern = Pattern(name="custom_pattern",regex=custom_regex, score = 1)
+    # Create regex pattern, handling quotes carefully
 
-    #print("custom_pattern:", custom_pattern)
+    quote_str = '"'
+    replace_str = '(?:"|"|")'
+
+    custom_regex = '|'.join(
+        rf'(?<!\w){re.escape(term.strip()).replace(quote_str, replace_str)}(?!\w)'
+        for term in custom_list
+    )
+    print(custom_regex)
+
+    custom_pattern = Pattern(name="custom_pattern", regex=custom_regex, score = 1)
+    
     custom_recogniser = PatternRecognizer(supported_entity="CUSTOM", name="CUSTOM", patterns = [custom_pattern], 
-    global_regex_flags=re.DOTALL | re.MULTILINE | re.IGNORECASE)
+        global_regex_flags=re.DOTALL | re.MULTILINE | re.IGNORECASE)
 
     return custom_recogniser
 
