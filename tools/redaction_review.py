@@ -74,22 +74,30 @@ def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
     return result
 
 def get_recogniser_dataframe_out(image_annotator_object, recogniser_dataframe_gr):
+    recogniser_entities_list = ["Redaction"]
+    recogniser_entities_drop = gr.Dropdown(value="", choices=[""], allow_custom_value=True, interactive=True)
+    recogniser_dataframe_out = recogniser_dataframe_gr
+
     try:
         review_dataframe = convert_review_json_to_pandas_df(image_annotator_object)[["page", "label"]]
         recogniser_entities = review_dataframe["label"].unique().tolist()
         recogniser_entities.append("ALL")
-        recogniser_entities = sorted(recogniser_entities)
+        recogniser_entities_for_drop = sorted(recogniser_entities)
+
 
         recogniser_dataframe_out = gr.Dataframe(review_dataframe)
-        recogniser_entities_drop = gr.Dropdown(value=recogniser_entities[0], choices=recogniser_entities, allow_custom_value=True, interactive=True)
+        recogniser_entities_drop = gr.Dropdown(value=recogniser_entities_for_drop[0], choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)
+
+        recogniser_entities_list = [entity for entity in recogniser_entities_for_drop if entity != 'Redaction' and entity != 'ALL']  # Remove any existing 'Redaction'
+        recogniser_entities_list.insert(0, 'Redaction')  # Add 'Redaction' to the start of the list
 
     except Exception as e:
         print("Could not extract recogniser information:", e)
         recogniser_dataframe_out = recogniser_dataframe_gr
         recogniser_entities_drop = gr.Dropdown(value="", choices=[""], allow_custom_value=True, interactive=True)
-        recogniser_entities = ["Redaction"]
+        recogniser_entities_list = ["Redaction"]
 
-    return recogniser_dataframe_out, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities
+    return recogniser_dataframe_out, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list
 
 def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, recogniser_entities_drop=gr.Dropdown(value="ALL", allow_custom_value=True), recogniser_dataframe_gr=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]})), zoom:int=100):
     '''
@@ -105,8 +113,15 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
     else:        
         review_dataframe = update_entities_df(recogniser_entities_drop, recogniser_dataframe_gr)
         recogniser_dataframe_out = gr.Dataframe(review_dataframe)
-        recogniser_entities_list = review_dataframe["label"].unique().tolist()
+        recogniser_entities_list = recogniser_dataframe_gr["label"].unique().tolist()
+
+        print("recogniser_entities_list all options:", recogniser_entities_list)
+
         recogniser_entities_list = sorted(recogniser_entities_list)
+        recogniser_entities_list = [entity for entity in recogniser_entities_list if entity != 'Redaction']  # Remove any existing 'Redaction'
+        recogniser_entities_list.insert(0, 'Redaction')  # Add 'Redaction' to the start of the list
+
+        print("recogniser_entities_list:", recogniser_entities_list)
 
     zoom_str = str(zoom) + '%'
     recogniser_colour_list = [(0, 0, 0) for _ in range(len(recogniser_entities_list))]
