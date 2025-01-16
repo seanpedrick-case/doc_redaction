@@ -41,8 +41,6 @@ full_entity_list = ["TITLES", "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "STREET
 
 language = 'en'
 
-
-
 host_name = socket.gethostname()
 feedback_logs_folder = 'feedback/' + today_rev + '/' + host_name + '/'
 access_logs_folder = 'logs/' + today_rev + '/' + host_name + '/'
@@ -121,7 +119,7 @@ with app:
 
 
     ## Annotator zoom value
-    annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=100, precision=0, visible=False)
+    annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=80, precision=0, visible=False)
     zoom_true_bool = gr.State(True)
     zoom_false_bool = gr.State(False)
 
@@ -160,9 +158,7 @@ with app:
 
     Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](https://github.com/seanpedrick-case/doc_redaction/blob/main/README.md) for a walkthrough on how to use the app. Below is a very brief overview.
     
-    To identify text in documents, the 'local' text/OCR image analysis uses spacy/tesseract, and works ok for documents with typed text. If available, choose 'AWS Textract service' to redact more complex elements e.g. signatures or handwriting. 
-    
-    Then, choose a method for PII identification. 'Local' is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
+    To identify text in documents, the 'local' text/OCR image analysis uses spacy/tesseract, and works ok for documents with typed text. If available, choose 'AWS Textract service' to redact more complex elements e.g. signatures or handwriting. Then, choose a method for PII identification. 'Local' is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
     
     After redaction, review suggested redactions on the 'Review redactions' tab. The original pdf can be uploaded here alongside a '...redaction_file.csv' to continue a previous redaction/review task. See the 'Redaction settings' tab to choose which pages to redact, the type of information to redact (e.g. people, places), or custom terms to always include/ exclude from redaction.
 
@@ -203,7 +199,7 @@ with app:
 
         with gr.Accordion(label = "Review redaction file", open=True):
             output_review_files = gr.File(label="Review output files", file_count='multiple', height=file_input_height)
-            upload_previous_review_file_btn = gr.Button("Review previously created redaction file (upload original PDF and ...review_file.csv)")
+            upload_previous_review_file_btn = gr.Button("Review previously created redaction file (upload original PDF and ...review_file.csv)", variant="primary")
 
         with gr.Row():
             annotation_last_page_button = gr.Button("Previous page", scale = 3)
@@ -215,12 +211,10 @@ with app:
             annotate_zoom_out = gr.Button("Zoom out")
         with gr.Row():
             clear_all_redactions_on_page_btn = gr.Button("Clear all redactions on page", visible=False)
-            annotation_button_apply = gr.Button("Apply revised redactions", variant="primary")
-
 
         with gr.Row():
 
-            with gr.Column(scale=4):
+            with gr.Column(scale=1):
 
                 zoom_str = str(annotator_zoom_number) + '%'
 
@@ -242,9 +236,13 @@ with app:
                     interactive=False
                 )
 
-            with gr.Column(scale=1):
-                recogniser_entity_dropdown = gr.Dropdown(label="Redaction category", value="ALL", allow_custom_value=True)
-                recogniser_entity_dataframe = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]}), col_count=2, type="pandas", label="Search results. Click to go to page")          
+        with gr.Row():
+            annotation_button_apply = gr.Button("Apply revised redactions", variant="primary")
+
+        #with gr.Column(scale=1):
+        with gr.Row():
+            recogniser_entity_dropdown = gr.Dropdown(label="Redaction category", value="ALL", allow_custom_value=True)
+            recogniser_entity_dataframe = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]}), col_count=2, type="pandas", label="Search results. Click to go to page")          
 
         with gr.Row():
             annotation_last_page_button_bottom = gr.Button("Previous page", scale = 3)
@@ -321,7 +319,7 @@ with app:
     ###
     in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list])
 
-    document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator]).\
+    document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state]).\
     then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state], api_name="prepare_doc").\
     then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
                     outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number], api_name="redact_doc").\
@@ -473,7 +471,7 @@ print(f'The value of RUN_DIRECT_MODE is {RUN_DIRECT_MODE}')
 MAX_QUEUE_SIZE = int(get_or_create_env_var('MAX_QUEUE_SIZE', '5'))
 print(f'The value of RUN_DIRECT_MODE is {MAX_QUEUE_SIZE}')
 
-MAX_FILE_SIZE = get_or_create_env_var('MAX_FILE_SIZE', '100mb')
+MAX_FILE_SIZE = get_or_create_env_var('MAX_FILE_SIZE', '250mb')
 print(f'The value of MAX_FILE_SIZE is {MAX_FILE_SIZE}')
 
 GRADIO_SERVER_PORT = int(get_or_create_env_var('GRADIO_SERVER_PORT', '7860'))

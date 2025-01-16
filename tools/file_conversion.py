@@ -16,6 +16,7 @@ from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 image_dpi = 300.0
+Image.MAX_IMAGE_PIXELS = None
 
 def is_pdf_or_image(filename):
     """
@@ -51,26 +52,57 @@ def is_pdf(filename):
 CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "")
 print(f'The value of CUSTOM_BOX_COLOUR is {CUSTOM_BOX_COLOUR}')
 
+import os
+from pdf2image import convert_from_path
+from PIL import Image
+
 def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_dir: str = 'input') -> tuple[int, str]:
     try:
-        # Construct the full output directory path relative to the current working directory
+        # Construct the full output directory path
         output_dir = os.path.join(os.getcwd(), output_dir)
-        
-        # Use the output_dir to construct the out_path
         out_path = os.path.join(output_dir, f"{os.path.basename(pdf_path)}_{page_num}.png")
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        
+
         if os.path.exists(out_path):
-            #print(f"Loading existing image for page {page_num + 1}")
+            # Load existing image
             image = Image.open(out_path)
         else:
-            #print(f"Converting page {page_num + 1}")
+            # Convert PDF page to image
             image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, 
                                         dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
             image = image_l[0]
             image = image.convert("L")
             image.save(out_path, format="PNG")
+
+        # Check file size and resize if necessary
+        max_size = 5 * 1024 * 1024  # 5 MB in bytes # 5
+        file_size = os.path.getsize(out_path)        
+
+        # Resize images if they are too big
+        if file_size > max_size:
+            # Start with the original image size
+            width, height = image.size
+
+            print(f"Image size before {new_width}x{new_height}, original file_size: {file_size}")
+
+            while file_size > max_size:
+                # Reduce the size by a factor (e.g., 50% of the current size)
+                new_width = int(width * 0.5)
+                new_height = int(height * 0.5)
+                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Save the resized image
+                image.save(out_path, format="PNG", optimize=True)
+                
+                # Update the file size
+                file_size = os.path.getsize(out_path)
+                print(f"Resized to {new_width}x{new_height}, new file_size: {file_size}")
+                
+                # Update the dimensions for the next iteration
+                width, height = new_width, new_height
+
         return page_num, out_path
+
     except Exception as e:
         print(f"Error processing page {page_num + 1}: {e}")
         return page_num, None
@@ -683,14 +715,20 @@ def join_values_within_threshold(df1, df2):
     print(final_df)
 
 
-def convert_review_json_to_pandas_df(data:List[dict], text_join_data=pd.DataFrame) -> pd.DataFrame:
+def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decision_output:pd.DataFrame=pd.DataFrame()) -> pd.DataFrame:
+    '''
+    Convert the annotation json data to a dataframe format. Add on any text from the initial review_file dataframe by joining on pages/co-ordinates (doesn't work very well currently).
+    '''
     # Flatten the data
-    flattened_data = []
+    flattened_annotation_data = []
 
-    for entry in data:
-        #print("entry:", entry)
+    if not isinstance(redaction_decision_output, pd.DataFrame):
+        redaction_decision_output = pd.DataFrame()
+
+    for annotation in all_annotations:
+        #print("annotation:", annotation)
         #print("flattened_data:", flattened_data)
-        image_path = entry["image"]
+        image_path = annotation["image"]
 
         # Use regex to find the number before .png
         match = re.search(r'_(\d+)\.png$', image_path)
@@ -701,56 +739,66 @@ def convert_review_json_to_pandas_df(data:List[dict], text_join_data=pd.DataFram
         else:
             print("No number found before .png")
 
-        # Check if 'boxes' is in the entry, if not, add an empty list
-        if 'boxes' not in entry:
-            entry['boxes'] = []        
+        # Check if 'boxes' is in the annotation, if not, add an empty list
+        if 'boxes' not in annotation:
+            annotation['boxes'] = []        
 
-        for box in entry["boxes"]:
+        for box in annotation["boxes"]:
             if 'text' not in box:
-                data_to_add = {"image": image_path, "page": reported_number,  **box} # "text": entry['text'],
+                data_to_add = {"image": image_path, "page": reported_number,  **box} # "text": annotation['text'],
             else:
-                data_to_add = {"image": image_path, "page": reported_number, "text": entry['text'], **box}
+                data_to_add = {"image": image_path, "page": reported_number, "text": annotation['text'], **box}
             #print("data_to_add:", data_to_add)
-            flattened_data.append(data_to_add)
+            flattened_annotation_data.append(data_to_add)
 
     # Convert to a DataFrame
-    df = pd.DataFrame(flattened_data)
+    annotation_data_as_df = pd.DataFrame(flattened_annotation_data)
+
+    #print("redaction_decision_output:", redaction_decision_output)
+    #print("annotation_data_as_df:", annotation_data_as_df)
 
     # Join on additional text data from decision output results if included
-    if not text_join_data.empty:
-        #print("text_join_data:", text_join_data)
-        #print("df:", df)
-        text_join_data['page'] = text_join_data['page'].astype(str)
-        df['page'] = df['page'].astype(str)
-        text_join_data = text_join_data[['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page', 'text']]
+    if not redaction_decision_output.empty:
+        #print("redaction_decision_output is not empty")
+        #print("redaction_decision_output:", redaction_decision_output)
+        #print("annotation_data_as_df:", annotation_data_as_df)
+        redaction_decision_output['page'] = redaction_decision_output['page'].astype(str)
+        annotation_data_as_df['page'] = annotation_data_as_df['page'].astype(str)
+        redaction_decision_output = redaction_decision_output[['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page', 'text']]
+
         # Round to the closest number divisible by 5
-        text_join_data[['xmin', 'ymin', 'xmax', 'ymax']] = (text_join_data[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
-        text_join_data = text_join_data.drop_duplicates(['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page'])
+        redaction_decision_output.loc[:, ['xmin', 'ymin', 'xmax', 'ymax']] = (redaction_decision_output[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
+
+        redaction_decision_output = redaction_decision_output.drop_duplicates(['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page'])
         
-        df[['xmin1', 'ymin1', 'xmax1', 'ymax1']] = (df[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
+        #annotation_data_as_df[['xmin1', 'ymin1', 'xmax1', 'ymax1']] = (annotation_data_as_df[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
 
-        df = df.merge(text_join_data, left_on = ['xmin1', 'ymin1', 'xmax1', 'ymax1', 'label', 'page'], right_on = ['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page'], how = "left", suffixes=("", "_y"))
+        annotation_data_as_df.loc[:, ['xmin1', 'ymin1', 'xmax1', 'ymax1']] = (annotation_data_as_df[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
 
-        df = df.drop(['xmin1', 'ymin1', 'xmax1', 'ymax1', 'xmin_y', 'ymin_y', 'xmax_y', 'ymax_y'], axis=1, errors="ignore")
+        annotation_data_as_df = annotation_data_as_df.merge(redaction_decision_output, left_on = ['xmin1', 'ymin1', 'xmax1', 'ymax1', 'label', 'page'], right_on = ['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page'], how = "left", suffixes=("", "_y"))
 
-        df = df[["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]]
+        annotation_data_as_df = annotation_data_as_df.drop(['xmin1', 'ymin1', 'xmax1', 'ymax1', 'xmin_y', 'ymin_y', 'xmax_y', 'ymax_y'], axis=1, errors="ignore")
 
-    if 'text' not in df.columns:
-        df['text'] = ''
+        annotation_data_as_df = annotation_data_as_df[["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]]
 
-    df = df.sort_values(['page', 'ymin', 'xmin', 'label'])
+    # Ensure required columns exist, filling with blank if they don't
+    for col in ["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]:
+        if col not in annotation_data_as_df.columns:
+            annotation_data_as_df[col] = ''
 
-    return df
+    annotation_data_as_df = annotation_data_as_df.sort_values(['page', 'ymin', 'xmin', 'label'])
 
-def convert_pandas_df_to_review_json(df: pd.DataFrame, image_paths: List[Image.Image]) -> List[dict]:
+    return annotation_data_as_df
+
+def convert_pandas_df_to_review_json(review_file_df: pd.DataFrame, image_paths: List[Image.Image]) -> List[dict]:
     '''
     Convert a review csv to a json file for use by the Gradio Annotation object
     '''
     # Keep only necessary columns
-    df = df[["image", "page", "xmin", "ymin", "xmax", "ymax", "color", "label"]]
+    review_file_df = review_file_df[["image", "page", "xmin", "ymin", "xmax", "ymax", "color", "label"]]
 
     # Group the DataFrame by the 'image' column
-    grouped_csv_pages = df.groupby('page')
+    grouped_csv_pages = review_file_df.groupby('page')
 
     # Create a list to hold the JSON data
     json_data = []
@@ -758,7 +806,7 @@ def convert_pandas_df_to_review_json(df: pd.DataFrame, image_paths: List[Image.I
     for n, pdf_image_path in enumerate(image_paths):
         reported_page_number = int(n + 1)
 
-        if reported_page_number in df["page"].values:
+        if reported_page_number in review_file_df["page"].values:
 
             # Convert each relevant group to a list of box dictionaries
             selected_csv_pages = grouped_csv_pages.get_group(reported_page_number)
