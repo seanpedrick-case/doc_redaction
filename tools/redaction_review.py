@@ -15,6 +15,8 @@ from fitz import Document
 from PIL import ImageDraw, Image
 from collections import defaultdict
 
+Image.MAX_IMAGE_PIXELS = None
+
 def decrease_page(number:int):
     '''
     Decrease page number for review redactions page.

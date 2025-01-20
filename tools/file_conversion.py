@@ -1,7 +1,6 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
 from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, read_file, get_or_create_env_var
 from PIL import Image, ImageFile
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 import os
 import re
 import time
@@ -16,6 +15,7 @@ from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 image_dpi = 300.0
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
 
 def is_pdf_or_image(filename):
@@ -75,7 +75,7 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
             image.save(out_path, format="PNG")
 
         # Check file size and resize if necessary
-        max_size = 5 * 1024 * 1024  # 5 MB in bytes # 5
+        max_size = 4.5 * 1024 * 1024  # 5 MB in bytes # 5
         file_size = os.path.getsize(out_path)        
 
         # Resize images if they are too big
@@ -83,7 +83,7 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
             # Start with the original image size
             width, height = image.size
 
-            print(f"Image size before {new_width}x{new_height}, original file_size: {file_size}")
+            print(f"Image size before {width}x{height}, original file_size: {file_size}")
 
             while file_size > max_size:
                 # Reduce the size by a factor (e.g., 50% of the current size)
@@ -107,9 +107,9 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
         print(f"Error processing page {page_num + 1}: {e}")
         return page_num, None
 
-def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min: int = 0, image_dpi: float = 200, num_threads: int = 8, output_dir: str = '/input'):
+def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min: int = 0, image_dpi: float = image_dpi, num_threads: int = 8, output_dir: str = '/input'):
 
-    # If preparing for review, just load the first page
+    # If preparing for review, just load the first page (not used)
     if prepare_for_review == True:
         page_count = pdfinfo_from_path(pdf_path)['Pages'] #1
     else:
