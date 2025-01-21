@@ -1,20 +1,19 @@
 import pytesseract
 import numpy as np
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
-#from presidio_image_redactor import ImagePreprocessor
 from typing import List, Dict, Optional, Union, Tuple
 from dataclasses import dataclass
 import time
 import cv2
-import PIL
-from PIL import ImageDraw, ImageFont, Image
-from typing import Optional, Tuple, Union
+import copy
 from copy import deepcopy
+from pdfminer.layout import LTChar
+import PIL
+from PIL import Image
+from typing import Optional, Tuple, Union
 from tools.helper_functions import clean_unicode_text
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.load_spacy_model_custom_recognisers import custom_entities
-#import string  # Import string to get a list of common punctuation characters
-import re  # Add this import at the top of the file
 
 @dataclass
 class OCRResult:
@@ -174,7 +173,6 @@ class BilateralFilter(ImagePreprocessor):
 
         return Image.fromarray(filtered_image), metadata
 
-
 class SegmentedAdaptiveThreshold(ImagePreprocessor):
     """SegmentedAdaptiveThreshold class.
 
@@ -252,9 +250,6 @@ class SegmentedAdaptiveThreshold(ImagePreprocessor):
         metadata = {"C": c, "background_color": background_color, "contrast": contrast}
         return Image.fromarray(adaptive_threshold_image), metadata
     
-    
-
-
 class ImageRescaling(ImagePreprocessor):
     """ImageRescaling class. Rescales images based on their size."""
 
@@ -301,7 +296,6 @@ class ImageRescaling(ImagePreprocessor):
         rescaled_image = cv2.resize(image, dimensions, interpolation=self.interpolation)
         metadata = {"scale_factor": scale_factor}
         return Image.fromarray(rescaled_image), metadata
-
 
 class ContrastSegmentedImageEnhancer(ImagePreprocessor):
     """Class containing all logic to perform contrastive segmentation.
@@ -409,453 +403,380 @@ def bounding_boxes_overlap(box1, box2):
     """Check if two bounding boxes overlap."""
     return (box1[0] < box2[2] and box2[0] < box1[2] and
             box1[1] < box2[3] and box2[1] < box1[3])
-
-class CustomImageAnalyzerEngine:
-    def __init__(
-        self,
-        analyzer_engine: Optional[AnalyzerEngine] = None,
-        tesseract_config: Optional[str] = None,
-        image_preprocessor: Optional[ImagePreprocessor] = None
-    ):
-        if not analyzer_engine:
-            analyzer_engine = AnalyzerEngine()
-        self.analyzer_engine = analyzer_engine
-        self.tesseract_config = tesseract_config or '--oem 3 --psm 11'
-
-        if not image_preprocessor:
-            image_preprocessor = ContrastSegmentedImageEnhancer()
-            #print(image_preprocessor)
-        self.image_preprocessor = image_preprocessor
-
-    def perform_ocr(self, image: Union[str, Image.Image, np.ndarray]) -> List[OCRResult]:
-        # Ensure image is a PIL Image
-        if isinstance(image, str):
-            image = Image.open(image)
-        elif isinstance(image, np.ndarray):
-            image = Image.fromarray(image)
-
-        image_processed, preprocessing_metadata = self.image_preprocessor.preprocess_image(image)
-
-        ocr_data = pytesseract.image_to_data(image_processed, output_type=pytesseract.Output.DICT, config=self.tesseract_config)
-
-        if preprocessing_metadata and ("scale_factor" in preprocessing_metadata):
-            ocr_result = self._scale_bbox_results(
-                ocr_data, preprocessing_metadata["scale_factor"]
-            )
-
-        ocr_result = self.remove_space_boxes(ocr_result)
+   
+def map_back_entity_results(page_analyser_result, page_text_mapping, all_text_line_results):
+    for entity in page_analyser_result:
+        entity_start = entity.start
+        entity_end = entity.end
         
-        # Filter out empty strings and low confidence results
-        valid_indices = [i for i, text in enumerate(ocr_result['text']) if text.strip() and int(ocr_result['conf'][i]) > 0]
+        # Track if the entity has been added to any line
+        added_to_line = False
         
-        return [
-            OCRResult(
-                text=clean_unicode_text(ocr_result['text'][i]),
-                left=ocr_result['left'][i],
-                top=ocr_result['top'][i],
-                width=ocr_result['width'][i],
-                height=ocr_result['height'][i]
-            )
-            for i in valid_indices
-        ]
-
-    def analyze_text(
-        self, 
-        line_level_ocr_results: List[OCRResult], 
-        ocr_results_with_children: Dict[str, Dict],
-        chosen_redact_comprehend_entities:List[str],
-        pii_identification_method:str="Local",
-        comprehend_client="",      
-        **text_analyzer_kwargs
-    ) -> List[CustomImageRecognizerResult]:
-        # Define English as default language, if not specified
-        if "language" not in text_analyzer_kwargs:
-            text_analyzer_kwargs["language"] = "en"
-
-        horizontal_buffer = 0 # add pixels to right of width
-        height_buffer = 2 # add pixels to bounding box height
-        comprehend_query_number = 0
-        
-        allow_list = text_analyzer_kwargs.get('allow_list', [])
-
-        combined_results = []
-        # Initialize variables for batching
-        current_batch = ""
-        current_batch_mapping = []  # List of (start_pos, line_index, original_text) tuples
-        analyzer_results_by_line = [[] for _ in line_level_ocr_results]  # Store results for each line
-
-        # Process OCR results in batches
-        for i, line_level_ocr_result in enumerate(line_level_ocr_results):
-            if pii_identification_method == "Local":
-                analyzer_result = self.analyzer_engine.analyze(
-                    text=line_level_ocr_result.text, **text_analyzer_kwargs
-                )
-                analyzer_results_by_line[i] = analyzer_result
-
-            elif pii_identification_method == "AWS Comprehend":
-
-                # If using AWS Comprehend, Spacy model is only used to identify the custom entities created. This is because Comprehend can't pick up Titles, Streetnames, and UKPostcodes, or a custom deny list specifically
-                text_analyzer_kwargs["entities"] = [entity for entity in chosen_redact_comprehend_entities if entity in custom_entities]
-
-                spacy_analyzer_result = self.analyzer_engine.analyze(
-                text=line_level_ocr_result.text, **text_analyzer_kwargs)
-                
-                analyzer_results_by_line[i].extend(spacy_analyzer_result)
-
-                if len(line_level_ocr_result.text) >= 3:
-                    # Add line to current batch with a separator
-                    if current_batch:
-                        current_batch += " | "  # Use a separator that's unlikely to appear in the text
-                    
-                    start_pos = len(current_batch)
-                    current_batch += line_level_ocr_result.text
-                    current_batch_mapping.append((start_pos, i, line_level_ocr_result.text))
-
-                    # Process batch if it's approaching 300 characters or this is the last line
-                    if len(current_batch) >= 200 or i == len(line_level_ocr_results) - 1:
-                        print("length of text for Comprehend:", len(current_batch))
-
-                        try:
-                            response = comprehend_client.detect_pii_entities(
-                                Text=current_batch,
-                                LanguageCode=text_analyzer_kwargs["language"]
-                            )
-
-                        except Exception as e:
-                            print("AWS Comprehend call failed due to:", e, "waiting three seconds to try again.")
-                            time.sleep(3)
-                            response = comprehend_client.detect_pii_entities(
-                                Text=current_batch,
-                                LanguageCode=text_analyzer_kwargs["language"]
-                            )
-
-                        comprehend_query_number += 1
-
-                        # Map results back to original lines
-                        if response and "Entities" in response:
-                            for entity in response["Entities"]:
-                                entity_start = entity["BeginOffset"]
-                                entity_end = entity["EndOffset"]
-                                
-                                # Find which line this entity belongs to
-                                for batch_start, line_idx, original_text in current_batch_mapping:
-                                    batch_end = batch_start + len(original_text)
-                                    
-                                    # Check if entity belongs to this line
-                                    if batch_start <= entity_start < batch_end:
-                                        # Adjust offsets relative to the original line
-                                        relative_start = entity_start - batch_start
-                                        relative_end = min(entity_end - batch_start, len(original_text))
-                                        
-                                        result_text = original_text[relative_start:relative_end]
-                                        
-                                        if result_text not in allow_list:
-                                            if entity.get("Type") in chosen_redact_comprehend_entities:
-                                                # Create a new entity with adjusted positions
-                                                adjusted_entity = entity.copy()
-                                                adjusted_entity["BeginOffset"] = relative_start
-                                                adjusted_entity["EndOffset"] = relative_end
-                                                
-                                                recogniser_entity = recognizer_result_from_dict(adjusted_entity)
-                                                analyzer_results_by_line[line_idx].append(recogniser_entity)
-                        
-                        # Reset batch
-                        current_batch = ""
-                        current_batch_mapping = []
-
-            # Process results for each line
-        for i, analyzer_result in enumerate(analyzer_results_by_line):
-                if i >= len(ocr_results_with_children):
-                    continue
-
-                child_level_key = list(ocr_results_with_children.keys())[i]
-                ocr_results_with_children_line_level = ocr_results_with_children[child_level_key]
-
-                # Go through results to add bounding boxes            
-                for result in analyzer_result:
-                    # Extract the relevant portion of text based on start and end
-                    relevant_text = line_level_ocr_results[i].text[result.start:result.end]
-                   
-                    # Find the corresponding entry in ocr_results_with_children
-                    child_words = ocr_results_with_children_line_level['words']
-
-                     # Initialize bounding box values
-                    left, top, bottom = float('inf'), float('inf'), float('-inf')  
-                    all_words = ""
-                    word_num = 0  # Initialize word count
-                    total_width = 0  # Initialize total width
-
-                    split_relevant_text = relevant_text.split()
-
-                    loop_child_words = child_words.copy()
-
-                    for word_text in split_relevant_text:  # Iterate through each word in relevant_text
-
-                        quote_str = '"'
-                        replace_str = '(?:"|"|")'
-
-                        word_regex = rf'(?<!\w){re.escape(word_text.strip()).replace(quote_str, replace_str)}(?!\w)'
-                    
-                        for word in loop_child_words:
-                            # Check for regex as whole word                            
-
-                            if re.search(word_regex, word['text']):
-                            #if re.search(r'\b' + re.escape(word_text) + r'\b', word['text']):
-                                found_word = word
-
-                                if word_num == 0:  # First word
-                                    left = found_word['bounding_box'][0]
-                                    top = found_word['bounding_box'][1]
-                                bottom = max(bottom, found_word['bounding_box'][3])  # Update bottom for all words
-                                all_words += found_word['text'] + " "  # Concatenate words
-                                total_width = found_word['bounding_box'][2] - left  # Add each word's width
-                                word_num += 1
-
-                                # Drop the first word of child_words
-                                loop_child_words = loop_child_words[1:]  # Skip the first word                                
-
-                                break  # Move to the next word in relevant_text
-
-                    width = total_width + horizontal_buffer # Set width to total width of all matched words
-                    height = bottom - top if word_num > 0 else 0  # Calculate height
-
-                    relevant_line_ocr_result = OCRResult(
-                        text=relevant_text,
-                        left=left,
-                        top=top - height_buffer,
-                        width=width,
-                        height=height + height_buffer
-                    )
-
-                    if not ocr_results_with_children_line_level:
-                        # Fallback to previous method if not found in ocr_results_with_children
-                        print("No child info found")
-                        continue
-
-                    # Reset the word positions indicated in the relevant ocr_result - i.e. it starts from 0 and ends at word length
-                    result_reset_pos = result
-                    result_reset_pos.start = 0
-                    result_reset_pos.end = len(relevant_text)
-                    
-                    #print("result_reset_pos:", result_reset_pos)
-                    #print("relevant_line_ocr_result:", relevant_line_ocr_result)
-                    #print("ocr_results_with_children_line_level:", ocr_results_with_children_line_level)
-
-                    # Map the analyzer results to bounding boxes for this line
-                    line_results = self.map_analyzer_results_to_bounding_boxes(
-                        [result_reset_pos], [relevant_line_ocr_result], relevant_line_ocr_result.text, allow_list, ocr_results_with_children_line_level
-                    )
-
-                    #print("line_results:", line_results)
-                    
-                    combined_results.extend(line_results)
-
-        return combined_results, comprehend_query_number
-
-    @staticmethod
-    def map_analyzer_results_to_bounding_boxes(
-        text_analyzer_results: List[RecognizerResult],
-        redaction_relevant_ocr_results: List[OCRResult],
-        full_text: str,
-        allow_list: List[str],
-        ocr_results_with_children_child_info: Dict[str, Dict]
-    ) -> List[CustomImageRecognizerResult]:
-        redaction_bboxes = []
-        text_position = 0
-
-        for redaction_relevant_ocr_result in redaction_relevant_ocr_results:
-            word_end = text_position + len(redaction_relevant_ocr_result.text)
-
-            #print("Checking relevant OCR result:", redaction_relevant_ocr_result)
-
-            for redaction_result in text_analyzer_results:
-                max_of_current_text_pos_or_result_start_pos = max(text_position, redaction_result.start)
-                min_of_result_end_pos_or_results_end = min(word_end, redaction_result.end)
-
-                redaction_result_bounding_box = (redaction_relevant_ocr_result.left, redaction_relevant_ocr_result.top, 
-                    redaction_relevant_ocr_result.left + redaction_relevant_ocr_result.width, 
-                    redaction_relevant_ocr_result.top + redaction_relevant_ocr_result.height)
-
-                if (max_of_current_text_pos_or_result_start_pos < min_of_result_end_pos_or_results_end) and (redaction_relevant_ocr_result.text not in allow_list):
-                    #print("result", redaction_result, "made it through if statement")
-                    # Find the corresponding entry in ocr_results_with_children that overlap with the redaction result
-                    child_info = ocr_results_with_children_child_info#.get(full_text)
-
-                    #print("child_info in sub function:", child_info)
-                    #print("redaction_result_bounding_box:", redaction_result_bounding_box)
-                    #print("Overlaps?", bounding_boxes_overlap(redaction_result_bounding_box, child_info['bounding_box']))
-
-                    if bounding_boxes_overlap(redaction_result_bounding_box, child_info['bounding_box']):
-                        # Use the bounding box from ocr_results_with_children
-                        bbox = redaction_result_bounding_box #child_info['bounding_box']
-                        left, top, right, bottom = bbox
-                        width = right - left
-                        height = bottom - top
-
-                    else:
-                        print("Could not find OCR result")
-                        continue
-
-                    redaction_bboxes.append(
-                        CustomImageRecognizerResult(
-                            entity_type=redaction_result.entity_type,
-                            start=redaction_result.start,
-                            end=redaction_result.end,
-                            score=redaction_result.score,
-                            left=left,
-                            top=top,
-                            width=width,
-                            height=height,
-                            text=redaction_relevant_ocr_result.text
-                        )
-                    )
+        for batch_start, line_idx, original_line, chars in page_text_mapping:
+            batch_end = batch_start + len(original_line.text)
             
-            text_position = word_end + 1  # +1 for the space between words
+            # Check if the entity overlaps with the current line
+            if batch_start < entity_end and batch_end > entity_start:  # Overlap condition
+                relative_start = max(0, entity_start - batch_start)  # Adjust start relative to the line
+                relative_end = min(entity_end - batch_start, len(original_line.text))  # Adjust end relative to the line
+                
+                # Create a new adjusted entity
+                adjusted_entity = copy.deepcopy(entity)
+                adjusted_entity.start = relative_start
+                adjusted_entity.end = relative_end
+                
+                # Check if this line already has an entry
+                existing_entry = next((entry for idx, entry in all_text_line_results if idx == line_idx), None)
+                
+                if existing_entry is None:
+                    all_text_line_results.append((line_idx, [adjusted_entity]))
+                else:
+                    existing_entry.append(adjusted_entity)  # Append to the existing list of entities
+                
+                added_to_line = True
+        
+        # If the entity spans multiple lines, you may want to handle that here
+        if not added_to_line:
+            # Handle cases where the entity does not fit in any line (optional)
+            print(f"Entity '{entity}' does not fit in any line.")
 
-        return redaction_bboxes
+    return all_text_line_results
+
+def map_back_comprehend_entity_results(response, current_batch_mapping, allow_list, chosen_redact_comprehend_entities, all_text_line_results):
+    if not response or "Entities" not in response:
+        return all_text_line_results
+
+    for entity in response["Entities"]:
+        if entity.get("Type") not in chosen_redact_comprehend_entities:
+            continue
+
+        entity_start = entity["BeginOffset"]
+        entity_end = entity["EndOffset"]
+
+        # Track if the entity has been added to any line
+        added_to_line = False
+
+        # Find the correct line and offset within that line
+        for batch_start, line_idx, original_line, chars, line_offset in current_batch_mapping:
+            batch_end = batch_start + len(original_line.text[line_offset:])
+
+            # Check if the entity overlaps with the current line
+            if batch_start < entity_end and batch_end > entity_start:  # Overlap condition
+                # Calculate the absolute position within the line
+                relative_start = max(0, entity_start - batch_start + line_offset)
+                relative_end = min(entity_end - batch_start + line_offset, len(original_line.text))
+
+                result_text = original_line.text[relative_start:relative_end]
+
+                if result_text not in allow_list:
+                    adjusted_entity = entity.copy()
+                    adjusted_entity["BeginOffset"] = relative_start  # Now relative to the full line
+                    adjusted_entity["EndOffset"] = relative_end
+
+                    recogniser_entity = recognizer_result_from_dict(adjusted_entity)
+
+                    existing_entry = next((entry for idx, entry in all_text_line_results if idx == line_idx), None)
+                    if existing_entry is None:
+                        all_text_line_results.append((line_idx, [recogniser_entity]))
+                    else:
+                        existing_entry.append(recogniser_entity)  # Append to the existing list of entities
+
+                added_to_line = True
+
+        # Optional: Handle cases where the entity does not fit in any line
+        if not added_to_line:
+            print(f"Entity '{entity}' does not fit in any line.")
+
+    return all_text_line_results
+
+def do_aws_comprehend_call(current_batch, current_batch_mapping, comprehend_client, language, allow_list, chosen_redact_comprehend_entities, all_text_line_results):
+    if not current_batch:
+        return all_text_line_results
+
+    max_retries = 3
+    retry_delay = 3
+
+    for attempt in range(max_retries):
+        try:
+            response = comprehend_client.detect_pii_entities(
+                Text=current_batch.strip(),
+                LanguageCode=language
+            )
+
+            all_text_line_results = map_back_comprehend_entity_results(
+                response, 
+                current_batch_mapping, 
+                allow_list, 
+                chosen_redact_comprehend_entities, 
+                all_text_line_results
+            )
+
+            return all_text_line_results
     
-    @staticmethod
-    def remove_space_boxes(ocr_result: dict) -> dict:
-        """Remove OCR bboxes that are for spaces.
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(retry_delay)
 
-        :param ocr_result: OCR results (raw or thresholded).
-        :return: OCR results with empty words removed.
-        """
-        # Get indices of items with no text
-        idx = list()
-        for i, text in enumerate(ocr_result["text"]):
-            is_not_space = text.isspace() is False
-            if text != "" and is_not_space:
-                idx.append(i)
-
-        # Only retain items with text
-        filtered_ocr_result = {}
-        for key in list(ocr_result.keys()):
-            filtered_ocr_result[key] = [ocr_result[key][i] for i in idx]
-
-        return filtered_ocr_result
+def run_page_text_redaction(
+    language: str,
+    chosen_redact_entities: List[str],
+    chosen_redact_comprehend_entities: List[str],
+    line_level_text_results_list: List[str],
+    line_characters: List,
+    page_analyser_results: List = [],
+    page_analysed_bounding_boxes: List = [],
+    comprehend_client = None,
+    allow_list: List[str] = None,
+    pii_identification_method: str = "Local",
+    nlp_analyser = None,
+    score_threshold: float = 0.0,
+    custom_entities: List[str] = None,
+    comprehend_query_number:int = 0#,
+    #merge_text_bounding_boxes_fn = merge_text_bounding_boxes
+):
+    #if not merge_text_bounding_boxes_fn:
+    #    raise ValueError("merge_text_bounding_boxes_fn is required")
     
-    @staticmethod
-    def _scale_bbox_results(
-        ocr_result: Dict[str, List[Union[int, str]]], scale_factor: float
-    ) -> Dict[str, float]:
-        """Scale down the bounding box results based on a scale percentage.
+    page_text = ""
+    page_text_mapping = []
+    all_text_line_results = []
+    comprehend_query_number = 0
 
-        :param ocr_result: OCR results (raw).
-        :param scale_percent: Scale percentage for resizing the bounding box.
+    # Collect all text from the page
+    for i, text_line in enumerate(line_level_text_results_list):
+        #print("line_level_text_results_list:", line_level_text_results_list)
+        if chosen_redact_entities:
+            if page_text:
+                #page_text += " | "
+                page_text += " "
+            
+            start_pos = len(page_text)
+            page_text += text_line.text
+            page_text_mapping.append((start_pos, i, text_line, line_characters[i]))
 
-        :return: OCR results (scaled).
-        """
-        scaled_results = deepcopy(ocr_result)
-        coordinate_keys = ["left", "top"]
-        dimension_keys = ["width", "height"]
+    # Process based on identification method
+    if pii_identification_method == "Local":
+        if not nlp_analyser:
+            raise ValueError("nlp_analyser is required for Local identification method")
+        
+        print("page text:", page_text)
 
-        for coord_key in coordinate_keys:
-            scaled_results[coord_key] = [
-                int(np.ceil((x) / (scale_factor))) for x in scaled_results[coord_key]
+        page_analyser_result = nlp_analyser.analyze(
+            text=page_text,
+            language=language,
+            entities=chosen_redact_entities,
+            score_threshold=score_threshold,
+            return_decision_process=True,
+            allow_list=allow_list
+        )
+
+        #print("page_analyser_result:", page_analyser_result)
+        
+        all_text_line_results = map_back_entity_results(
+            page_analyser_result, 
+            page_text_mapping, 
+            all_text_line_results
+        )
+
+        #print("all_text_line_results:", all_text_line_results)
+
+    elif pii_identification_method == "AWS Comprehend":
+        #print("page text:", page_text)
+
+        # Process custom entities if any
+        if custom_entities:
+            custom_redact_entities = [
+                entity for entity in chosen_redact_comprehend_entities 
+                if entity in custom_entities
             ]
+            if custom_redact_entities:
+                page_analyser_result = nlp_analyser.analyze(
+                    text=page_text,
+                    language=language,
+                    entities=custom_redact_entities,
+                    score_threshold=score_threshold,
+                    return_decision_process=True,
+                    allow_list=allow_list
+                )
 
-        for dim_key in dimension_keys:
-            scaled_results[dim_key] = [
-                max(1, int(np.ceil(x / (scale_factor))))
-                for x in scaled_results[dim_key]
-            ]
-        return scaled_results
+                print("page_analyser_result:", page_analyser_result)
 
-    @staticmethod
-    def estimate_x_offset(full_text: str, start: int) -> int:
-        # Estimate the x-offset based on character position
-        # This is a simple estimation and might need refinement for variable-width fonts
-        return int(start / len(full_text) * len(full_text))
-    
-    def estimate_width(self, ocr_result: OCRResult, start: int, end: int) -> int:
-        # Extract the relevant text portion
-        relevant_text = ocr_result.text[start:end]
-        
-        # If the relevant text is the same as the full text, return the full width
-        if relevant_text == ocr_result.text:
-            return ocr_result.width
-        
-        # Estimate width based on the proportion of the relevant text length to the total text length
-        total_text_length = len(ocr_result.text)
-        relevant_text_length = len(relevant_text)
-        
-        if total_text_length == 0:
-            return 0  # Avoid division by zero
-        
-        # Proportion of the relevant text to the total text
-        proportion = relevant_text_length / total_text_length
-        
-        # Estimate the width based on the proportion
-        estimated_width = int(proportion * ocr_result.width)
-        
-        return estimated_width
+                all_text_line_results = map_back_entity_results(
+                    page_analyser_result, 
+                    page_text_mapping, 
+                    all_text_line_results
+                )
 
+        current_batch = ""
+        current_batch_mapping = []
+        batch_char_count = 0
+        batch_word_count = 0
 
-    # def estimate_width(self, ocr_result: OCRResult, start: int, end: int) -> int:
-    #     # Extract the relevant text portion
-    #     relevant_text = ocr_result.text[start:end]
-        
-    #     # Check if the relevant text is the entire text of the OCR result
-    #     if relevant_text == ocr_result.text:
-    #         return ocr_result.width
-        
-    #     # Estimate the font size based on the height of the bounding box
-    #     estimated_font_size = ocr_result.height + 4
-        
-    #     # Create a blank image with enough width to measure the text
-    #     dummy_image = Image.new('RGB', (1000, 50), color=(255, 255, 255))
-    #     draw = ImageDraw.Draw(dummy_image)
-        
-    #     # Specify the font and size
-    #     try:
-    #         font = ImageFont.truetype("arial.ttf", estimated_font_size)  # Adjust the font file as needed
-    #     except IOError:
-    #         font = ImageFont.load_default()  # Fallback to default font if the specified font is not found
-        
-    #     # Draw the relevant text on the image
-    #     draw.text((0, 0), relevant_text, fill=(0, 0, 0), font=font)
-        
-    #     # Save the image for debugging purposes
-    #     dummy_image.save("debug_image.png")
-        
-    #     # Use pytesseract to get the bounding box of the relevant text
-    #     bbox = pytesseract.image_to_boxes(dummy_image, config=self.tesseract_config)
-        
-    #     # Print the bbox for debugging
-    #     print("Bounding box:", bbox)
-        
-    #     # Calculate the width from the bounding box
-    #     if bbox:
-    #         try:
-    #             # Initialize min_left and max_right with extreme values
-    #             min_left = float('inf')
-    #             max_right = float('-inf')
+        for i, text_line in enumerate(line_level_text_results_list):
+            words = text_line.text.split()
+            word_start_positions = []
+            
+            # Calculate word start positions within the line
+            current_pos = 0
+            for word in words:
+                word_start_positions.append(current_pos)
+                current_pos += len(word) + 1  # +1 for space
+            
+            for word_idx, word in enumerate(words):
+                new_batch_char_count = len(current_batch) + len(word) + 1
                 
-    #             # Split the bbox string into lines
-    #             bbox_lines = bbox.splitlines()
-                
-    #             for line in bbox_lines:
-    #                 parts = line.split()
-    #                 if len(parts) == 6:
-    #                     _, left, _, right, _, _ = parts
-    #                     left = int(left)
-    #                     right = int(right)
-    #                     min_left = min(min_left, left)
-    #                     max_right = max(max_right, right)
-                
-    #             width = max_right - min_left
-    #         except ValueError as e:
-    #             print("Error parsing bounding box:", e)
-    #             width = 0
-    #     else:
-    #         width = 0
+                if batch_word_count >= 50 or new_batch_char_count >= 200:
+                    # Process current batch
+                    all_text_line_results = do_aws_comprehend_call(
+                        current_batch,
+                        current_batch_mapping,
+                        comprehend_client,
+                        language,
+                        allow_list,
+                        chosen_redact_comprehend_entities,
+                        all_text_line_results
+                    )
+                    comprehend_query_number += 1
+                    
+                    # Start new batch
+                    current_batch = word
+                    batch_word_count = 1
+                    batch_char_count = len(word)
+                    current_batch_mapping = [(0, i, text_line, line_characters[i], word_start_positions[word_idx])]
+                else:
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+                    
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append((
+                            batch_char_count - len(word),
+                            i,
+                            text_line,
+                            line_characters[i],
+                            word_start_positions[word_idx]  # Add the word's start position within its line
+                        ))
 
-    #     print("Estimated width:", width)
+        # Process final batch
+        if current_batch:
+            all_text_line_results = do_aws_comprehend_call(
+                current_batch,
+                current_batch_mapping,
+                comprehend_client,
+                language,
+                allow_list,
+                chosen_redact_comprehend_entities,
+                all_text_line_results
+            )
+            comprehend_query_number += 1
+
+    # Process results for each line
+    for i, text_line in enumerate(line_level_text_results_list):
+        line_results = next((results for idx, results in all_text_line_results if idx == i), [])
         
-    #     return width
+        if line_results:
+            text_line_bounding_boxes = merge_text_bounding_boxes(
+                line_results,
+                line_characters[i]
+            )
+            
+            page_analyser_results.extend(line_results)
+            page_analysed_bounding_boxes.extend(text_line_bounding_boxes)
 
+    return page_analysed_bounding_boxes
 
+def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combine_pixel_dist: int = 20, vertical_padding: int = 0):
+    '''
+    Merge identified bounding boxes containing PII that are very close to one another
+    '''
+    analysed_bounding_boxes = []
+    original_bounding_boxes = []  # List to hold original bounding boxes
+
+    if len(analyser_results) > 0 and len(characters) > 0:
+        # Extract bounding box coordinates for sorting
+        bounding_boxes = []
+        for result in analyser_results:
+            #print("Result:", result)
+            char_boxes = [char.bbox for char in characters[result.start:result.end] if isinstance(char, LTChar)]
+            char_text = [char._text for char in characters[result.start:result.end] if isinstance(char, LTChar)]
+            if char_boxes:
+                # Calculate the bounding box that encompasses all characters
+                left = min(box[0] for box in char_boxes)
+                bottom = min(box[1] for box in char_boxes)
+                right = max(box[2] for box in char_boxes)
+                top = max(box[3] for box in char_boxes) + vertical_padding
+                bbox = [left, bottom, right, top]
+                bounding_boxes.append((bottom, left, result, bbox, char_text))  # (y, x, result, bbox, text)
+
+                # Store original bounding boxes
+                original_bounding_boxes.append({"text": "".join(char_text), "boundingBox": bbox, "result": copy.deepcopy(result)})
+                #print("Original bounding boxes:", original_bounding_boxes)
+
+        # Sort the results by y-coordinate and then by x-coordinate
+        bounding_boxes.sort()
+
+        merged_bounding_boxes = []
+        current_box = None
+        current_y = None
+        current_result = None
+        current_text = []
+
+        for y, x, result, next_box, text in bounding_boxes:
+            if current_y is None or current_box is None:
+                # Initialize the first bounding box
+                current_box = next_box
+                current_y = next_box[1]
+                current_result = result
+                current_text = list(text)
+            else:
+                vertical_diff_bboxes = abs(next_box[1] - current_y)
+                horizontal_diff_bboxes = abs(next_box[0] - current_box[2])
+
+                if vertical_diff_bboxes <= 5 and horizontal_diff_bboxes <= combine_pixel_dist:
+                    # Merge bounding boxes
+                    #print("Merging boxes")
+                    merged_box = current_box.copy()
+                    merged_result = current_result
+                    merged_text = current_text.copy()
+
+                    merged_box[2] = next_box[2]  # Extend horizontally
+                    merged_box[3] = max(current_box[3], next_box[3])  # Adjust the top
+                    merged_result.end = max(current_result.end, result.end)  # Extend text range
+                    try:
+                        if current_result.entity_type != result.entity_type:
+                            merged_result.entity_type = current_result.entity_type + " - " + result.entity_type
+                        else:
+                            merged_result.entity_type = current_result.entity_type
+                    except Exception as e:
+                        print("Unable to combine result entity types:", e)
+                    if current_text:
+                        merged_text.append(" ")  # Add space between texts
+                    merged_text.extend(text)
+
+                    merged_bounding_boxes.append({
+                        "text": "".join(merged_text),
+                        "boundingBox": merged_box,
+                        "result": merged_result
+                    })
+
+                else:
+                    # Start a new bounding box
+                    current_box = next_box
+                    current_y = next_box[1]
+                    current_result = result
+                    current_text = list(text)
+
+        # Combine original and merged bounding boxes
+        analysed_bounding_boxes.extend(original_bounding_boxes)
+        analysed_bounding_boxes.extend(merged_bounding_boxes)
+
+        #print("Analysed bounding boxes:", analysed_bounding_boxes)
+
+    return analysed_bounding_boxes
 
 # Function to combine OCR results into line-level results
 def combine_ocr_results(ocr_results, x_threshold=50, y_threshold=12):
@@ -925,16 +846,7 @@ def combine_ocr_results(ocr_results, x_threshold=50, y_threshold=12):
 
                 # Commit the current line and start a new one
                 combined_results.append(current_bbox)
-                # new_format_results[current_bbox.text] = { # f"combined_text_{line_counter}"
-                #     'bounding_box': (current_bbox.left, current_bbox.top, 
-                #                      current_bbox.left + current_bbox.width, 
-                #                      current_bbox.top + current_bbox.height),
-                #     'words': [{'text': word.text, 
-                #                'bounding_box': (word.left, word.top, 
-                #                                 word.left + word.width, 
-                #                                 word.top + word.height)} 
-                #               for word in current_line]
-                # }
+
                 new_format_results["text_line_" + str(line_counter)] = create_ocr_result_with_children(new_format_results, line_counter, current_bbox, current_line)
 
                 line_counter += 1
@@ -944,19 +856,351 @@ def combine_ocr_results(ocr_results, x_threshold=50, y_threshold=12):
     # Append the last line
     if current_bbox:
         combined_results.append(current_bbox)
-        # new_format_results[current_bbox.text] = { # f"combined_text_{line_counter}"
-        #     'bounding_box': (current_bbox.left, current_bbox.top, 
-        #                      current_bbox.left + current_bbox.width, 
-        #                      current_bbox.top + current_bbox.height),
-        #     'words': [{'text': word.text, 
-        #                'bounding_box': (word.left, word.top, 
-        #                                 word.left + word.width, 
-        #                                 word.top + word.height)} 
-        #               for word in current_line]
-        # }
 
         new_format_results["text_line_" + str(line_counter)] = create_ocr_result_with_children(new_format_results, line_counter, current_bbox, current_line)
 
 
     return combined_results, new_format_results
 
+class CustomImageAnalyzerEngine:
+    def __init__(
+        self,
+        analyzer_engine: Optional[AnalyzerEngine] = None,
+        tesseract_config: Optional[str] = None,
+        image_preprocessor: Optional[ImagePreprocessor] = None
+    ):
+        if not analyzer_engine:
+            analyzer_engine = AnalyzerEngine()
+        self.analyzer_engine = analyzer_engine
+        self.tesseract_config = tesseract_config or '--oem 3 --psm 11'
+
+        if not image_preprocessor:
+            image_preprocessor = ContrastSegmentedImageEnhancer()
+            #print(image_preprocessor)
+        self.image_preprocessor = image_preprocessor
+
+    def perform_ocr(self, image: Union[str, Image.Image, np.ndarray]) -> List[OCRResult]:
+        # Ensure image is a PIL Image
+        if isinstance(image, str):
+            image = Image.open(image)
+        elif isinstance(image, np.ndarray):
+            image = Image.fromarray(image)
+
+        image_processed, preprocessing_metadata = self.image_preprocessor.preprocess_image(image)
+
+        ocr_data = pytesseract.image_to_data(image_processed, output_type=pytesseract.Output.DICT, config=self.tesseract_config)
+
+        if preprocessing_metadata and ("scale_factor" in preprocessing_metadata):
+            ocr_result = self._scale_bbox_results(
+                ocr_data, preprocessing_metadata["scale_factor"]
+            )
+
+        ocr_result = self.remove_space_boxes(ocr_result)
+        
+        # Filter out empty strings and low confidence results
+        valid_indices = [i for i, text in enumerate(ocr_result['text']) if text.strip() and int(ocr_result['conf'][i]) > 0]
+        
+        return [
+            OCRResult(
+                text=clean_unicode_text(ocr_result['text'][i]),
+                left=ocr_result['left'][i],
+                top=ocr_result['top'][i],
+                width=ocr_result['width'][i],
+                height=ocr_result['height'][i]
+            )
+            for i in valid_indices
+        ]
+
+    def analyze_text(
+        self, 
+        line_level_ocr_results: List[OCRResult], 
+        ocr_results_with_children: Dict[str, Dict],
+        chosen_redact_comprehend_entities: List[str],
+        pii_identification_method: str = "Local",
+        comprehend_client = "",      
+        **text_analyzer_kwargs
+    ) -> List[CustomImageRecognizerResult]:
+
+        page_text = ""
+        page_text_mapping = []
+        all_text_line_results = []
+        comprehend_query_number = 0
+
+        # Collect all text and create mapping
+        for i, line_level_ocr_result in enumerate(line_level_ocr_results):
+            if page_text:
+                page_text += " "
+            start_pos = len(page_text)
+            page_text += line_level_ocr_result.text
+            # Note: We're not passing line_characters here since it's not needed for this use case
+            page_text_mapping.append((start_pos, i, line_level_ocr_result, None))
+
+        # Process using either Local or AWS Comprehend
+        if pii_identification_method == "Local":
+            analyzer_result = self.analyzer_engine.analyze(
+                text=page_text,
+                **text_analyzer_kwargs
+            )
+            all_text_line_results = map_back_entity_results(
+                analyzer_result,
+                page_text_mapping,
+                all_text_line_results
+            )
+
+        elif pii_identification_method == "AWS Comprehend":
+            # Handle custom entities first
+            if custom_entities:
+                custom_redact_entities = [
+                    entity for entity in chosen_redact_comprehend_entities 
+                    if entity in custom_entities
+                ]
+                if custom_redact_entities:
+                    text_analyzer_kwargs["entities"] = custom_redact_entities
+                    page_analyser_result = self.analyzer_engine.analyze(
+                        text=page_text,
+                        **text_analyzer_kwargs
+                    )
+                    all_text_line_results = map_back_entity_results(
+                        page_analyser_result,
+                        page_text_mapping,
+                        all_text_line_results
+                    )
+
+            # Process text in batches for AWS Comprehend
+            current_batch = ""
+            current_batch_mapping = []
+            batch_char_count = 0
+            batch_word_count = 0
+
+            for i, text_line in enumerate(line_level_ocr_results):
+                words = text_line.text.split()
+                word_start_positions = []
+                current_pos = 0
+                
+                for word in words:
+                    word_start_positions.append(current_pos)
+                    current_pos += len(word) + 1
+
+                for word_idx, word in enumerate(words):
+                    new_batch_char_count = len(current_batch) + len(word) + 1
+                    
+                    if batch_word_count >= 50 or new_batch_char_count >= 200:
+                        # Process current batch
+                        all_text_line_results = do_aws_comprehend_call(
+                            current_batch,
+                            current_batch_mapping,
+                            comprehend_client,
+                            text_analyzer_kwargs["language"],
+                            text_analyzer_kwargs.get('allow_list', []),
+                            chosen_redact_comprehend_entities,
+                            all_text_line_results
+                        )
+                        comprehend_query_number += 1
+                        
+                        # Reset batch
+                        current_batch = word
+                        batch_word_count = 1
+                        batch_char_count = len(word)
+                        current_batch_mapping = [(0, i, text_line, None, word_start_positions[word_idx])]
+                    else:
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+                        
+                        if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                            current_batch_mapping.append((
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                None,
+                                word_start_positions[word_idx]
+                            ))
+
+            # Process final batch if any
+            if current_batch:
+                all_text_line_results = do_aws_comprehend_call(
+                    current_batch,
+                    current_batch_mapping,
+                    comprehend_client,
+                    text_analyzer_kwargs["language"],
+                    text_analyzer_kwargs.get('allow_list', []),
+                    chosen_redact_comprehend_entities,
+                    all_text_line_results
+                )
+                comprehend_query_number += 1
+
+        
+
+        # Process results and create bounding boxes
+        combined_results = []
+        for i, text_line in enumerate(line_level_ocr_results):
+            line_results = next((results for idx, results in all_text_line_results if idx == i), [])
+            if line_results and i < len(ocr_results_with_children):
+                child_level_key = list(ocr_results_with_children.keys())[i]
+                ocr_results_with_children_line_level = ocr_results_with_children[child_level_key]
+                
+                for result in line_results:
+                    bbox_results = self.map_analyzer_results_to_bounding_boxes(
+                        [result],
+                        [OCRResult(
+                            text=text_line.text[result.start:result.end],
+                            left=text_line.left,
+                            top=text_line.top,
+                            width=text_line.width,
+                            height=text_line.height
+                        )],
+                        text_line.text,
+                        text_analyzer_kwargs.get('allow_list', []),
+                        ocr_results_with_children_line_level
+                    )
+                    combined_results.extend(bbox_results)
+
+        return combined_results, comprehend_query_number
+
+    @staticmethod
+    def map_analyzer_results_to_bounding_boxes(
+    text_analyzer_results: List[RecognizerResult],
+    redaction_relevant_ocr_results: List[OCRResult],
+    full_text: str,
+    allow_list: List[str],
+    ocr_results_with_children_child_info: Dict[str, Dict]
+) -> List[CustomImageRecognizerResult]:
+        redaction_bboxes = []
+
+        for redaction_relevant_ocr_result in redaction_relevant_ocr_results:
+            #print("ocr_results_with_children_child_info:", ocr_results_with_children_child_info)
+
+            line_text = ocr_results_with_children_child_info['text']
+            line_length = len(line_text)
+            redaction_text = redaction_relevant_ocr_result.text
+
+            # print(f"Processing line: '{line_text}'")
+            
+            for redaction_result in text_analyzer_results:
+                # print(f"Checking redaction result: {redaction_result}")
+                # print("redaction_text:", redaction_text)
+                # print("line_length:", line_length)
+                # print("line_text:", line_text)
+                
+                # Check if the redaction text is no in the allow list
+                
+                if redaction_text not in allow_list:
+                    
+                    # Adjust start and end to be within line bounds
+                    start_in_line = max(0, redaction_result.start)
+                    end_in_line = min(line_length, redaction_result.end)
+                    
+                    # Get the matched text from this line
+                    matched_text = line_text[start_in_line:end_in_line]
+                    matched_words = matched_text.split()
+                    
+                    # print(f"Found match: '{matched_text}' in line")
+                    
+                    # Find the corresponding words in the OCR results
+                    matching_word_boxes = []
+                    for word_info in ocr_results_with_children_child_info.get('words', []):
+                        # Check if this word is part of our match
+                        if any(word.lower() in word_info['text'].lower() for word in matched_words):
+                            matching_word_boxes.append(word_info['bounding_box'])
+                            # print(f"Matched word: {word_info['text']}")
+                    
+                    if matching_word_boxes:
+                        # Calculate the combined bounding box for all matching words
+                        left = min(box[0] for box in matching_word_boxes)
+                        top = min(box[1] for box in matching_word_boxes)
+                        right = max(box[2] for box in matching_word_boxes)
+                        bottom = max(box[3] for box in matching_word_boxes)
+                        
+                        redaction_bboxes.append(
+                            CustomImageRecognizerResult(
+                                entity_type=redaction_result.entity_type,
+                                start=start_in_line,
+                                end=end_in_line,
+                                score=redaction_result.score,
+                                left=left,
+                                top=top,
+                                width=right - left,
+                                height=bottom - top,
+                                text=matched_text
+                            )
+                        )
+                        # print(f"Added bounding box for: '{matched_text}'")
+
+        return redaction_bboxes
+    
+    @staticmethod
+    def remove_space_boxes(ocr_result: dict) -> dict:
+        """Remove OCR bboxes that are for spaces.
+        :param ocr_result: OCR results (raw or thresholded).
+        :return: OCR results with empty words removed.
+        """
+        # Get indices of items with no text
+        idx = list()
+        for i, text in enumerate(ocr_result["text"]):
+            is_not_space = text.isspace() is False
+            if text != "" and is_not_space:
+                idx.append(i)
+
+        # Only retain items with text
+        filtered_ocr_result = {}
+        for key in list(ocr_result.keys()):
+            filtered_ocr_result[key] = [ocr_result[key][i] for i in idx]
+
+        return filtered_ocr_result
+    
+    @staticmethod
+    def _scale_bbox_results(
+        ocr_result: Dict[str, List[Union[int, str]]], scale_factor: float
+    ) -> Dict[str, float]:
+        """Scale down the bounding box results based on a scale percentage.
+        :param ocr_result: OCR results (raw).
+        :param scale_percent: Scale percentage for resizing the bounding box.
+        :return: OCR results (scaled).
+        """
+        scaled_results = deepcopy(ocr_result)
+        coordinate_keys = ["left", "top"]
+        dimension_keys = ["width", "height"]
+
+        for coord_key in coordinate_keys:
+            scaled_results[coord_key] = [
+                int(np.ceil((x) / (scale_factor))) for x in scaled_results[coord_key]
+            ]
+
+        for dim_key in dimension_keys:
+            scaled_results[dim_key] = [
+                max(1, int(np.ceil(x / (scale_factor))))
+                for x in scaled_results[dim_key]
+            ]
+        return scaled_results
+
+    @staticmethod
+    def estimate_x_offset(full_text: str, start: int) -> int:
+        # Estimate the x-offset based on character position
+        # This is a simple estimation and might need refinement for variable-width fonts
+        return int(start / len(full_text) * len(full_text))
+    
+    def estimate_width(self, ocr_result: OCRResult, start: int, end: int) -> int:
+        # Extract the relevant text portion
+        relevant_text = ocr_result.text[start:end]
+        
+        # If the relevant text is the same as the full text, return the full width
+        if relevant_text == ocr_result.text:
+            return ocr_result.width
+        
+        # Estimate width based on the proportion of the relevant text length to the total text length
+        total_text_length = len(ocr_result.text)
+        relevant_text_length = len(relevant_text)
+        
+        if total_text_length == 0:
+            return 0  # Avoid division by zero
+        
+        # Proportion of the relevant text to the total text
+        proportion = relevant_text_length / total_text_length
+        
+        # Estimate the width based on the proportion
+        estimated_width = int(proportion * ocr_result.width)
+        
+        return estimated_width

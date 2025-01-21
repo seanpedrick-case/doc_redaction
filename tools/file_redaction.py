@@ -25,13 +25,13 @@ from collections import defaultdict  # For efficient grouping
 
 from presidio_analyzer import RecognizerResult
 from tools.aws_functions import RUN_AWS_FUNCTIONS
-from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult
+from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction, merge_text_bounding_boxes
 from tools.file_conversion import process_file, image_dpi, convert_review_json_to_pandas_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser
 from tools.helper_functions import get_file_path_end, output_folder, clean_unicode_text, get_or_create_env_var, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
 from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult
-from tools.presidio_analyzer_custom import recognizer_result_from_dict
+from tools.presidio_analyzer_custom import recognizer_result_from_dict 
 
 # Number of pages to loop through before breaking. Currently set very high, as functions are breaking on time metrics (e.g. every 105 seconds), rather than on number of pages redacted.
 page_break_value = get_or_create_env_var('page_break_value', '50000')
@@ -136,6 +136,9 @@ def choose_and_run_redactor(file_paths:List[str],
     tic = time.perf_counter()
     all_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
 
+    print("prepared_pdf_file_paths:", prepared_pdf_file_paths[0])
+    review_out_file_paths = [prepared_pdf_file_paths[0]]
+
     if isinstance(custom_recogniser_word_list, pd.DataFrame):
         custom_recogniser_word_list = custom_recogniser_word_list.iloc[:,0].tolist()
 
@@ -158,7 +161,6 @@ def choose_and_run_redactor(file_paths:List[str],
     # If not the first time around, and the current page loop has been set to a huge number (been through all pages), reset current page to 0
     elif (first_loop_state == False) & (current_loop_page == 999):
         current_loop_page = 0
-
 
     if not out_file_paths:
         out_file_paths = []
@@ -184,21 +186,33 @@ def choose_and_run_redactor(file_paths:List[str],
             combined_out_message = '\n'.join(out_message)
         else:
             combined_out_message = out_message
+
+        if len(review_out_file_paths) == 1:
+
+            out_review_file_path = [x for x in out_file_paths if "review_file" in x]
+        
+            review_out_file_paths.extend(out_review_file_path)
         
         estimate_total_processing_time = sum_numbers_before_seconds(combined_out_message)
         print("Estimated total processing time:", str(estimate_total_processing_time))
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths
     
     # If we have reached the last page, return message
     if current_loop_page >= number_of_pages:
-        print("current_loop_page:", current_loop_page, "is equal to or greater than number of pages in document:", number_of_pages)
+        print("Reached last page of document:", current_loop_page)
 
         # Set to a very high number so as not to mix up with subsequent file processing by the user
         current_loop_page = 999
         combined_out_message = out_message
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
+        if len(review_out_file_paths) == 1:
+
+            out_review_file_path = [x for x in out_file_paths if "review_file" in x]
+        
+            review_out_file_paths.extend(out_review_file_path)
+
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths
 
     # Create allow list
     # If string, assume file path
@@ -221,7 +235,7 @@ def choose_and_run_redactor(file_paths:List[str],
             comprehend_client = ""
             out_message = "Cannot connect to AWS Comprehend service. Please choose another PII identification method."
             print(out_message)
-            return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
+            return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths
     else:
         comprehend_client = ""
         
@@ -233,7 +247,7 @@ def choose_and_run_redactor(file_paths:List[str],
             textract_client = ""
             out_message = "Cannot connect to AWS Textract. Please choose another text extraction method."
             print(out_message)
-            return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
+            return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths
     else:
         textract_client = ""
 
@@ -265,8 +279,9 @@ def choose_and_run_redactor(file_paths:List[str],
             file_path = file.name    
 
         if file_path:
-            file_path_without_ext = get_file_path_end(file_path)
-            print("Redacting file:", file_path_without_ext)
+            pdf_file_name_without_ext = get_file_path_end(file_path)
+            pdf_file_name_with_ext = os.path.basename(file_path)
+            print("Redacting file:", pdf_file_name_with_ext)
 
             is_a_pdf = is_pdf(file_path) == True
             if is_a_pdf == False and in_redact_method == text_ocr_option:
@@ -277,16 +292,16 @@ def choose_and_run_redactor(file_paths:List[str],
             out_message = "No file selected"
             print(out_message)
 
-            return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
+            return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths
 
         if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
 
             #Analyse and redact image-based pdf or image
             if is_pdf_or_image(file_path) == False:
                 out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
-                return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
+                return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths
 
-            print("Redacting file " + file_path_without_ext + " as an image-based file")
+            print("Redacting file " + pdf_file_name_with_ext + " as an image-based file")
 
             pymupdf_doc, all_decision_process_table, log_files_output_paths, new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number = redact_image_pdf(file_path,
              prepared_pdf_image_paths,
@@ -328,7 +343,7 @@ def choose_and_run_redactor(file_paths:List[str],
             
             if is_pdf(file_path) == False:
                 out_message = "Please upload a PDF file for text analysis. If you have an image, select 'Image analysis'."
-                return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
+                return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths
             
             # Analyse text-based pdf
             print('Redacting file as text-based PDF')
@@ -356,12 +371,12 @@ def choose_and_run_redactor(file_paths:List[str],
         else:
             out_message = "No redaction method selected"
             print(out_message)
-            return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
+            return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths
         
         # If at last page, save to file
         if current_loop_page >= number_of_pages:
 
-            print("Current page loop:", current_loop_page, "is greater or equal to number of pages:", number_of_pages)
+            print("Current page loop:", current_loop_page, "is the last page.")
             latest_file_completed += 1
             current_loop_page = 999
 
@@ -370,36 +385,43 @@ def choose_and_run_redactor(file_paths:List[str],
 
             # Save file
             if is_pdf(file_path) == False:
-                out_image_file_path = output_folder + file_path_without_ext + "_redacted_as_pdf.pdf"
-                pymupdf_doc[0].save(out_image_file_path, "PDF" ,resolution=image_dpi, save_all=False)#, append_images=pymupdf_doc[:1])
+                out_redacted_pdf_file_path = output_folder + pdf_file_name_without_ext + "_redacted_as_pdf.pdf"
+                #pymupdf_doc[0].save(out_redacted_pdf_file_path, "PDF" ,resolution=image_dpi, save_all=False)
+                #print("pymupdf_doc", pymupdf_doc)
+                #print("pymupdf_doc[0]", pymupdf_doc[0])
+                pymupdf_doc[-1].save(out_redacted_pdf_file_path, "PDF" ,resolution=image_dpi, save_all=False)#, append_images=pymupdf_doc[:1])
+                out_review_file_path = output_folder + pdf_file_name_without_ext + '_review_file.csv'
             
             else:
-                out_image_file_path = output_folder + file_path_without_ext + "_redacted.pdf"
-                pymupdf_doc.save(out_image_file_path)
+                out_redacted_pdf_file_path = output_folder + pdf_file_name_without_ext + "_redacted.pdf"
+                pymupdf_doc.save(out_redacted_pdf_file_path)
 
-            out_file_paths.append(out_image_file_path)
+            out_file_paths.append(out_redacted_pdf_file_path)
 
             #if log_files_output_paths:
             #    log_files_output_paths.extend(log_files_output_paths)
 
-            logs_output_file_name = out_image_file_path + "_decision_process_output.csv"
+
+            out_orig_pdf_file_path = output_folder + pdf_file_name_with_ext
+
+            logs_output_file_name = out_orig_pdf_file_path + "_decision_process_output.csv"
             all_decision_process_table.to_csv(logs_output_file_name, index = None, encoding="utf-8")
             log_files_output_paths.append(logs_output_file_name)
 
-            all_text_output_file_name = out_image_file_path + "_ocr_output.csv"
+            all_text_output_file_name = out_orig_pdf_file_path + "_ocr_output.csv"
             all_line_level_ocr_results_df.to_csv(all_text_output_file_name, index = None, encoding="utf-8")
             out_file_paths.append(all_text_output_file_name)
 
             # Save the gradio_annotation_boxes to a JSON file
             try:
-                print("Saving annotations to JSON")
+                #print("Saving annotations to JSON")
 
-                out_annotation_file_path = out_image_file_path + '_review_file.json'
+                out_annotation_file_path = out_orig_pdf_file_path + '_review_file.json'
                 with open(out_annotation_file_path, 'w') as f:
                     json.dump(annotations_all_pages, f)
                 log_files_output_paths.append(out_annotation_file_path)
 
-                print("Saving annotations to CSV")
+                #print("Saving annotations to CSV")
 
                 # Convert json to csv and also save this
                 #print("annotations_all_pages:", annotations_all_pages)
@@ -407,14 +429,14 @@ def choose_and_run_redactor(file_paths:List[str],
 
                 review_df = convert_review_json_to_pandas_df(annotations_all_pages, all_decision_process_table)
 
-                out_review_file_file_path = out_image_file_path + '_review_file.csv'
-                review_df.to_csv(out_review_file_file_path, index=None)
-                out_file_paths.append(out_review_file_file_path)
+                out_review_file_path = out_orig_pdf_file_path + '_review_file.csv'
+                review_df.to_csv(out_review_file_path, index=None)
+                out_file_paths.append(out_review_file_path)
 
                 print("Saved review file to csv")
 
             except Exception as e:
-                print("Could not save annotations to json file:", e)
+                print("Could not save annotations to json or csv file:", e)
 
             # Make a combined message for the file                
             if isinstance(out_message, list):
@@ -429,7 +451,7 @@ def choose_and_run_redactor(file_paths:List[str],
             combined_out_message = combined_out_message + " " + out_time_message  # Ensure this is a single string
 
             estimate_total_processing_time = sum_numbers_before_seconds(combined_out_message)
-            print("Estimated total processing time:", str(estimate_total_processing_time))
+            #print("Estimated total processing time:", str(estimate_total_processing_time))
 
         else:
             toc = time.perf_counter()
@@ -441,7 +463,7 @@ def choose_and_run_redactor(file_paths:List[str],
     if all_request_metadata:
         all_request_metadata_str = '\n'.join(all_request_metadata).strip()
 
-        all_request_metadata_file_path = output_folder + file_path_without_ext + "_textract_request_metadata.txt"   
+        all_request_metadata_file_path = output_folder + pdf_file_name_without_ext + "_textract_request_metadata.txt"   
 
         with open(all_request_metadata_file_path, "w") as f:
             f.write(all_request_metadata_str)
@@ -456,10 +478,15 @@ def choose_and_run_redactor(file_paths:List[str],
 
     # Ensure no duplicated output files
     log_files_output_paths = list(set(log_files_output_paths))
-    out_file_paths = list(set(out_file_paths))
+    out_file_paths = list(set(out_file_paths))    
+    review_out_file_paths = [prepared_pdf_file_paths[0], out_review_file_path]
+
+    #print("log_files_output_paths:", log_files_output_paths)
+    #print("out_file_paths:", out_file_paths)
+    #print("review_out_file_paths:", review_out_file_paths)
 
 
-    return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number
+    return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths
 
 def convert_pikepdf_coords_to_pymupdf(pymupdf_page, pikepdf_bbox, type="pikepdf_annot"):
     '''
@@ -930,14 +957,7 @@ def redact_image_pdf(file_path:str,
         nlp_analyser.registry.remove_recognizer("CUSTOM")
         new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
         #print("new_custom_recogniser:", new_custom_recogniser)
-        nlp_analyser.registry.add_recognizer(new_custom_recogniser)
-
-        # List all elements currently in the nlp_analyser registry
-        #print("Current recognizers in nlp_analyser registry:")
-        for recognizer_name in nlp_analyser.registry.recognizers:
-            print(recognizer_name)
-
-        
+        nlp_analyser.registry.add_recognizer(new_custom_recogniser)      
 
 
     image_analyser = CustomImageAnalyzerEngine(nlp_analyser)
@@ -1031,7 +1051,7 @@ def redact_image_pdf(file_path:str,
 
             #print("Image is in range of pages to redact")            
             if isinstance(image, str):
-                #print("image is a file path")
+                print("image is a file path", image)
                 image = Image.open(image)
 
             # Need image size to convert textract OCR outputs to the correct sizes
@@ -1137,7 +1157,7 @@ def redact_image_pdf(file_path:str,
                 all_image_annotations_boxes = []
 
                 for box in merged_redaction_bboxes:
-                    print("box:", box)
+                    #print("box:", box)
 
                     x0 = box.left
                     y0 = box.top
@@ -1299,6 +1319,8 @@ def get_text_container_characters(text_container:LTTextContainer):
                     for line in text_container
                     if isinstance(line, LTTextLine) or isinstance(line, LTTextLineHorizontal)
                     for char in line]
+        
+        #print("Initial characters:", characters)
     
         return characters
     return []
@@ -1312,6 +1334,7 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
     line_level_characters_out = []
     #all_line_level_characters_out = []
     character_objects_out = []  # New list to store character objects
+    # character_text_objects_out = []
 
     # Initialize variables
     full_text = ""
@@ -1326,12 +1349,19 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
     for char in char_objects:
         character_objects_out.append(char)  # Collect character objects
 
+        if not isinstance(char, LTAnno):
+            character_text = char.get_text()
+            # character_text_objects_out.append(character_text)        
+
         if isinstance(char, LTAnno):
+
+            # print("Character line:", "".join(character_text_objects_out))
+            # print("Char is an annotation object:", char)
 
             added_text = char.get_text()
         
             # Handle double quotes
-            added_text = added_text.replace('"', '\\"')  # Escape double quotes
+            #added_text = added_text.replace('"', '\\"')  # Escape double quotes
 
             # Handle space separately by finalizing the word
             full_text += added_text  # Adds space or newline
@@ -1348,7 +1378,7 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
                 if current_word:
                     word_bboxes.append((current_word, current_word_bbox))
                 # Create an OCRResult for the current line
-                line_level_results_out.append(OCRResult(full_text, round(overall_bbox[0], 2), round(overall_bbox[1], 2), round(overall_bbox[2] - overall_bbox[0], 2), round(overall_bbox[3] - overall_bbox[1], 2)))
+                line_level_results_out.append(OCRResult(full_text.strip(), round(overall_bbox[0], 2), round(overall_bbox[1], 2), round(overall_bbox[2] - overall_bbox[0], 2), round(overall_bbox[3] - overall_bbox[1], 2)))
                 line_level_characters_out.append(character_objects_out)
                 # Reset for the next line
                 character_objects_out = []
@@ -1396,119 +1426,15 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
             # Convert special characters to a human-readable format
             #full_text = full_text.encode('latin1', errors='replace').decode('utf-8')
             full_text = clean_unicode_text(full_text)
+            full_text = full_text.strip()
         #print("full_text:", full_text)
 
-        line_level_results_out.append(OCRResult(full_text, round(overall_bbox[0],2), round(overall_bbox[1], 2), round(overall_bbox[2]-overall_bbox[0],2), round(overall_bbox[3]-overall_bbox[1],2)))
+        line_level_results_out.append(OCRResult(full_text.strip(), round(overall_bbox[0],2), round(overall_bbox[1], 2), round(overall_bbox[2]-overall_bbox[0],2), round(overall_bbox[3]-overall_bbox[1],2)))
 
     #line_level_characters_out = character_objects_out        
 
     return line_level_results_out, line_level_characters_out  # Return both results and character objects
 
-def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combine_pixel_dist: int = 20, vertical_padding: int = 0):
-    '''
-    Merge identified bounding boxes containing PII that are very close to one another
-    '''
-    analysed_bounding_boxes = []
-    original_bounding_boxes = []  # List to hold original bounding boxes
-
-    if len(analyser_results) > 0 and len(characters) > 0:
-        # Extract bounding box coordinates for sorting
-        bounding_boxes = []
-        for result in analyser_results:
-            #print("Result:", result)
-            char_boxes = [char.bbox for char in characters[result.start:result.end] if isinstance(char, LTChar)]
-            char_text = [char._text for char in characters[result.start:result.end] if isinstance(char, LTChar)]
-            if char_boxes:
-                # Calculate the bounding box that encompasses all characters
-                left = min(box[0] for box in char_boxes)
-                bottom = min(box[1] for box in char_boxes)
-                right = max(box[2] for box in char_boxes)
-                top = max(box[3] for box in char_boxes) + vertical_padding
-                bbox = [left, bottom, right, top]
-                bounding_boxes.append((bottom, left, result, bbox, char_text))  # (y, x, result, bbox, text)
-
-                # Store original bounding boxes
-                original_bounding_boxes.append({"text": "".join(char_text), "boundingBox": bbox, "result": copy.deepcopy(result)})
-                #print("Original bounding boxes:", original_bounding_boxes)
-
-        # Sort the results by y-coordinate and then by x-coordinate
-        bounding_boxes.sort()
-
-        merged_bounding_boxes = []
-        current_box = None
-        current_y = None
-        current_result = None
-        current_text = []
-
-        for y, x, result, next_box, text in bounding_boxes:
-            if current_y is None or current_box is None:
-                # Initialize the first bounding box
-                current_box = next_box
-                current_y = next_box[1]
-                current_result = result
-                current_text = list(text)
-            else:
-                vertical_diff_bboxes = abs(next_box[1] - current_y)
-                horizontal_diff_bboxes = abs(next_box[0] - current_box[2])
-
-                if vertical_diff_bboxes <= 5 and horizontal_diff_bboxes <= combine_pixel_dist:
-                    # Merge bounding boxes
-                    #print("Merging boxes")
-                    merged_box = current_box.copy()
-                    merged_result = current_result
-                    merged_text = current_text.copy()
-
-                    #print("current_box_max_x:", current_box[2])
-                    #print("char_max_x:", next_box[2])
-
-                    merged_box[2] = next_box[2]  # Extend horizontally
-                    merged_box[3] = max(current_box[3], next_box[3])  # Adjust the top
-                    merged_result.end = max(current_result.end, result.end)  # Extend text range
-                    try:
-                        if current_result.entity_type != result.entity_type:
-                            merged_result.entity_type = current_result.entity_type + " - " + result.entity_type
-                        else:
-                            merged_result.entity_type = current_result.entity_type
-                    except Exception as e:
-                        print("Unable to combine result entity types:", e)
-                    if current_text:
-                        merged_text.append(" ")  # Add space between texts
-                    merged_text.extend(text)
-
-                    merged_bounding_boxes.append({
-                        "text": "".join(merged_text),
-                        "boundingBox": merged_box,
-                        "result": merged_result
-                    })
-
-                else:
-                    # Save the current merged box before starting a new one
-                    # merged_bounding_boxes.append({
-                    #     "text": "".join(current_text),
-                    #     "boundingBox": current_box,
-                    #     "result": current_result
-                    # })
-                    # Start a new bounding box
-                    current_box = next_box
-                    current_y = next_box[1]
-                    current_result = result
-                    current_text = list(text)
-
-        # Handle the last box
-        # if current_box is not None:
-        #     merged_bounding_boxes.append({
-        #         "text": "".join(current_text),
-        #         "boundingBox": current_box,
-        #         "result": current_result
-        #     })
-
-        # Combine original and merged bounding boxes
-        analysed_bounding_boxes.extend(original_bounding_boxes)
-        analysed_bounding_boxes.extend(merged_bounding_boxes)
-
-        #print("Analysed bounding boxes:", analysed_bounding_boxes)
-
-    return analysed_bounding_boxes
 
 def create_text_redaction_process_results(analyser_results, analysed_bounding_boxes, page_num):
     decision_process_table = pd.DataFrame()
@@ -1558,6 +1484,182 @@ def create_pikepdf_annotations_for_bounding_boxes(analysed_bounding_boxes):
         )
         pikepdf_annotations_on_page.append(annotation)
     return pikepdf_annotations_on_page
+
+# def run_page_text_redaction(language: str,  # Language of the PDF content
+#     chosen_redact_entities: List[str],  # List of entities to be redacted
+#     chosen_redact_comprehend_entities: List[str],
+#     line_level_text_results_list: List[str],
+#     line_characters: List,
+#     page_analyser_results: List = [],
+#     page_analysed_bounding_boxes: List = [],
+#     comprehend_client = None, # Connection to AWS Comprehend
+#     allow_list: List[str] = None,  # Optional list of allowed entities
+#     pii_identification_method: str = "Local"
+#     ):
+
+#     # Initialize batching variables
+#     current_batch = ""
+#     current_batch_mapping = []  # List of (start_pos, line_index, OCRResult) tuples
+#     all_text_line_results = []  # Store results for all lines
+#     text_container_analyser_results = []
+#     text_container_analysed_bounding_boxes = []
+
+#     # First pass: collect all lines into batches
+#     for i, text_line in enumerate(line_level_text_results_list):
+#         if chosen_redact_entities:
+#             if pii_identification_method == "Local":
+
+#                 #print("chosen_redact_entities:", chosen_redact_entities)
+
+#                 # Process immediately for local analysis
+#                 text_line_analyser_result = nlp_analyser.analyze(
+#                     text=text_line.text,
+#                     language=language,
+#                     entities=chosen_redact_entities,
+#                     score_threshold=score_threshold,
+#                     return_decision_process=True,
+#                     allow_list=allow_list
+#                 )
+#                 all_text_line_results.append((i, text_line_analyser_result))
+
+                                                
+#             elif pii_identification_method == "AWS Comprehend":
+
+#                 # First use the local Spacy model to pick up custom entities that AWS Comprehend can't search for.
+#                 custom_redact_entities = [entity for entity in chosen_redact_comprehend_entities if entity in custom_entities]
+
+
+#                 text_line_analyser_result = nlp_analyser.analyze(
+#                     text=text_line.text,
+#                     language=language,
+#                     entities=custom_redact_entities,
+#                     score_threshold=score_threshold,
+#                     return_decision_process=True,
+#                     allow_list=allow_list
+#                 )
+#                 all_text_line_results.append((i, text_line_analyser_result))
+
+
+#                 if len(text_line.text) >= 3:
+#                     # Add separator between lines
+#                     if current_batch:
+#                         current_batch += " | "
+                    
+#                     start_pos = len(current_batch)
+#                     current_batch += text_line.text
+#                     current_batch_mapping.append((start_pos, i, text_line))
+
+#                     # Process batch if approaching 300 characters or last line
+#                     if len(current_batch) >= 200 or i == len(line_level_text_results_list) - 1:
+#                         print("length of text for Comprehend:", len(current_batch))
+                        
+#                         try:
+#                             response = comprehend_client.detect_pii_entities(
+#                                 Text=current_batch,
+#                                 LanguageCode=language
+#                             )
+#                         except Exception as e:
+#                             print(e)
+#                             time.sleep(3)
+#                             response = comprehend_client.detect_pii_entities(
+#                                 Text=current_batch,
+#                                 LanguageCode=language
+#                             )
+
+#                         comprehend_query_number += 1
+
+#                         # Process response and map back to original lines
+#                         if response and "Entities" in response:
+#                             for entity in response["Entities"]:
+#                                 entity_start = entity["BeginOffset"]
+#                                 entity_end = entity["EndOffset"]
+
+#                                 # Find which line this entity belongs to
+#                                 for batch_start, line_idx, original_line in current_batch_mapping:
+#                                     batch_end = batch_start + len(original_line.text)
+
+#                                     # Check if entity belongs to this line
+#                                     if batch_start <= entity_start < batch_end:
+#                                         # Adjust offsets relative to original line
+#                                         relative_start = entity_start - batch_start
+#                                         relative_end = min(entity_end - batch_start, len(original_line.text))
+                                        
+#                                         result_text = original_line.text[relative_start:relative_end]
+
+#                                         if result_text not in allow_list:
+#                                             if entity.get("Type") in chosen_redact_comprehend_entities:
+#                                                 # Create adjusted entity
+#                                                 adjusted_entity = entity.copy()
+#                                                 adjusted_entity["BeginOffset"] = relative_start
+#                                                 adjusted_entity["EndOffset"] = relative_end
+
+#                                                 recogniser_entity = recognizer_result_from_dict(adjusted_entity)
+                                                
+#                                                 # Add to results for this line
+#                                                 existing_results = next((results for idx, results in all_text_line_results if idx == line_idx), [])
+#                                                 if not existing_results:
+#                                                     all_text_line_results.append((line_idx, [recogniser_entity]))
+#                                                 else:
+#                                                     existing_results.append(recogniser_entity)
+
+#                         # Reset batch
+#                         current_batch = ""
+#                         current_batch_mapping = []
+
+#     # Second pass: process results for each line
+#     for i, text_line in enumerate(line_level_text_results_list):
+#         text_line_analyser_result = []
+#         text_line_bounding_boxes = []
+
+#         # Get results for this line
+#         line_results = next((results for idx, results in all_text_line_results if idx == i), [])
+        
+#         if line_results:
+#             text_line_analyser_result = line_results
+
+#             #print("Analysed text container, now merging bounding boxes")
+
+#             # Merge bounding boxes if very close together
+#             text_line_bounding_boxes = merge_text_bounding_boxes(text_line_analyser_result, line_characters[i])
+
+#             #print("merged bounding boxes")
+
+#             text_container_analyser_results.extend(text_line_analyser_result)
+#             #text_container_analysed_bounding_boxes.extend(text_line_bounding_boxes)
+
+#             #print("text_container_analyser_results:", text_container_analyser_results)
+
+#             page_analyser_results.extend(text_container_analyser_results)  # Add this line
+#             page_analysed_bounding_boxes.extend(text_line_bounding_boxes)  # Add this line
+
+#     return page_analysed_bounding_boxes
+
+# def map_back_entity_results(page_analyser_result, page_text_mapping, all_text_line_results):
+#     for entity in page_analyser_result:
+#         entity_start = entity.start
+#         entity_end = entity.end
+        
+#         for batch_start, line_idx, original_line, chars in page_text_mapping:
+#             batch_end = batch_start + len(original_line.text)
+            
+#             if batch_start <= entity_start < batch_end:
+#                 relative_start = entity_start - batch_start
+#                 relative_end = min(entity_end - batch_start, len(original_line.text))
+                
+#                 adjusted_entity = copy.deepcopy(entity)
+#                 adjusted_entity.start = relative_start
+#                 adjusted_entity.end = relative_end
+                
+#                 existing_entry = next((entry for idx, entry in all_text_line_results if idx == line_idx), None)
+                
+#                 if existing_entry is None:
+#                     all_text_line_results.append((line_idx, [adjusted_entity]))
+#                 else:
+#                     existing_entry.append(adjusted_entity)
+#                 break
+
+#     return all_text_line_results
+
 
 def redact_text_pdf(
     filename: str,  # Path to the PDF file to be redacted
@@ -1681,20 +1783,22 @@ def redact_text_pdf(
 
             for page_layout in extract_pages(filename, page_numbers = [page_no], maxpages=1):
                 
+                all_line_characters = []
+                all_line_level_text_results_list = []
                 page_analyser_results = []
                 page_analysed_bounding_boxes = []            
                 
                 characters = []
                 pikepdf_annotations_on_page = []
                 decision_process_table_on_page = pd.DataFrame()    
-                page_text_outputs = pd.DataFrame()  
+                page_text_ocr_outputs = pd.DataFrame()  
 
                 if analysis_type == text_ocr_option:
                     for n, text_container in enumerate(page_layout):
-
-                        text_container_analyser_results = []
-                        text_container_analysed_bounding_boxes = []
+                        
                         characters = []
+
+                        #print("text container:", text_container)
 
                         if isinstance(text_container, LTTextContainer) or isinstance(text_container, LTAnno):
                             characters = get_text_container_characters(text_container)
@@ -1702,152 +1806,41 @@ def redact_text_pdf(
                         # Create dataframe for all the text on the page
                         line_level_text_results_list, line_characters = create_text_bounding_boxes_from_characters(characters)
 
-                        # Create page_text_outputs (OCR format outputs)
+                        ### Create page_text_ocr_outputs (OCR format outputs)
                         if line_level_text_results_list:
                             # Convert to DataFrame and add to ongoing logging table
                             line_level_text_results_df = pd.DataFrame([{
                                 'page': page_no + 1,
-                                'text': result.text,
+                                'text': (result.text).strip(),
                                 'left': result.left,
                                 'top': result.top,
                                 'width': result.width,
                                 'height': result.height
                             } for result in line_level_text_results_list])
 
-                            page_text_outputs = pd.concat([page_text_outputs, line_level_text_results_df])
+                            page_text_ocr_outputs = pd.concat([page_text_ocr_outputs, line_level_text_results_df])
 
-                        # Initialize batching variables
-                        current_batch = ""
-                        current_batch_mapping = []  # List of (start_pos, line_index, OCRResult) tuples
-                        all_text_line_results = []  # Store results for all lines
+                        all_line_level_text_results_list.extend(line_level_text_results_list)
+                        all_line_characters.extend(line_characters)
 
-                        # First pass: collect all lines into batches
-                        for i, text_line in enumerate(line_level_text_results_list):
-                            if chosen_redact_entities:
-                                if pii_identification_method == "Local":
+                    ### REDACTION
 
-                                    #print("chosen_redact_entities:", chosen_redact_entities)
-
-                                    # Process immediately for local analysis
-                                    text_line_analyser_result = nlp_analyser.analyze(
-                                        text=text_line.text,
-                                        language=language,
-                                        entities=chosen_redact_entities,
-                                        score_threshold=score_threshold,
-                                        return_decision_process=True,
-                                        allow_list=allow_list
-                                    )
-                                    all_text_line_results.append((i, text_line_analyser_result))
-
-                                                                    
-                                elif pii_identification_method == "AWS Comprehend":
-
-                                    # First use the local Spacy model to pick up custom entities that AWS Comprehend can't search for.
-                                    custom_redact_entities = [entity for entity in chosen_redact_comprehend_entities if entity in custom_entities]
-
-
-                                    text_line_analyser_result = nlp_analyser.analyze(
-                                        text=text_line.text,
-                                        language=language,
-                                        entities=custom_redact_entities,
-                                        score_threshold=score_threshold,
-                                        return_decision_process=True,
-                                        allow_list=allow_list
-                                    )
-                                    all_text_line_results.append((i, text_line_analyser_result))
-
-
-                                    if len(text_line.text) >= 3:
-                                        # Add separator between lines
-                                        if current_batch:
-                                            current_batch += " | "
-                                        
-                                        start_pos = len(current_batch)
-                                        current_batch += text_line.text
-                                        current_batch_mapping.append((start_pos, i, text_line))
-
-                                        # Process batch if approaching 300 characters or last line
-                                        if len(current_batch) >= 200 or i == len(line_level_text_results_list) - 1:
-                                            print("length of text for Comprehend:", len(current_batch))
-                                            
-                                            try:
-                                                response = comprehend_client.detect_pii_entities(
-                                                    Text=current_batch,
-                                                    LanguageCode=language
-                                                )
-                                            except Exception as e:
-                                                print(e)
-                                                time.sleep(3)
-                                                response = comprehend_client.detect_pii_entities(
-                                                    Text=current_batch,
-                                                    LanguageCode=language
-                                                )
-
-                                            comprehend_query_number += 1
-
-                                            # Process response and map back to original lines
-                                            if response and "Entities" in response:
-                                                for entity in response["Entities"]:
-                                                    entity_start = entity["BeginOffset"]
-                                                    entity_end = entity["EndOffset"]
-
-                                                    # Find which line this entity belongs to
-                                                    for batch_start, line_idx, original_line in current_batch_mapping:
-                                                        batch_end = batch_start + len(original_line.text)
-
-                                                        # Check if entity belongs to this line
-                                                        if batch_start <= entity_start < batch_end:
-                                                            # Adjust offsets relative to original line
-                                                            relative_start = entity_start - batch_start
-                                                            relative_end = min(entity_end - batch_start, len(original_line.text))
-                                                            
-                                                            result_text = original_line.text[relative_start:relative_end]
-
-                                                            if result_text not in allow_list:
-                                                                if entity.get("Type") in chosen_redact_comprehend_entities:
-                                                                    # Create adjusted entity
-                                                                    adjusted_entity = entity.copy()
-                                                                    adjusted_entity["BeginOffset"] = relative_start
-                                                                    adjusted_entity["EndOffset"] = relative_end
-
-                                                                    recogniser_entity = recognizer_result_from_dict(adjusted_entity)
-                                                                    
-                                                                    # Add to results for this line
-                                                                    existing_results = next((results for idx, results in all_text_line_results if idx == line_idx), [])
-                                                                    if not existing_results:
-                                                                        all_text_line_results.append((line_idx, [recogniser_entity]))
-                                                                    else:
-                                                                        existing_results.append(recogniser_entity)
-
-                                            # Reset batch
-                                            current_batch = ""
-                                            current_batch_mapping = []
-
-                        # Second pass: process results for each line
-                        for i, text_line in enumerate(line_level_text_results_list):
-                            text_line_analyser_result = []
-                            text_line_bounding_boxes = []
-
-                            # Get results for this line
-                            line_results = next((results for idx, results in all_text_line_results if idx == i), [])
-                            
-                            if line_results:
-                                text_line_analyser_result = line_results
-
-                                #print("Analysed text container, now merging bounding boxes")
-
-                                # Merge bounding boxes if very close together
-                                text_line_bounding_boxes = merge_text_bounding_boxes(text_line_analyser_result, line_characters[i])
-
-                                #print("merged bounding boxes")
-
-                                text_container_analyser_results.extend(text_line_analyser_result)
-                                text_container_analysed_bounding_boxes.extend(text_line_bounding_boxes)
-
-                                #print("text_container_analyser_results:", text_container_analyser_results)
-
-                                page_analyser_results.extend(text_container_analyser_results)  # Add this line
-                                page_analysed_bounding_boxes.extend(text_line_bounding_boxes)  # Add this line
+                    page_analysed_bounding_boxes = run_page_text_redaction(
+                                                        language,
+                                                        chosen_redact_entities,
+                                                        chosen_redact_comprehend_entities,
+                                                        all_line_level_text_results_list, #line_level_text_results_list,
+                                                        all_line_characters,
+                                                        page_analyser_results,
+                                                        page_analysed_bounding_boxes,
+                                                        comprehend_client, 
+                                                        allow_list,
+                                                        pii_identification_method,
+                                                        nlp_analyser,
+                                                        score_threshold,
+                                                        custom_entities,
+                                                        comprehend_query_number
+                                                        )
 
 
                 #print("page_analyser_results:", page_analyser_results)
@@ -1879,17 +1872,18 @@ def redact_text_pdf(
                 reported_page_no = page_no + 1
                 print("For page number:", reported_page_no, "there are", len(image_annotations["boxes"]), "annotations")
 
+                # Join extracted text outputs for all lines together
+                if not page_text_ocr_outputs.empty:
+                        page_text_ocr_outputs = page_text_ocr_outputs.sort_values(["top", "left"], ascending=[False, False]).reset_index(drop=True)
+                        all_line_level_ocr_results_df = pd.concat([all_line_level_ocr_results_df, page_text_ocr_outputs])
+
                 # Write logs
                 # Create decision process table
                 decision_process_table_on_page = create_text_redaction_process_results(page_analyser_results, page_analysed_bounding_boxes, current_loop_page)     
 
                 if not decision_process_table_on_page.empty:
                     all_decision_process_table = pd.concat([all_decision_process_table, decision_process_table_on_page])
-                    #print("all_decision_process_table:", all_decision_process_table)
-
-                if not page_text_outputs.empty:
-                    page_text_outputs = page_text_outputs.sort_values(["top", "left"], ascending=[False, False]).reset_index(drop=True)
-                    all_line_level_ocr_results_df = pd.concat([all_line_level_ocr_results_df, page_text_outputs])
+                    #print("all_decision_process_table:", all_decision_process_table)               
 
                 toc = time.perf_counter()
 

@@ -7,7 +7,6 @@ spacy.prefer_gpu()
 from spacy.cli.download import download
 import re
 
-# %%
 model_name = "en_core_web_sm" #"en_core_web_trf"
 score_threshold = 0.001
 custom_entities = ["TITLES", "UKPOSTCODE", "STREETNAME", "CUSTOM"]
@@ -34,7 +33,7 @@ def custom_word_list_recogniser(custom_list:List[str]=[]):
         rf'(?<!\w){re.escape(term.strip()).replace(quote_str, replace_str)}(?!\w)'
         for term in custom_list
     )
-    print(custom_regex)
+    #print(custom_regex)
 
     custom_pattern = Pattern(name="custom_pattern", regex=custom_regex, score = 1)
     

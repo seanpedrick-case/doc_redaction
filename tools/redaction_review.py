@@ -15,6 +15,8 @@ from fitz import Document
 from PIL import ImageDraw, Image
 from collections import defaultdict
 
+Image.MAX_IMAGE_PIXELS = None
+
 def decrease_page(number:int):
     '''
     Decrease page number for review redactions page.
@@ -115,13 +117,10 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
         recogniser_dataframe_out = gr.Dataframe(review_dataframe)
         recogniser_entities_list = recogniser_dataframe_gr["label"].unique().tolist()
 
-        print("recogniser_entities_list all options:", recogniser_entities_list)
-
         recogniser_entities_list = sorted(recogniser_entities_list)
         recogniser_entities_list = [entity for entity in recogniser_entities_list if entity != 'Redaction']  # Remove any existing 'Redaction'
         recogniser_entities_list.insert(0, 'Redaction')  # Add 'Redaction' to the start of the list
 
-        print("recogniser_entities_list:", recogniser_entities_list)
 
     zoom_str = str(zoom) + '%'
     recogniser_colour_list = [(0, 0, 0) for _ in range(len(recogniser_entities_list))]
@@ -246,6 +245,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
 
     output_files = []
     output_log_files = []
+    pdf_doc = []
 
     #print("File paths in apply_redactions:", file_paths)
 
@@ -262,7 +262,8 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
 
     for file_path in file_paths:
         #print("file_path:", file_path)
-        file_base = get_file_path_end(file_path)
+        file_name_without_ext = get_file_path_end(file_path)
+        file_name_with_ext = os.path.basename(file_path)
 
         file_extension = os.path.splitext(file_path)[1].lower()
         
@@ -285,7 +286,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
 
                     draw.rectangle(coords, fill=fill)
 
-                    image.save(output_folder + file_base + "_redacted.png")
+                    image.save(output_folder + file_name_without_ext + "_redacted.png")
 
                 doc = [image]
 
@@ -296,6 +297,9 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
             # If working with pdfs
             elif is_pdf(file_path) == True:
                 pdf_doc = pymupdf.open(file_path)
+                orig_pdf_file_path = file_path
+
+                output_files.append(orig_pdf_file_path)
 
                 number_of_pages = pdf_doc.page_count
 
@@ -314,7 +318,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
                         #all_image_annotations[i]['image'] = image_loc.tolist()
                     elif isinstance(image_loc, Image.Image):
                         image = image_loc
-                        #image_out_folder = output_folder + file_base + "_page_" + str(i) + ".png"
+                        #image_out_folder = output_folder + file_name_without_ext + "_page_" + str(i) + ".png"
                         #image_loc.save(image_out_folder)
                         #all_image_annotations[i]['image'] = image_out_folder
                     elif isinstance(image_loc, str):
@@ -328,25 +332,34 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
                     
             #try:
             if pdf_doc:
-                out_pdf_file_path = output_folder + file_base + "_redacted.pdf"
+                out_pdf_file_path = output_folder + file_name_without_ext + "_redacted.pdf"
                 pdf_doc.save(out_pdf_file_path)
                 output_files.append(out_pdf_file_path)
 
-        try:
-            print("Saving annotations to JSON")
+            else:
+                print("PDF input not found.")
 
-            out_annotation_file_path = output_folder + file_base + '_review_file.json'
+        # If save_pdf is not true, then add the original pdf to the output files
+        else:
+            if is_pdf(file_path) == True:                
+                orig_pdf_file_path = file_path
+                output_files.append(orig_pdf_file_path)
+
+        try:
+            #print("Saving annotations to JSON")
+
+            out_annotation_file_path = output_folder + file_name_with_ext + '_review_file.json'
             with open(out_annotation_file_path, 'w') as f:
                 json.dump(all_image_annotations, f)
             output_log_files.append(out_annotation_file_path)
 
-            print("Saving annotations to CSV review file")
+            #print("Saving annotations to CSV review file")
 
             #print("review_file_state:", review_file_state)
 
             # Convert json to csv and also save this
             review_df = convert_review_json_to_pandas_df(all_image_annotations, review_file_state)
-            out_review_file_file_path = output_folder + file_base + '_review_file.csv'
+            out_review_file_file_path = output_folder + file_name_with_ext + '_review_file.csv'
             review_df.to_csv(out_review_file_file_path, index=None)
             output_files.append(out_review_file_file_path)
 
@@ -365,9 +378,6 @@ def update_entities_df(choice:str, df:pd.DataFrame):
         return df.loc[df["label"]==choice,:]
     
 def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
-        #print("index", evt.index)
-        #print("value", evt.value)
-        #print("row_value", evt.row_value)
         row_value_page = evt.row_value[0] # This is the page number value
         return row_value_page
 

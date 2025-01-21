@@ -1,7 +1,6 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
 from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, read_file, get_or_create_env_var
 from PIL import Image, ImageFile
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 import os
 import re
 import time
@@ -16,6 +15,7 @@ from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 image_dpi = 300.0
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
 
 def is_pdf_or_image(filename):
@@ -75,7 +75,7 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
             image.save(out_path, format="PNG")
 
         # Check file size and resize if necessary
-        max_size = 5 * 1024 * 1024  # 5 MB in bytes # 5
+        max_size = 4.5 * 1024 * 1024  # 5 MB in bytes # 5
         file_size = os.path.getsize(out_path)        
 
         # Resize images if they are too big
@@ -83,7 +83,7 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
             # Start with the original image size
             width, height = image.size
 
-            print(f"Image size before {new_width}x{new_height}, original file_size: {file_size}")
+            print(f"Image size before {width}x{height}, original file_size: {file_size}")
 
             while file_size > max_size:
                 # Reduce the size by a factor (e.g., 50% of the current size)
@@ -107,9 +107,9 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
         print(f"Error processing page {page_num + 1}: {e}")
         return page_num, None
 
-def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min: int = 0, image_dpi: float = 200, num_threads: int = 8, output_dir: str = '/input'):
+def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min: int = 0, image_dpi: float = image_dpi, num_threads: int = 8, output_dir: str = '/input'):
 
-    # If preparing for review, just load the first page
+    # If preparing for review, just load the first page (not used)
     if prepare_for_review == True:
         page_count = pdfinfo_from_path(pdf_path)['Pages'] #1
     else:
@@ -201,7 +201,7 @@ def process_file(file_path:str, prepare_for_review:bool=False):
     if file_extension in ['.jpg', '.jpeg', '.png']:
         print(f"{file_path} is an image file.")
         # Perform image processing here
-        img_object = [Image.open(file_path)]
+        img_object = [file_path] #[Image.open(file_path)]
         # Load images from the file paths
 
     # Check if the file is a PDF
@@ -490,6 +490,7 @@ def prepare_image_or_pdf(
         else:
             file_path = file.name
         file_path_without_ext = get_file_path_end(file_path)
+        file_name_with_ext = os.path.basename(file_path)
 
         if not file_path:
             out_message = "Please select a file."
@@ -532,8 +533,13 @@ def prepare_image_or_pdf(
 
             image_file_paths = process_file(file_path_str, prepare_for_review)
 
-            print("Inserted image into PDF file")
+            #print("image_file_paths:", image_file_paths)
 
+            converted_file_path = output_folder + file_name_with_ext
+
+            pymupdf_doc.save(converted_file_path)
+
+            print("Inserted image into PDF file")
 
         elif file_extension in ['.csv']:
             review_file_csv = read_file(file)
@@ -738,6 +744,7 @@ def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decis
             reported_number = int(number) + 1
         else:
             print("No number found before .png")
+            reported_number = 1
 
         # Check if 'boxes' is in the annotation, if not, add an empty list
         if 'boxes' not in annotation:

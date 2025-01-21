@@ -1,10 +1,21 @@
 
+import os
 import boto3
 import gradio as gr
 import hmac
 import hashlib
 import base64
-from tools.helper_functions import get_or_create_env_var
+
+def get_or_create_env_var(var_name, default_value):
+    # Get the environment variable if it exists
+    value = os.environ.get(var_name)
+    
+    # If it doesn't exist, set it to the default value
+    if value is None:
+        os.environ[var_name] = default_value
+        value = default_value
+    
+    return value
 
 client_id = get_or_create_env_var('AWS_CLIENT_ID', '')
 #print(f'The value of AWS_CLIENT_ID is {client_id}')
