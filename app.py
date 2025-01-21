@@ -66,26 +66,27 @@ with app:
 
     pdf_doc_state = gr.State([])    
     all_image_annotations_state = gr.State([])
-    all_line_level_ocr_results_df_state = gr.State(pd.DataFrame())
-    all_decision_process_table_state = gr.State(pd.DataFrame())
+
+
+    all_line_level_ocr_results_df_state = gr.Dataframe(value=pd.DataFrame(), label="all_line_level_ocr_results_df", visible=False, type="pandas") #gr.State(pd.DataFrame())
+    all_decision_process_table_state = gr.Dataframe(value=pd.DataFrame(), label="all_decision_process_table", visible=False, type="pandas") # gr.State(pd.DataFrame())
+    review_file_state = gr.Dataframe(value=pd.DataFrame(), label="review_file_df", visible=False, type="pandas") #gr.State(pd.DataFrame())
 
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
 
     first_loop_state = gr.State(True)
     second_loop_state = gr.State(False)
-
-    prepared_pdf_state = gr.State([])
-    images_pdf_state = gr.State([]) # List of pdf pages converted to PIL images
-    
-    output_image_files_state = gr.State([])
-    output_file_list_state = gr.State([])
-    text_output_file_list_state = gr.State([])
-    log_files_output_list_state = gr.State([])
-
-    review_file_state = gr.State(pd.DataFrame())
-
     do_not_save_pdf_state = gr.State(False)
+
+    prepared_pdf_state = gr.Dropdown(label = "prepared_pdf_list", value="", allow_custom_value=True,visible=False) #gr.State([])
+    images_pdf_state = gr.Dropdown(label = "images_pdf_list", value="", allow_custom_value=True,visible=False) #gr.State([]) # List of pdf pages converted to PIL images
+    
+    output_image_files_state = gr.Dropdown(label = "output_image_files_list", value="", allow_custom_value=True,visible=False) #gr.State([])
+    output_file_list_state = gr.Dropdown(label = "output_file_list", value="", allow_custom_value=True,visible=False) #gr.State([])
+    text_output_file_list_state = gr.Dropdown(label = "text_output_file_list", value="", allow_custom_value=True,visible=False) #gr.State([])
+    log_files_output_list_state = gr.Dropdown(label = "log_files_output_list", value="", allow_custom_value=True,visible=False) #gr.State([])   
+    
     
     # Logging state
     log_file_name = 'log.csv'
@@ -95,7 +96,7 @@ with app:
     access_logs_state = gr.State(access_logs_folder + log_file_name)
     access_s3_logs_loc_state = gr.State(access_logs_folder)
     usage_logs_state = gr.State(usage_logs_folder + log_file_name)
-    usage_s3_logs_loc_state = gr.State(usage_logs_folder)    
+    usage_s3_logs_loc_state = gr.State(usage_logs_folder)
     
     # Invisible text boxes to hold the session hash/username, Textract request metadata, data file names just for logging purposes.
     session_hash_textbox = gr.Textbox(label= "session_hash_textbox", value="", visible=False)
@@ -115,8 +116,7 @@ with app:
     estimated_time_taken_number = gr.Number(label = "estimated_time_taken_number", value=0.0, precision=1, visible=False) # This keeps track of the time taken to redact files for logging purposes.
     annotate_previous_page = gr.Number(value=0, label="Previous page", precision=0, visible=False) # Keeps track of the last page that the annotator was on
 
-    s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)  
-
+    s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
 
     ## Annotator zoom value
     annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=80, precision=0, visible=False)
@@ -129,16 +129,16 @@ with app:
     ## Settings page variables
     default_allow_list_file_name = "default_allow_list.csv"
     default_allow_list_loc = output_folder + "/" + default_allow_list_file_name
-    in_allow_list_state = gr.State(pd.DataFrame())
+    in_allow_list_state = gr.Dataframe(value=pd.DataFrame(), label="in_allow_list_df", visible=False, type="pandas")
 
     default_deny_list_file_name = "default_deny_list.csv"
     default_deny_list_loc = output_folder + "/" + default_deny_list_file_name
-    in_deny_list_state = gr.State([])
+    in_deny_list_state = gr.Dataframe(value=pd.DataFrame(), label="in_deny_list_df", visible=False, type="pandas")
     in_deny_list_text_in = gr.Textbox(value="Deny list", visible=False)
 
     fully_redacted_list_file_name = "default_fully_redacted_list.csv"
     fully_redacted_list_loc = output_folder + "/" + fully_redacted_list_file_name
-    in_fully_redacted_list_state = gr.State([])
+    in_fully_redacted_list_state = gr.Dataframe(value=pd.DataFrame(), label="in_full_redacted_list_df", visible=False, type="pandas")
     in_fully_redacted_text_in = gr.Textbox(value="Fully redacted page list", visible=False)
 
     # S3 settings for default allow list load
@@ -210,6 +210,8 @@ with app:
             annotate_zoom_in = gr.Button("Zoom in")
             annotate_zoom_out = gr.Button("Zoom out")
         with gr.Row():
+            annotation_button_apply = gr.Button("Apply revised redactions to pdf", variant="secondary")
+        with gr.Row():
             clear_all_redactions_on_page_btn = gr.Button("Clear all redactions on page", visible=False)
 
         with gr.Row():
@@ -237,18 +239,16 @@ with app:
                 )
 
         with gr.Row():
-            annotation_button_apply = gr.Button("Apply revised redactions", variant="primary")
+            annotation_last_page_button_bottom = gr.Button("Previous page", scale = 3)
+            annotate_current_page_bottom = gr.Number(value=1, label="Page (press enter to change)", precision=0, interactive=True, scale = 2)
+            annotate_max_pages_bottom = gr.Number(value=1, label="Total pages", precision=0, interactive=False, scale = 1)
+            annotation_next_page_button_bottom = gr.Button("Next page", scale = 3)
 
         #with gr.Column(scale=1):
         with gr.Row():
             recogniser_entity_dropdown = gr.Dropdown(label="Redaction category", value="ALL", allow_custom_value=True)
             recogniser_entity_dataframe = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]}), col_count=2, type="pandas", label="Search results. Click to go to page")          
-
-        with gr.Row():
-            annotation_last_page_button_bottom = gr.Button("Previous page", scale = 3)
-            annotate_current_page_bottom = gr.Number(value=1, label="Page (press enter to change)", precision=0, interactive=True, scale = 2)
-            annotate_max_pages_bottom = gr.Number(value=1, label="Total pages", precision=0, interactive=False, scale = 1)
-            annotation_next_page_button_bottom = gr.Button("Next page", scale = 3)
+        
 
     # TEXT / TABULAR DATA TAB
     with gr.Tab(label="Open text or Excel/csv files"):
@@ -322,12 +322,12 @@ with app:
     document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state]).\
     then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state], api_name="prepare_doc").\
     then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
-                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number], api_name="redact_doc").\
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, output_review_files], api_name="redact_doc").\
                     then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
     
     # If the app has completed a batch of pages, it will run this until the end of all pages in the document
     current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
-                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number]).\
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, output_review_files]).\
                     then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
     
     # If a file has been completed, the function will continue onto the next document
@@ -394,7 +394,8 @@ with app:
 
     recogniser_entity_dataframe.select(df_select_callback, inputs=[recogniser_entity_dataframe], outputs=[annotate_current_page]).\
     then(modify_existing_page_redactions, inputs = [annotator, annotate_current_page, annotate_previous_page, all_image_annotations_state, recogniser_entity_dropdown, recogniser_entity_dataframe_base], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom, recogniser_entity_dropdown, recogniser_entity_dataframe_base]).\
-        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
+        then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
+        then(apply_redactions, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, do_not_save_pdf_state], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output])
     
 
     ###

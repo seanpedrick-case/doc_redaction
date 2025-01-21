@@ -201,7 +201,7 @@ def process_file(file_path:str, prepare_for_review:bool=False):
     if file_extension in ['.jpg', '.jpeg', '.png']:
         print(f"{file_path} is an image file.")
         # Perform image processing here
-        img_object = [Image.open(file_path)]
+        img_object = [file_path] #[Image.open(file_path)]
         # Load images from the file paths
 
     # Check if the file is a PDF
@@ -490,6 +490,7 @@ def prepare_image_or_pdf(
         else:
             file_path = file.name
         file_path_without_ext = get_file_path_end(file_path)
+        file_name_with_ext = os.path.basename(file_path)
 
         if not file_path:
             out_message = "Please select a file."
@@ -532,8 +533,13 @@ def prepare_image_or_pdf(
 
             image_file_paths = process_file(file_path_str, prepare_for_review)
 
-            print("Inserted image into PDF file")
+            #print("image_file_paths:", image_file_paths)
 
+            converted_file_path = output_folder + file_name_with_ext
+
+            pymupdf_doc.save(converted_file_path)
+
+            print("Inserted image into PDF file")
 
         elif file_extension in ['.csv']:
             review_file_csv = read_file(file)
@@ -738,6 +744,7 @@ def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decis
             reported_number = int(number) + 1
         else:
             print("No number found before .png")
+            reported_number = 1
 
         # Check if 'boxes' is in the annotation, if not, add an empty list
         if 'boxes' not in annotation:

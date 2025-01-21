@@ -17,3 +17,4 @@ dist/*
 build_deps/*
 logs/*
 doc_redaction_amplify_app/*
+user_guide/*

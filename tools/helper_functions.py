@@ -1,10 +1,13 @@
 import os
 import re
+import boto3
+from botocore.exceptions import ClientError
 import gradio as gr
 import pandas as pd
 import unicodedata
 from typing import List
 from gradio_image_annotation import image_annotator
+from tools.auth import user_pool_id
 
 def reset_state_vars():
     return [], [], pd.DataFrame(), pd.DataFrame(), 0, "", image_annotator(
@@ -120,6 +123,8 @@ def custom_regex_load(in_file:List[str], file_type:str = "Allow list"):
             custom_regex = pd.read_csv(regex_file_name, low_memory=False, header=None)
             #regex_file_name_no_ext = get_file_path_end(regex_file_name)
 
+            custom_regex.columns = custom_regex.columns.astype(str)
+
             output_text = file_type + " file loaded."
 
             print(output_text)
@@ -229,10 +234,10 @@ async def get_connection_params(request: gr.Request):
     #if 'context' in request_data:
     #     print("Request context dictionary:", request_data['context'])
 
-    print("Request headers dictionary:", request.headers)
-    print("All host elements", request.client)           
-    print("IP address:", request.client.host)
-    print("Query parameters:", dict(request.query_params))
+    # print("Request headers dictionary:", request.headers)
+    # print("All host elements", request.client)           
+    # print("IP address:", request.client.host)
+    # print("Query parameters:", dict(request.query_params))
     # To get the underlying FastAPI items you would need to use await and some fancy @ stuff for a live query: https://fastapi.tiangolo.com/vi/reference/request/
     #print("Request dictionary to object:", request.request.body())
     print("Session hash:", request.session_hash)
@@ -264,6 +269,23 @@ async def get_connection_params(request: gr.Request):
     elif 'x-amzn-oidc-identity' in request.headers:
         out_session_hash = request.headers['x-amzn-oidc-identity']
         base_folder = "user-files/"
+
+        # Fetch email address using Cognito client
+        cognito_client = boto3.client('cognito-idp')
+        try:
+            response = cognito_client.admin_get_user(
+                UserPoolId=user_pool_id,  # Replace with your User Pool ID
+                Username=out_session_hash
+            )
+            email = next(attr['Value'] for attr in response['UserAttributes'] if attr['Name'] == 'email')
+            #print("Email address found:", email)
+
+            out_session_hash = email
+        except ClientError as e:
+            print("Error fetching user details:", e)
+            email = None
+
+
         print("Cognito ID found:", out_session_hash)
 
     else:
