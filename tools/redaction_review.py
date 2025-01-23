@@ -1,10 +1,12 @@
 import gradio as gr
 import pandas as pd
 import numpy as np
+from xml.etree.ElementTree import Element, SubElement, tostring
+from xml.dom import minidom
+import uuid
 from typing import List
 from gradio_image_annotation import image_annotator
 from gradio_image_annotation.image_annotator import AnnotatedImageData
-
 from tools.file_conversion import is_pdf, convert_review_json_to_pandas_df
 from tools.helper_functions import get_file_path_end, output_folder
 from tools.file_redaction import redact_page_with_pymupdf
@@ -381,3 +383,61 @@ def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
         row_value_page = evt.row_value[0] # This is the page number value
         return row_value_page
 
+
+
+
+def create_xfdf(df, pdf_path):
+    # Create root element
+    xfdf = Element('xfdf', xmlns="http://ns.adobe.com/xfdf/", xml_space="preserve")
+    
+    # Add header
+    header = SubElement(xfdf, 'header')
+    header.set('pdf-filepath', pdf_path)
+    
+    # Add annots
+    annots = SubElement(xfdf, 'annots')
+    
+    # Process each row in dataframe
+    for _, row in df.iterrows():
+        # Create text annotation
+        text_annot = SubElement(annots, 'text')
+        
+        # Generate unique ID for each annotation
+        annot_id = str(uuid.uuid4())
+        text_annot.set('name', annot_id)
+        
+        # Set page number (subtract 1 as PDF pages are 0-based)
+        text_annot.set('page', str(int(row['page']) - 1))
+        
+        # Set coordinates (convert to PDF coordinate system)
+        # Note: You might need to adjust these calculations based on your PDF dimensions
+        text_annot.set('rect', f"{row['xmin']},{row['ymin']},{row['xmax']},{row['ymax']}")
+        
+        # Set color (convert RGB tuple string to comma-separated values)
+        color_str = row['color'].strip('()').replace(' ', '')
+        text_annot.set('color', color_str)
+        
+        # Set text content
+        text_annot.set('contents', f"{row['label']}: {row['text']}")
+        
+        # Set additional properties
+        text_annot.set('flags', "print")
+        text_annot.set('date', "D:20240123000000")
+        text_annot.set('title', "Annotation")
+        
+    # Convert to pretty XML string
+    xml_str = minidom.parseString(tostring(xfdf)).toprettyxml(indent="  ")
+    
+    return xml_str
+
+# Example usage:
+# Assuming your dataframe is named 'df' and you want to create annotations for 'example.pdf'
+def convert_df_to_xfdf(df, pdf_path, output_path):
+    xfdf_content = create_xfdf(df, pdf_path)
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(xfdf_content)
+
+# Usage example:
+# df = your_dataframe
+# convert_df_to_xfdf(df, 'path/to/your.pdf', 'output.xfdf')

@@ -19,6 +19,7 @@ from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.custom_csvlogger import CSVLogger_custom
+from tools.find_duplicate_pages import identify_similar_pages
 
 today_rev = datetime.now().strftime("%Y%m%d")
 
@@ -68,9 +69,9 @@ with app:
     all_image_annotations_state = gr.State([])
 
 
-    all_line_level_ocr_results_df_state = gr.Dataframe(value=pd.DataFrame(), label="all_line_level_ocr_results_df", visible=False, type="pandas") #gr.State(pd.DataFrame())
-    all_decision_process_table_state = gr.Dataframe(value=pd.DataFrame(), label="all_decision_process_table", visible=False, type="pandas") # gr.State(pd.DataFrame())
-    review_file_state = gr.Dataframe(value=pd.DataFrame(), label="review_file_df", visible=False, type="pandas") #gr.State(pd.DataFrame())
+    all_line_level_ocr_results_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"),  label="all_line_level_ocr_results_df", visible=False, type="pandas") #gr.State(pd.DataFrame())
+    all_decision_process_table_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"),  label="all_decision_process_table", visible=False, type="pandas") # gr.State(pd.DataFrame())
+    review_file_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="review_file_df", visible=False, type="pandas") #gr.State(pd.DataFrame())
 
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
@@ -129,16 +130,16 @@ with app:
     ## Settings page variables
     default_allow_list_file_name = "default_allow_list.csv"
     default_allow_list_loc = output_folder + "/" + default_allow_list_file_name
-    in_allow_list_state = gr.Dataframe(value=pd.DataFrame(), label="in_allow_list_df", visible=False, type="pandas")
+    in_allow_list_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="in_allow_list_df", visible=False, type="pandas")
 
     default_deny_list_file_name = "default_deny_list.csv"
     default_deny_list_loc = output_folder + "/" + default_deny_list_file_name
-    in_deny_list_state = gr.Dataframe(value=pd.DataFrame(), label="in_deny_list_df", visible=False, type="pandas")
+    in_deny_list_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="in_deny_list_df", visible=False, type="pandas")
     in_deny_list_text_in = gr.Textbox(value="Deny list", visible=False)
 
     fully_redacted_list_file_name = "default_fully_redacted_list.csv"
     fully_redacted_list_loc = output_folder + "/" + fully_redacted_list_file_name
-    in_fully_redacted_list_state = gr.Dataframe(value=pd.DataFrame(), label="in_full_redacted_list_df", visible=False, type="pandas")
+    in_fully_redacted_list_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="in_full_redacted_list_df", visible=False, type="pandas")
     in_fully_redacted_text_in = gr.Textbox(value="Fully redacted page list", visible=False)
 
     # S3 settings for default allow list load
@@ -148,6 +149,10 @@ with app:
 
     # Base dataframe for recognisers that is not modified subsequent to load
     recogniser_entity_dataframe_base = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]}), col_count=2, type="pandas", visible=False)
+
+    # Duplicate page detection
+    in_duplicate_pages_text = gr.Textbox(label="in_duplicate_pages_text", visible=False)
+    duplicate_pages_df = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="in_deny_list_df", visible=False, type="pandas")
 
     ###
     # UI DESIGN
@@ -164,8 +169,10 @@ with app:
 
     NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.""")
 
-    # PDF / IMAGES TAB
-    with gr.Tab("PDFs/images"):
+    ###
+    # REDACTION PDF/IMAGES TABL
+    ###
+    with gr.Tab("Redact PDFs/images"):
         with gr.Accordion("Redact document", open = True):
             in_doc_files = gr.File(label="Choose a document or image file (PDF, JPG, PNG)", file_count= "single", file_types=['.pdf', '.jpg', '.png', '.json'], height=file_input_height)
             if RUN_AWS_FUNCTIONS == "1":
@@ -194,7 +201,9 @@ with app:
         pdf_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
         pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
         
-    # Object annotation
+    ###
+    # REVIEW REDACTIONS TAB
+    ###
     with gr.Tab("Review redactions", id="tab_object_annotation"):
 
         with gr.Accordion(label = "Review redaction file", open=True):
@@ -215,7 +224,6 @@ with app:
             clear_all_redactions_on_page_btn = gr.Button("Clear all redactions on page", visible=False)
 
         with gr.Row():
-
             with gr.Column(scale=1):
 
                 zoom_str = str(annotator_zoom_number) + '%'
@@ -249,8 +257,9 @@ with app:
             recogniser_entity_dropdown = gr.Dropdown(label="Redaction category", value="ALL", allow_custom_value=True)
             recogniser_entity_dataframe = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]}), col_count=2, type="pandas", label="Search results. Click to go to page")          
         
-
+    ###
     # TEXT / TABULAR DATA TAB
+    ###
     with gr.Tab(label="Open text or Excel/csv files"):
         gr.Markdown(
     """
@@ -280,7 +289,20 @@ with app:
         data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
         data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
+    ###
+    # IDENTIFY DUPLICATE PAGES TAB
+    ###
+    with gr.Tab(label="Identify duplicate pages"):
+        with gr.Accordion("Identify duplicate pages to redact", open = True):            
+            in_duplicate_pages = gr.File(label="Upload multiple 'ocr_output.csv' data files from redaction jobs here to compare", file_count="multiple", height=file_input_height, file_types=['.csv'])
+
+            find_duplicate_pages_btn = gr.Button(value="Identify duplicate pages", variant="primary")
+                
+            duplicate_pages_out =gr.File(label="Duplicate pages analysis output", file_count="multiple", height=file_input_height, file_types=['.csv'])
+
+    ###
     # SETTINGS TAB
+    ###
     with gr.Tab(label="Redaction settings"):       
         with gr.Accordion("Custom allow, deny, and full page redaction lists", open = True):
             with gr.Row():
@@ -319,7 +341,7 @@ with app:
     ###
     in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list])
 
-    document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state]).\
+    document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
     then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state], api_name="prepare_doc").\
     then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number],
                     outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, output_review_files], api_name="redact_doc").\
@@ -411,9 +433,14 @@ with app:
     then(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title])
 
     ###
+    # IDENTIFY DUPLICATE PAGES
+    ###
+    find_duplicate_pages_btn.click(fn=identify_similar_pages, inputs=[in_duplicate_pages], outputs=[duplicate_pages_df, duplicate_pages_out])
+
+    ###
     # SETTINGS PAGE INPUT / OUTPUT
     ###
-    # If a custom allow list is uploaded
+    # If a custom allow/deny/duplicate page list is uploaded
     in_allow_list.change(fn=custom_regex_load, inputs=[in_allow_list], outputs=[in_allow_list_text, in_allow_list_state])
     in_deny_list.change(fn=custom_regex_load, inputs=[in_deny_list, in_deny_list_text_in], outputs=[in_deny_list_text, in_deny_list_state])
     in_fully_redacted_list.change(fn=custom_regex_load, inputs=[in_fully_redacted_list, in_fully_redacted_text_in], outputs=[in_fully_redacted_list_text, in_fully_redacted_list_state])
