@@ -22,6 +22,9 @@ def reset_state_vars():
             interactive=False
         ), [], [], [], pd.DataFrame(), pd.DataFrame()
 
+def reset_review_vars():
+    return [], pd.DataFrame(), pd.DataFrame()
+
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists
     value = os.environ.get(var_name)
@@ -81,6 +84,8 @@ def detect_file_type(filename):
         return 'jpeg'
     elif filename.endswith('.png'):
         return 'png'
+    elif filename.endswith('.xfdf'):
+        return 'xfdf'
     else:
         raise ValueError("Unsupported file type.")
 

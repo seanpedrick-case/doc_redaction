@@ -1,14 +1,14 @@
 import gradio as gr
 import pandas as pd
 import numpy as np
-from xml.etree.ElementTree import Element, SubElement, tostring
+from xml.etree.ElementTree import Element, SubElement, tostring, parse
 from xml.dom import minidom
 import uuid
 from typing import List
 from gradio_image_annotation import image_annotator
 from gradio_image_annotation.image_annotator import AnnotatedImageData
-from tools.file_conversion import is_pdf, convert_review_json_to_pandas_df
-from tools.helper_functions import get_file_path_end, output_folder
+from tools.file_conversion import is_pdf, convert_review_json_to_pandas_df, CUSTOM_BOX_COLOUR
+from tools.helper_functions import get_file_path_end, output_folder, detect_file_type
 from tools.file_redaction import redact_page_with_pymupdf
 import json
 import os
@@ -383,10 +383,46 @@ def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
         row_value_page = evt.row_value[0] # This is the page number value
         return row_value_page
 
+def convert_image_coords_to_adobe(pdf_page_width, pdf_page_height, image_width, image_height, x1, y1, x2, y2):
+    '''
+    Converts coordinates from image space to Adobe PDF space.
+    
+    Parameters:
+    - pdf_page_width: Width of the PDF page
+    - pdf_page_height: Height of the PDF page
+    - image_width: Width of the source image
+    - image_height: Height of the source image
+    - x1, y1, x2, y2: Coordinates in image space
+    
+    Returns:
+    - Tuple of converted coordinates (x1, y1, x2, y2) in Adobe PDF space
+    '''
+    
+    # Calculate scaling factors
+    scale_width = pdf_page_width / image_width
+    scale_height = pdf_page_height / image_height
+    
+    # Convert coordinates
+    pdf_x1 = x1 * scale_width
+    pdf_x2 = x2 * scale_width
+    
+    # Convert Y coordinates (flip vertical axis)
+    # Adobe coordinates start from bottom-left
+    pdf_y1 = pdf_page_height - (y1 * scale_height)
+    pdf_y2 = pdf_page_height - (y2 * scale_height)
+    
+    # Make sure y1 is always less than y2 for Adobe's coordinate system
+    if pdf_y1 > pdf_y2:
+        pdf_y1, pdf_y2 = pdf_y2, pdf_y1
+    
+    return pdf_x1, pdf_y1, pdf_x2, pdf_y2
 
 
-
-def create_xfdf(df, pdf_path):
+def create_xfdf(df, pdf_path, pymupdf_doc, image_paths):
+    '''
+    Create an xfdf file from a review csv file and a pdf
+    '''
+    
     # Create root element
     xfdf = Element('xfdf', xmlns="http://ns.adobe.com/xfdf/", xml_space="preserve")
     
@@ -397,47 +433,315 @@ def create_xfdf(df, pdf_path):
     # Add annots
     annots = SubElement(xfdf, 'annots')
     
-    # Process each row in dataframe
     for _, row in df.iterrows():
-        # Create text annotation
-        text_annot = SubElement(annots, 'text')
+        page_python_format = int(row["page"])-1
+
+        pymupdf_page = pymupdf_doc.load_page(page_python_format)
+
+        pdf_page_height = pymupdf_page.rect.height
+        pdf_page_width = pymupdf_page.rect.width 
+
+        image = image_paths[page_python_format]
+
+        #print("image:", image)
+
+        if isinstance(image, str):
+            image = Image.open(image)
+
+        image_page_width, image_page_height = image.size
+
+        # Create redaction annotation
+        redact_annot = SubElement(annots, 'redact')
         
-        # Generate unique ID for each annotation
+        # Generate unique ID
         annot_id = str(uuid.uuid4())
-        text_annot.set('name', annot_id)
+        redact_annot.set('name', annot_id)
         
         # Set page number (subtract 1 as PDF pages are 0-based)
-        text_annot.set('page', str(int(row['page']) - 1))
+        redact_annot.set('page', str(int(row['page']) - 1))
         
-        # Set coordinates (convert to PDF coordinate system)
-        # Note: You might need to adjust these calculations based on your PDF dimensions
-        text_annot.set('rect', f"{row['xmin']},{row['ymin']},{row['xmax']},{row['ymax']}")
+        # Convert coordinates
+        x1, y1, x2, y2 = convert_image_coords_to_adobe(
+            pdf_page_width,
+            pdf_page_height,
+            image_page_width,
+            image_page_height,
+            row['xmin'],
+            row['ymin'],
+            row['xmax'],
+            row['ymax']
+        )
+
+        if CUSTOM_BOX_COLOUR == "grey":
+            colour_str = "0.5,0.5,0.5"        
+        else:
+            colour_str = row['color'].strip('()').replace(' ', '')
         
-        # Set color (convert RGB tuple string to comma-separated values)
-        color_str = row['color'].strip('()').replace(' ', '')
-        text_annot.set('color', color_str)
+        # Set coordinates
+        redact_annot.set('rect', f"{x1:.2f},{y1:.2f},{x2:.2f},{y2:.2f}")
         
-        # Set text content
-        text_annot.set('contents', f"{row['label']}: {row['text']}")
+        # Set redaction properties
+        redact_annot.set('title', row['label'])  # The type of redaction (e.g., "PERSON")
+        redact_annot.set('contents', row['text'])  # The redacted text
+        redact_annot.set('subject', row['label'])  # The redacted text
+        redact_annot.set('mimetype', "Form")
         
-        # Set additional properties
-        text_annot.set('flags', "print")
-        text_annot.set('date', "D:20240123000000")
-        text_annot.set('title', "Annotation")
+        # Set appearance properties
+        redact_annot.set('border-color', colour_str)  # Black border
+        redact_annot.set('repeat', 'false')
+        redact_annot.set('interior-color', colour_str)
+        #redact_annot.set('fill-color', colour_str)
+        #redact_annot.set('outline-color', colour_str)
+        redact_annot.set('overlay-color', colour_str)
+        redact_annot.set('overlay-text', row['label'])
+        redact_annot.set('opacity', "0.5")
+
+        # Add appearance dictionary
+        # appearanceDict = SubElement(redact_annot, 'appearancedict')
         
+        # # Normal appearance
+        # normal = SubElement(appearanceDict, 'normal')
+        # #normal.set('appearance', 'redact')
+                
+        # # Color settings for the mark (before applying redaction)
+        # markAppearance = SubElement(redact_annot, 'markappearance')
+        # markAppearance.set('stroke-color', colour_str)  # Red outline
+        # markAppearance.set('fill-color', colour_str)    # Light red fill
+        # markAppearance.set('opacity', '0.5')          # 50% opacity
+        
+        # # Final redaction appearance (after applying)
+        # redactAppearance = SubElement(redact_annot, 'redactAppearance')
+        # redactAppearance.set('fillColor', colour_str)  # Black fill
+        # redactAppearance.set('fontName', 'Helvetica')
+        # redactAppearance.set('fontSize', '12')
+        # redactAppearance.set('textAlignment', 'left')
+        # redactAppearance.set('textColor', colour_str)  # White text
+    
     # Convert to pretty XML string
     xml_str = minidom.parseString(tostring(xfdf)).toprettyxml(indent="  ")
     
     return xml_str
 
-# Example usage:
-# Assuming your dataframe is named 'df' and you want to create annotations for 'example.pdf'
-def convert_df_to_xfdf(df, pdf_path, output_path):
-    xfdf_content = create_xfdf(df, pdf_path)
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(xfdf_content)
+def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths):
+    '''
+    Load in files to convert a review file into an Adobe comment file format
+    '''
+    output_paths = []
+    pdf_name = ""
 
-# Usage example:
-# df = your_dataframe
-# convert_df_to_xfdf(df, 'path/to/your.pdf', 'output.xfdf')
+    if isinstance(input_files, str):
+        file_paths_list = [input_files]
+    else:
+        file_paths_list = input_files
+
+    # Sort the file paths so that the pdfs come first
+    file_paths_list = sorted(file_paths_list, key=lambda x: (os.path.splitext(x)[1] != '.pdf', os.path.splitext(x)[1] != '.json')) 
+    
+    for file in file_paths_list:
+
+        if isinstance(file, str):
+            file_path = file
+        else:
+            file_path = file.name
+    
+    file_path_name = get_file_path_end(file_path)
+    file_path_end = detect_file_type(file_path)
+
+    if file_path_end == "pdf":
+        pdf_name = os.path.basename(file_path)
+
+    if file_path_end == "csv":
+        # If no pdf name, just get the name of the file path
+        if not pdf_name:
+            pdf_name = file_path_name
+        # Read CSV file
+        df = pd.read_csv(file_path)
+
+        df.fillna('', inplace=True)  # Replace NaN with an empty string
+
+        xfdf_content = create_xfdf(df, pdf_name, pdf_doc, image_paths)
+
+        output_path = output_folder + file_path_name + "_adobe.xfdf"        
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(xfdf_content)
+
+        output_paths.append(output_path)
+
+    return output_paths
+
+
+### Convert xfdf coordinates back to image for app
+
+def convert_adobe_coords_to_image(pdf_page_width, pdf_page_height, image_width, image_height, x1, y1, x2, y2):
+    '''
+    Converts coordinates from Adobe PDF space to image space.
+    
+    Parameters:
+    - pdf_page_width: Width of the PDF page
+    - pdf_page_height: Height of the PDF page
+    - image_width: Width of the source image
+    - image_height: Height of the source image
+    - x1, y1, x2, y2: Coordinates in Adobe PDF space
+    
+    Returns:
+    - Tuple of converted coordinates (x1, y1, x2, y2) in image space
+    '''
+    
+    # Calculate scaling factors
+    scale_width = image_width / pdf_page_width
+    scale_height = image_height / pdf_page_height
+    
+    # Convert coordinates
+    image_x1 = x1 * scale_width
+    image_x2 = x2 * scale_width
+    
+    # Convert Y coordinates (flip vertical axis)
+    # Adobe coordinates start from bottom-left
+    image_y1 = (pdf_page_height - y1) * scale_height
+    image_y2 = (pdf_page_height - y2) * scale_height
+    
+    # Make sure y1 is always less than y2 for image's coordinate system
+    if image_y1 > image_y2:
+        image_y1, image_y2 = image_y2, image_y1
+    
+    return image_x1, image_y1, image_x2, image_y2
+
+def parse_xfdf(xfdf_path):
+    '''
+    Parse the XFDF file and extract redaction annotations.
+    
+    Parameters:
+    - xfdf_path: Path to the XFDF file
+    
+    Returns:
+    - List of dictionaries containing redaction information
+    '''
+    tree = parse(xfdf_path)
+    root = tree.getroot()
+    
+    # Define the namespace
+    namespace = {'xfdf': 'http://ns.adobe.com/xfdf/'}
+    
+    redactions = []
+    
+    # Find all redact elements using the namespace
+    for redact in root.findall('.//xfdf:redact', namespaces=namespace):
+
+        #print("redact:", redact)
+
+        redaction_info = {
+            'image': '', # Image will be filled in later
+            'page': int(redact.get('page')) + 1,  # Convert to 1-based index
+            'xmin': float(redact.get('rect').split(',')[0]),
+            'ymin': float(redact.get('rect').split(',')[1]),
+            'xmax': float(redact.get('rect').split(',')[2]),
+            'ymax': float(redact.get('rect').split(',')[3]),
+            'label': redact.get('title'),
+            'text': redact.get('contents'),
+            'color': redact.get('border-color', '(0, 0, 0)')  # Default to black if not specified
+        }
+        redactions.append(redaction_info)
+
+        print("redactions:", redactions)
+    
+    return redactions
+
+def convert_xfdf_to_dataframe(file_paths_list, pymupdf_doc, image_paths):
+    '''
+    Convert redaction annotations from XFDF and associated images into a DataFrame.
+    
+    Parameters:
+    - xfdf_path: Path to the XFDF file
+    - pdf_doc: PyMuPDF document object
+    - image_paths: List of PIL Image objects corresponding to PDF pages
+    
+    Returns:
+    - DataFrame containing redaction information
+    '''
+    output_paths = []
+    xfdf_paths = []
+    df = pd.DataFrame()
+
+    #print("Image paths:", image_paths)
+
+    # Sort the file paths so that the pdfs come first
+    file_paths_list = sorted(file_paths_list, key=lambda x: (os.path.splitext(x)[1] != '.pdf', os.path.splitext(x)[1] != '.json'))
+    
+    for file in file_paths_list:
+
+        if isinstance(file, str):
+            file_path = file
+        else:
+            file_path = file.name
+    
+        file_path_name = get_file_path_end(file_path)
+        file_path_end = detect_file_type(file_path)
+
+        if file_path_end == "pdf":
+            pdf_name = os.path.basename(file_path)
+            #print("pymupdf_doc:", pymupdf_doc)
+
+            # Add pdf to outputs
+            output_paths.append(file_path)
+
+        if file_path_end == "xfdf":
+
+            if not pdf_name:
+                message = "Original PDF needed to convert from .xfdf format"
+                print(message)
+                raise ValueError(message)
+
+            xfdf_path = file
+
+            # if isinstance(xfdf_paths, str):
+            #     xfdf_path = xfdf_paths.name
+            # else:
+            #     xfdf_path = xfdf_paths[0].name
+
+            file_path_name = get_file_path_end(xfdf_path)
+
+            #print("file_path_name:", file_path_name)
+
+            # Parse the XFDF file
+            redactions = parse_xfdf(xfdf_path)
+            
+            # Create a DataFrame from the redaction information
+            df = pd.DataFrame(redactions)
+
+            df.fillna('', inplace=True)  # Replace NaN with an empty string
+
+            for _, row in df.iterrows():
+                page_python_format = int(row["page"])-1
+
+                pymupdf_page = pymupdf_doc.load_page(page_python_format)
+
+                pdf_page_height = pymupdf_page.rect.height
+                pdf_page_width = pymupdf_page.rect.width 
+
+                image_path = image_paths[page_python_format]
+
+                #print("image_path:", image_path)
+
+                if isinstance(image_path, str):
+                    image = Image.open(image_path)
+
+                image_page_width, image_page_height = image.size
+
+                # Convert to image coordinates
+                image_x1, image_y1, image_x2, image_y2 = convert_adobe_coords_to_image(pdf_page_width, pdf_page_height, image_page_width, image_page_height, row['xmin'], row['ymin'], row['xmax'], row['ymax'])
+
+                df.loc[_, ['xmin', 'ymin', 'xmax', 'ymax']] = [image_x1, image_y1, image_x2, image_y2]
+            
+                # Optionally, you can add the image path or other relevant information
+                #print("Image path:", image_path)
+                df.loc[_, 'image'] = image_path
+
+                #print('row:', row)
+
+    out_file_path = output_folder + file_path_name + "_review_file.csv"
+    df.to_csv(out_file_path, index=None)
+
+    output_paths.append(out_file_path)
+    
+    return output_paths
