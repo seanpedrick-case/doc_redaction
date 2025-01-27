@@ -27,8 +27,8 @@ from presidio_analyzer import RecognizerResult
 from tools.aws_functions import RUN_AWS_FUNCTIONS
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction, merge_text_bounding_boxes
 from tools.file_conversion import process_file, image_dpi, convert_review_json_to_pandas_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords
-from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser
-from tools.helper_functions import get_file_path_end, output_folder, clean_unicode_text, get_or_create_env_var, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
+from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer
+from tools.helper_functions import get_file_name_without_type, output_folder, clean_unicode_text, get_or_create_env_var, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.file_conversion import process_file, is_pdf, is_pdf_or_image
 from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult
 from tools.presidio_analyzer_custom import recognizer_result_from_dict 
@@ -94,6 +94,8 @@ def choose_and_run_redactor(file_paths:List[str],
  page_break_return:bool=False,
  pii_identification_method:str="Local",
  comprehend_query_number:int=0,
+ max_fuzzy_spelling_mistakes_num:int=1,
+ match_fuzzy_whole_phrase_bool:bool=True,
  output_folder:str=output_folder,
  progress=gr.Progress(track_tqdm=True)):
     '''
@@ -127,6 +129,8 @@ def choose_and_run_redactor(file_paths:List[str],
     - page_break_return (bool, optional): A flag indicating if the function should return after a page break. Defaults to False.
     - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
+    -  max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
+    -  match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
     - output_folder (str, optional): Output folder for results.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
@@ -136,7 +140,7 @@ def choose_and_run_redactor(file_paths:List[str],
     tic = time.perf_counter()
     all_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
 
-    print("prepared_pdf_file_paths:", prepared_pdf_file_paths[0])
+    #print("prepared_pdf_file_paths:", prepared_pdf_file_paths[0])
     review_out_file_paths = [prepared_pdf_file_paths[0]]
 
     if isinstance(custom_recogniser_word_list, pd.DataFrame):
@@ -279,9 +283,9 @@ def choose_and_run_redactor(file_paths:List[str],
             file_path = file.name    
 
         if file_path:
-            pdf_file_name_without_ext = get_file_path_end(file_path)
+            pdf_file_name_without_ext = get_file_name_without_type(file_path)
             pdf_file_name_with_ext = os.path.basename(file_path)
-            print("Redacting file:", pdf_file_name_with_ext)
+            # print("Redacting file:", pdf_file_name_with_ext)
 
             is_a_pdf = is_pdf(file_path) == True
             if is_a_pdf == False and in_redact_method == text_ocr_option:
@@ -327,7 +331,9 @@ def choose_and_run_redactor(file_paths:List[str],
              comprehend_client,
              textract_client,
              custom_recogniser_word_list,
-             redact_whole_page_list)
+             redact_whole_page_list,
+             max_fuzzy_spelling_mistakes_num,
+             match_fuzzy_whole_phrase_bool)
 
             
             #print("log_files_output_paths at end of image redact function:", log_files_output_paths)
@@ -366,7 +372,9 @@ def choose_and_run_redactor(file_paths:List[str],
             comprehend_query_number,
             comprehend_client,
             custom_recogniser_word_list,
-            redact_whole_page_list)
+            redact_whole_page_list,
+            max_fuzzy_spelling_mistakes_num,
+            match_fuzzy_whole_phrase_bool)
 
         else:
             out_message = "No redaction method selected"
@@ -414,13 +422,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
             # Save the gradio_annotation_boxes to a JSON file
             try:
-                #print("Saving annotations to JSON")
-
-                out_annotation_file_path = out_orig_pdf_file_path + '_review_file.json'
-                with open(out_annotation_file_path, 'w') as f:
-                    json.dump(annotations_all_pages, f)
-                log_files_output_paths.append(out_annotation_file_path)
-
+                
                 #print("Saving annotations to CSV")
 
                 # Convert json to csv and also save this
@@ -434,6 +436,13 @@ def choose_and_run_redactor(file_paths:List[str],
                 out_file_paths.append(out_review_file_path)
 
                 print("Saved review file to csv")
+
+                out_annotation_file_path = out_orig_pdf_file_path + '_review_file.json'
+                with open(out_annotation_file_path, 'w') as f:
+                    json.dump(annotations_all_pages, f)
+                log_files_output_paths.append(out_annotation_file_path)
+
+                print("Saving annotations to JSON")
 
             except Exception as e:
                 print("Could not save annotations to json or csv file:", e)
@@ -694,10 +703,10 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
                 x1 = pymupdf_x1
                 x2 = pymupdf_x2
 
-                # if hasattr(annot, 'text') and annot.text:
-                #     img_annotation_box["text"] = annot.text
-                # else:
-                #     img_annotation_box["text"] = ""
+                if hasattr(annot, 'text') and annot.text:
+                    img_annotation_box["text"] = annot.text
+                else:
+                    img_annotation_box["text"] = ""
 
             # Else should be CustomImageRecognizerResult
             else:
@@ -715,10 +724,11 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
                     img_annotation_box["label"] = annot.entity_type
                 except:
                     img_annotation_box["label"] = "Redaction"
-                # if hasattr(annot, 'text') and annot.text:
-                #     img_annotation_box["text"] = annot.text
-                # else:
-                #     img_annotation_box["text"] = ""
+
+                if hasattr(annot, 'text') and annot.text:
+                    img_annotation_box["text"] = annot.text
+                else:
+                    img_annotation_box["text"] = ""
 
             rect = Rect(x1, pymupdf_y1, x2, pymupdf_y2)  # Create the PyMuPDF Rect
 
@@ -749,12 +759,14 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
 
                 if isinstance(annot, Dictionary):
                     img_annotation_box["label"] = str(annot["/T"])
+
+                    if hasattr(annot, 'Contents'):
+                        img_annotation_box["text"] = annot.Contents
+                    else:
+                        img_annotation_box["text"] = ""
                 else:
                     img_annotation_box["label"] = "REDACTION"
-                # if hasattr(annot, 'text') and annot.text:
-                #     img_annotation_box["text"] = annot.text
-                # else:
-                #     img_annotation_box["text"] = ""
+                    img_annotation_box["text"] = ""                
 
         # Convert to a PyMuPDF Rect object
         #rect = Rect(rect_coordinates)
@@ -778,6 +790,11 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
     page.clean_contents()
 
     return page, out_annotation_boxes
+
+###
+# IMAGE-BASED OCR PDF TEXT DETECTION/REDACTION WITH TESSERACT OR AWS TEXTRACT
+###
+
 
 def merge_img_bboxes(bboxes, combined_results: Dict, signature_recogniser_results=[], handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Redact all identified handwriting", "Redact all identified signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
 
@@ -908,6 +925,8 @@ def redact_image_pdf(file_path:str,
                      textract_client:str="",
                      custom_recogniser_word_list:List[str]=[],
                      redact_whole_page_list:List[str]=[],
+                     max_fuzzy_spelling_mistakes_num:int=1,
+                     match_fuzzy_whole_phrase_bool:bool=True,
                      page_break_val:int=int(page_break_value),
                      log_files_output_paths:List=[],
                      max_time:int=int(max_time_value),                                       
@@ -940,14 +959,16 @@ def redact_image_pdf(file_path:str,
     - textract_client (optional): A connection to the AWS Textract service via the boto3 package.
     - custom_recogniser_word_list (optional): A list of custom words that the user has chosen specifically to redact.
     - redact_whole_page_list (optional, List[str]): A list of pages to fully redact.
+    - max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
+    - match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to 3.
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.      
     - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
-    The function returns a fully or partially-redacted PDF document.
+    The function returns a redacted PDF document along with processing output objects.
     '''
-    file_name = get_file_path_end(file_path)
+    file_name = get_file_name_without_type(file_path)
     fill = (0, 0, 0)   # Fill colour for redactions
     comprehend_query_number_new = 0
 
@@ -957,11 +978,14 @@ def redact_image_pdf(file_path:str,
         nlp_analyser.registry.remove_recognizer("CUSTOM")
         new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
         #print("new_custom_recogniser:", new_custom_recogniser)
-        nlp_analyser.registry.add_recognizer(new_custom_recogniser)      
+        nlp_analyser.registry.add_recognizer(new_custom_recogniser)
 
+        nlp_analyser.registry.remove_recognizer("CUSTOM_FUZZY")
+        new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_recogniser_word_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
+        #print("new_custom_recogniser:", new_custom_recogniser)
+        nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
 
-    image_analyser = CustomImageAnalyzerEngine(nlp_analyser)
-    
+    image_analyser = CustomImageAnalyzerEngine(nlp_analyser)    
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         print("Connection to AWS Comprehend service unsuccessful.")
@@ -1051,7 +1075,7 @@ def redact_image_pdf(file_path:str,
 
             #print("Image is in range of pages to redact")            
             if isinstance(image, str):
-                print("image is a file path", image)
+                #print("image is a file path", image)
                 image = Image.open(image)
 
             # Need image size to convert textract OCR outputs to the correct sizes
@@ -1119,7 +1143,7 @@ def redact_image_pdf(file_path:str,
                 line_level_ocr_results, handwriting_or_signature_boxes, signature_recogniser_results, handwriting_recogniser_results, line_level_ocr_results_with_children = json_to_ocrresult(text_blocks, page_width, page_height, reported_page_number)
 
             # Step 2: Analyze text and identify PII
-            if chosen_redact_entities:
+            if chosen_redact_entities or chosen_redact_comprehend_entities:
 
                 redaction_bboxes, comprehend_query_number_new = image_analyser.analyze_text(
                     line_level_ocr_results,
@@ -1185,6 +1209,7 @@ def redact_image_pdf(file_path:str,
 
             ## Apply annotations with pymupdf            
             else:
+                print("merged_redaction_boxes:", merged_redaction_bboxes)
                 #print("redact_whole_page_list:", redact_whole_page_list)
                 if redact_whole_page_list:
                     int_reported_page_number = int(reported_page_number) 
@@ -1309,7 +1334,7 @@ def redact_image_pdf(file_path:str,
 
 
 ###
-# PIKEPDF TEXT PDF REDACTION
+# PIKEPDF TEXT DETECTION/REDACTION
 ###
 
 def get_text_container_characters(text_container:LTTextContainer):
@@ -1466,6 +1491,8 @@ def create_text_redaction_process_results(analyser_results, analysed_bounding_bo
 def create_pikepdf_annotations_for_bounding_boxes(analysed_bounding_boxes):
     pikepdf_annotations_on_page = []
     for analysed_bounding_box in analysed_bounding_boxes:
+        #print("analysed_bounding_box:", analysed_bounding_boxes)
+
         bounding_box = analysed_bounding_box["boundingBox"]
         annotation = Dictionary(
             Type=Name.Annot,
@@ -1477,6 +1504,7 @@ def create_pikepdf_annotations_for_bounding_boxes(analysed_bounding_boxes):
             IC=[0, 0, 0],
             CA=1, # Transparency
             T=analysed_bounding_box["result"].entity_type,
+            Contents=analysed_bounding_box["text"],
             BS=Dictionary(
                 W=0,                     # Border width: 1 point
                 S=Name.S                # Border style: solid
@@ -1484,182 +1512,6 @@ def create_pikepdf_annotations_for_bounding_boxes(analysed_bounding_boxes):
         )
         pikepdf_annotations_on_page.append(annotation)
     return pikepdf_annotations_on_page
-
-# def run_page_text_redaction(language: str,  # Language of the PDF content
-#     chosen_redact_entities: List[str],  # List of entities to be redacted
-#     chosen_redact_comprehend_entities: List[str],
-#     line_level_text_results_list: List[str],
-#     line_characters: List,
-#     page_analyser_results: List = [],
-#     page_analysed_bounding_boxes: List = [],
-#     comprehend_client = None, # Connection to AWS Comprehend
-#     allow_list: List[str] = None,  # Optional list of allowed entities
-#     pii_identification_method: str = "Local"
-#     ):
-
-#     # Initialize batching variables
-#     current_batch = ""
-#     current_batch_mapping = []  # List of (start_pos, line_index, OCRResult) tuples
-#     all_text_line_results = []  # Store results for all lines
-#     text_container_analyser_results = []
-#     text_container_analysed_bounding_boxes = []
-
-#     # First pass: collect all lines into batches
-#     for i, text_line in enumerate(line_level_text_results_list):
-#         if chosen_redact_entities:
-#             if pii_identification_method == "Local":
-
-#                 #print("chosen_redact_entities:", chosen_redact_entities)
-
-#                 # Process immediately for local analysis
-#                 text_line_analyser_result = nlp_analyser.analyze(
-#                     text=text_line.text,
-#                     language=language,
-#                     entities=chosen_redact_entities,
-#                     score_threshold=score_threshold,
-#                     return_decision_process=True,
-#                     allow_list=allow_list
-#                 )
-#                 all_text_line_results.append((i, text_line_analyser_result))
-
-                                                
-#             elif pii_identification_method == "AWS Comprehend":
-
-#                 # First use the local Spacy model to pick up custom entities that AWS Comprehend can't search for.
-#                 custom_redact_entities = [entity for entity in chosen_redact_comprehend_entities if entity in custom_entities]
-
-
-#                 text_line_analyser_result = nlp_analyser.analyze(
-#                     text=text_line.text,
-#                     language=language,
-#                     entities=custom_redact_entities,
-#                     score_threshold=score_threshold,
-#                     return_decision_process=True,
-#                     allow_list=allow_list
-#                 )
-#                 all_text_line_results.append((i, text_line_analyser_result))
-
-
-#                 if len(text_line.text) >= 3:
-#                     # Add separator between lines
-#                     if current_batch:
-#                         current_batch += " | "
-                    
-#                     start_pos = len(current_batch)
-#                     current_batch += text_line.text
-#                     current_batch_mapping.append((start_pos, i, text_line))
-
-#                     # Process batch if approaching 300 characters or last line
-#                     if len(current_batch) >= 200 or i == len(line_level_text_results_list) - 1:
-#                         print("length of text for Comprehend:", len(current_batch))
-                        
-#                         try:
-#                             response = comprehend_client.detect_pii_entities(
-#                                 Text=current_batch,
-#                                 LanguageCode=language
-#                             )
-#                         except Exception as e:
-#                             print(e)
-#                             time.sleep(3)
-#                             response = comprehend_client.detect_pii_entities(
-#                                 Text=current_batch,
-#                                 LanguageCode=language
-#                             )
-
-#                         comprehend_query_number += 1
-
-#                         # Process response and map back to original lines
-#                         if response and "Entities" in response:
-#                             for entity in response["Entities"]:
-#                                 entity_start = entity["BeginOffset"]
-#                                 entity_end = entity["EndOffset"]
-
-#                                 # Find which line this entity belongs to
-#                                 for batch_start, line_idx, original_line in current_batch_mapping:
-#                                     batch_end = batch_start + len(original_line.text)
-
-#                                     # Check if entity belongs to this line
-#                                     if batch_start <= entity_start < batch_end:
-#                                         # Adjust offsets relative to original line
-#                                         relative_start = entity_start - batch_start
-#                                         relative_end = min(entity_end - batch_start, len(original_line.text))
-                                        
-#                                         result_text = original_line.text[relative_start:relative_end]
-
-#                                         if result_text not in allow_list:
-#                                             if entity.get("Type") in chosen_redact_comprehend_entities:
-#                                                 # Create adjusted entity
-#                                                 adjusted_entity = entity.copy()
-#                                                 adjusted_entity["BeginOffset"] = relative_start
-#                                                 adjusted_entity["EndOffset"] = relative_end
-
-#                                                 recogniser_entity = recognizer_result_from_dict(adjusted_entity)
-                                                
-#                                                 # Add to results for this line
-#                                                 existing_results = next((results for idx, results in all_text_line_results if idx == line_idx), [])
-#                                                 if not existing_results:
-#                                                     all_text_line_results.append((line_idx, [recogniser_entity]))
-#                                                 else:
-#                                                     existing_results.append(recogniser_entity)
-
-#                         # Reset batch
-#                         current_batch = ""
-#                         current_batch_mapping = []
-
-#     # Second pass: process results for each line
-#     for i, text_line in enumerate(line_level_text_results_list):
-#         text_line_analyser_result = []
-#         text_line_bounding_boxes = []
-
-#         # Get results for this line
-#         line_results = next((results for idx, results in all_text_line_results if idx == i), [])
-        
-#         if line_results:
-#             text_line_analyser_result = line_results
-
-#             #print("Analysed text container, now merging bounding boxes")
-
-#             # Merge bounding boxes if very close together
-#             text_line_bounding_boxes = merge_text_bounding_boxes(text_line_analyser_result, line_characters[i])
-
-#             #print("merged bounding boxes")
-
-#             text_container_analyser_results.extend(text_line_analyser_result)
-#             #text_container_analysed_bounding_boxes.extend(text_line_bounding_boxes)
-
-#             #print("text_container_analyser_results:", text_container_analyser_results)
-
-#             page_analyser_results.extend(text_container_analyser_results)  # Add this line
-#             page_analysed_bounding_boxes.extend(text_line_bounding_boxes)  # Add this line
-
-#     return page_analysed_bounding_boxes
-
-# def map_back_entity_results(page_analyser_result, page_text_mapping, all_text_line_results):
-#     for entity in page_analyser_result:
-#         entity_start = entity.start
-#         entity_end = entity.end
-        
-#         for batch_start, line_idx, original_line, chars in page_text_mapping:
-#             batch_end = batch_start + len(original_line.text)
-            
-#             if batch_start <= entity_start < batch_end:
-#                 relative_start = entity_start - batch_start
-#                 relative_end = min(entity_end - batch_start, len(original_line.text))
-                
-#                 adjusted_entity = copy.deepcopy(entity)
-#                 adjusted_entity.start = relative_start
-#                 adjusted_entity.end = relative_end
-                
-#                 existing_entry = next((entry for idx, entry in all_text_line_results if idx == line_idx), None)
-                
-#                 if existing_entry is None:
-#                     all_text_line_results.append((line_idx, [adjusted_entity]))
-#                 else:
-#                     existing_entry.append(adjusted_entity)
-#                 break
-
-#     return all_text_line_results
-
 
 def redact_text_pdf(
     filename: str,  # Path to the PDF file to be redacted
@@ -1682,6 +1534,8 @@ def redact_text_pdf(
     comprehend_client="",
     custom_recogniser_word_list:List[str]=[],
     redact_whole_page_list:List[str]=[],
+    max_fuzzy_spelling_mistakes_num:int=1,
+    match_fuzzy_whole_phrase_bool:bool=True,
     page_break_val: int = int(page_break_value),  # Value for page break
     max_time: int = int(max_time_value),    
     progress: Progress = Progress(track_tqdm=True)  # Progress tracking object
@@ -1711,6 +1565,8 @@ def redact_text_pdf(
     - comprehend_client (optional): A connection to the AWS Comprehend service via the boto3 package.
     - custom_recogniser_word_list (optional, List[str]): A list of custom words that the user has chosen specifically to redact.
     - redact_whole_page_list (optional, List[str]): A list of pages to fully redact.
+    -  max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
+    -  match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
     - page_break_val: Value for page break
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.     
     - progress: Progress tracking object
@@ -1726,8 +1582,11 @@ def redact_text_pdf(
     if custom_recogniser_word_list:        
         nlp_analyser.registry.remove_recognizer("CUSTOM")
         new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
-        #print("new_custom_recogniser:", new_custom_recogniser)
         nlp_analyser.registry.add_recognizer(new_custom_recogniser)
+
+        nlp_analyser.registry.remove_recognizer("CUSTOM_FUZZY")
+        new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_recogniser_word_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
+        nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
 
         # List all elements currently in the nlp_analyser registry
         #print("Current recognizers in nlp_analyser registry:")
@@ -1761,15 +1620,14 @@ def redact_text_pdf(
     for page_no in progress_bar:
 
         reported_page_number = str(page_no + 1)
-        print("Redacting page:", reported_page_number)
+        #print("Redacting page:", reported_page_number)
 
         # Assuming prepared_pdf_file_paths[page_no] is a PIL image object
         try:
             image = prepared_pdf_image_path[page_no]#.copy()
             #print("image:", image)
         except Exception as e:
-            print("Could not redact page:", reported_page_number, "due to:")
-            print(e)
+            print("Could not redact page:", reported_page_number, "due to:", e)
             continue
 
         image_annotations = {"image": image, "boxes": []} 
@@ -1825,27 +1683,32 @@ def redact_text_pdf(
 
                     ### REDACTION
 
-                    page_analysed_bounding_boxes = run_page_text_redaction(
-                                                        language,
-                                                        chosen_redact_entities,
-                                                        chosen_redact_comprehend_entities,
-                                                        all_line_level_text_results_list, #line_level_text_results_list,
-                                                        all_line_characters,
-                                                        page_analyser_results,
-                                                        page_analysed_bounding_boxes,
-                                                        comprehend_client, 
-                                                        allow_list,
-                                                        pii_identification_method,
-                                                        nlp_analyser,
-                                                        score_threshold,
-                                                        custom_entities,
-                                                        comprehend_query_number
-                                                        )
+                    if chosen_redact_entities or chosen_redact_comprehend_entities:
+                        #print("Identifying redactions on page.")
 
+                        page_analysed_bounding_boxes = run_page_text_redaction(
+                                                            language,
+                                                            chosen_redact_entities,
+                                                            chosen_redact_comprehend_entities,
+                                                            all_line_level_text_results_list,
+                                                            all_line_characters,
+                                                            page_analyser_results,
+                                                            page_analysed_bounding_boxes,
+                                                            comprehend_client, 
+                                                            allow_list,
+                                                            pii_identification_method,
+                                                            nlp_analyser,
+                                                            score_threshold,
+                                                            custom_entities,
+                                                            comprehend_query_number
+                                                            )
 
-                #print("page_analyser_results:", page_analyser_results)
-                #print("page_analysed_bounding_boxes:", page_analysed_bounding_boxes)
-                #print("image:", image)
+                    #print("page_analyser_results:", page_analyser_results)
+                    #print("page_analysed_bounding_boxes:", page_analysed_bounding_boxes)
+                    #print("image:", image)
+                    else:
+                        page_analysed_bounding_boxes = []
+                
 
                 page_analysed_bounding_boxes = convert_pikepdf_decision_output_to_image_coords(pymupdf_page, page_analysed_bounding_boxes, image)
 
@@ -1854,7 +1717,7 @@ def redact_text_pdf(
                 # Annotate redactions on page
                 pikepdf_annotations_on_page = create_pikepdf_annotations_for_bounding_boxes(page_analysed_bounding_boxes)
 
-                #print("pikepdf_annotations_on_page:", pikepdf_annotations_on_page)
+                # print("pikepdf_annotations_on_page:", pikepdf_annotations_on_page)
 
                 # Make pymupdf page redactions
                 #print("redact_whole_page_list:", redact_whole_page_list)

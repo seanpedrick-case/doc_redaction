@@ -560,7 +560,7 @@ def run_page_text_redaction(
         if not nlp_analyser:
             raise ValueError("nlp_analyser is required for Local identification method")
         
-        print("page text:", page_text)
+        #print("page text:", page_text)
 
         page_analyser_result = nlp_analyser.analyze(
             text=page_text,
@@ -1077,15 +1077,15 @@ class CustomImageAnalyzerEngine:
             line_length = len(line_text)
             redaction_text = redaction_relevant_ocr_result.text
 
-            # print(f"Processing line: '{line_text}'")
+            #print(f"Processing line: '{line_text}'")
             
             for redaction_result in text_analyzer_results:
-                # print(f"Checking redaction result: {redaction_result}")
-                # print("redaction_text:", redaction_text)
-                # print("line_length:", line_length)
-                # print("line_text:", line_text)
+                #print(f"Checking redaction result: {redaction_result}")
+                #print("redaction_text:", redaction_text)
+                #print("line_length:", line_length)
+                #print("line_text:", line_text)
                 
-                # Check if the redaction text is no in the allow list
+                # Check if the redaction text is not in the allow list
                 
                 if redaction_text not in allow_list:
                     
@@ -1098,14 +1098,45 @@ class CustomImageAnalyzerEngine:
                     matched_words = matched_text.split()
                     
                     # print(f"Found match: '{matched_text}' in line")
+
+                    # for word_info in ocr_results_with_children_child_info.get('words', []):
+                    #     # Check if this word is part of our match
+                    #     if any(word.lower() in word_info['text'].lower() for word in matched_words):
+                    #         matching_word_boxes.append(word_info['bounding_box'])
+                    #         print(f"Matched word: {word_info['text']}")
                     
                     # Find the corresponding words in the OCR results
                     matching_word_boxes = []
+                    
+                    #print("ocr_results_with_children_child_info:", ocr_results_with_children_child_info)
+
+                    current_position = 0
+
                     for word_info in ocr_results_with_children_child_info.get('words', []):
-                        # Check if this word is part of our match
-                        if any(word.lower() in word_info['text'].lower() for word in matched_words):
+                        word_text = word_info['text']
+                        word_length = len(word_text)
+
+                        # Assign start and end character positions
+                        #word_info['start_position'] = current_position
+                        #word_info['end_position'] = current_position + word_length
+
+                        word_start = current_position
+                        word_end = current_position + word_length
+
+                        # Update current position for the next word
+                        current_position += word_length + 1  # +1 for the space after the word
+
+                        #print("word_info['bounding_box']:", word_info['bounding_box'])
+                        #print("word_start:", word_start)
+                        #print("start_in_line:", start_in_line)
+
+                        #print("word_end:", word_end)
+                        #print("end_in_line:", end_in_line)
+                        
+                        # Check if the word's bounding box is within the start and end bounds
+                        if word_start >= start_in_line and word_end <= (end_in_line + 1):
                             matching_word_boxes.append(word_info['bounding_box'])
-                            # print(f"Matched word: {word_info['text']}")
+                            #print(f"Matched word: {word_info['text']}")
                     
                     if matching_word_boxes:
                         # Calculate the combined bounding box for all matching words
@@ -1127,7 +1158,7 @@ class CustomImageAnalyzerEngine:
                                 text=matched_text
                             )
                         )
-                        # print(f"Added bounding box for: '{matched_text}'")
+                        #print(f"Added bounding box for: '{matched_text}'")
 
         return redaction_bboxes
     
