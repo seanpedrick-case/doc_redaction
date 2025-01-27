@@ -12,7 +12,7 @@ from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine, DictAnalyzerR
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
 
-from tools.helper_functions import output_folder, get_file_path_end, read_file, detect_file_type
+from tools.helper_functions import output_folder, get_file_name_without_type, read_file, detect_file_type
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold
 
 # Use custom version of analyze_dict to be able to track progress
@@ -434,7 +434,7 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
             file_type = detect_file_type(anon_file)
             print("File type is:", file_type)
 
-            out_file_part = get_file_path_end(anon_file.name)
+            out_file_part = get_file_name_without_type(anon_file.name)
     
             if file_type == 'xlsx':
                 print("Running through all xlsx sheets")
@@ -472,7 +472,7 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
             else:
                 sheet_name = ""
                 anon_df = read_file(anon_file)
-                out_file_part = get_file_path_end(anon_file.name)
+                out_file_part = get_file_name_without_type(anon_file.name)
                 out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths)
 
         # Increase latest file completed count unless we are at the last file

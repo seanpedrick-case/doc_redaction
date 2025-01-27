@@ -1,5 +1,5 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
-from tools.helper_functions import get_file_path_end, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, read_file, get_or_create_env_var
+from tools.helper_functions import get_file_name_without_type, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, read_file, get_or_create_env_var
 from PIL import Image, ImageFile
 import os
 import re
@@ -7,6 +7,7 @@ import time
 import json
 import pymupdf
 import pandas as pd
+import numpy as np
 from pymupdf import Rect
 from fitz import Page
 from tqdm import tqdm
@@ -240,7 +241,7 @@ def get_input_file_names(file_input:List[str]):
         else:
             file_path = file.name
 
-        file_path_without_ext = get_file_path_end(file_path)
+        file_path_without_ext = get_file_name_without_type(file_path)
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
@@ -489,7 +490,7 @@ def prepare_image_or_pdf(
             file_path = file
         else:
             file_path = file.name
-        file_path_without_ext = get_file_path_end(file_path)
+        file_path_without_ext = get_file_name_without_type(file_path)
         file_name_with_ext = os.path.basename(file_path)
 
         if not file_path:
@@ -668,7 +669,7 @@ def prepare_image_or_pdf(
     return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi):
-    file_path_without_ext = get_file_path_end(in_file_path)
+    file_path_without_ext = get_file_name_without_type(in_file_path)
 
     out_file_paths = out_text_file_path
 
@@ -754,7 +755,7 @@ def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decis
             if 'text' not in box:
                 data_to_add = {"image": image_path, "page": reported_number,  **box} # "text": annotation['text'],
             else:
-                data_to_add = {"image": image_path, "page": reported_number, "text": annotation['text'], **box}
+                data_to_add = {"image": image_path, "page": reported_number, "text": box['text'], **box}
             #print("data_to_add:", data_to_add)
             flattened_annotation_data.append(data_to_add)
 
@@ -764,7 +765,7 @@ def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decis
     #print("redaction_decision_output:", redaction_decision_output)
     #print("annotation_data_as_df:", annotation_data_as_df)
 
-    # Join on additional text data from decision output results if included
+    # Join on additional text data from decision output results if included, if text not already there
     if not redaction_decision_output.empty:
         #print("redaction_decision_output is not empty")
         #print("redaction_decision_output:", redaction_decision_output)
@@ -792,6 +793,9 @@ def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decis
     for col in ["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]:
         if col not in annotation_data_as_df.columns:
             annotation_data_as_df[col] = ''
+
+    for col in ['xmin', 'xmax', 'ymin', 'ymax']:
+        annotation_data_as_df[col] = np.floor(annotation_data_as_df[col])
 
     annotation_data_as_df = annotation_data_as_df.sort_values(['page', 'ymin', 'xmin', 'label'])
 

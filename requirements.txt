@@ -16,6 +16,8 @@ boto3==1.35.83
 pyarrow==18.1.0
 openpyxl==3.1.2
 Faker==22.2.0
+python-levenshtein==0.26.1
+spaczz==0.6.1
 gradio_image_annotation==0.2.5
 numpy==1.26.4
 awslambdaric==3.0.0

@@ -8,7 +8,7 @@ from typing import List
 from gradio_image_annotation import image_annotator
 from gradio_image_annotation.image_annotator import AnnotatedImageData
 from tools.file_conversion import is_pdf, convert_review_json_to_pandas_df, CUSTOM_BOX_COLOUR
-from tools.helper_functions import get_file_path_end, output_folder, detect_file_type
+from tools.helper_functions import get_file_name_without_type, output_folder, detect_file_type
 from tools.file_redaction import redact_page_with_pymupdf
 import json
 import os
@@ -68,6 +68,12 @@ def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
     for image, items in image_groups.items():
         # Filter items with non-empty boxes
         non_empty_boxes = [item for item in items if item.get('boxes')]
+
+         # Remove 'text' elements from boxes
+        for item in non_empty_boxes:
+            if 'boxes' in item:
+                item['boxes'] = [{k: v for k, v in box.items() if k != 'text'} for box in item['boxes']]
+
         if non_empty_boxes:
             # Keep the first entry with non-empty boxes
             result.append(non_empty_boxes[0])
@@ -175,6 +181,8 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
 
     image_annotator_object = remove_duplicate_images_with_blank_boxes(image_annotator_object)
 
+
+
     out_image_annotator = image_annotator(
         value = image_annotator_object[page_num_reported - 1],
         boxes_alpha=0.1,
@@ -264,7 +272,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
 
     for file_path in file_paths:
         #print("file_path:", file_path)
-        file_name_without_ext = get_file_path_end(file_path)
+        file_name_without_ext = get_file_name_without_type(file_path)
         file_name_with_ext = os.path.basename(file_path)
 
         file_extension = os.path.splitext(file_path)[1].lower()
@@ -544,7 +552,7 @@ def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths):
         else:
             file_path = file.name
     
-    file_path_name = get_file_path_end(file_path)
+    file_path_name = get_file_name_without_type(file_path)
     file_path_end = detect_file_type(file_path)
 
     if file_path_end == "pdf":
@@ -675,7 +683,7 @@ def convert_xfdf_to_dataframe(file_paths_list, pymupdf_doc, image_paths):
         else:
             file_path = file.name
     
-        file_path_name = get_file_path_end(file_path)
+        file_path_name = get_file_name_without_type(file_path)
         file_path_end = detect_file_type(file_path)
 
         if file_path_end == "pdf":
@@ -699,7 +707,7 @@ def convert_xfdf_to_dataframe(file_paths_list, pymupdf_doc, image_paths):
             # else:
             #     xfdf_path = xfdf_paths[0].name
 
-            file_path_name = get_file_path_end(xfdf_path)
+            file_path_name = get_file_name_without_type(xfdf_path)
 
             #print("file_path_name:", file_path_name)
 

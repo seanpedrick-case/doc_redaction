@@ -4,26 +4,12 @@ import boto3
 from botocore.exceptions import ClientError
 import gradio as gr
 import pandas as pd
+import numpy as np
 import unicodedata
 from typing import List
 from gradio_image_annotation import image_annotator
 from tools.auth import user_pool_id
 
-def reset_state_vars():
-    return [], [], pd.DataFrame(), pd.DataFrame(), 0, "", image_annotator(
-            label="Modify redaction boxes",
-            label_list=["Redaction"],
-            label_colors=[(0, 0, 0)],
-            show_label=False,
-            sources=None,#["upload"],
-            show_clear_button=False,
-            show_share_button=False,
-            show_remove_button=False,
-            interactive=False
-        ), [], [], [], pd.DataFrame(), pd.DataFrame()
-
-def reset_review_vars():
-    return [], pd.DataFrame(), pd.DataFrame()
 
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists
@@ -51,13 +37,40 @@ print(f'The value of GRADIO_OUTPUT_FOLDER is {output_folder}')
 input_folder = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/')
 print(f'The value of GRADIO_INPUT_FOLDER is {input_folder}')
 
+# Retrieving or setting CUSTOM_HEADER
+CUSTOM_HEADER = get_or_create_env_var('CUSTOM_HEADER', '')
+print(f'CUSTOM_HEADER found')
+
+# Retrieving or setting CUSTOM_HEADER_VALUE
+CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', '')
+print(f'CUSTOM_HEADER_VALUE found')
+
+
+def reset_state_vars():
+    return [], [], pd.DataFrame(), pd.DataFrame(), 0, "", image_annotator(
+            label="Modify redaction boxes",
+            label_list=["Redaction"],
+            label_colors=[(0, 0, 0)],
+            show_label=False,
+            sources=None,#["upload"],
+            show_clear_button=False,
+            show_share_button=False,
+            show_remove_button=False,
+            interactive=False
+        ), [], [], [], pd.DataFrame(), pd.DataFrame()
+
+def reset_review_vars():
+    return [], pd.DataFrame(), pd.DataFrame()
+
+
+
 def load_in_default_allow_list(allow_list_file_path):
     if isinstance(allow_list_file_path, str):
         allow_list_file_path = [allow_list_file_path]
     return allow_list_file_path
 
 
-def get_file_path_end(file_path):
+def get_file_name_without_type(file_path):
     # First, get the basename of the file (e.g., "example.txt" from "/path/to/example.txt")
     basename = os.path.basename(file_path)
     
@@ -126,7 +139,7 @@ def custom_regex_load(in_file:List[str], file_type:str = "Allow list"):
         if regex_file_names:
             regex_file_name = regex_file_names[0]
             custom_regex = pd.read_csv(regex_file_name, low_memory=False, header=None)
-            #regex_file_name_no_ext = get_file_path_end(regex_file_name)
+            #regex_file_name_no_ext = get_file_name_without_type(regex_file_name)
 
             custom_regex.columns = custom_regex.columns.astype(str)
 
@@ -220,13 +233,41 @@ def wipe_logs(feedback_logs_loc, usage_logs_loc):
     except Exception as e:
         print("Could not remove usage logs file", e)
 
-# Retrieving or setting CUSTOM_HEADER
-CUSTOM_HEADER = get_or_create_env_var('CUSTOM_HEADER', '')
-print(f'CUSTOM_HEADER found')
+def merge_csv_files(file_list):
 
-# Retrieving or setting CUSTOM_HEADER_VALUE
-CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', '')
-print(f'CUSTOM_HEADER_VALUE found')
+    # Initialise an empty list to hold DataFrames
+    dataframes = []
+    output_files = []
+
+    # Loop through each file in the file list
+    for file in file_list:
+        # Read the CSV file into a DataFrame
+        df = pd.read_csv(file.name)
+        dataframes.append(df)
+
+    # Concatenate all DataFrames into a single DataFrame
+    merged_df = pd.concat(dataframes, ignore_index=True)    
+
+    for col in ['xmin', 'xmax', 'ymin', 'ymax']:
+        merged_df[col] = np.floor(merged_df[col])
+
+    merged_df = merged_df.drop_duplicates(subset=['page', 'label', 'color', 'xmin', 'ymin', 'xmax', 'ymax'])
+
+    merged_df = merged_df.sort_values(['page', 'ymin', 'xmin', 'label'])
+
+    file_out_name = os.path.basename(file_list[0])
+
+    merged_csv_path = output_folder + file_out_name + "_merged.csv"
+
+    # Save the merged DataFrame to a CSV file
+    #merged_csv = StringIO()
+    merged_df.to_csv(merged_csv_path, index=False)
+    output_files.append(merged_csv_path)
+    #merged_csv.seek(0)  # Move to the beginning of the StringIO object
+
+    return output_files
+
+
 
 async def get_connection_params(request: gr.Request):
     base_folder = ""
