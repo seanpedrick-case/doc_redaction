@@ -329,7 +329,7 @@ with app:
 
                 with gr.Row():
                     max_fuzzy_spelling_mistakes_num = gr.Number(label="Maximum number of spelling mistakes allowed for fuzzy matching (CUSTOM_FUZZY entity).", value=1, minimum=0, maximum=9, precision=0)
-                    match_fuzzy_whole_phrase_bool = gr.Checkbox(label="Should fuzzy match on entire phrases in deny list (as opposed to each word individually)?", value=True)
+                    match_fuzzy_whole_phrase_bool = gr.Checkbox(label="Should fuzzy search match on entire phrases in deny list (as opposed to each word individually)?", value=True)
 
         with gr.Accordion("Redact only selected pages", open = False):
             with gr.Row():
