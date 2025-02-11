@@ -1,17 +1,31 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_all
 
 datas = [('tesseract/', 'tesseract/'), ('poppler/poppler-24.02.0/', 'poppler/poppler-24.02.0/')]
+binaries = []
+hiddenimports = ['gradio_image_annotation', 'pyarrow.vendored.version', 'pydicom.encoders', 'safehttpx', 'presidio_analyzer', 'presidio_anonymizer', 'presidio_image_redactor']
 datas += collect_data_files('gradio_client')
 datas += collect_data_files('gradio')
+datas += collect_data_files('gradio_image_annotation')
+tmp_ret = collect_all('gradio_image_annotation')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('safehttpx')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('presidio_analyzer')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('presidio_anonymizer')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('presidio_image_redactor')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
-    hiddenimports=['pyarrow.vendored.version', 'pydicom.encoders'],
+    hiddenimports=hiddenimports,
     hookspath=['build_deps'],
     hooksconfig={},
     runtime_hooks=[],
@@ -29,7 +43,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='DocRedactApp_0.2',
+    name='DocRedactApp_0.2.0',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -48,5 +62,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='DocRedactApp_0.2',
+    name='DocRedactApp_0.2.0',
 )

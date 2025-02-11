@@ -12,9 +12,9 @@ NOTE: for ensuring that spaCy models are loaded into the program correctly in re
 
 8. In command line, cd to the folder that contains app.py. 
 
-9.Run the following, assuming you want to make one single .exe file (This helped me: https://github.com/pyinstaller/pyinstaller/issues/8108):
+9.Run the following (This helped me: https://github.com/pyinstaller/pyinstaller/issues/8108):
 
-a) In command line: pyi-makespec --additional-hooks-dir="build_deps" --add-data "tesseract/:tesseract/" --add-data "poppler/poppler-24.02.0/:poppler/poppler-24.02.0/" --collect-data=gradio_client  --collect-data=gradio  --hidden-import pyarrow.vendored.version --hidden-import pydicom.encoders  --name DocRedactApp_0.2 app.py 
+a) In command line: pyi-makespec --additional-hooks-dir="build_deps" --add-data "tesseract/:tesseract/" --add-data "poppler/poppler-24.02.0/:poppler/poppler-24.02.0/" --collect-data=gradio_client  --collect-data=gradio --hidden-import=gradio_image_annotation --collect-data=gradio_image_annotation --collect-all=gradio_image_annotation --hidden-import pyarrow.vendored.version --hidden-import pydicom.encoders --hidden-import=safehttpx --collect-all=safehttpx --hidden-import=presidio_analyzer --collect-all=presidio_analyzer --hidden-import=presidio_anonymizer --collect-all=presidio_anonymizer --hidden-import=presidio_image_redactor --collect-all=presidio_image_redactor --name DocRedactApp_0.2.0 app.py
 
 # Add --onefile  to the above if you would like everything packaged as a single exe, although this will need to be extracted upon starting the app, slowing down initialisation time significantly.
 
@@ -28,11 +28,29 @@ a = Analysis(
     }
 )
 
-c) Back in command line, run this: pyinstaller --clean --noconfirm DocRedactApp_0.2.spec
+hook-presidio-image-redactor.py
+
+c) Back in command line, run this: pyinstaller --clean --noconfirm DocRedactApp_0.2.0.spec
 
 
-9. A 'dist' folder will be created with the executable inside along with all dependencies('dist\data_text_search'). 
+9. A 'dist' folder will be created with the executable inside along with all dependencies('dist\redaction').
 
-10. In 'dist\data_text_search' try double clicking on the .exe file. After a short delay, the command prompt should inform you about the IP address of the app that is now running. Copy the IP address. **Do not close this window!**
+10. go to dist/APP-NAME/gradio/component_meta.py and modify the start of the 'create_or_modify_pyi(...' function to this:
 
-11. In an Internet browser, navigate to the indicated IP address. The app should now be running in your browser window.
+def create_or_modify_pyi(
+    component_class: type, class_name: str, events: list[str | EventListener]
+):
+    source_file = Path(inspect.getfile(component_class))
+
+    try:
+        # Try to read the source file
+        source_code = source_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # If source file not found, skip pyi generation
+        return None 
+
+11. Copy the poppler and tesseract folders into the location where the .exe is
+
+12. In 'dist\redaction' try double clicking on the .exe file. After a short delay, the command prompt should inform you about the IP address of the app that is now running. Copy the IP address. **Do not close this window!**
+
+12. In an Internet browser, navigate to the indicated IP address. The app should now be running in your browser window.

@@ -389,6 +389,11 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
     if isinstance(out_message, str):
         out_message = [out_message]
 
+    print("log_files_output_paths:",log_files_output_paths)
+
+    if isinstance(log_files_output_paths, str):
+        log_files_output_paths = []
+
     if not out_file_paths:
         out_file_paths = []
     
@@ -473,6 +478,7 @@ def anonymise_data_files(file_paths:List[str], in_text:str, anon_strat:str, chos
                 sheet_name = ""
                 anon_df = read_file(anon_file)
                 out_file_part = get_file_name_without_type(anon_file.name)
+
                 out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths)
 
         # Increase latest file completed count unless we are at the last file

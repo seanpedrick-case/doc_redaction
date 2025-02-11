@@ -500,8 +500,8 @@ def create_xfdf(df, pdf_path, pymupdf_doc, image_paths):
         redact_annot.set('interior-color', colour_str)
         #redact_annot.set('fill-color', colour_str)
         #redact_annot.set('outline-color', colour_str)
-        redact_annot.set('overlay-color', colour_str)
-        redact_annot.set('overlay-text', row['label'])
+        #redact_annot.set('overlay-color', colour_str)
+        #redact_annot.set('overlay-text', row['label'])
         redact_annot.set('opacity', "0.5")
 
         # Add appearance dictionary
