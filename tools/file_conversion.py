@@ -304,42 +304,136 @@ def redact_single_box(pymupdf_page:Page, pymupdf_rect:Rect, img_annotation_box:d
     #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle
     shape.commit()
 
+# def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
+#     '''
+#     Converts coordinates from pymupdf format to image coordinates,
+#     accounting for mediabox dimensions and offset.
+#     '''
+#     # Get rect dimensions
+#     rect = pymupdf_page.rect
+#     rect_width = rect.width
+#     rect_height = rect.height
+    
+#     # Get mediabox dimensions and position
+#     mediabox = pymupdf_page.mediabox
+#     mediabox_width = mediabox.width
+#     mediabox_height = mediabox.height
+    
+#     # Get target image dimensions
+#     image_page_width, image_page_height = image.size
+
+#     # Calculate scaling factors
+#     image_to_mediabox_x_scale = image_page_width / mediabox_width
+#     image_to_mediabox_y_scale = image_page_height / mediabox_height
+
+#     image_to_rect_scale_width = image_page_width / rect_width
+#     image_to_rect_scale_height = image_page_height / rect_height
+
+#     # Adjust for offsets (difference in position between mediabox and rect)
+#     x_offset = rect.x0 - mediabox.x0  # Difference in x position
+#     y_offset = rect.y0 - mediabox.y0  # Difference in y position
+
+#     print("x_offset:", x_offset)
+#     print("y_offset:", y_offset)
+
+#     # Adjust coordinates:
+#     # Apply scaling to match image dimensions
+#     x1_image = x1 * image_to_mediabox_x_scale    
+#     x2_image = x2 * image_to_mediabox_x_scale
+#     y1_image = y1 * image_to_mediabox_y_scale
+#     y2_image = y2 * image_to_mediabox_y_scale
+
+#     # Correct for difference in rect and mediabox size
+#     if mediabox_width != rect_width:
+        
+#         mediabox_to_rect_x_scale = mediabox_width / rect_width
+#         mediabox_to_rect_y_scale = mediabox_height / rect_height
+
+#         x1_image *= mediabox_to_rect_x_scale
+#         x2_image *= mediabox_to_rect_x_scale
+#         y1_image *= mediabox_to_rect_y_scale
+#         y2_image *= mediabox_to_rect_y_scale
+
+#         print("mediabox_to_rect_x_scale:", mediabox_to_rect_x_scale)
+#         #print("mediabox_to_rect_y_scale:", mediabox_to_rect_y_scale)
+
+#         print("image_to_mediabox_x_scale:", image_to_mediabox_x_scale)
+#         #print("image_to_mediabox_y_scale:", image_to_mediabox_y_scale)
+
+#         mediabox_rect_x_diff = (mediabox_width - rect_width) * 2 
+#         mediabox_rect_y_diff = (mediabox_height - rect_height) * 2
+
+#         x1_image -= mediabox_rect_x_diff
+#         x2_image -= mediabox_rect_x_diff
+#         y1_image += mediabox_rect_y_diff
+#         y2_image += mediabox_rect_y_diff
+
+#     return x1_image, y1_image, x2_image, y2_image
+
 def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
     '''
     Converts coordinates from pymupdf format to image coordinates,
-    accounting for mediabox dimensions.
+    accounting for mediabox dimensions and offset.
     '''
+    # Get rect dimensions
+    rect = pymupdf_page.rect
+    rect_width = rect.width
+    rect_height = rect.height
     
-    rect_height = pymupdf_page.rect.height
-    rect_width = pymupdf_page.rect.width
-    
-    # Get mediabox dimensions
+    # Get mediabox dimensions and position
     mediabox = pymupdf_page.mediabox
     mediabox_width = mediabox.width
     mediabox_height = mediabox.height
     
+    # Get target image dimensions
     image_page_width, image_page_height = image.size
 
-    # Calculate scaling factors using mediabox dimensions
-    scale_width = image_page_width / mediabox_width
-    scale_height = image_page_height / mediabox_height
+    # Calculate scaling factors
+    image_to_mediabox_x_scale = image_page_width / mediabox_width
+    image_to_mediabox_y_scale = image_page_height / mediabox_height
 
-    #print("scale_width:", scale_width)
-    #print("scale_height:", scale_height)
+    image_to_rect_scale_width = image_page_width / rect_width
+    image_to_rect_scale_height = image_page_height / rect_height
 
-    rect_to_mediabox_x_scale = mediabox_width / rect_width
-    rect_to_mediabox_y_scale = mediabox_height / rect_height 
+    # Adjust for offsets (difference in position between mediabox and rect)
+    x_offset = rect.x0 - mediabox.x0  # Difference in x position
+    y_offset = rect.y0 - mediabox.y0  # Difference in y position
 
-    #print("rect_to_mediabox_x_scale:", rect_to_mediabox_x_scale)
-    #print("rect_to_mediabox_y_scale:", rect_to_mediabox_y_scale)
+    #print("x_offset:", x_offset)
+    #print("y_offset:", y_offset)
 
-    # Adjust coordinates based on scaling factors
-    x1_image = (x1 * scale_width) * rect_to_mediabox_x_scale
-    y1_image = (y1 * scale_height) * rect_to_mediabox_y_scale
-    x2_image = (x2 * scale_width) * rect_to_mediabox_x_scale
-    y2_image = (y2 * scale_height) * rect_to_mediabox_y_scale
+    # Adjust coordinates:
+    # Apply scaling to match image dimensions
+    x1_image = x1 * image_to_mediabox_x_scale    
+    x2_image = x2 * image_to_mediabox_x_scale
+    y1_image = y1 * image_to_mediabox_y_scale
+    y2_image = y2 * image_to_mediabox_y_scale
+
+    # Correct for difference in rect and mediabox size
+    if mediabox_width != rect_width:
+        
+        mediabox_to_rect_x_scale = mediabox_width / rect_width
+        mediabox_to_rect_y_scale = mediabox_height / rect_height
+
+        rect_to_mediabox_x_scale = rect_width / mediabox_width
+        #rect_to_mediabox_y_scale = rect_height / mediabox_height
+
+        mediabox_rect_x_diff = (mediabox_width - rect_width) * (image_to_mediabox_x_scale / 2)
+        mediabox_rect_y_diff = (mediabox_height - rect_height) * (image_to_mediabox_y_scale / 2)
+
+        x1_image -= mediabox_rect_x_diff
+        x2_image -= mediabox_rect_x_diff
+        y1_image += mediabox_rect_y_diff
+        y2_image += mediabox_rect_y_diff
+
+        #
+        x1_image *= mediabox_to_rect_x_scale
+        x2_image *= mediabox_to_rect_x_scale
+        y1_image *= mediabox_to_rect_y_scale
+        y2_image *= mediabox_to_rect_y_scale
 
     return x1_image, y1_image, x2_image, y2_image
+
 
 
 def redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colours, border = 5):
@@ -598,13 +692,16 @@ def prepare_image_or_pdf(
                             all_annotations_object.append(annotation)
 
                         #print("annotation:", annotation, "for page:", str(i))
+                        try:
+                            if not annotation:
+                                annotation = {"image":"", "boxes": []}
+                                annotation_page_number = int(re.search(r'_(\d+)\.png$', image_file_path).group(1))
 
-                        if not annotation:
-                            annotation = {"image":"", "boxes": []}
-                            annotation_page_number = int(re.search(r'_(\d+)\.png$', image_file_path).group(1))
-
-                        else:
-                            annotation_page_number = int(re.search(r'_(\d+)\.png$', annotation["image"]).group(1))
+                            else:
+                                annotation_page_number = int(re.search(r'_(\d+)\.png$', annotation["image"]).group(1))
+                        except Exception as e:
+                            print("Extracting page number from image failed due to:", e)
+                            annotation_page_number = 0
                         #print("Annotation page number:", annotation_page_number)
 
                         # Check if the annotation page number exists in the image file paths pages
@@ -744,7 +841,7 @@ def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decis
             #print(number)  # Output: 0
             reported_number = int(number) + 1
         else:
-            print("No number found before .png")
+            print("No number found before .png. Returning page 1.")
             reported_number = 1
 
         # Check if 'boxes' is in the annotation, if not, add an empty list

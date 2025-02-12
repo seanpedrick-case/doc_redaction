@@ -295,8 +295,13 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
                     fill = img_annotation_box["color"]
 
                     draw.rectangle(coords, fill=fill)
-
+                    
+                    output_image_path = output_folder + file_name_without_ext + "_redacted.png"
                     image.save(output_folder + file_name_without_ext + "_redacted.png")
+
+                output_files.append(output_image_path)
+
+                print("Redactions saved to image file")
 
                 doc = [image]
 
@@ -347,7 +352,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
                 output_files.append(out_pdf_file_path)
 
             else:
-                print("PDF input not found.")
+                print("PDF input not found. Outputs not saved to PDF.")
 
         # If save_pdf is not true, then add the original pdf to the output files
         else:
