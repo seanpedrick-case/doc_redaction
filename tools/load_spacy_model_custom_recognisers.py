@@ -184,9 +184,9 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
     #print("custom_query_list:", custom_query_list)
 
     if not text:
-        out_message = "Prepared data not found. Have you clicked 'Load data' above to prepare a search index?"
+        out_message = "No text data found. Skipping page."
         print(out_message)
-        return out_message, None  
+        return all_start_positions, all_end_positions
 
     for string_query in custom_query_list:
 
@@ -254,14 +254,14 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
                 for match_id, start, end, ratio, pattern in matches:
                     span = str(doc[start:end]).strip()
                     query_search = str(query).strip()
-                    print("doc:", doc)
-                    print("span:", span)
-                    print("query_search:", query_search)
+                    #print("doc:", doc)
+                    #print("span:", span)
+                    #print("query_search:", query_search)
                     
                     # Calculate Levenshtein distance. Only keep matches with less than specified number of spelling mistakes
                     distance = Levenshtein.distance(query_search.lower(), span.lower())
 
-                    print("Levenshtein distance:", distance)
+                    #print("Levenshtein distance:", distance)
                     
                     if distance > spelling_mistakes_max:                                       
                         match_count = match_count - 1
@@ -270,8 +270,8 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
                         start_char = doc[start].idx  # Start character position
                         end_char = doc[end - 1].idx + len(doc[end - 1])  # End character position
 
-                        print("start_char:", start_char)
-                        print("end_char:", end_char)
+                        #print("start_char:", start_char)
+                        #print("end_char:", end_char)
 
                         all_matches.append(match_count)
                         all_start_positions.append(start_char)

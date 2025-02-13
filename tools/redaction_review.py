@@ -137,7 +137,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
         page_num_reported = 1
 
         out_image_annotator = image_annotator(
-        image_annotator_object[page_num_reported - 1],
+        None,
         boxes_alpha=0.1,
         box_thickness=1,
         label_list=recogniser_entities_list,
@@ -295,8 +295,13 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
                     fill = img_annotation_box["color"]
 
                     draw.rectangle(coords, fill=fill)
-
+                    
+                    output_image_path = output_folder + file_name_without_ext + "_redacted.png"
                     image.save(output_folder + file_name_without_ext + "_redacted.png")
+
+                output_files.append(output_image_path)
+
+                print("Redactions saved to image file")
 
                 doc = [image]
 
@@ -347,7 +352,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
                 output_files.append(out_pdf_file_path)
 
             else:
-                print("PDF input not found.")
+                print("PDF input not found. Outputs not saved to PDF.")
 
         # If save_pdf is not true, then add the original pdf to the output files
         else:
@@ -500,8 +505,8 @@ def create_xfdf(df, pdf_path, pymupdf_doc, image_paths):
         redact_annot.set('interior-color', colour_str)
         #redact_annot.set('fill-color', colour_str)
         #redact_annot.set('outline-color', colour_str)
-        redact_annot.set('overlay-color', colour_str)
-        redact_annot.set('overlay-text', row['label'])
+        #redact_annot.set('overlay-color', colour_str)
+        #redact_annot.set('overlay-text', row['label'])
         redact_annot.set('opacity', "0.5")
 
         # Add appearance dictionary

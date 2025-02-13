@@ -8,7 +8,8 @@ RUN apt-get update \
         make \
         cmake \
         unzip \
-        libcurl4-openssl-dev \
+        libcurl4-openssl-dev \        
+        git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
