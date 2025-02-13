@@ -44,6 +44,7 @@ RUN apt-get update \
         poppler-utils \
         libgl1-mesa-glx \
         libglib2.0-0 \
+        git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
