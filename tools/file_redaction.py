@@ -144,14 +144,21 @@ def choose_and_run_redactor(file_paths:List[str],
     review_out_file_paths = [prepared_pdf_file_paths[0]]
 
     if isinstance(custom_recogniser_word_list, pd.DataFrame):
-        custom_recogniser_word_list = custom_recogniser_word_list.iloc[:,0].tolist()
+        if not custom_recogniser_word_list.empty:
+            custom_recogniser_word_list = custom_recogniser_word_list.iloc[:, 0].tolist()
+        else:
+            # Handle the case where the DataFrame is empty
+            custom_recogniser_word_list = []  # or some default value
 
         # Sort the strings in order from the longest string to the shortest
         custom_recogniser_word_list = sorted(custom_recogniser_word_list, key=len, reverse=True)
 
     if isinstance(redact_whole_page_list, pd.DataFrame):
-        redact_whole_page_list = redact_whole_page_list.iloc[:,0].tolist()
-
+        if not redact_whole_page_list.empty:
+            redact_whole_page_list = redact_whole_page_list.iloc[:,0].tolist()
+        else:
+            # Handle the case where the DataFrame is empty
+            redact_whole_page_list = []  # or some default value
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -1209,7 +1216,7 @@ def redact_image_pdf(file_path:str,
 
             ## Apply annotations with pymupdf            
             else:
-                print("merged_redaction_boxes:", merged_redaction_bboxes)
+                #print("merged_redaction_boxes:", merged_redaction_bboxes)
                 #print("redact_whole_page_list:", redact_whole_page_list)
                 if redact_whole_page_list:
                     int_reported_page_number = int(reported_page_number) 

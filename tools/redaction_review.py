@@ -137,7 +137,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
         page_num_reported = 1
 
         out_image_annotator = image_annotator(
-        image_annotator_object[page_num_reported - 1],
+        None,
         boxes_alpha=0.1,
         box_thickness=1,
         label_list=recogniser_entities_list,

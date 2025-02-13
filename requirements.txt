@@ -12,7 +12,7 @@ scikit-learn==1.5.2
 spacy==3.8.3
 #en_core_web_lg @ https://github.com/explosion/spacy-#models/releases/download/en_core_web_lg-3.8.0/en_core_web_sm-#3.8.0.tar.gz
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz
-gradio==5.15.0
+gradio==5.16.0
 boto3==1.36.15
 pyarrow==18.1.0
 openpyxl==3.1.2
@@ -22,7 +22,6 @@ spaczz==0.6.1
 #gradio_image_annotation==0.2.5
 # The following version includes rotation and image zoom options
 git+https://github.com/seanpedrick-case/gradio_image_annotator
-
 rapidfuzz==3.12.1
 numpy==1.26.4
 awslambdaric==3.0.0
