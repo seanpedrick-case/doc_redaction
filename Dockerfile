@@ -8,7 +8,8 @@ RUN apt-get update \
         make \
         cmake \
         unzip \
-        libcurl4-openssl-dev \
+        libcurl4-openssl-dev \        
+        git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -44,7 +45,6 @@ RUN apt-get update \
         poppler-utils \
         libgl1-mesa-glx \
         libglib2.0-0 \
-        git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
