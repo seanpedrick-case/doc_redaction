@@ -987,10 +987,11 @@ def redact_image_pdf(file_path:str,
         #print("new_custom_recogniser:", new_custom_recogniser)
         nlp_analyser.registry.add_recognizer(new_custom_recogniser)
 
-        nlp_analyser.registry.remove_recognizer("CUSTOM_FUZZY")
+        nlp_analyser.registry.remove_recognizer("CustomWordFuzzyRecognizer")
         new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_recogniser_word_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
         #print("new_custom_recogniser:", new_custom_recogniser)
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
+
 
     image_analyser = CustomImageAnalyzerEngine(nlp_analyser)    
 
@@ -1591,16 +1592,19 @@ def redact_text_pdf(
         new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
         nlp_analyser.registry.add_recognizer(new_custom_recogniser)
 
-        nlp_analyser.registry.remove_recognizer("CUSTOM_FUZZY")
+        nlp_analyser.registry.remove_recognizer("CustomWordFuzzyRecognizer")
         new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_recogniser_word_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
 
         # List all elements currently in the nlp_analyser registry
         #print("Current recognizers in nlp_analyser registry:")
         #for recognizer_name in nlp_analyser.registry.recognizers:
-        #    print(recognizer_name)
+           #print(recognizer_name)
+           #print(recognizer_name.name)
 
-        #print("Custom recogniser:", nlp_analyser.registry.)
+        #print("Custom recogniser:", nlp_analyser.registry)
+
+        #print("custom_recogniser_word_list:", custom_recogniser_word_list)
 
     tic = time.perf_counter()
 
