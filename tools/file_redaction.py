@@ -24,7 +24,7 @@ from gradio import Progress
 from collections import defaultdict  # For efficient grouping
 
 from presidio_analyzer import RecognizerResult
-from tools.aws_functions import RUN_AWS_FUNCTIONS
+from tools.aws_functions import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction, merge_text_bounding_boxes
 from tools.file_conversion import process_file, image_dpi, convert_review_json_to_pandas_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer
@@ -39,6 +39,7 @@ print(f'The value of page_break_value is {page_break_value}')
 
 max_time_value = get_or_create_env_var('max_time_value', '999999')
 print(f'The value of max_time_value is {max_time_value}')
+
 
 def bounding_boxes_overlap(box1, box2):
     """Check if two bounding boxes overlap."""
@@ -96,6 +97,8 @@ def choose_and_run_redactor(file_paths:List[str],
  comprehend_query_number:int=0,
  max_fuzzy_spelling_mistakes_num:int=1,
  match_fuzzy_whole_phrase_bool:bool=True,
+ aws_access_key_textbox:str='',
+ aws_secret_key_textbox:str='',
  output_folder:str=output_folder,
  progress=gr.Progress(track_tqdm=True)):
     '''
@@ -129,8 +132,10 @@ def choose_and_run_redactor(file_paths:List[str],
     - page_break_return (bool, optional): A flag indicating if the function should return after a page break. Defaults to False.
     - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
-    -  max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
-    -  match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
+    - max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
+    - match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
+    - aws_access_key_textbox (str, optional): AWS access key for account with Textract and Comprehend permissions.
+    - aws_secret_key_textbox (str, optional): AWS secret key for account with Textract and Comprehend permissions.
     - output_folder (str, optional): Output folder for results.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
@@ -242,6 +247,14 @@ def choose_and_run_redactor(file_paths:List[str],
         print("Trying to connect to AWS Comprehend service")
         if RUN_AWS_FUNCTIONS == "1":
             comprehend_client = boto3.client('comprehend')
+        elif aws_access_key_textbox and aws_secret_key_textbox:
+            comprehend_client = boto3.client('comprehend', 
+                aws_access_key_id=aws_access_key_textbox, 
+                aws_secret_access_key=aws_secret_key_textbox)
+        elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+            comprehend_client = boto3.client('comprehend', 
+                aws_access_key_id=AWS_ACCESS_KEY, 
+                aws_secret_access_key=AWS_SECRET_KEY)
         else:
             comprehend_client = ""
             out_message = "Cannot connect to AWS Comprehend service. Please choose another PII identification method."
@@ -251,9 +264,17 @@ def choose_and_run_redactor(file_paths:List[str],
         comprehend_client = ""
         
     if in_redact_method == textract_option:
-        print("Trying to connect to AWS Comprehend service")
+        print("Trying to connect to AWS Textract service")
         if RUN_AWS_FUNCTIONS == "1":
             textract_client = boto3.client('textract')
+        elif aws_access_key_textbox and aws_secret_key_textbox:
+            comprehend_client = boto3.client('textract', 
+                aws_access_key_id=aws_access_key_textbox, 
+                aws_secret_access_key=aws_secret_key_textbox)
+        elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+            comprehend_client = boto3.client('textract', 
+                aws_access_key_id=AWS_ACCESS_KEY, 
+                aws_secret_access_key=AWS_SECRET_KEY)
         else:
             textract_client = ""
             out_message = "Cannot connect to AWS Textract. Please choose another text extraction method."

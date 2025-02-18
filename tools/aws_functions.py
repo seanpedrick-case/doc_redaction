@@ -16,6 +16,14 @@ print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
 AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
 print(f'The value of AWS_REGION is {AWS_REGION}')
 
+AWS_ACCESS_KEY = get_or_create_env_var('AWS_ACCESS_KEY', '')
+if AWS_ACCESS_KEY:
+    print(f'AWS_ACCESS_KEY found in environment variables')
+
+AWS_SECRET_KEY = get_or_create_env_var('AWS_SECRET_KEY', '')
+if AWS_SECRET_KEY:
+    print(f'AWS_SECRET_KEY found in environment variables')
+
 
 
 def get_assumed_role_info():
@@ -36,7 +44,7 @@ if RUN_AWS_FUNCTIONS == "1":
         bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
         session = boto3.Session()   
 
-        #print("session:", session)    
+        #print("session:", session)
             
     except Exception as e:
         print("Could not start boto3 session:", e)    
