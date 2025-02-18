@@ -8,6 +8,7 @@ import time
 # Example: converting this single page to an image
 #from pdf2image import convert_from_bytes
 from tools.custom_image_analyser_engine import OCRResult, CustomImageRecognizerResult
+from tools.aws_functions import AWS_ACCESS_KEY, AWS_SECRET_KEY
 
 def extract_textract_metadata(response):
     """Extracts metadata from an AWS Textract response."""
@@ -30,8 +31,13 @@ def analyse_page_with_textract(pdf_page_bytes, page_no, client="", handwrite_sig
     Analyse page with AWS Textract
     '''
     if client == "":
-        try:
-            client = boto3.client('textract')
+        try:               
+            if AWS_ACCESS_KEY and AWS_SECRET_KEY:
+                client = boto3.client('textract', 
+                aws_access_key_id=AWS_ACCESS_KEY, 
+                aws_secret_access_key=AWS_SECRET_KEY)
+            else:
+                client = boto3.client('textract')
         except:
             print("Cannot connect to AWS Textract")
             return [], ""  # Return an empty list and an empty string

@@ -65,6 +65,8 @@ def combine_ocr_output_text(input_files):
         if 'page' not in df.columns or 'text' not in df.columns:
             print(f"Warning: Skipping {file_path} - missing required columns 'page' and 'text'")
             continue
+
+        df['text'] = df['text'].fillna('').astype(str)
         
         # Group by page and concatenate text
         grouped = df.groupby('page')['text'].apply(' '.join).reset_index()
