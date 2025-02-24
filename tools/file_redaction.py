@@ -1153,7 +1153,7 @@ def redact_image_pdf(file_path:str,
                             text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
                         except Exception as e:
                             print("Textract extraction for page", reported_page_number, "failed due to:", e)
-                            text_bocks = []
+                            text_blocks = []
                             new_request_metadata = "Failed Textract API call"
 
                         # Check if "pages" key exists, if not, initialize it as an empty list

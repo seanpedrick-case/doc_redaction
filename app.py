@@ -542,14 +542,17 @@ print(f'The value of GRADIO_SERVER_PORT is {GRADIO_SERVER_PORT}')
 ROOT_PATH = get_or_create_env_var('ROOT_PATH', '')
 print(f'The value of ROOT_PATH is {ROOT_PATH}')
 
+DEFAULT_CONCURRENCY_LIMIT = get_or_create_env_var('DEFAULT_CONCURRENCY_LIMIT', '3')
+print(f'The value of ROOT_PATH is {DEFAULT_CONCURRENCY_LIMIT}')
+
 if __name__ == "__main__":
 
     if RUN_DIRECT_MODE == "0":
         
         if os.environ['COGNITO_AUTH'] == "1":
-            app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+            app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
         else:
-            app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+            app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
     
     else:
         from tools.cli_redact import main
