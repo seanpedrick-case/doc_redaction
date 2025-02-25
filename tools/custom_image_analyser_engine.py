@@ -515,6 +515,7 @@ def do_aws_comprehend_call(current_batch, current_batch_mapping, comprehend_clie
     
         except Exception as e:
             if attempt == max_retries - 1:
+                print("AWS Comprehend calls failed due to", e)
                 raise
             time.sleep(retry_delay)
 
@@ -571,7 +572,6 @@ def run_page_text_redaction(
             allow_list=allow_list
         )
 
-        #print("page_analyser_result:", page_analyser_result)
         
         all_text_line_results = map_back_entity_results(
             page_analyser_result, 
@@ -579,10 +579,8 @@ def run_page_text_redaction(
             all_text_line_results
         )
 
-        #print("all_text_line_results:", all_text_line_results)
 
     elif pii_identification_method == "AWS Comprehend":
-        #print("page text:", page_text)
 
         # Process custom entities if any
         if custom_entities:
@@ -599,8 +597,6 @@ def run_page_text_redaction(
                     return_decision_process=True,
                     allow_list=allow_list
                 )
-
-                print("page_analyser_result:", page_analyser_result)
 
                 all_text_line_results = map_back_entity_results(
                     page_analyser_result, 

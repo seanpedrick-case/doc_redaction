@@ -464,12 +464,10 @@ def redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colou
 def prepare_image_or_pdf(
     file_paths: List[str],
     in_redact_method: str,
-    in_allow_list: Optional[List[List[str]]] = None,
     latest_file_completed: int = 0,
     out_message: List[str] = [],
     first_loop_state: bool = False,
     number_of_pages:int = 1,
-    current_loop_page_number:int=0,
     all_annotations_object:List = [],
     prepare_for_review:bool = False,
     in_fully_redacted_list:List[int]=[],
@@ -484,12 +482,10 @@ def prepare_image_or_pdf(
     Args:
         file_paths (List[str]): List of file paths to process.
         in_redact_method (str): The redaction method to use.
-        in_allow_list (optional, Optional[List[List[str]]]): List of allowed terms for redaction.
         latest_file_completed (optional, int): Index of the last completed file.
         out_message (optional, List[str]): List to store output messages.
         first_loop_state (optional, bool): Flag indicating if this is the first iteration.
         number_of_pages (optional, int): integer indicating the number of pages in the document
-        current_loop_page_number (optional, int): Current number of loop
         all_annotations_object(optional, List of annotation objects): All annotations for current document
         prepare_for_review(optional, bool): Is this preparation step preparing pdfs and json files to review current redactions?
         in_fully_redacted_list(optional, List of int): A list of pages to fully redact
