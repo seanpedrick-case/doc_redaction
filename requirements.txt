@@ -23,6 +23,7 @@ spaczz==0.6.1
 # The following version includes rotation and image zoom options
 https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.0/gradio_image_annotation-0.3.0-py3-none-any.whl
 rapidfuzz==3.12.1
+python-dotenv==1.0.1
 numpy==1.26.4
 awslambdaric==3.0.1
 
