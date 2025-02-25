@@ -4,17 +4,26 @@ import boto3
 import tempfile
 import os
 from tools.helper_functions import get_or_create_env_var
+from dotenv import load_dotenv
 
 PandasDataFrame = Type[pd.DataFrame]
 
 # Get AWS credentials
 bucket_name=""
 
-RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "1")
+RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
 print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
 
 AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
 print(f'The value of AWS_REGION is {AWS_REGION}')
+
+# If you have an aws_config env file in the config folder, you can load in AWS keys this way
+AWS_CONFIG_PATH = get_or_create_env_var('AWS_CONFIG_PATH', '/env/aws_config.env')
+print(f'The value of AWS_CONFIG_PATH is {AWS_CONFIG_PATH}')
+
+if os.path.exists(AWS_CONFIG_PATH):
+    print("Loading AWS keys from config folder")
+    load_dotenv(AWS_CONFIG_PATH)
 
 AWS_ACCESS_KEY = get_or_create_env_var('AWS_ACCESS_KEY', '')
 if AWS_ACCESS_KEY:

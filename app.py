@@ -2,7 +2,7 @@ import os
 import socket
 
 # By default TLDExtract will try to pull files from the internet. I have instead downloaded this file locally to avoid the requirement for an internet connection.
-os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
+#os.environ['TLDEXTRACT_CACHE'] = 'tld/.tld_set_snapshot'
 
 import gradio as gr
 import pandas as pd
@@ -65,7 +65,8 @@ with app:
     ###
     # STATE VARIABLES
     ###
-
+    
+    # Pymupdf doc and all image annotations objects need to be stored as State objects as they do not have a standard Gradio component equivalent
     pdf_doc_state = gr.State([])    
     all_image_annotations_state = gr.State([])
 
@@ -73,12 +74,12 @@ with app:
     all_decision_process_table_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"),  label="all_decision_process_table", visible=False, type="pandas") # gr.State(pd.DataFrame())
     review_file_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="review_file_df", visible=False, type="pandas") #gr.State(pd.DataFrame())
 
-    session_hash_state = gr.State()
-    s3_output_folder_state = gr.State()
+    session_hash_state = gr.Textbox(label= "session_hash_state", value="", visible=False) #.State()
+    s3_output_folder_state = gr.Textbox(label= "s3_output_folder_state", value="", visible=False) #.State()
 
-    first_loop_state = gr.State(True)
-    second_loop_state = gr.State(False)
-    do_not_save_pdf_state = gr.State(False)
+    first_loop_state = gr.Checkbox(label="first_loop_state", value=True, visible=False) #.State(True)
+    second_loop_state = gr.Checkbox(label="second_loop_state", value=False, visible=False) #.State(False)
+    do_not_save_pdf_state = gr.Checkbox(label="do_not_save_pdf_state", value=False, visible=False) #.State(False)
 
     prepared_pdf_state = gr.Dropdown(label = "prepared_pdf_list", value="", allow_custom_value=True,visible=False) #gr.State([])
     images_pdf_state = gr.Dropdown(label = "images_pdf_list", value="", allow_custom_value=True,visible=False) #gr.State([]) # List of pdf pages converted to PIL images
@@ -92,12 +93,12 @@ with app:
     # Logging state
     log_file_name = 'log.csv'
 
-    feedback_logs_state = gr.State(feedback_logs_folder + log_file_name)
-    feedback_s3_logs_loc_state = gr.State(feedback_logs_folder)
-    access_logs_state = gr.State(access_logs_folder + log_file_name)
-    access_s3_logs_loc_state = gr.State(access_logs_folder)
-    usage_logs_state = gr.State(usage_logs_folder + log_file_name)
-    usage_s3_logs_loc_state = gr.State(usage_logs_folder)
+    feedback_logs_state = gr.Textbox(label= "feedback_logs_state", value=feedback_logs_folder + log_file_name, visible=False) #State(feedback_logs_folder + log_file_name)
+    feedback_s3_logs_loc_state = gr.Textbox(label= "feedback_s3_logs_loc_state", value=feedback_logs_folder, visible=False) #State(feedback_logs_folder)
+    access_logs_state = gr.Textbox(label= "access_logs_state", value=access_logs_folder + log_file_name, visible=False) #State(access_logs_folder + log_file_name)
+    access_s3_logs_loc_state = gr.Textbox(label= "access_s3_logs_loc_state", value=access_logs_folder, visible=False) #State(access_logs_folder)
+    usage_logs_state = gr.Textbox(label= "usage_logs_state", value=usage_logs_folder + log_file_name, visible=False) #State(usage_logs_folder + log_file_name)
+    usage_s3_logs_loc_state = gr.Textbox(label= "usage_s3_logs_loc_state", value=usage_logs_folder, visible=False) #State(usage_logs_folder)
     
     # Invisible text boxes to hold the session hash/username, Textract request metadata, data file names just for logging purposes.
     session_hash_textbox = gr.Textbox(label= "session_hash_textbox", value="", visible=False)
@@ -121,11 +122,11 @@ with app:
 
     ## Annotator zoom value
     annotator_zoom_number = gr.Number(label = "Current annotator zoom level", value=80, precision=0, visible=False)
-    zoom_true_bool = gr.State(True)
-    zoom_false_bool = gr.State(False)
+    zoom_true_bool = gr.Checkbox(label="zoom_true_bool", value=True, visible=False) #State(True)
+    zoom_false_bool = gr.Checkbox(label="zoom_false_bool", value=False, visible=False) #State(False)
 
-    clear_all_page_redactions = gr.State(True)
-    prepare_for_review_bool = gr.Checkbox(value=True, visible=False)
+    clear_all_page_redactions = gr.Checkbox(label="clear_all_page_redactions", value=True, visible=False) #State(True)
+    prepare_for_review_bool = gr.Checkbox(label="prepare_for_review_bool", value=True, visible=False)
 
     ## Settings page variables
     default_allow_list_file_name = "default_allow_list.csv"
@@ -148,11 +149,11 @@ with app:
     default_allow_list_output_folder_location = gr.Textbox(label = "Output default allow list location", value=default_allow_list_loc, visible=False)
 
     # Base dataframe for recognisers that is not modified subsequent to load
-    recogniser_entity_dataframe_base = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]}), col_count=2, type="pandas", visible=False)
+    recogniser_entity_dataframe_base = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]}), col_count=2, type="pandas", visible=False, label="recogniser_entity_dataframe_base")
 
     # Duplicate page detection
     in_duplicate_pages_text = gr.Textbox(label="in_duplicate_pages_text", visible=False)
-    duplicate_pages_df = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="in_deny_list_df", visible=False, type="pandas")
+    duplicate_pages_df = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="duplicate_pages_df", visible=False, type="pandas")
 
 
 
@@ -177,12 +178,12 @@ with app:
     with gr.Tab("Redact PDFs/images"):
         with gr.Accordion("Redact document", open = True):
             in_doc_files = gr.File(label="Choose a document or image file (PDF, JPG, PNG)", file_count= "single", file_types=['.pdf', '.jpg', '.png', '.json'], height=file_input_height)
-            if RUN_AWS_FUNCTIONS == "1":
-                in_redaction_method = gr.Radio(label="Choose text extraction method. AWS Textract has a cost per page.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
-                pii_identification_method_drop = gr.Radio(label = "Choose PII detection method. AWS Comprehend has a cost per 100 characters.", value = default_pii_detector, choices=[local_pii_detector, aws_pii_detector])
-            else:
-                in_redaction_method = gr.Radio(label="Choose text extraction method.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option])
-                pii_identification_method_drop = gr.Radio(label = "Choose PII detection method.", value = default_pii_detector, choices=[local_pii_detector], visible=False)
+            # if RUN_AWS_FUNCTIONS == "1":
+            in_redaction_method = gr.Radio(label="Choose text extraction method. AWS Textract has a cost per page - $3.50 per 1,000 pages with signature detection (default), $1.50 without. Go to Redaction settings - AWS Textract options to remove signature detection.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
+            pii_identification_method_drop = gr.Radio(label = "Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.", value = default_pii_detector, choices=[local_pii_detector, aws_pii_detector])
+            # else:
+            #     in_redaction_method = gr.Radio(label="Choose text extraction method.", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option])
+            #     pii_identification_method_drop = gr.Radio(label = "Choose PII detection method.", value = default_pii_detector, choices=[local_pii_detector], visible=False)
 
             gr.Markdown("""If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the redaction settings tab.""")
             document_redact_btn = gr.Button("Redact document", variant="primary")
@@ -336,14 +337,14 @@ with app:
                 page_min = gr.Number(precision=0,minimum=0,maximum=9999, label="Lowest page to redact")
                 page_max = gr.Number(precision=0,minimum=0,maximum=9999, label="Highest page to redact")
 
-        with gr.Accordion("AWS Textract specific options", open = False):            
+        with gr.Accordion("AWS Textract options", open = False):            
             handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract settings", choices=["Redact all identified handwriting", "Redact all identified signatures"], value=["Redact all identified handwriting", "Redact all identified signatures"])
             #with gr.Row():
             in_redact_language = gr.Dropdown(value = "en", choices = ["en"], label="Redaction language (only English currently supported)", multiselect=False, visible=False)
 
             with gr.Row():
-                aws_access_key_textbox = gr.Textbox(value='', label="AWS access key for account with permissions for AWS Textract and Comprehend", visible=False)
-                aws_secret_key_textbox = gr.Textbox(value='', label="AWS secret key for account with permissions for AWS Textract and Comprehend", visible=False)
+                aws_access_key_textbox = gr.Textbox(value='', label="AWS access key for account with permissions for AWS Textract and Comprehend", visible=True, type="password")
+                aws_secret_key_textbox = gr.Textbox(value='', label="AWS secret key for account with permissions for AWS Textract and Comprehend", visible=True, type="password")
 
         with gr.Accordion("Settings for open text or xlsx/csv files", open = False):
             anon_strat = gr.Radio(choices=["replace with <REDACTED>", "replace with <ENTITY_NAME>", "redact", "hash", "mask", "encrypt", "fake_first_name"], label="Select an anonymisation method.", value = "replace with <REDACTED>")
@@ -355,8 +356,6 @@ with app:
             merge_multiple_review_files_btn = gr.Button("Merge multiple review files into one", variant="primary")   
 
 
-
-
     ### UI INTERACTION ###
 
     ###
@@ -365,14 +364,13 @@ with app:
     in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list])
 
     document_redact_btn.click(fn = reset_state_vars, outputs=[pdf_doc_state, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
-    then(fn = prepare_image_or_pdf, inputs=[in_doc_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, first_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state], api_name="prepare_doc").\
-    then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number, max_fuzzy_spelling_mistakes_num, match_fuzzy_whole_phrase_bool, aws_access_key_textbox, aws_secret_key_textbox],
-                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, output_review_files], api_name="redact_doc").\
+        then(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number, max_fuzzy_spelling_mistakes_num, match_fuzzy_whole_phrase_bool, aws_access_key_textbox, aws_secret_key_textbox, annotate_max_pages, review_file_state],
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, output_review_files, annotate_max_pages, annotate_max_pages_bottom, prepared_pdf_state, images_pdf_state, review_file_state], api_name="redact_doc").\
                     then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
     
     # If the app has completed a batch of pages, it will run this until the end of all pages in the document
-    current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number, max_fuzzy_spelling_mistakes_num, match_fuzzy_whole_phrase_bool, aws_access_key_textbox, aws_secret_key_textbox],
-                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, output_review_files]).\
+    current_loop_page_number.change(fn = choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, in_redaction_method, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, output_summary, output_file_list_state, log_files_output_list_state, second_loop_state, page_min, page_max, estimated_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_state, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number, max_fuzzy_spelling_mistakes_num, match_fuzzy_whole_phrase_bool, aws_access_key_textbox, aws_secret_key_textbox, annotate_max_pages, review_file_state],
+                    outputs=[output_summary, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, estimated_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_state, all_decision_process_table_state, comprehend_query_number, output_review_files, annotate_max_pages, annotate_max_pages_bottom, prepared_pdf_state, images_pdf_state, review_file_state]).\
                     then(fn=update_annotator, inputs=[all_image_annotations_state, page_min, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs=[annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
     
     # If a file has been completed, the function will continue onto the next document
@@ -386,7 +384,7 @@ with app:
     # Upload previous files for modifying redactions
     upload_previous_review_file_btn.click(fn=reset_review_vars, inputs=None, outputs=[recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
         then(fn=get_input_file_names, inputs=[output_review_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list]).\
-        then(fn = prepare_image_or_pdf, inputs=[output_review_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state, prepare_for_review_bool], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state]).\
+        then(fn = prepare_image_or_pdf, inputs=[output_review_files, in_redaction_method, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state], api_name="prepare_doc").\
         then(update_annotator, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base])
 
     # Page controls at top
@@ -445,12 +443,12 @@ with app:
     
     # Convert review file to xfdf Adobe format
     convert_review_file_to_adobe_btn.click(fn=get_input_file_names, inputs=[output_review_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list]).\
-        then(fn = prepare_image_or_pdf, inputs=[output_review_files, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state, prepare_for_review_bool], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state]).\
+        then(fn = prepare_image_or_pdf, inputs=[output_review_files, in_redaction_method, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state]).\
         then(convert_df_to_xfdf, inputs=[output_review_files, pdf_doc_state, images_pdf_state], outputs=[adobe_review_files_out])
     
     # Convert xfdf Adobe file back to review_file.csv
     convert_adobe_to_review_file_btn.click(fn=get_input_file_names, inputs=[adobe_review_files_out], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list]).\
-        then(fn = prepare_image_or_pdf, inputs=[adobe_review_files_out, in_redaction_method, in_allow_list, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, current_loop_page_number, all_image_annotations_state, prepare_for_review_bool], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state]).\
+        then(fn = prepare_image_or_pdf, inputs=[adobe_review_files_out, in_redaction_method, latest_file_completed_text, output_summary, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool], outputs=[output_summary, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state]).\
         then(fn=convert_xfdf_to_dataframe, inputs=[adobe_review_files_out, pdf_doc_state, images_pdf_state], outputs=[output_review_files], scroll_to_output=True)
     
     ###
@@ -542,14 +540,17 @@ print(f'The value of GRADIO_SERVER_PORT is {GRADIO_SERVER_PORT}')
 ROOT_PATH = get_or_create_env_var('ROOT_PATH', '')
 print(f'The value of ROOT_PATH is {ROOT_PATH}')
 
+DEFAULT_CONCURRENCY_LIMIT = get_or_create_env_var('DEFAULT_CONCURRENCY_LIMIT', '5')
+print(f'The value of DEFAULT_CONCURRENCY_LIMIT is {DEFAULT_CONCURRENCY_LIMIT}')
+
 if __name__ == "__main__":
 
     if RUN_DIRECT_MODE == "0":
         
         if os.environ['COGNITO_AUTH'] == "1":
-            app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+            app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
         else:
-            app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+            app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
     
     else:
         from tools.cli_redact import main

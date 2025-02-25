@@ -34,7 +34,16 @@ NOTE: The app is not 100% accurate, and it will miss some personal information. 
     - [Handwriting and signature redaction](#handwriting-and-signature-redaction)
 - [Reviewing and modifying suggested redactions](#reviewing-and-modifying-suggested-redactions)
 
-See the [advanced user guide here](#advanced-user-guide).
+See the [advanced user guide here](#advanced-user-guide):
+- [Modifying and merging redaction review files](#modifying-and-merging-redaction-review-files)
+    - [Modifying existing redaction review files](#modifying-existing-redaction-review-files)
+    - [Merging existing redaction review files](#merging-existing-redaction-review-files)
+- [Identifying and redacting duplicate pages](#identifying-and-redacting-duplicate-pages)
+- [Fuzzy search and redaction](#fuzzy-search-and-redaction)
+- [Export redactions to and import from Adobe Acrobat](#export-to-and-import-from-adobe)
+    - [Exporting to Adobe Acrobat](#exporting-to-adobe-acrobat)
+    - [Importing from Adobe Acrobat](#importing-from-adobe-acrobat)
+- [Using AWS Textract and Comprehend when not running in an AWS environment](#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment)
 
 ## Example data files
 
@@ -293,3 +302,24 @@ The app also allows you to import .xfdf files from Adobe Acrobat. To do this, go
 When you click the 'convert .xfdf comment file to review_file.csv' button, the app should take you up to the top of the screen where the new review file has been created and can be downloaded.
 
 ![Outputs from Adobe import](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/export_to_adobe/img/import_from_adobe_interface_outputs.PNG)
+
+## Using AWS Textract and Comprehend when not running in an AWS environment
+
+AWS Textract and Comprehend give much better results for text extraction and document redaction than the local model options in the app. The most secure way to access them in the Redaction app is to run the app in a secure AWS environment with relevant permissions. Alternatively, you could run the app on your own system while logged in to AWS SSO with relevant permissions.
+
+However, it is possible to access these services directly via API from outside an AWS environment by creating IAM users and access keys with relevant permissions to access AWS Textract and Comprehend services. Please check with your IT and data security teams that this approach is acceptable for your data before trying the following approaches.
+
+To do the following, in your AWS environment you will need to create a new user with permissions for "textract:AnalyzeDocument", "textract:DetectDocumentText", and "comprehend:DetectPiiEntities". Under security credentials, create new access keys - note down the access key and secret key.
+
+### Direct access by passing AWS access keys through app
+The Redaction Settings tab now has boxes for entering the AWS access key and secret key. If you paste the relevant keys into these boxes before performing redaction, you should be able to use these services in the app.
+
+### Picking up AWS access keys through an .env file
+The app also has the capability of picking up AWS access key details through a .env file located in a '/config/aws_config.env' file (default), or alternative .env file location specified by the environment variable AWS_CONFIG_PATH. The env file should look like the following with just two lines:
+
+AWS_ACCESS_KEY=<your-access-key>
+AWS_SECRET_KEY=<your-secret-key>
+
+The app should then pick up these keys when trying to access the AWS Textract and Comprehend services during redaction.
+
+Again, a lot can potentially go wrong with AWS solutions that are insecure, so before trying the above please consult with your AWS and data security teams.

@@ -56,6 +56,7 @@ RUN mkdir -p /home/user/app/output \
     && mkdir -p /home/user/app/input \
     && mkdir -p /home/user/app/tld \
     && mkdir -p /home/user/app/logs \
+    && mkdir -p /home/user/app/config \
     && chown -R user:user /home/user/app
 
 # Copy installed packages from builder stage
