@@ -396,7 +396,7 @@ def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
         row_value_page = evt.row_value[0] # This is the page number value
         return row_value_page
 
-def convert_image_coords_to_adobe(pdf_page_width, pdf_page_height, image_width, image_height, x1, y1, x2, y2):
+def convert_image_coords_to_adobe(pdf_page_width:float, pdf_page_height:float, image_width:float, image_height:float, x1:float, y1:float, x2:float, y2:float):
     '''
     Converts coordinates from image space to Adobe PDF space.
     
@@ -431,7 +431,7 @@ def convert_image_coords_to_adobe(pdf_page_width, pdf_page_height, image_width, 
     return pdf_x1, pdf_y1, pdf_x2, pdf_y2
 
 
-def create_xfdf(df, pdf_path, pymupdf_doc, image_paths):
+def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc, image_paths:List[str]):
     '''
     Create an xfdf file from a review csv file and a pdf
     '''

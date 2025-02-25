@@ -1,22 +1,22 @@
-pdfminer.six==20231228
+pdfminer.six==20240706
 pdf2image==1.17.0
-pymupdf==1.24.10
+pymupdf==1.25.3
 opencv-python==4.10.0.84
-presidio_analyzer==2.2.355
-presidio_anonymizer==2.2.355
-presidio-image-redactor==0.0.53
-pikepdf==8.15.1
+presidio_analyzer==2.2.357
+presidio_anonymizer==2.2.357
+presidio-image-redactor==0.0.55
+pikepdf==9.5.2
 pandas==2.2.3
 nltk==3.9.1
-scikit-learn==1.5.2
+scikit-learn==1.6.1
 spacy==3.8.3
 #en_core_web_lg @ https://github.com/explosion/spacy-#models/releases/download/en_core_web_lg-3.8.0/en_core_web_sm-#3.8.0.tar.gz
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz
-gradio==5.16.0
-boto3==1.36.15
-pyarrow==18.1.0
-openpyxl==3.1.2
-Faker==22.2.0
+gradio==5.18.0
+boto3==1.36.26
+pyarrow==19.0.1
+openpyxl==3.1.5
+Faker==36.1.1
 python-levenshtein==0.26.1
 spaczz==0.6.1
 #gradio_image_annotation==0.2.5
@@ -24,7 +24,7 @@ spaczz==0.6.1
 https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.0/gradio_image_annotation-0.3.0-py3-none-any.whl
 rapidfuzz==3.12.1
 numpy==1.26.4
-awslambdaric==3.0.0
+awslambdaric==3.0.1
 
 
 
