@@ -87,7 +87,7 @@ with app:
     output_image_files_state = gr.Dropdown(label = "output_image_files_list", value="", allow_custom_value=True,visible=False) #gr.State([])
     output_file_list_state = gr.Dropdown(label = "output_file_list", value="", allow_custom_value=True,visible=False) #gr.State([])
     text_output_file_list_state = gr.Dropdown(label = "text_output_file_list", value="", allow_custom_value=True,visible=False) #gr.State([])
-    log_files_output_list_state = gr.Dropdown(label = "log_files_output_list", value="", allow_custom_value=True,visible=True) #gr.State([])   
+    log_files_output_list_state = gr.Dropdown(label = "log_files_output_list", value="", allow_custom_value=True,visible=False) #gr.State([])   
     
     
     # Logging state
