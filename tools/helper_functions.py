@@ -34,6 +34,9 @@ aws_pii_detector  = "AWS Comprehend"
 output_folder = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/')
 print(f'The value of GRADIO_OUTPUT_FOLDER is {output_folder}')
 
+session_output_folder = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'True')
+print(f'The value of SESSION_OUTPUT_FOLDER is {session_output_folder}')
+
 input_folder = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/')
 print(f'The value of GRADIO_INPUT_FOLDER is {input_folder}')
 
@@ -61,8 +64,6 @@ def reset_state_vars():
 
 def reset_review_vars():
     return [], pd.DataFrame(), pd.DataFrame()
-
-
 
 def load_in_default_allow_list(allow_list_file_path):
     if isinstance(allow_list_file_path, str):
@@ -269,8 +270,7 @@ def merge_csv_files(file_list):
 
 
 
-async def get_connection_params(request: gr.Request):
-    base_folder = ""
+async def get_connection_params(request: gr.Request, output_folder_textbox:str='/output/'):
 
     #print("request user:", request.username)
 
@@ -304,17 +304,14 @@ async def get_connection_params(request: gr.Request):
 
     if request.username:
         out_session_hash = request.username
-        base_folder = "user-files/"
         print("Request username found:", out_session_hash)
 
     elif 'x-cognito-id' in request.headers:
         out_session_hash = request.headers['x-cognito-id']
-        base_folder = "user-files/"
         print("Cognito ID found:", out_session_hash)
 
     elif 'x-amzn-oidc-identity' in request.headers:
         out_session_hash = request.headers['x-amzn-oidc-identity']
-        base_folder = "user-files/"
 
         # Fetch email address using Cognito client
         cognito_client = boto3.client('cognito-idp')
@@ -331,20 +328,23 @@ async def get_connection_params(request: gr.Request):
             print("Error fetching user details:", e)
             email = None
 
-
         print("Cognito ID found:", out_session_hash)
 
     else:
         out_session_hash = request.session_hash
-        base_folder = "temp-files/"
-        # print("Cognito ID not found. Using session hash as save folder:", out_session_hash)
 
-    output_folder = base_folder + out_session_hash + "/"
+    if session_output_folder == 'True':
+        output_folder = output_folder_textbox + out_session_hash + "/"
+    else:
+        output_folder = output_folder_textbox
+
+    if not os.path.exists(output_folder):
+        os.mkdir(output_folder)
+
     #if bucket_name:
     #    print("S3 output folder is: " + "s3://" + bucket_name + "/" + output_folder)
 
     return out_session_hash, output_folder, out_session_hash
-    
 
 def clean_unicode_text(text):
     # Step 1: Normalize unicode characters to decompose any special forms
@@ -366,3 +366,19 @@ def clean_unicode_text(text):
     cleaned_text = re.sub(r'[^\x00-\x7F]+', '', normalized_text)
 
     return cleaned_text
+   
+def load_all_output_files(folder_path:str=output_folder) -> List[str]:
+    """Get the file paths of all files in the given folder."""
+    file_paths = []
+    
+    # List all files in the specified folder
+    for filename in os.listdir(folder_path):
+        # Construct full file path
+        full_path = os.path.join(folder_path, filename)
+        # Check if it's a file (not a directory)
+        if os.path.isfile(full_path):
+            file_paths.append(full_path)
+    
+    return file_paths
+
+    

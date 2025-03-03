@@ -375,7 +375,8 @@ def choose_and_run_redactor(file_paths:List[str],
              redact_whole_page_list,
              max_fuzzy_spelling_mistakes_num,
              match_fuzzy_whole_phrase_bool,
-             log_files_output_paths=log_files_output_paths)
+             log_files_output_paths=log_files_output_paths,
+             output_folder=output_folder)
                         
             # Save Textract request metadata (if exists)
             if new_request_metadata:
@@ -443,15 +444,15 @@ def choose_and_run_redactor(file_paths:List[str],
 
             out_orig_pdf_file_path = output_folder + pdf_file_name_with_ext
 
-            logs_output_file_name = out_orig_pdf_file_path + "_decision_process_output.csv"
-            all_decision_process_table.to_csv(logs_output_file_name, index = None, encoding="utf-8")
-            log_files_output_paths.append(logs_output_file_name)
+            #logs_output_file_name = out_orig_pdf_file_path + "_decision_process_output.csv"
+            #all_decision_process_table.to_csv(logs_output_file_name, index = None, encoding="utf-8")
+            #log_files_output_paths.append(logs_output_file_name)
 
             all_text_output_file_name = out_orig_pdf_file_path + "_ocr_output.csv"
             all_line_level_ocr_results_df.to_csv(all_text_output_file_name, index = None, encoding="utf-8")
             out_file_paths.append(all_text_output_file_name)
 
-            # Save the gradio_annotation_boxes to a JSON file
+            # Save the gradio_annotation_boxes to a review csv file
             try:
                 review_df = convert_review_json_to_pandas_df(annotations_all_pages, all_decision_process_table)
 
@@ -461,15 +462,15 @@ def choose_and_run_redactor(file_paths:List[str],
 
                 #print("Saved review file to csv")
 
-                out_annotation_file_path = out_orig_pdf_file_path + '_review_file.json'
-                with open(out_annotation_file_path, 'w') as f:
-                    json.dump(annotations_all_pages, f)
-                log_files_output_paths.append(out_annotation_file_path)
+                # out_annotation_file_path = out_orig_pdf_file_path + '_review_file.json'
+                # with open(out_annotation_file_path, 'w') as f:
+                #     json.dump(annotations_all_pages, f)
+                # log_files_output_paths.append(out_annotation_file_path)
 
                 #print("Saving annotations to JSON")
 
             except Exception as e:
-                print("Could not save annotations to json or csv file:", e)
+                print("Could not save annotations to csv file:", e)
 
             # Make a combined message for the file                
             if isinstance(out_message, list):
@@ -942,7 +943,8 @@ def redact_image_pdf(file_path:str,
                      match_fuzzy_whole_phrase_bool:bool=True,
                      page_break_val:int=int(page_break_value),
                      log_files_output_paths:List=[],
-                     max_time:int=int(max_time_value),                                       
+                     max_time:int=int(max_time_value),
+                     output_folder:str=output_folder,                                       
                      progress=Progress(track_tqdm=True)):
 
     '''
@@ -976,7 +978,8 @@ def redact_image_pdf(file_path:str,
     - match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to 3.
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
-    - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.      
+    - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
+    - output_folder (str, optional): The folder for file outputs.
     - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
     The function returns a redacted PDF document along with processing output objects.

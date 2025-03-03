@@ -63,7 +63,7 @@ RUN mkdir -p /home/user/app/output \
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 
 # Download NLTK data packages
-RUN python -m nltk.downloader punkt stopwords punkt_tab
+RUN python -m nltk.downloader --quiet punkt stopwords punkt_tab
 
 # Entrypoint helps to switch between Gradio and Lambda mode
 COPY entrypoint.sh /entrypoint.sh

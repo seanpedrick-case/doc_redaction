@@ -247,7 +247,7 @@ def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_
 
     return all_image_annotations, current_page, current_page, recogniser_entities_drop, recogniser_dataframe_out
 
-def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], doc:Document, all_image_annotations:List[AnnotatedImageData], current_page:int, review_file_state, save_pdf:bool=True, progress=gr.Progress(track_tqdm=True)):
+def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], doc:Document, all_image_annotations:List[AnnotatedImageData], current_page:int, review_file_state, output_folder:str = output_folder, save_pdf:bool=True, progress=gr.Progress(track_tqdm=True)):
     '''
     Apply modified redactions to a pymupdf and export review files
     '''
@@ -363,10 +363,10 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
         try:
             #print("Saving annotations to JSON")
 
-            out_annotation_file_path = output_folder + file_name_with_ext + '_review_file.json'
-            with open(out_annotation_file_path, 'w') as f:
-                json.dump(all_image_annotations, f)
-            output_log_files.append(out_annotation_file_path)
+            # out_annotation_file_path = output_folder + file_name_with_ext + '_review_file.json'
+            # with open(out_annotation_file_path, 'w') as f:
+            #     json.dump(all_image_annotations, f)
+            # output_log_files.append(out_annotation_file_path)
 
             #print("Saving annotations to CSV review file")
 
@@ -379,7 +379,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
             output_files.append(out_review_file_file_path)
 
         except Exception as e:
-            print("Could not save annotations to json or csv file:", e)
+            print("Could not save annotations to csv file:", e)
 
     return doc, all_image_annotations, output_files, output_log_files
 
@@ -535,7 +535,7 @@ def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc, image_paths:List[str
     
     return xml_str
 
-def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths):
+def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths:List[str], output_folder:str = output_folder):
     '''
     Load in files to convert a review file into an Adobe comment file format
     '''
@@ -586,7 +586,7 @@ def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths):
 
 ### Convert xfdf coordinates back to image for app
 
-def convert_adobe_coords_to_image(pdf_page_width, pdf_page_height, image_width, image_height, x1, y1, x2, y2):
+def convert_adobe_coords_to_image(pdf_page_width:float, pdf_page_height:float, image_width:float, image_height:float, x1:float, y1:float, x2:float, y2:float):
     '''
     Converts coordinates from Adobe PDF space to image space.
     
@@ -660,7 +660,7 @@ def parse_xfdf(xfdf_path):
     
     return redactions
 
-def convert_xfdf_to_dataframe(file_paths_list, pymupdf_doc, image_paths):
+def convert_xfdf_to_dataframe(file_paths_list:List[str], pymupdf_doc, image_paths:List[str], output_folder:str=output_folder):
     '''
     Convert redaction annotations from XFDF and associated images into a DataFrame.
     
