@@ -111,7 +111,7 @@ def choose_and_run_redactor(file_paths:List[str],
     - prepared_pdf_image_paths (List[str]): A list of paths to the PDF files converted to images for redaction.
     - language (str): The language of the text in the files.
     - chosen_redact_entities (List[str]): A list of entity types to redact from the files using the local model (spacy) with Microsoft Presidio.
-    - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service
+    - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service.
     - in_redact_method (str): The method to use for redaction.
     - in_allow_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
     - custom_recogniser_word_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
