@@ -70,7 +70,7 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
         else:
             # Convert PDF page to image
             image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, 
-                                        dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
+                                        dpi=image_dpi, use_cropbox=False, use_pdftocairo=False)
             image = image_l[0]
             image = image.convert("L")
             image.save(out_path, format="PNG")
@@ -139,59 +139,6 @@ def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min
     return images
 
 
-# def convert_pdf_to_images(pdf_path:str, page_min:int = 0, image_dpi:float = image_dpi, progress=Progress(track_tqdm=True)):
-
-#     print("pdf_path in convert_pdf_to_images:", pdf_path)
-
-#     # Get the number of pages in the PDF
-#     page_count = pdfinfo_from_path(pdf_path)['Pages']
-#     print("Number of pages in PDF: ", str(page_count))
-
-#     images = []
-
-#     # Open the PDF file
-#     #for page_num in progress.tqdm(range(0,page_count), total=page_count, unit="pages", desc="Converting pages"): range(page_min,page_count): #
-#     for page_num in tqdm(range(page_min,page_count), total=page_count, unit="pages", desc="Preparing pages"):
-
-#         #print("page_num in convert_pdf_to_images:", page_num)
-        
-#         print("Converting page: ", str(page_num + 1))
-
-#         # Convert one page to image
-#         out_path  = pdf_path + "_" + str(page_num) + ".png"
-        
-#         # Ensure the directory exists
-#         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
-#         # Check if the image already exists
-#         if os.path.exists(out_path):
-#             #print(f"Loading existing image from {out_path}.")
-#             image = Image.open(out_path)  # Load the existing image
-
-#         else:
-#             image_l = convert_from_path(pdf_path, first_page=page_num+1, last_page=page_num+1, dpi=image_dpi, use_cropbox=True, use_pdftocairo=False)
-
-#             image = image_l[0]
-
-#             # Convert to greyscale
-#             image = image.convert("L")
-
-#             image.save(out_path, format="PNG")  # Save the new image
-
-#         # If no images are returned, break the loop
-#         if not image:
-#             print("Conversion of page", str(page_num), "to file failed.")
-#             break
-
-#         # print("Conversion of page", str(page_num), "to file succeeded.")
-#         # print("image:", image)
-
-#         images.append(out_path)
-
-#     print("PDF has been converted to images.")
-#     # print("Images:", images)
-
-#     return images
 
 # Function to take in a file path, decide if it is an image or pdf, then process appropriately.
 def process_file(file_path:str, prepare_for_review:bool=False):
@@ -304,71 +251,6 @@ def redact_single_box(pymupdf_page:Page, pymupdf_rect:Rect, img_annotation_box:d
     #shape.finish(color=(0, 0, 0))  # Black fill for the rectangle
     shape.commit()
 
-# def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
-#     '''
-#     Converts coordinates from pymupdf format to image coordinates,
-#     accounting for mediabox dimensions and offset.
-#     '''
-#     # Get rect dimensions
-#     rect = pymupdf_page.rect
-#     rect_width = rect.width
-#     rect_height = rect.height
-    
-#     # Get mediabox dimensions and position
-#     mediabox = pymupdf_page.mediabox
-#     mediabox_width = mediabox.width
-#     mediabox_height = mediabox.height
-    
-#     # Get target image dimensions
-#     image_page_width, image_page_height = image.size
-
-#     # Calculate scaling factors
-#     image_to_mediabox_x_scale = image_page_width / mediabox_width
-#     image_to_mediabox_y_scale = image_page_height / mediabox_height
-
-#     image_to_rect_scale_width = image_page_width / rect_width
-#     image_to_rect_scale_height = image_page_height / rect_height
-
-#     # Adjust for offsets (difference in position between mediabox and rect)
-#     x_offset = rect.x0 - mediabox.x0  # Difference in x position
-#     y_offset = rect.y0 - mediabox.y0  # Difference in y position
-
-#     print("x_offset:", x_offset)
-#     print("y_offset:", y_offset)
-
-#     # Adjust coordinates:
-#     # Apply scaling to match image dimensions
-#     x1_image = x1 * image_to_mediabox_x_scale    
-#     x2_image = x2 * image_to_mediabox_x_scale
-#     y1_image = y1 * image_to_mediabox_y_scale
-#     y2_image = y2 * image_to_mediabox_y_scale
-
-#     # Correct for difference in rect and mediabox size
-#     if mediabox_width != rect_width:
-        
-#         mediabox_to_rect_x_scale = mediabox_width / rect_width
-#         mediabox_to_rect_y_scale = mediabox_height / rect_height
-
-#         x1_image *= mediabox_to_rect_x_scale
-#         x2_image *= mediabox_to_rect_x_scale
-#         y1_image *= mediabox_to_rect_y_scale
-#         y2_image *= mediabox_to_rect_y_scale
-
-#         print("mediabox_to_rect_x_scale:", mediabox_to_rect_x_scale)
-#         #print("mediabox_to_rect_y_scale:", mediabox_to_rect_y_scale)
-
-#         print("image_to_mediabox_x_scale:", image_to_mediabox_x_scale)
-#         #print("image_to_mediabox_y_scale:", image_to_mediabox_y_scale)
-
-#         mediabox_rect_x_diff = (mediabox_width - rect_width) * 2 
-#         mediabox_rect_y_diff = (mediabox_height - rect_height) * 2
-
-#         x1_image -= mediabox_rect_x_diff
-#         x2_image -= mediabox_rect_x_diff
-#         y1_image += mediabox_rect_y_diff
-#         y2_image += mediabox_rect_y_diff
-
-#     return x1_image, y1_image, x2_image, y2_image
 
 def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
     '''
@@ -434,8 +316,6 @@ def convert_pymupdf_to_image_coords(pymupdf_page, x1, y1, x2, y2, image: Image):
 
     return x1_image, y1_image, x2_image, y2_image
 
-
-
 def redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colours, border = 5):
     # Small border to page that remains white
     border = 5
@@ -498,6 +378,7 @@ def prepare_image_or_pdf(
 
     tic = time.perf_counter()
     json_from_csv = False
+    original_cropboxes = []  # Store original CropBox values
 
     if isinstance(in_fully_redacted_list, pd.DataFrame):
         in_fully_redacted_list = in_fully_redacted_list.iloc[:,0].tolist()
@@ -586,13 +467,18 @@ def prepare_image_or_pdf(
         if not file_path:
             out_message = "Please select a file."
             print(out_message)
-            return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
-
+            raise Exception(out_message)
+            
         file_extension = os.path.splitext(file_path)[1].lower()
 
         # If a pdf, load as a pymupdf document
         if is_pdf(file_path):
             pymupdf_doc = pymupdf.open(file_path)
+
+            # Load cropbox dimensions to use later
+            
+            for page in pymupdf_doc:
+                original_cropboxes.append(page.cropbox)  # Save original CropBox
 
             converted_file_path = file_path
             image_file_paths = process_file(file_path, prepare_for_review)
@@ -737,13 +623,13 @@ def prepare_image_or_pdf(
                 if is_pdf_or_image(file_path) == False:
                     out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
                     print(out_message)
-                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
+                    raise Exception(out_message)
 
             elif in_redact_method == text_ocr_option:
                 if is_pdf(file_path) == False:
                     out_message = "Please upload a PDF file for text analysis."
                     print(out_message)
-                    return out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv        
+                    raise Exception(out_message)  
 
 
         converted_file_paths.append(converted_file_path)
@@ -759,7 +645,7 @@ def prepare_image_or_pdf(
 
     number_of_pages = len(image_file_paths)
         
-    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
+    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi):
     file_path_without_ext = get_file_name_without_type(in_file_path)

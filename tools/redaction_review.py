@@ -12,8 +12,9 @@ from tools.helper_functions import get_file_name_without_type, output_folder, de
 from tools.file_redaction import redact_page_with_pymupdf
 import json
 import os
+import re
 import pymupdf
-from fitz import Document
+from fitz import Document, Rect
 from PIL import ImageDraw, Image
 from collections import defaultdict
 
@@ -431,7 +432,7 @@ def convert_image_coords_to_adobe(pdf_page_width:float, pdf_page_height:float, i
     return pdf_x1, pdf_y1, pdf_x2, pdf_y2
 
 
-def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc, image_paths:List[str]):
+def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:List[str], document_cropboxes:List=[]):
     '''
     Create an xfdf file from a review csv file and a pdf
     '''
@@ -451,8 +452,23 @@ def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc, image_paths:List[str
 
         pymupdf_page = pymupdf_doc.load_page(page_python_format)
 
-        pdf_page_height = pymupdf_page.rect.height
-        pdf_page_width = pymupdf_page.rect.width 
+        # Load cropbox sizes
+        if document_cropboxes:
+            print("Document cropboxes:", document_cropboxes)
+
+            # Extract numbers safely using regex
+            match = re.findall(r"[-+]?\d*\.\d+|\d+", document_cropboxes[page_python_format])
+
+            if match and len(match) == 4:
+                rect_values = list(map(float, match))  # Convert extracted strings to floats
+                pymupdf_page.set_cropbox(Rect(*rect_values))
+            else:
+                raise ValueError(f"Invalid cropbox format: {document_cropboxes[page_python_format]}")
+        else:
+            print("Document cropboxes not found.")
+
+        pdf_page_height = pymupdf_page.mediabox.height
+        pdf_page_width = pymupdf_page.mediabox.width 
 
         image = image_paths[page_python_format]
 
@@ -535,7 +551,7 @@ def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc, image_paths:List[str
     
     return xml_str
 
-def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths:List[str], output_folder:str = output_folder):
+def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths:List[str], output_folder:str = output_folder, document_cropboxes:List=[]):
     '''
     Load in files to convert a review file into an Adobe comment file format
     '''
@@ -572,7 +588,7 @@ def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths:List[str], ou
 
         df.fillna('', inplace=True)  # Replace NaN with an empty string
 
-        xfdf_content = create_xfdf(df, pdf_name, pdf_doc, image_paths)
+        xfdf_content = create_xfdf(df, pdf_name, pdf_doc, image_paths, document_cropboxes)
 
         output_path = output_folder + file_path_name + "_adobe.xfdf"        
         

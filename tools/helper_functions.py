@@ -60,7 +60,7 @@ def reset_state_vars():
             show_share_button=False,
             show_remove_button=False,
             interactive=False
-        ), [], [], [], pd.DataFrame(), pd.DataFrame()
+        ), [], [], [], pd.DataFrame(), pd.DataFrame(), []
 
 def reset_review_vars():
     return [], pd.DataFrame(), pd.DataFrame()
