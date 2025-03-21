@@ -34,7 +34,7 @@ aws_pii_detector  = "AWS Comprehend"
 output_folder = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/')
 print(f'The value of GRADIO_OUTPUT_FOLDER is {output_folder}')
 
-session_output_folder = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'True')
+session_output_folder = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'False')
 print(f'The value of SESSION_OUTPUT_FOLDER is {session_output_folder}')
 
 input_folder = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/')
@@ -60,10 +60,10 @@ def reset_state_vars():
             show_share_button=False,
             show_remove_button=False,
             interactive=False
-        ), [], [], [], pd.DataFrame(), pd.DataFrame(), []
+        ), [], [], pd.DataFrame(), pd.DataFrame(), []
 
 def reset_review_vars():
-    return [], pd.DataFrame(), pd.DataFrame()
+    return pd.DataFrame(), pd.DataFrame()
 
 def load_in_default_allow_list(allow_list_file_path):
     if isinstance(allow_list_file_path, str):

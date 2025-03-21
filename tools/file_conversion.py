@@ -8,12 +8,16 @@ import json
 import pymupdf
 import pandas as pd
 import numpy as np
+import shutil
 from pymupdf import Rect
 from fitz import Page
 from tqdm import tqdm
 from gradio import Progress
 from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pdf2image import convert_from_path
+from PIL import Image
+from scipy.spatial import cKDTree
 
 image_dpi = 300.0
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -53,9 +57,41 @@ def is_pdf(filename):
 CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "")
 print(f'The value of CUSTOM_BOX_COLOUR is {CUSTOM_BOX_COLOUR}')
 
-import os
-from pdf2image import convert_from_path
-from PIL import Image
+def check_image_size_and_reduce(out_path:str, image:Image):
+    '''
+    Check if a given image size is above around 4.5mb, and reduce size if necessary. 5mb is the maximum possible to submit to AWS Textract.
+    '''
+
+    # Check file size and resize if necessary
+    max_size = 4.5 * 1024 * 1024  # 5 MB in bytes # 5
+    file_size = os.path.getsize(out_path)        
+
+    width = image.width
+    height = image.height
+
+    # Resize images if they are too big
+    if file_size > max_size:
+        # Start with the original image size          
+
+        print(f"Image size before {width}x{height}, original file_size: {file_size}")
+
+        while file_size > max_size:
+            # Reduce the size by a factor (e.g., 50% of the current size)
+            new_width = int(width * 0.5)
+            new_height = int(height * 0.5)
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Save the resized image
+            image.save(out_path, format="PNG", optimize=True)
+            
+            # Update the file size
+            file_size = os.path.getsize(out_path)
+            print(f"Resized to {new_width}x{new_height}, new file_size: {file_size}")
+    else:
+        new_width = width
+        new_height = height 
+
+    return new_width, new_height
 
 def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_dir: str = 'input') -> tuple[int, str]:
     try:
@@ -75,38 +111,16 @@ def process_single_page(pdf_path: str, page_num: int, image_dpi: float, output_d
             image = image.convert("L")
             image.save(out_path, format="PNG")
 
-        # Check file size and resize if necessary
-        max_size = 4.5 * 1024 * 1024  # 5 MB in bytes # 5
-        file_size = os.path.getsize(out_path)        
+        width, height = image.size
 
-        # Resize images if they are too big
-        if file_size > max_size:
-            # Start with the original image size
-            width, height = image.size
+        # Check if image size too large and reduce if necessary
+        width, height = check_image_size_and_reduce(out_path, image)                
 
-            print(f"Image size before {width}x{height}, original file_size: {file_size}")
-
-            while file_size > max_size:
-                # Reduce the size by a factor (e.g., 50% of the current size)
-                new_width = int(width * 0.5)
-                new_height = int(height * 0.5)
-                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                
-                # Save the resized image
-                image.save(out_path, format="PNG", optimize=True)
-                
-                # Update the file size
-                file_size = os.path.getsize(out_path)
-                print(f"Resized to {new_width}x{new_height}, new file_size: {file_size}")
-                
-                # Update the dimensions for the next iteration
-                width, height = new_width, new_height
-
-        return page_num, out_path
+        return page_num, out_path, width, height
 
     except Exception as e:
         print(f"Error processing page {page_num + 1}: {e}")
-        return page_num, None
+        return page_num, "", width, height
 
 def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min: int = 0, image_dpi: float = image_dpi, num_threads: int = 8, output_dir: str = '/input'):
 
@@ -125,44 +139,49 @@ def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min
             futures.append(executor.submit(process_single_page, pdf_path, page_num, image_dpi))
         
         for future in tqdm(as_completed(futures), total=len(futures), unit="pages", desc="Converting pages"):
-            page_num, result = future.result()
+            page_num, result, width, height = future.result()
             if result:
-                results.append((page_num, result))
+                results.append((page_num, result, width, height))
             else:
                 print(f"Page {page_num + 1} failed to process.")
     
     # Sort results by page number
     results.sort(key=lambda x: x[0])
     images = [result[1] for result in results]
+    widths = [result[2] for result in results]
+    heights = [result[3] for result in results]
 
     print("PDF has been converted to images.")
-    return images
-
-
+    return images, widths, heights
 
 # Function to take in a file path, decide if it is an image or pdf, then process appropriately.
 def process_file(file_path:str, prepare_for_review:bool=False):
     # Get the file extension
     file_extension = os.path.splitext(file_path)[1].lower()
-
+ 
     # Check if the file is an image type
     if file_extension in ['.jpg', '.jpeg', '.png']:
         print(f"{file_path} is an image file.")
         # Perform image processing here
         img_object = [file_path] #[Image.open(file_path)]
-        # Load images from the file paths
+
+        # Load images from the file paths. Test to see if it is bigger than 4.5 mb and reduct if needed (Textract limit is 5mb)
+        image = Image.open(file_path)
+        img_object, image_sizes_width, image_sizes_height = check_image_size_and_reduce(file_path, image)
 
     # Check if the file is a PDF
     elif file_extension == '.pdf':
         print(f"{file_path} is a PDF file. Converting to image set")
         # Run your function for processing PDF files here
-        img_object = convert_pdf_to_images(file_path, prepare_for_review)
+        img_object, image_sizes_width, image_sizes_height = convert_pdf_to_images(file_path, prepare_for_review)
 
     else:
         print(f"{file_path} is not an image or PDF file.")
-        img_object = ['']
+        img_object = []
+        image_sizes_width = []
+        image_sizes_height = []
 
-    return img_object
+    return img_object, image_sizes_width, image_sizes_height
 
 def get_input_file_names(file_input:List[str]):
     '''
@@ -351,6 +370,7 @@ def prepare_image_or_pdf(
     all_annotations_object:List = [],
     prepare_for_review:bool = False,
     in_fully_redacted_list:List[int]=[],
+    output_folder:str=output_folder,
     progress: Progress = Progress(track_tqdm=True)
 ) -> tuple[List[str], List[str]]:
     """
@@ -369,7 +389,8 @@ def prepare_image_or_pdf(
         all_annotations_object(optional, List of annotation objects): All annotations for current document
         prepare_for_review(optional, bool): Is this preparation step preparing pdfs and json files to review current redactions?
         in_fully_redacted_list(optional, List of int): A list of pages to fully redact
-        progress (optional, Progress): Progress tracker for the operation.
+        output_folder (optional, str): The output folder for file save
+        progress (optional, Progress): Progress tracker for the operation
         
 
     Returns:
@@ -381,7 +402,8 @@ def prepare_image_or_pdf(
     original_cropboxes = []  # Store original CropBox values
 
     if isinstance(in_fully_redacted_list, pd.DataFrame):
-        in_fully_redacted_list = in_fully_redacted_list.iloc[:,0].tolist()
+        if not in_fully_redacted_list.empty:
+            in_fully_redacted_list = in_fully_redacted_list.iloc[:,0].tolist()
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -433,7 +455,7 @@ def prepare_image_or_pdf(
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv
+        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes
 
     #in_allow_list_flat = [item for sublist in in_allow_list for item in sublist]
 
@@ -475,13 +497,22 @@ def prepare_image_or_pdf(
         if is_pdf(file_path):
             pymupdf_doc = pymupdf.open(file_path)
 
-            # Load cropbox dimensions to use later
-            
-            for page in pymupdf_doc:
-                original_cropboxes.append(page.cropbox)  # Save original CropBox
+            # Load cropbox dimensions to use later  
 
             converted_file_path = file_path
-            image_file_paths = process_file(file_path, prepare_for_review)
+            image_file_paths, image_sizes_width, image_sizes_height = process_file(file_path, prepare_for_review)
+            page_sizes = []
+
+            for i, page in enumerate(pymupdf_doc):
+                page_no = i
+                reported_page_no = i + 1
+                
+                pymupdf_page = pymupdf_doc.load_page(page_no)
+                original_cropboxes.append(pymupdf_page.cropbox)  # Save original CropBox
+
+                # Create a page_sizes_object
+                out_page_image_sizes = {"page":reported_page_no, "image_width":image_sizes_width[page_no], "image_height":image_sizes_height[page_no], "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":pymupdf_page.cropbox.width, "cropbox_height":pymupdf_page.cropbox.height}
+                page_sizes.append(out_page_image_sizes)
 
             #Create base version of the annotation object that doesn't have any annotations in it
             if (not all_annotations_object) & (prepare_for_review == True):
@@ -503,14 +534,20 @@ def prepare_image_or_pdf(
 
             img = Image.open(file_path)  # Open the image file
             rect = pymupdf.Rect(0, 0, img.width, img.height)  # Create a rectangle for the image
-            page = pymupdf_doc.new_page(width=img.width, height=img.height)  # Add a new page
-            page.insert_image(rect, filename=file_path)  # Insert the image into the page
+            pymupdf_page = pymupdf_doc.new_page(width=img.width, height=img.height)  # Add a new page
+            pymupdf_page.insert_image(rect, filename=file_path)  # Insert the image into the page
+            pymupdf_page = pymupdf_doc.load_page(0)
+
+            original_cropboxes.append(pymupdf_page.cropbox)  # Save original CropBox
 
             file_path_str = str(file_path)
 
-            image_file_paths = process_file(file_path_str, prepare_for_review)
+            image_file_paths, image_sizes_width, image_sizes_height = process_file(file_path_str, prepare_for_review)
 
             #print("image_file_paths:", image_file_paths)
+            # Create a page_sizes_object
+            out_page_image_sizes = {"page":1, "image_width":image_sizes_width[page_no], "image_height":image_sizes_height[page_no], "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":original_cropboxes[-1].width, "cropbox_height":original_cropboxes[-1].height}
+            page_sizes.append(out_page_image_sizes)
 
             converted_file_path = output_folder + file_name_with_ext
 
@@ -520,7 +557,7 @@ def prepare_image_or_pdf(
 
         elif file_extension in ['.csv']:
             review_file_csv = read_file(file)
-            all_annotations_object = convert_pandas_df_to_review_json(review_file_csv, image_file_paths)
+            all_annotations_object = convert_pandas_df_to_review_json(review_file_csv, image_file_paths, page_sizes)
             json_from_csv = True
             print("Converted CSV review file to json")
 
@@ -537,13 +574,14 @@ def prepare_image_or_pdf(
                     all_annotations_object = json.loads(file_path)  # Use loads for string content
 
             # Assume it's a textract json
-            elif (file_extension in ['.json']) & (prepare_for_review != True):
-                # If the file loaded has end textract.json, assume this is a textract response object. Save this to the output folder so it can be found later during redaction and go to the next file.
-                json_contents = json.load(file_path)
-                # Write the response to a JSON file in output folder
-                out_folder = output_folder + file_path_without_ext + ".json"
-                with open(out_folder, 'w') as json_file:
-                    json.dump(json_contents, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
+            elif (file_extension == '.json') and (prepare_for_review is not True):
+                # If the file ends with textract.json, assume it's a Textract response object.
+                # Copy it to the output folder so it can be used later.
+                out_folder = os.path.join(output_folder, file_path_without_ext + ".json")
+
+                # Use shutil to copy the file directly
+                shutil.copy2(file_path, out_folder)  # Preserves metadata
+                
                 continue
 
             # If you have an annotations object from the above code
@@ -600,16 +638,16 @@ def prepare_image_or_pdf(
                     #print("all_annotations_object at end of json/csv load part:", all_annotations_object)
 
                 # Get list of pages that are to be fully redacted and redact them
-                if in_fully_redacted_list:
-                    print("Redacting whole pages")
+                # if not in_fully_redacted_list.empty:
+                #     print("Redacting whole pages")
 
-                    for i, image in enumerate(image_file_paths):
-                        page = pymupdf_doc.load_page(i)
-                        rect_height = page.rect.height
-                        rect_width = page.rect.width 
-                        whole_page_img_annotation_box = redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colours = False, border = 5)
+                #     for i, image in enumerate(image_file_paths):
+                #         page = pymupdf_doc.load_page(i)
+                #         rect_height = page.rect.height
+                #         rect_width = page.rect.width 
+                #         whole_page_img_annotation_box = redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colours = False, border = 5)
 
-                        all_annotations_object.append(whole_page_img_annotation_box)
+                #         all_annotations_object.append(whole_page_img_annotation_box)
 
                 # Write the response to a JSON file in output folder
                 out_folder = output_folder + file_path_without_ext + ".json"
@@ -645,7 +683,7 @@ def prepare_image_or_pdf(
 
     number_of_pages = len(image_file_paths)
         
-    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes
+    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi):
     file_path_without_ext = get_file_name_without_type(in_file_path)
@@ -655,7 +693,7 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], 
     # Convert annotated text pdf back to image to give genuine redactions
     print("Creating image version of redacted PDF to embed redactions.")
     
-    pdf_text_image_paths = process_file(out_text_file_path[0])
+    pdf_text_image_paths, image_sizes_width, image_sizes_height = process_file(out_text_file_path[0])
     out_text_image_file_path = output_folder + file_path_without_ext + "_text_redacted_as_img.pdf"
     pdf_text_image_paths[0].save(out_text_image_file_path, "PDF" ,resolution=image_dpi, save_all=True, append_images=pdf_text_image_paths[1:])
 
@@ -701,12 +739,13 @@ def join_values_within_threshold(df1, df2):
     print(final_df)
 
 
-def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decision_output:pd.DataFrame=pd.DataFrame()) -> pd.DataFrame:
+def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decision_output:pd.DataFrame=pd.DataFrame(), page_sizes:List[dict]=[]) -> pd.DataFrame:
     '''
     Convert the annotation json data to a dataframe format. Add on any text from the initial review_file dataframe by joining on pages/co-ordinates (doesn't work very well currently).
     '''
     # Flatten the data
     flattened_annotation_data = []
+    page_sizes_df = pd.DataFrame()
 
     if not isinstance(redaction_decision_output, pd.DataFrame):
         redaction_decision_output = pd.DataFrame()
@@ -739,53 +778,170 @@ def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decis
             flattened_annotation_data.append(data_to_add)
 
     # Convert to a DataFrame
-    annotation_data_as_df = pd.DataFrame(flattened_annotation_data)
+    review_file_df = pd.DataFrame(flattened_annotation_data)
+
+    if page_sizes:
+        page_sizes_df = pd.DataFrame(page_sizes)
+        page_sizes_df["page"] = page_sizes_df["page"].astype(int)
+
+    # Convert data to same coordinate system
+    # If all coordinates all greater than one, this is a absolute image coordinates - change back to relative coordinates
+    if "xmin" in review_file_df.columns:
+        if review_file_df["xmin"].max() >= 1 and review_file_df["xmax"].max() >= 1 and review_file_df["ymin"].max() >= 1 and review_file_df["ymax"].max() >= 1:
+            print("review file df has large coordinates")
+            review_file_df["page"] = review_file_df["page"].astype(int)
+
+            if "image_width" not in review_file_df.columns and not page_sizes_df.empty:                            
+                review_file_df = review_file_df.merge(page_sizes_df, on="page", how="left")
+
+            if "image_width" in review_file_df.columns:
+                print("Dividing coordinates in review file")
+                review_file_df["xmin"] = review_file_df["xmin"] / review_file_df["image_width"]
+                review_file_df["xmax"] = review_file_df["xmax"] / review_file_df["image_width"]
+                review_file_df["ymin"] = review_file_df["ymin"] / review_file_df["image_height"]
+                review_file_df["ymax"] = review_file_df["ymax"] / review_file_df["image_height"]
+
+                #print("review_file_df after coordinates divided:", review_file_df)
+
+    if not redaction_decision_output.empty:
+        # If all coordinates all greater than one, this is a absolute image coordinates - change back to relative coordinates
+        if redaction_decision_output["xmin"].max() >= 1 and redaction_decision_output["xmax"].max() >= 1 and redaction_decision_output["ymin"].max() >= 1 and redaction_decision_output["ymax"].max() >= 1:
+
+            redaction_decision_output["page"] = redaction_decision_output["page"].astype(int)
+
+            if "image_width" not in redaction_decision_output.columns and not page_sizes_df.empty:                            
+                redaction_decision_output = redaction_decision_output.merge(page_sizes_df, on="page", how="left")
+
+            if "image_width" in redaction_decision_output.columns:
+                redaction_decision_output["xmin"] = redaction_decision_output["xmin"] / redaction_decision_output["image_width"]
+                redaction_decision_output["xmax"] = redaction_decision_output["xmax"] / redaction_decision_output["image_width"]
+                redaction_decision_output["ymin"] = redaction_decision_output["ymin"] / redaction_decision_output["image_height"]
+                redaction_decision_output["ymax"] = redaction_decision_output["ymax"] / redaction_decision_output["image_height"]
+
+    #print("convert_review_json review_file_df before merges:", review_file_df[['xmin', 'ymin', 'xmax', 'ymax', 'label']])
+    #print("review_file_df[xmin]", review_file_df["xmin"])
 
     #print("redaction_decision_output:", redaction_decision_output)
-    #print("annotation_data_as_df:", annotation_data_as_df)
+    #print("review_file_df:", review_file_df)
 
     # Join on additional text data from decision output results if included, if text not already there
-    if not redaction_decision_output.empty:
-        #print("redaction_decision_output is not empty")
-        #print("redaction_decision_output:", redaction_decision_output)
-        #print("annotation_data_as_df:", annotation_data_as_df)
-        redaction_decision_output['page'] = redaction_decision_output['page'].astype(str)
-        annotation_data_as_df['page'] = annotation_data_as_df['page'].astype(str)
-        redaction_decision_output = redaction_decision_output[['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page', 'text']]
+    if not redaction_decision_output.empty: 
+        if not 'text' in redaction_decision_output.columns:
+            redaction_decision_output['text'] = ''
 
-        # Round to the closest number divisible by 5
-        redaction_decision_output.loc[:, ['xmin', 'ymin', 'xmax', 'ymax']] = (redaction_decision_output[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
+        if not 'text' in review_file_df.columns:
+            review_file_df['text'] = ''
 
-        redaction_decision_output = redaction_decision_output.drop_duplicates(['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page'])
+        # Load DataFrames
+        df1 = review_file_df.copy()
+        df2 = redaction_decision_output.copy()
+
+        #print("review_file before tolerance merge:", review_file_df)
+        #print("redaction_decision_output before tolerance merge:", redaction_decision_output)
+
+        # Create a unique key based on coordinates and label for exact merge
+        merge_keys = ['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page']
+        df1['key'] = df1[merge_keys].astype(str).agg('_'.join, axis=1)
+        df2['key'] = df2[merge_keys].astype(str).agg('_'.join, axis=1)
+
+        # Attempt exact merge first
+        #merged_df = df1.merge(df2[['key', 'text']], on='key', how='left')
+
+        # Attempt exact merge first, renaming df2['text'] to avoid suffixes
+        merged_df = df1.merge(df2[['key', 'text']], on='key', how='left', suffixes=('', '_duplicate'))
+
+        # If a match is found, keep that text; otherwise, keep the original df1 text
+        merged_df['text'] = merged_df['text'].combine_first(merged_df.pop('text_duplicate'))
+
+        #print("merged_df['text']:", merged_df['text'])
+
+        # Handle missing matches using a proximity-based approach
+        #if merged_df['text'].isnull().sum() > 0:
+        print("Attempting tolerance-based merge for text")
+        # Convert coordinates to numpy arrays for KDTree lookup
+        tree = cKDTree(df2[['xmin', 'ymin', 'xmax', 'ymax']].values)
+        query_coords = df1[['xmin', 'ymin', 'xmax', 'ymax']].values
         
-        #annotation_data_as_df[['xmin1', 'ymin1', 'xmax1', 'ymax1']] = (annotation_data_as_df[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
+        # Find nearest neighbors within a reasonable tolerance (e.g., 1% of page)
+        tolerance = 0.01
+        distances, indices = tree.query(query_coords, distance_upper_bound=tolerance)
 
-        annotation_data_as_df.loc[:, ['xmin1', 'ymin1', 'xmax1', 'ymax1']] = (annotation_data_as_df[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
+        # Assign text values where matches are found
+        for i, (dist, idx) in enumerate(zip(distances, indices)):
+            if dist < tolerance and idx < len(df2):
+                merged_df.at[i, 'text'] = df2.iloc[idx]['text']
 
-        annotation_data_as_df = annotation_data_as_df.merge(redaction_decision_output, left_on = ['xmin1', 'ymin1', 'xmax1', 'ymax1', 'label', 'page'], right_on = ['xmin', 'ymin', 'xmax', 'ymax', 'label', 'page'], how = "left", suffixes=("", "_y"))
+        # Drop the temporary key column
+        merged_df.drop(columns=['key'], inplace=True)
 
-        annotation_data_as_df = annotation_data_as_df.drop(['xmin1', 'ymin1', 'xmax1', 'ymax1', 'xmin_y', 'ymin_y', 'xmax_y', 'ymax_y'], axis=1, errors="ignore")
+        review_file_df = merged_df
 
-        annotation_data_as_df = annotation_data_as_df[["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]]
+        review_file_df = review_file_df[["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]]
 
     # Ensure required columns exist, filling with blank if they don't
     for col in ["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]:
-        if col not in annotation_data_as_df.columns:
-            annotation_data_as_df[col] = ''
+        if col not in review_file_df.columns:
+            review_file_df[col] = ''
 
-    for col in ['xmin', 'xmax', 'ymin', 'ymax']:
-        annotation_data_as_df[col] = np.floor(annotation_data_as_df[col])
+    #for col in ['xmin', 'xmax', 'ymin', 'ymax']:
+    #    review_file_df[col] = np.floor(review_file_df[col])
 
-    annotation_data_as_df = annotation_data_as_df.sort_values(['page', 'ymin', 'xmin', 'label'])
+    # If colours are saved as list, convert to tuple
+    review_file_df["color"] = review_file_df["color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
 
-    return annotation_data_as_df
+    # print("page_sizes:", page_sizes)
 
-def convert_pandas_df_to_review_json(review_file_df: pd.DataFrame, image_paths: List[Image.Image]) -> List[dict]:
+    # Convert page sizes to relative values
+    # if page_sizes:
+    #     print("Checking page sizes")
+        
+    #     page_sizes_df = pd.DataFrame(page_sizes)
+
+    #     if "image_width" not in review_file_df.columns:
+    #         review_file_df = review_file_df.merge(page_sizes_df, how="left", on = "page")
+        
+    #     # If all coordinates all greater than one, this is a absolute image coordinates - change back to relative coordinates
+    #     if review_file_df["xmin"].max() > 1 and review_file_df["xmax"].max() > 1 and review_file_df["ymin"].max() > 1 and review_file_df["ymax"].max() > 1:
+    #         print("Dividing coordinates by image width and height.")
+    #         review_file_df["xmin"] = review_file_df["xmin"] / review_file_df["image_width"]
+    #         review_file_df["xmax"] = review_file_df["xmax"] / review_file_df["image_width"]
+    #         review_file_df["ymin"] = review_file_df["ymin"] / review_file_df["image_height"]
+    #         review_file_df["ymax"] = review_file_df["ymax"] / review_file_df["image_height"]
+
+    review_file_df = review_file_df.sort_values(['page', 'ymin', 'xmin', 'label'])
+
+    review_file_df.to_csv(output_folder + "review_file_test.csv", index=None)
+
+    return review_file_df
+
+def convert_pandas_df_to_review_json(review_file_df: pd.DataFrame, image_paths: List[Image.Image], page_sizes:List[dict]=[]) -> List[dict]:
     '''
-    Convert a review csv to a json file for use by the Gradio Annotation object
+    Convert a review csv to a json file for use by the Gradio Annotation object.
     '''
+    
+    if page_sizes:
+        
+        page_sizes_df = pd.DataFrame(page_sizes)
+
+        #print(page_sizes_df)
+
+        if "image_width" not in review_file_df.columns:
+            review_file_df = review_file_df.merge(page_sizes_df, how="left", on = "page")
+
+        #print("review_file_df in convert pandas df to review json function:", review_file_df[["xmin", "xmax", "ymin", "ymax"]])
+        
+        # If all coordinates are less or equal to one, this is a relative page scaling - change back to image coordinates
+        if review_file_df["xmin"].max() <= 1 and review_file_df["xmax"].max() <= 1 and review_file_df["ymin"].max() <= 1 and review_file_df["ymax"].max() <= 1:
+            review_file_df["xmin"] = review_file_df["xmin"] * review_file_df["image_width"]
+            review_file_df["xmax"] = review_file_df["xmax"] * review_file_df["image_width"]
+            review_file_df["ymin"] = review_file_df["ymin"] * review_file_df["image_height"]
+            review_file_df["ymax"] = review_file_df["ymax"] * review_file_df["image_height"]
+            
     # Keep only necessary columns
     review_file_df = review_file_df[["image", "page", "xmin", "ymin", "xmax", "ymax", "color", "label"]]
+
+    # If colours are saved as list, convert to tuple
+    review_file_df.loc[:, "color"] = review_file_df.loc[:,"color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
 
     # Group the DataFrame by the 'image' column
     grouped_csv_pages = review_file_df.groupby('page')
@@ -795,6 +951,7 @@ def convert_pandas_df_to_review_json(review_file_df: pd.DataFrame, image_paths: 
 
     for n, pdf_image_path in enumerate(image_paths):
         reported_page_number = int(n + 1)
+            
 
         if reported_page_number in review_file_df["page"].values:
 
@@ -802,6 +959,8 @@ def convert_pandas_df_to_review_json(review_file_df: pd.DataFrame, image_paths: 
             selected_csv_pages = grouped_csv_pages.get_group(reported_page_number)
             annotation_boxes = selected_csv_pages.drop(columns=['image', 'page']).to_dict(orient='records')
 
+            # If all bbox coordinates are below 1, then they are relative. Need to convert based on image size.
+            
             annotation = {
                 "image": pdf_image_path,
                 "boxes": annotation_boxes

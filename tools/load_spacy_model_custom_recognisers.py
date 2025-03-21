@@ -11,14 +11,14 @@ import Levenshtein
 import re
 import gradio as gr
 
-model_name = "en_core_web_sm" #"en_core_web_trf"
+model_name = "en_core_web_lg" #"en_core_web_sm" #"en_core_web_trf"
 score_threshold = 0.001
 custom_entities = ["TITLES", "UKPOSTCODE", "STREETNAME", "CUSTOM"]
 
 #Load spacy model
 try:
-	import en_core_web_sm
-	nlp = en_core_web_sm.load()
+	import en_core_web_lg #en_core_web_sm
+	nlp = en_core_web_lg.load() #en_core_web_sm.load()
 	print("Successfully imported spaCy model")
 
 except:

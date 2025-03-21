@@ -30,7 +30,7 @@ from tools.file_conversion import process_file, image_dpi, convert_review_json_t
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer
 from tools.helper_functions import get_file_name_without_type, output_folder, clean_unicode_text, get_or_create_env_var, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.file_conversion import process_file, is_pdf, is_pdf_or_image, prepare_image_or_pdf
-from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult
+from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult, load_and_convert_textract_json
 from tools.presidio_analyzer_custom import recognizer_result_from_dict 
 
 # Number of pages to loop through before breaking. Currently set very high, as functions are breaking on time metrics (e.g. every 105 seconds), rather than on number of pages redacted.
@@ -100,7 +100,7 @@ def choose_and_run_redactor(file_paths:List[str],
  aws_access_key_textbox:str='',
  aws_secret_key_textbox:str='',
  annotate_max_pages:int=1,
- review_file_state=[],
+ review_file_state:pd.DataFrame=[],
  output_folder:str=output_folder,
  document_cropboxes:List=[],
  progress=gr.Progress(track_tqdm=True)):
@@ -139,7 +139,8 @@ def choose_and_run_redactor(file_paths:List[str],
     - match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
     - aws_access_key_textbox (str, optional): AWS access key for account with Textract and Comprehend permissions.
     - aws_secret_key_textbox (str, optional): AWS secret key for account with Textract and Comprehend permissions.
-    - annotate_max_pages (int, optional): Maximum page value for the annotation object
+    - annotate_max_pages (int, optional): Maximum page value for the annotation object.
+    - review_file_state (pd.DataFrame, optional): Output review file dataframe.
     - output_folder (str, optional): Output folder for results.
     - document_cropboxes (List, optional): List of document cropboxes for the PDF.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
@@ -150,10 +151,29 @@ def choose_and_run_redactor(file_paths:List[str],
     tic = time.perf_counter()
     all_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
 
+    # Choose the correct file to prepare
+    if isinstance(file_paths, str):
+        file_paths_list = [os.path.abspath(file_paths)]
+    elif isinstance(file_paths, dict):
+        file_paths = file_paths["name"]
+        file_paths_list = [os.path.abspath(file_paths)]
+    else:
+        file_paths_list = file_paths
+
+    valid_extensions = {".pdf", ".jpg", ".jpeg", ".png"}
+    # Filter only files with valid extensions. Currently only allowing one file to be redacted at a time
+    file_paths_list = [list([file for file in file_paths_list if os.path.splitext(file)[1].lower() in valid_extensions])[0]]
+
+    # If latest_file_completed is used, get the specific file
+    if not isinstance(file_paths, (str, dict)):
+        file_paths_loop = [file_paths_list[int(latest_file_completed)]] if len(file_paths_list) > latest_file_completed else []
+    else:
+        file_paths_loop = file_paths_list
+
     # If there are no prepared PDF file paths, it is most likely that the prepare_image_or_pdf function has not been run. So do it here to get the outputs you need
     if not pymupdf_doc:
         print("Prepared PDF file not found, loading from file")        
-        out_message, prepared_pdf_file_paths, prepared_pdf_image_paths, annotate_max_pages, annotate_max_pages, pymupdf_doc, annotations_all_pages, review_file_state, document_cropboxes = prepare_image_or_pdf(file_paths, in_redact_method, latest_file_completed, out_message, first_loop_state, annotate_max_pages, annotations_all_pages, document_cropboxes)
+        out_message, prepared_pdf_file_paths, prepared_pdf_image_paths, annotate_max_pages, annotate_max_pages, pymupdf_doc, annotations_all_pages, review_file_state, document_cropboxes, page_sizes = prepare_image_or_pdf(file_paths, in_redact_method, latest_file_completed, out_message, first_loop_state, annotate_max_pages, annotations_all_pages, document_cropboxes, redact_whole_page_list, output_folder)
 
     #print("prepared_pdf_file_paths:", prepared_pdf_file_paths[0])
     review_out_file_paths = [prepared_pdf_file_paths[0]]
@@ -219,7 +239,7 @@ def choose_and_run_redactor(file_paths:List[str],
         estimate_total_processing_time = sum_numbers_before_seconds(combined_out_message)
         print("Estimated total processing time:", str(estimate_total_processing_time))
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state, page_sizes
     
     # If we have reached the last page, return message and outputs
     if current_loop_page >= number_of_pages:
@@ -235,7 +255,7 @@ def choose_and_run_redactor(file_paths:List[str],
         
             review_out_file_paths.extend(out_review_file_path)
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state, page_sizes
 
     # Create allow list
     # If string, assume file path
@@ -306,17 +326,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
     progress(0.5, desc="Redacting file")
     
-    if isinstance(file_paths, str):
-        file_paths_list = [os.path.abspath(file_paths)]
-        file_paths_loop = file_paths_list
-    elif isinstance(file_paths, dict):
-        file_paths = file_paths["name"]
-        file_paths_list = [os.path.abspath(file_paths)]
-        file_paths_loop = file_paths_list
-    else:
-        file_paths_list = file_paths
-        file_paths_loop = [file_paths_list[int(latest_file_completed)]]    
-
+    # Run through file loop, redact each file at a time
     for file in file_paths_loop:
         if isinstance(file, str):
             file_path = file
@@ -336,7 +346,7 @@ def choose_and_run_redactor(file_paths:List[str],
             out_message = "No file selected"
             print(out_message)
             raise Exception(out_message)
-
+        
         if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
 
             #Analyse and redact image-based pdf or image
@@ -346,7 +356,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
             print("Redacting file " + pdf_file_name_with_ext + " as an image-based file")
 
-            pymupdf_doc, all_decision_process_table, log_files_output_paths, new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number = redact_image_pdf(file_path,
+            pymupdf_doc, all_decision_process_table, log_files_output_paths, new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number, page_sizes = redact_image_pdf(file_path,
              prepared_pdf_image_paths,
              language,
              chosen_redact_entities,
@@ -389,7 +399,7 @@ def choose_and_run_redactor(file_paths:List[str],
             # Analyse text-based pdf
             print('Redacting file as text-based PDF')
             
-            pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number = redact_text_pdf(file_path,
+            pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, page_sizes = redact_text_pdf(file_path,
             prepared_pdf_image_paths,language,
             chosen_redact_entities,
             chosen_redact_comprehend_entities,
@@ -416,6 +426,10 @@ def choose_and_run_redactor(file_paths:List[str],
             print(out_message)
             raise Exception(out_message)
         
+        # Output file paths
+        out_orig_pdf_file_path = output_folder + pdf_file_name_with_ext
+        out_review_file_path = out_orig_pdf_file_path + '_review_file.csv'
+
         # If at last page, save to file
         if current_loop_page >= number_of_pages:
 
@@ -437,21 +451,61 @@ def choose_and_run_redactor(file_paths:List[str],
 
             out_file_paths.append(out_redacted_pdf_file_path)
 
-            out_orig_pdf_file_path = output_folder + pdf_file_name_with_ext
-
             #logs_output_file_name = out_orig_pdf_file_path + "_decision_process_output.csv"
             #all_decision_process_table.to_csv(logs_output_file_name, index = None, encoding="utf-8")
             #log_files_output_paths.append(logs_output_file_name)
+
+            # Convert OCR result bounding boxes to relative values
+            #print("all_line_level_ocr_results_df:", all_line_level_ocr_results_df)
+            #print("page_sizes:", page_sizes)
+            #print("all_line_level_ocr_results_df:", all_line_level_ocr_results_df)
+
+            page_sizes_df = pd.DataFrame(page_sizes)
+
+            page_sizes_df["page"] = page_sizes_df["page"].astype(int)
+            all_line_level_ocr_results_df["page"] = all_line_level_ocr_results_df["page"].astype(int)
+
+            all_line_level_ocr_results_df = all_line_level_ocr_results_df.merge(page_sizes_df, on="page", how="left")
+
+            all_line_level_ocr_results_df["left"] = all_line_level_ocr_results_df["left"] / all_line_level_ocr_results_df["image_width"]
+            all_line_level_ocr_results_df["width"] = all_line_level_ocr_results_df["width"] / all_line_level_ocr_results_df["image_width"]
+            all_line_level_ocr_results_df["top"] = all_line_level_ocr_results_df["top"] / all_line_level_ocr_results_df["image_height"]
+            all_line_level_ocr_results_df["height"] = all_line_level_ocr_results_df["height"] / all_line_level_ocr_results_df["image_height"]
+
+            #print("all_line_level_ocr_results_df in choose and run redactor:", all_line_level_ocr_results_df)
 
             all_text_output_file_name = out_orig_pdf_file_path + "_ocr_output.csv"
             all_line_level_ocr_results_df.to_csv(all_text_output_file_name, index = None, encoding="utf-8")
             out_file_paths.append(all_text_output_file_name)
 
-            # Save the gradio_annotation_boxes to a review csv file
+            # Save the gradio_annotation_boxes to a review csv file            
             try:
-                review_df = convert_review_json_to_pandas_df(annotations_all_pages, all_decision_process_table)
+                #print("annotations_all_pages before in choose and run redactor:", annotations_all_pages)
+                #print("all_decision_process_table before in choose and run redactor:", all_decision_process_table)
+                #print("page_sizes before in choose and run redactor:", page_sizes)
 
-                out_review_file_path = out_orig_pdf_file_path + '_review_file.csv'
+                review_df = convert_review_json_to_pandas_df(annotations_all_pages, all_decision_process_table, page_sizes)
+
+                #print("annotation_all_pages:", annotations_all_pages)
+                #print("all_decision_process_table after in choose and run redactor:", all_decision_process_table)
+                #print("review_df after in choose and run redactor:", review_df)
+
+                review_df["page"] = review_df["page"].astype(int)
+                if "image_height" not in review_df.columns:
+                    review_df = review_df.merge(page_sizes_df, on="page", how="left")
+
+                # If all coordinates all greater than one, this is a absolute image coordinates - change back to relative coordinates
+                if review_df["xmin"].max() >= 1 and review_df["xmax"].max() >= 1 and review_df["ymin"].max() >= 1 and review_df["ymax"].max() >= 1:
+                    review_df["xmin"] = review_df["xmin"] / review_df["image_width"]
+                    review_df["xmax"] = review_df["xmax"] / review_df["image_width"]
+                    review_df["ymin"] = review_df["ymin"] / review_df["image_height"]
+                    review_df["ymax"] = review_df["ymax"] / review_df["image_height"]
+
+                # Don't need page sizes in outputs
+                review_df.drop(["image_width", "image_height", "mediabox_width", "mediabox_height", "cropbox_width", "cropbox_height"], axis=1, inplace=True, errors="ignore")
+
+                #print("review_df:", review_df)
+                
                 review_df.to_csv(out_review_file_path, index=None)
                 out_file_paths.append(out_review_file_path)
 
@@ -465,7 +519,7 @@ def choose_and_run_redactor(file_paths:List[str],
                 #print("Saving annotations to JSON")
 
             except Exception as e:
-                print("Could not save annotations to csv file:", e)
+                print("Could not save annotations to csv file in choose and run redactor:", e)
 
             # Make a combined message for the file                
             if isinstance(out_message, list):
@@ -485,7 +539,6 @@ def choose_and_run_redactor(file_paths:List[str],
             toc = time.perf_counter()
             time_taken = toc - tic
             estimated_time_taken_state = estimated_time_taken_state + time_taken
-
 
    # If textract requests made, write to logging file
     if all_request_metadata:
@@ -507,7 +560,7 @@ def choose_and_run_redactor(file_paths:List[str],
     out_file_paths = list(set(out_file_paths))    
     review_out_file_paths = [prepared_pdf_file_paths[0], out_review_file_path]
 
-    return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state
+    return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_df, page_sizes
 
 def convert_pikepdf_coords_to_pymupdf(pymupdf_page, pikepdf_bbox, type="pikepdf_annot"):
     '''
@@ -714,7 +767,7 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
                 x2 = pymupdf_x2
 
                 if hasattr(annot, 'text') and annot.text:
-                    img_annotation_box["text"] = annot.text
+                    img_annotation_box["text"] = str(annot.text)
                 else:
                     img_annotation_box["text"] = ""
 
@@ -731,12 +784,12 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
                 img_annotation_box["ymax"] = annot.top + annot.height
                 img_annotation_box["color"] = (0,0,0)
                 try:
-                    img_annotation_box["label"] = annot.entity_type
+                    img_annotation_box["label"] = str(annot.entity_type)
                 except:
                     img_annotation_box["label"] = "Redaction"
 
                 if hasattr(annot, 'text') and annot.text:
-                    img_annotation_box["text"] = annot.text
+                    img_annotation_box["text"] = str(annot.text)
                 else:
                     img_annotation_box["text"] = ""
 
@@ -771,7 +824,7 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
                     img_annotation_box["label"] = str(annot["/T"])
 
                     if hasattr(annot, 'Contents'):
-                        img_annotation_box["text"] = annot.Contents
+                        img_annotation_box["text"] = str(annot.Contents)
                     else:
                         img_annotation_box["text"] = ""
                 else:
@@ -797,7 +850,7 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image=None, custo
     }
 
     page.apply_redactions(images=0, graphics=0)
-    page.set_cropbox(original_cropbox)  # Set CropBox to original size
+    page.set_cropbox = original_cropbox  # Set CropBox to original size
     page.clean_contents()
 
     return page, out_annotation_boxes
@@ -1006,9 +1059,9 @@ def redact_image_pdf(file_path:str,
 
     
     if analysis_type == textract_option and textract_client == "":
-        print("Connection to AWS Textract service unsuccessful.")
-
-        return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+        out_message = "Connection to AWS Textract service unsuccessful."
+        print(out_message)
+        raise Exception(out_message)
 
     tic = time.perf_counter()
 
@@ -1016,7 +1069,7 @@ def redact_image_pdf(file_path:str,
         out_message = "PDF does not exist as images. Converting pages to image"
         print(out_message)
 
-        prepared_pdf_file_paths = process_file(file_path)
+        prepared_pdf_file_paths, image_sizes = process_file(file_path)
 
     number_of_pages = len(prepared_pdf_file_paths)
     print("Number of pages:", str(number_of_pages))
@@ -1033,21 +1086,10 @@ def redact_image_pdf(file_path:str,
     # If running Textract, check if file already exists. If it does, load in existing data
     if analysis_type == textract_option:
                 
-        json_file_path = output_folder + file_name + "_textract.json"
+        textract_json_file_path = output_folder + file_name + "_textract.json"
         
-        if not os.path.exists(json_file_path):
-            print("No existing Textract results file found.")
-            textract_data = {}
-        else:
-            # Open the file and load the JSON data
-            no_textract_file = False
-            print("Found existing Textract json results file.")
-
-            if json_file_path not in log_files_output_paths:
-                log_files_output_paths.append(json_file_path)
-
-            with open(json_file_path, 'r') as json_file:
-                textract_data = json.load(json_file)
+        # Usage
+        textract_data, is_missing, log_files_output_paths = load_and_convert_textract_json(textract_json_file_path, log_files_output_paths)
 
     ###
     if current_loop_page == 0: page_loop_start = 0
@@ -1056,6 +1098,7 @@ def redact_image_pdf(file_path:str,
     progress_bar = tqdm(range(page_loop_start, number_of_pages), unit="pages remaining", desc="Redacting pages")
 
     original_cropboxes = []
+    page_sizes = []
 
     for page_no in progress_bar:
 
@@ -1077,7 +1120,8 @@ def redact_image_pdf(file_path:str,
         image_annotations = {"image": image, "boxes": []}        
         pymupdf_page = pymupdf_doc.load_page(page_no)
 
-        original_cropboxes.append(pymupdf_page.cropbox)  # Save original CropBox
+        # Set visible page size to biggest size (mediabox) for redaction
+        original_cropboxes.append(pymupdf_page.cropbox.irect)  # Save original CropBox
         pymupdf_page.set_cropbox(pymupdf_page.mediabox)  # Set CropBox to MediaBox
  
         if page_no >= page_min and page_no < page_max:    
@@ -1085,9 +1129,14 @@ def redact_image_pdf(file_path:str,
             #print("Image is in range of pages to redact")            
             if isinstance(image, str):
                 image = Image.open(image)
+            elif not isinstance(image, Image.Image):
+                raise TypeError(f"Unexpected image type: {type(image)}")  # Ensure image is valid
 
             # Need image size to convert textract OCR outputs to the correct sizes
             page_width, page_height = image.size
+
+            out_page_image_sizes = {"page":(page_no+1), "image_width":page_width, "image_height":page_height, "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":original_cropboxes[-1].width, "cropbox_height":original_cropboxes[-1].height}
+            page_sizes.append(out_page_image_sizes)
 
             # Possibility to use different languages
             if language == 'en': ocr_lang = 'eng'
@@ -1110,8 +1159,8 @@ def redact_image_pdf(file_path:str,
                     try:
                         text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
                         
-                        if json_file_path not in log_files_output_paths:
-                            log_files_output_paths.append(json_file_path)
+                        if textract_json_file_path not in log_files_output_paths:
+                            log_files_output_paths.append(textract_json_file_path)
 
                         textract_data = {"pages":[text_blocks]}
                     except Exception as e:
@@ -1170,10 +1219,6 @@ def redact_image_pdf(file_path:str,
             else:
                 redaction_bboxes = []
                 
-
-            # if analysis_type == tesseract_ocr_option: interim_results_file_path = output_folder + "interim_analyser_bboxes_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + ".txt"
-            # elif analysis_type == textract_option: interim_results_file_path = output_folder + "interim_analyser_bboxes_" + file_name + "_pages_" + str(page_min + 1) + "_" + str(page_max) + "_textract.txt" 
-
             # # Save decision making process
             # bboxes_str = str(redaction_bboxes)
             # with open(interim_results_file_path, "w") as f:
@@ -1282,17 +1327,17 @@ def redact_image_pdf(file_path:str,
 
                 if analysis_type == textract_option:
                     # Write the updated existing textract data back to the JSON file
-                    with open(json_file_path, 'w') as json_file:
+                    with open(textract_json_file_path, 'w') as json_file:
                         json.dump(textract_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
 
-                        if json_file_path not in log_files_output_paths:
-                            log_files_output_paths.append(json_file_path)
+                        if textract_json_file_path not in log_files_output_paths:
+                            log_files_output_paths.append(textract_json_file_path)
 
-                            print("At end of redact_image_pdf function where time over max.", json_file_path, "not found in log_files_output_paths, appended to list:", log_files_output_paths)
+                            print("At end of redact_image_pdf function where time over max.", textract_json_file_path, "not found in log_files_output_paths, appended to list:", log_files_output_paths)
 
                 current_loop_page += 1
 
-                return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+                return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number, page_sizes
 
         if is_pdf(file_path) == False:
             images.append(image)
@@ -1317,23 +1362,23 @@ def redact_image_pdf(file_path:str,
 
             if analysis_type == textract_option:
                 # Write the updated existing textract data back to the JSON file
-                with open(json_file_path, 'w') as json_file:
+                with open(textract_json_file_path, 'w') as json_file:
                     json.dump(textract_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
 
-                    if json_file_path not in log_files_output_paths:
-                        log_files_output_paths.append(json_file_path)
+                    if textract_json_file_path not in log_files_output_paths:
+                        log_files_output_paths.append(textract_json_file_path)
 
-            return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+            return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number, page_sizes
         
     if analysis_type == textract_option:
         # Write the updated existing textract data back to the JSON file
         
-        with open(json_file_path, 'w') as json_file:
+        with open(textract_json_file_path, 'w') as json_file:
             json.dump(textract_data, json_file, indent=4)  # indent=4 makes the JSON file pretty-printed
-            if json_file_path not in log_files_output_paths:
-                log_files_output_paths.append(json_file_path)
+            if textract_json_file_path not in log_files_output_paths:
+                log_files_output_paths.append(textract_json_file_path)
 
-    return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+    return pymupdf_doc, all_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number, page_sizes
 
 
 ###
@@ -1565,11 +1610,13 @@ def redact_text_pdf(
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.     
     - progress: Progress tracking object
     '''
+    page_sizes = []
+    out_page_image_sizes = {}
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         print("Connection to AWS Comprehend service not found.")
 
-        return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
+        return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, page_sizes
     
     # Update custom word list analyser object with any new words that have been added to the custom deny list
     if custom_recogniser_word_list:        
@@ -1600,6 +1647,7 @@ def redact_text_pdf(
     else: page_loop_start = current_loop_page
 
     original_cropboxes = []
+    page_sizes = []
 
     progress_bar = tqdm(range(current_loop_page, number_of_pages), unit="pages remaining", desc="Redacting pages")
 
@@ -1620,7 +1668,7 @@ def redact_text_pdf(
         image_annotations = {"image": image, "boxes": []} 
         pymupdf_page = pymupdf_doc.load_page(page_no)
 
-        original_cropboxes.append(pymupdf_page.cropbox)  # Save original CropBox
+        original_cropboxes.append(pymupdf_page.cropbox.irect)  # Save original CropBox
         pymupdf_page.set_cropbox(pymupdf_page.mediabox)  # Set CropBox to MediaBox
 
         if page_min <= page_no < page_max:
@@ -1628,6 +1676,14 @@ def redact_text_pdf(
             if isinstance(image, str):
                 image_path = image
                 image = Image.open(image_path)
+            elif not isinstance(image, Image.Image):
+                raise TypeError(f"Unexpected image type: {type(image)}")  # Ensure image is valid
+
+            # Need image size to convert textract OCR outputs to the correct sizes
+            page_width, page_height = image.size
+
+            out_page_image_sizes = {"page":(page_no+1), "image_width":page_width, "image_height":page_height, "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":original_cropboxes[-1].width, "cropbox_height":original_cropboxes[-1].height}
+            page_sizes.append(out_page_image_sizes)
 
             for page_layout in extract_pages(filename, page_numbers = [page_no], maxpages=1):
                 
@@ -1749,7 +1805,7 @@ def redact_text_pdf(
 
                     current_loop_page += 1
 
-                    return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
+                    return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, page_sizes
                 
 
         # Check if the image already exists in annotations_all_pages
@@ -1768,7 +1824,7 @@ def redact_text_pdf(
             page_break_return = True
             progress.close(_tqdm=progress_bar)
 
-            return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
+            return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, page_sizes
         
             
-    return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
+    return pymupdf_doc, all_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, page_sizes

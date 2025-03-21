@@ -7,7 +7,7 @@ import uuid
 from typing import List
 from gradio_image_annotation import image_annotator
 from gradio_image_annotation.image_annotator import AnnotatedImageData
-from tools.file_conversion import is_pdf, convert_review_json_to_pandas_df, CUSTOM_BOX_COLOUR
+from tools.file_conversion import is_pdf, convert_review_json_to_pandas_df, convert_pandas_df_to_review_json, CUSTOM_BOX_COLOUR
 from tools.helper_functions import get_file_name_without_type, output_folder, detect_file_type
 from tools.file_redaction import redact_page_with_pymupdf
 import json
@@ -84,55 +84,145 @@ def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
 
     return result
 
-def get_recogniser_dataframe_out(image_annotator_object, recogniser_dataframe_gr):
+def update_dropdown_list_based_on_dataframe(df:pd.DataFrame, column:str) -> List["str"]:
+    '''
+    Gather unique elements from a string pandas Series, then append 'ALL' to the start and return the list.
+    '''
+
+    entities = df[column].astype(str).unique().tolist()        
+    entities_for_drop = sorted(entities)
+    entities_for_drop.insert(0, "ALL")
+
+    return entities_for_drop
+
+def get_filtered_recogniser_dataframe_and_dropdowns(image_annotator_object:AnnotatedImageData,
+                                 recogniser_dataframe_modified:pd.DataFrame,
+                                 recogniser_dropdown_value:str,
+                                 text_dropdown_value:str,
+                                 page_dropdown_value:str,
+                                 review_df:pd.DataFrame=[],
+                                 page_sizes:List[str]=[]):
+    '''
+    Create a filtered recogniser dataframe and associated dropdowns based on current information in the image annotator and review data frame.
+    '''
+
     recogniser_entities_list = ["Redaction"]
-    recogniser_entities_drop = gr.Dropdown(value="", choices=[""], allow_custom_value=True, interactive=True)
-    recogniser_dataframe_out = recogniser_dataframe_gr
+    recogniser_dataframe_out = recogniser_dataframe_modified
 
     try:
-        review_dataframe = convert_review_json_to_pandas_df(image_annotator_object)[["page", "label"]]
-        recogniser_entities = review_dataframe["label"].unique().tolist()
-        recogniser_entities.append("ALL")
-        recogniser_entities_for_drop = sorted(recogniser_entities)
+        review_dataframe = convert_review_json_to_pandas_df(image_annotator_object, review_df, page_sizes)
 
+        print("in get_filtered_recogniser_dataframe_and_dropdowns, recogniser_dropdown_value:", recogniser_dropdown_value)
 
-        recogniser_dataframe_out = gr.Dataframe(review_dataframe)
-        recogniser_entities_drop = gr.Dropdown(value=recogniser_entities_for_drop[0], choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)
+        recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(review_dataframe, "label")
+        recogniser_entities_drop = gr.Dropdown(value=recogniser_dropdown_value, choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)
 
-        recogniser_entities_list = [entity for entity in recogniser_entities_for_drop if entity != 'Redaction' and entity != 'ALL']  # Remove any existing 'Redaction'
-        recogniser_entities_list.insert(0, 'Redaction')  # Add 'Redaction' to the start of the list
+        # This is the choice list for entities when creating a new redaction box
+        recogniser_entities_list = [entity for entity in recogniser_entities_for_drop.copy() if entity != 'Redaction' and entity != 'ALL']  # Remove any existing 'Redaction'
+        recogniser_entities_list.insert(0, 'Redaction')  # Add 'Redaction' to the start of the list        
+
+        text_entities_for_drop = update_dropdown_list_based_on_dataframe(review_dataframe, "text")
+        text_entities_drop = gr.Dropdown(value=text_dropdown_value, choices=text_entities_for_drop, allow_custom_value=True, interactive=True)
+
+        page_entities_for_drop = update_dropdown_list_based_on_dataframe(review_dataframe, "page")
+        page_entities_drop = gr.Dropdown(value=page_dropdown_value, choices=page_entities_for_drop, allow_custom_value=True, interactive=True)
+
+        recogniser_dataframe_out = gr.Dataframe(review_dataframe[["page", "label", "text"]], show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"])
 
     except Exception as e:
         print("Could not extract recogniser information:", e)
-        recogniser_dataframe_out = recogniser_dataframe_gr
-        recogniser_entities_drop = gr.Dropdown(value="", choices=[""], allow_custom_value=True, interactive=True)
+        recogniser_dataframe_out = recogniser_dataframe_modified[["page", "label", "text"]]
+
+        recogniser_entities_drop = gr.Dropdown(value=recogniser_dropdown_value, choices=recogniser_dataframe_out["label"].astype(str).unique().tolist(), allow_custom_value=True, interactive=True)
         recogniser_entities_list = ["Redaction"]
+        text_entities_drop = gr.Dropdown(value=text_dropdown_value, choices=recogniser_dataframe_out["text"].astype(str).unique().tolist(), allow_custom_value=True, interactive=True)
+        page_entities_drop = gr.Dropdown(value=page_dropdown_value, choices=recogniser_dataframe_out["page"].astype(str).unique().tolist(), allow_custom_value=True, interactive=True)
 
-    return recogniser_dataframe_out, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list
+    return recogniser_dataframe_out, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list, text_entities_drop, page_entities_drop
 
-def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, recogniser_entities_drop=gr.Dropdown(value="ALL", allow_custom_value=True), recogniser_dataframe_gr=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]})), zoom:int=100):
+
+def update_recogniser_dataframes(image_annotator_object:AnnotatedImageData, recogniser_dataframe_modified:pd.DataFrame, recogniser_entities_dropdown_value:str="ALL", text_dropdown_value:str="ALL", page_dropdown_value:str="ALL", review_df:pd.DataFrame=[], page_sizes:list[str]=[]):
     '''
-    Update a gradio_image_annotation object with new annotation data
-    '''    
+    Update recogniser dataframe information that appears alongside the pdf pages on the review screen.
+    '''
     recogniser_entities_list = ["Redaction"]
     recogniser_dataframe_out = pd.DataFrame()
 
-    if recogniser_dataframe_gr.empty:
-        recogniser_dataframe_gr, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list = get_recogniser_dataframe_out(image_annotator_object, recogniser_dataframe_gr)    
-    elif recogniser_dataframe_gr.iloc[0,0] == "":
-        recogniser_dataframe_gr, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list = get_recogniser_dataframe_out(image_annotator_object, recogniser_dataframe_gr)
+    if recogniser_dataframe_modified.empty:
+        recogniser_dataframe_modified, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list, text_entities_drop, page_entities_drop = get_filtered_recogniser_dataframe_and_dropdowns(image_annotator_object, recogniser_dataframe_modified, recogniser_entities_dropdown_value, text_dropdown_value, page_dropdown_value, review_df, page_sizes)    
+    elif recogniser_dataframe_modified.iloc[0,0] == "":
+        recogniser_dataframe_modified, recogniser_dataframe_out, recogniser_entities_dropdown_value, recogniser_entities_list, text_entities_drop, page_entities_drop = get_filtered_recogniser_dataframe_and_dropdowns(image_annotator_object, recogniser_dataframe_modified, recogniser_entities_dropdown_value, text_dropdown_value, page_dropdown_value, review_df, page_sizes)
     else:        
-        review_dataframe = update_entities_df(recogniser_entities_drop, recogniser_dataframe_gr)
-        recogniser_dataframe_out = gr.Dataframe(review_dataframe)
-        recogniser_entities_list = recogniser_dataframe_gr["label"].unique().tolist()
+        print("recogniser dataframe is not empty")
+        review_dataframe, text_entities_drop, page_entities_drop = update_entities_df_recogniser_entities(recogniser_entities_dropdown_value, recogniser_dataframe_modified, page_dropdown_value, text_dropdown_value)
+        recogniser_dataframe_out = gr.Dataframe(review_dataframe[["page", "label", "text"]], show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"])
+        
+        recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(recogniser_dataframe_modified, "label")
+        recogniser_entities_drop = gr.Dropdown(value=recogniser_entities_dropdown_value, choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)
 
-        recogniser_entities_list = sorted(recogniser_entities_list)
-        recogniser_entities_list = [entity for entity in recogniser_entities_list if entity != 'Redaction']  # Remove any existing 'Redaction'
-        recogniser_entities_list.insert(0, 'Redaction')  # Add 'Redaction' to the start of the list
+        recogniser_entities_list_base = recogniser_dataframe_modified["label"].astype(str).unique().tolist()
 
+        # Recogniser entities list is the list of choices that appear when you make a new redaction box
+        recogniser_entities_list = [entity for entity in recogniser_entities_list_base if entity != 'Redaction']
+        recogniser_entities_list.insert(0, 'Redaction')
+
+    return recogniser_entities_list, recogniser_dataframe_out, recogniser_dataframe_modified, recogniser_entities_drop, text_entities_drop, page_entities_drop
+
+
+def undo_last_removal(backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base):
+    return backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base
+
+def exclude_selected_items_from_redaction(review_df: pd.DataFrame, selected_rows_df: pd.DataFrame, image_file_paths:List[str], page_sizes:List[dict], image_annotations_state:dict, recogniser_entity_dataframe_base:pd.DataFrame):
+    '''
+    Remove selected items from the review dataframe from the annotation object and review dataframe.
+    '''
+
+    backup_review_state = review_df
+    backup_image_annotations_state = image_annotations_state
+    backup_recogniser_entity_dataframe_base = recogniser_entity_dataframe_base
+
+    if not selected_rows_df.empty and not review_df.empty:
+        # Ensure selected_rows_df has the same relevant columns
+        selected_subset = selected_rows_df[['label', 'page', 'text']].drop_duplicates()
+
+        # Perform anti-join using merge with an indicator column
+        merged_df = review_df.merge(selected_subset, on=['label', 'page', 'text'], how='left', indicator=True)
+        
+        # Keep only the rows that do not have a match in selected_rows_df
+        out_review_df = merged_df[merged_df['_merge'] == 'left_only'].drop(columns=['_merge'])
+
+        out_image_annotations_state = convert_pandas_df_to_review_json(out_review_df, image_file_paths, page_sizes)
+        recogniser_entity_dataframe_base = out_review_df[["page", "label", "text"]]
+    
+    else:
+        out_review_df = review_df
+        recogniser_entity_dataframe_base = pd.DataFrame()
+        out_image_annotations_state = {}
+    
+    return out_review_df, out_image_annotations_state, recogniser_entity_dataframe_base, backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base
+
+def update_annotator(image_annotator_object:AnnotatedImageData,
+                     page_num:int,
+                     recogniser_entities_dropdown_value:str="ALL",
+                     page_dropdown_value:str="ALL",
+                     text_dropdown_value:str="ALL",
+                     recogniser_dataframe_modified=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[]}), type="pandas", headers=["page", "label", "text"]), zoom:int=100,
+                     review_df:pd.DataFrame=[],
+                     page_sizes:List[dict]=[]):
+    '''
+    Update a gradio_image_annotation object with new annotation data.
+    '''
+    # First, update the dataframe containing the found recognisers
+    recogniser_entities_list, recogniser_dataframe_out, recogniser_dataframe_modified, recogniser_entities_dropdown_value, text_entities_drop, page_entities_drop = update_recogniser_dataframes(image_annotator_object, recogniser_dataframe_modified, recogniser_entities_dropdown_value, text_dropdown_value, page_dropdown_value, review_df, page_sizes)
+
+    #print("Creating output annotator object in update_annotator function")
 
     zoom_str = str(zoom) + '%'
     recogniser_colour_list = [(0, 0, 0) for _ in range(len(recogniser_entities_list))]
+
+    #print("recogniser_entities_list:", recogniser_entities_list)
+    #print("recogniser_colour_list:", recogniser_colour_list)
+    #print("zoom_str:", zoom_str)
 
     if not image_annotator_object:
         page_num_reported = 1
@@ -156,9 +246,9 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
         handles_cursor=True,
         interactive=True
     )        
-        number_reported = gr.Number(label = "Page (press enter to change)", value=page_num_reported, precision=0)
+        number_reported = gr.Number(label = "Current page", value=page_num_reported, precision=0)
 
-        return out_image_annotator, number_reported, number_reported, page_num_reported, recogniser_entities_drop, recogniser_dataframe_out, recogniser_dataframe_gr
+        return out_image_annotator, number_reported, number_reported, page_num_reported, recogniser_entities_dropdown_value, recogniser_dataframe_out, recogniser_dataframe_modified, text_entities_drop, page_entities_drop
     
     #print("page_num at start of update_annotator function:", page_num)
 
@@ -181,9 +271,7 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
         page_num_reported = page_max_reported
 
     image_annotator_object = remove_duplicate_images_with_blank_boxes(image_annotator_object)
-
-
-
+    
     out_image_annotator = image_annotator(
         value = image_annotator_object[page_num_reported - 1],
         boxes_alpha=0.1,
@@ -204,11 +292,22 @@ def update_annotator(image_annotator_object:AnnotatedImageData, page_num:int, re
         interactive=True
     )
 
-    number_reported = gr.Number(label = "Page (press enter to change)", value=page_num_reported, precision=0)
+    number_reported = gr.Number(label = "Current page", value=page_num_reported, precision=0)
 
-    return out_image_annotator, number_reported, number_reported, page_num_reported, recogniser_entities_drop, recogniser_dataframe_out, recogniser_dataframe_gr
+    return out_image_annotator, number_reported, number_reported, page_num_reported, recogniser_entities_dropdown_value, recogniser_dataframe_out, recogniser_dataframe_modified, text_entities_drop, page_entities_drop
 
-def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_page:int, previous_page:int, all_image_annotations:List[AnnotatedImageData], recogniser_entities_drop=gr.Dropdown(value="ALL", allow_custom_value=True),recogniser_dataframe=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[]})), clear_all:bool=False):
+def modify_existing_page_redactions(image_annotator_object:AnnotatedImageData,
+                                    current_page:int,
+                                    previous_page:int,
+                                    all_image_annotations:List[AnnotatedImageData],
+                                    recogniser_entities_dropdown_value="ALL",                                    
+                                    text_dropdown_value="ALL",
+                                    page_dropdown_value="ALL",
+                                    recogniser_dataframe=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[]}), show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"]),
+                                    review_dataframe:pd.DataFrame=[],
+                                    page_sizes:List[dict]=[],
+                                    clear_all:bool=False
+                                    ):
     '''
     Overwrite current image annotations with modifications
     '''
@@ -216,43 +315,30 @@ def modify_existing_page_redactions(image_annotated:AnnotatedImageData, current_
     if not current_page:
         current_page = 1
 
-    #If no previous page or is 0, i.e. first time run, then rewrite current page
-    #if not previous_page:
-    #    previous_page = current_page
-
-    #print("image_annotated:", image_annotated)
+    print("in modify_existing_page_redactions - recogniser_entities_dropdown_value:", recogniser_entities_dropdown_value)
     
-    image_annotated['image'] = all_image_annotations[previous_page - 1]["image"]
+    image_annotator_object['image'] = all_image_annotations[previous_page - 1]["image"]
 
     if clear_all == False:
-        all_image_annotations[previous_page - 1] = image_annotated
+        all_image_annotations[previous_page - 1] = image_annotator_object
     else:
         all_image_annotations[previous_page - 1]["boxes"] = []
 
-    #print("all_image_annotations:", all_image_annotations)
+    return all_image_annotations, current_page, current_page
 
-    # Rewrite all_image_annotations search dataframe with latest updates
-    try:
-        review_dataframe = convert_review_json_to_pandas_df(all_image_annotations)[["page", "label"]]
-        #print("review_dataframe['label']", review_dataframe["label"])
-        recogniser_entities = review_dataframe["label"].unique().tolist()
-        recogniser_entities.append("ALL")
-        recogniser_entities = sorted(recogniser_entities)
-
-        recogniser_dataframe_out = gr.Dataframe(review_dataframe)
-        #recogniser_dataframe_gr = gr.Dataframe(review_dataframe)
-        recogniser_entities_drop = gr.Dropdown(value=recogniser_entities_drop, choices=recogniser_entities, allow_custom_value=True, interactive=True)
-    except Exception as e:
-        print("Could not extract recogniser information:", e)
-        recogniser_dataframe_out = recogniser_dataframe
-
-    return all_image_annotations, current_page, current_page, recogniser_entities_drop, recogniser_dataframe_out
-
-def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], doc:Document, all_image_annotations:List[AnnotatedImageData], current_page:int, review_file_state, output_folder:str = output_folder, save_pdf:bool=True, progress=gr.Progress(track_tqdm=True)):
+def apply_redactions(image_annotator_object:AnnotatedImageData,
+                     file_paths:List[str],
+                     doc:Document,
+                     all_image_annotations:List[AnnotatedImageData],
+                     current_page:int,
+                     review_file_state:pd.DataFrame,
+                     output_folder:str = output_folder,
+                     save_pdf:bool=True,
+                     page_sizes:List[dict]=[],
+                     progress=gr.Progress(track_tqdm=True)):
     '''
     Apply modified redactions to a pymupdf and export review files
     '''
-    #print("all_image_annotations:", all_image_annotations)
 
     output_files = []
     output_log_files = []
@@ -260,11 +346,11 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
 
     #print("File paths in apply_redactions:", file_paths)
 
-    image_annotated['image'] = all_image_annotations[current_page - 1]["image"]
+    image_annotator_object['image'] = all_image_annotations[current_page - 1]["image"]
 
-    all_image_annotations[current_page - 1] = image_annotated
+    all_image_annotations[current_page - 1] = image_annotator_object
 
-    if not image_annotated:
+    if not image_annotator_object:
         print("No image annotations found")
         return doc, all_image_annotations
     
@@ -287,7 +373,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
 
                 draw = ImageDraw.Draw(image)
 
-                for img_annotation_box in image_annotated['boxes']:
+                for img_annotation_box in image_annotator_object['boxes']:
                     coords = [img_annotation_box["xmin"],
                     img_annotation_box["ymin"],
                     img_annotation_box["xmax"],
@@ -318,6 +404,7 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
                 output_files.append(orig_pdf_file_path)
 
                 number_of_pages = pdf_doc.page_count
+                original_cropboxes = []
 
                 print("Saving pages to file.")
 
@@ -340,8 +427,17 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
                     elif isinstance(image_loc, str):
                         image = Image.open(image_loc)
 
+                    
+                    #print("all_image_annotations for page:", all_image_annotations[i])
+                    #print("image:", image)
+
                     pymupdf_page = pdf_doc.load_page(i) #doc.load_page(current_page -1)
-                    pymupdf_page = redact_page_with_pymupdf(pymupdf_page, all_image_annotations[i], image)
+                    original_cropboxes.append(pymupdf_page.cropbox.irect)
+                    pymupdf_page.set_cropbox = pymupdf_page.mediabox
+                    #print("pymupdf_page:", pymupdf_page)
+                    # print("original_cropboxes:", original_cropboxes)
+
+                    pymupdf_page = redact_page_with_pymupdf(page=pymupdf_page, page_annotations=all_image_annotations[i], image=image, original_cropbox=original_cropboxes[-1])
 
             else:
                 print("File type not recognised.")
@@ -370,31 +466,140 @@ def apply_redactions(image_annotated:AnnotatedImageData, file_paths:List[str], d
             # output_log_files.append(out_annotation_file_path)
 
             #print("Saving annotations to CSV review file")
-
-            #print("review_file_state:", review_file_state)
+            #print("all_image_annotations before conversion in apply redactions:", all_image_annotations)
+            #print("review_file_state before conversion in apply redactions:", review_file_state)
+            #print("page_sizes before conversion in apply redactions:", page_sizes)
 
             # Convert json to csv and also save this
-            review_df = convert_review_json_to_pandas_df(all_image_annotations, review_file_state)
+            review_df = convert_review_json_to_pandas_df(all_image_annotations, review_file_state, page_sizes=page_sizes)
             out_review_file_file_path = output_folder + file_name_with_ext + '_review_file.csv'
+
+            print("Saving review file after convert_review_json function in apply redactions")
             review_df.to_csv(out_review_file_file_path, index=None)
             output_files.append(out_review_file_file_path)
 
         except Exception as e:
-            print("Could not save annotations to csv file:", e)
+            print("In apply redactions function, could not save annotations to csv file:", e)
 
     return doc, all_image_annotations, output_files, output_log_files
 
 def get_boxes_json(annotations:AnnotatedImageData):
     return annotations["boxes"]
 
-def update_entities_df(choice:str, df:pd.DataFrame):
-    if choice=="ALL":
-        return df
-    else:
-        return df.loc[df["label"]==choice,:]
+def update_entities_df_recogniser_entities(choice:str, df:pd.DataFrame, page_dropdown_value:str, text_dropdown_value:str):
+    '''
+    Update the rows in a dataframe depending on the user choice from a dropdown
+    '''
+    if isinstance(choice, str):
+        choice = [choice]
+    if isinstance(page_dropdown_value, str):
+        page_dropdown_value = [page_dropdown_value]
+    if isinstance(text_dropdown_value, str):
+        text_dropdown_value = [text_dropdown_value]
+    
+    filtered_df = df.copy()
+
+    # Apply filtering based on dropdown selections
+    if not "ALL" in page_dropdown_value:
+        filtered_df = filtered_df[filtered_df["page"].astype(str).isin(page_dropdown_value)]
+    
+    if not "ALL" in text_dropdown_value:
+        filtered_df = filtered_df[filtered_df["text"].astype(str).isin(text_dropdown_value)]
+
+    if not "ALL" in choice:
+        filtered_df = filtered_df[filtered_df["label"].astype(str).isin(choice)]
+
+    recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "label")
+    recogniser_entities_drop = gr.Dropdown(value=choice[0], choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)    
+
+    text_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "text")
+    text_entities_drop = gr.Dropdown(value=text_dropdown_value[0], choices=text_entities_for_drop, allow_custom_value=True, interactive=True)
+
+    page_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "page")
+    page_entities_drop = gr.Dropdown(value=page_dropdown_value[0], choices=page_entities_for_drop, allow_custom_value=True, interactive=True)
+
+    return filtered_df, text_entities_drop, page_entities_drop
+    
+def update_entities_df_page(choice:str, df:pd.DataFrame, label_dropdown_value:str, text_dropdown_value:str):
+    '''
+    Update the rows in a dataframe depending on the user choice from a dropdown
+    '''
+    if isinstance(choice, str):
+        choice = [choice]
+    if isinstance(label_dropdown_value, str):
+        label_dropdown_value = [label_dropdown_value]
+    if isinstance(text_dropdown_value, str):
+        text_dropdown_value = [text_dropdown_value]
+
+    filtered_df = df.copy()
+
+    # Apply filtering based on dropdown selections
+    if not "ALL" in text_dropdown_value:
+        filtered_df = filtered_df[filtered_df["text"].astype(str).isin(text_dropdown_value)]
+    
+    if not "ALL" in label_dropdown_value:
+        filtered_df = filtered_df[filtered_df["label"].astype(str).isin(label_dropdown_value)]
+
+    if not "ALL" in choice:
+        filtered_df = filtered_df[filtered_df["page"].astype(str).isin(choice)]
+
+    recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "label")
+    recogniser_entities_drop = gr.Dropdown(value=label_dropdown_value[0], choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)    
+
+    text_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "text")
+    text_entities_drop = gr.Dropdown(value=text_dropdown_value[0], choices=text_entities_for_drop, allow_custom_value=True, interactive=True)
+
+    page_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "page")
+    page_entities_drop = gr.Dropdown(value=choice[0], choices=page_entities_for_drop, allow_custom_value=True, interactive=True)    
+
+    return filtered_df, recogniser_entities_drop, text_entities_drop
+    
+def update_entities_df_text(choice:str, df:pd.DataFrame, label_dropdown_value:str, page_dropdown_value:str):
+    '''
+    Update the rows in a dataframe depending on the user choice from a dropdown
+    '''
+    if isinstance(choice, str):
+        choice = [choice]
+    if isinstance(label_dropdown_value, str):
+        label_dropdown_value = [label_dropdown_value]
+    if isinstance(page_dropdown_value, str):
+        page_dropdown_value = [page_dropdown_value]
+
+    filtered_df = df.copy()
+
+    # Apply filtering based on dropdown selections
+    if not "ALL" in page_dropdown_value:
+        filtered_df = filtered_df[filtered_df["page"].astype(str).isin(page_dropdown_value)]
+    
+    if not "ALL" in label_dropdown_value:
+        filtered_df = filtered_df[filtered_df["label"].astype(str).isin(label_dropdown_value)]
+
+    if not "ALL" in choice:
+        filtered_df = filtered_df[filtered_df["text"].astype(str).isin(choice)]
+
+    recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "label")
+    recogniser_entities_drop = gr.Dropdown(value=label_dropdown_value[0], choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)    
+
+    text_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "text")
+    text_entities_drop = gr.Dropdown(value=choice[0], choices=text_entities_for_drop, allow_custom_value=True, interactive=True)
+
+    page_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "page")
+    page_entities_drop = gr.Dropdown(value=page_dropdown_value[0], choices=page_entities_for_drop, allow_custom_value=True, interactive=True)    
+
+    return filtered_df, recogniser_entities_drop, page_entities_drop
+    
+def reset_dropdowns():
+    return gr.Dropdown(value="ALL", allow_custom_value=True), gr.Dropdown(value="ALL", allow_custom_value=True), gr.Dropdown(value="ALL", allow_custom_value=True)
     
 def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
+        print("evt.row_value[0]:", evt.row_value[0])
+
         row_value_page = evt.row_value[0] # This is the page number value
+
+        if isinstance(row_value_page, list):
+            row_value_page = row_value_page[0]
+
+        print("row_value_page:", row_value_page)
         return row_value_page
 
 def convert_image_coords_to_adobe(pdf_page_width:float, pdf_page_height:float, image_width:float, image_height:float, x1:float, y1:float, x2:float, y2:float):
@@ -454,7 +659,7 @@ def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:L
 
         # Load cropbox sizes
         if document_cropboxes:
-            print("Document cropboxes:", document_cropboxes)
+            #print("Document cropboxes:", document_cropboxes)
 
             # Extract numbers safely using regex
             match = re.findall(r"[-+]?\d*\.\d+|\d+", document_cropboxes[page_python_format])
