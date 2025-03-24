@@ -141,6 +141,8 @@ def choose_and_run_redactor(file_paths:List[str],
     The function returns a redacted document along with processing logs.
     '''
     combined_out_message = ""
+    out_review_file_path = ""
+    pdf_file_name_with_ext = ""
     tic = time.perf_counter()
     all_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
 
@@ -171,22 +173,46 @@ def choose_and_run_redactor(file_paths:List[str],
     #print("prepared_pdf_file_paths:", prepared_pdf_file_paths[0])
     review_out_file_paths = [prepared_pdf_file_paths[0]]
 
+    # Load/create allow list
+    # If string, assume file path
+    if isinstance(in_allow_list, str):
+        in_allow_list = pd.read_csv(in_allow_list)
+    # Now, should be a pandas dataframe format
+    if not in_allow_list.empty:
+        in_allow_list_flat = in_allow_list.iloc[:,0].tolist()
+        print("In allow list after flattening:", in_allow_list_flat)
+    else:
+        in_allow_list_flat = []
+
+    # If string, assume file path
+    if isinstance(custom_recogniser_word_list, str):
+        custom_recogniser_word_list = pd.read_csv(custom_recogniser_word_list)
     if isinstance(custom_recogniser_word_list, pd.DataFrame):
         if not custom_recogniser_word_list.empty:
-            custom_recogniser_word_list = custom_recogniser_word_list.iloc[:, 0].tolist()
+            custom_recogniser_word_list_flat = custom_recogniser_word_list.iloc[:, 0].tolist()
         else:
-            # Handle the case where the DataFrame is empty
-            custom_recogniser_word_list = []  # or some default value
+            custom_recogniser_word_list_flat = []
 
         # Sort the strings in order from the longest string to the shortest
-        custom_recogniser_word_list = sorted(custom_recogniser_word_list, key=len, reverse=True)
+        custom_recogniser_word_list_flat = sorted(custom_recogniser_word_list_flat, key=len, reverse=True)
 
+    #print("custom_recogniser_word_list_flat:", custom_recogniser_word_list_flat)
+
+    # If string, assume file path
+    if isinstance(redact_whole_page_list, str):
+        redact_whole_page_list = pd.read_csv(redact_whole_page_list)
     if isinstance(redact_whole_page_list, pd.DataFrame):
         if not redact_whole_page_list.empty:
-            redact_whole_page_list = redact_whole_page_list.iloc[:,0].tolist()
+            #print("redact_whole_page_list:", redact_whole_page_list)
+            try:
+                redact_whole_page_list_flat = redact_whole_page_list.iloc[:,0].astype(int).tolist()
+            except Exception as e:
+                print("Could not convert whole page redaction data to number list due to:", e)
+                redact_whole_page_list_flat = redact_whole_page_list.iloc[:,0].tolist()
         else:
-            # Handle the case where the DataFrame is empty
-            redact_whole_page_list = []  # or some default value
+            redact_whole_page_list_flat = []
+
+    #print("redact_whole_page_list_flat:", redact_whole_page_list_flat)
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -250,24 +276,13 @@ def choose_and_run_redactor(file_paths:List[str],
 
         return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state, page_sizes, document_cropboxes
 
-    # Create allow list
-    # If string, assume file path
-    if isinstance(in_allow_list, str):
-        in_allow_list = pd.read_csv(in_allow_list)
 
-    if not in_allow_list.empty:
-        in_allow_list_flat = in_allow_list.iloc[:,0].tolist()
-        #print("In allow list:", in_allow_list_flat)
-    else:
-        in_allow_list_flat = []
 
     # Try to connect to AWS services directly only if RUN_AWS_FUNCTIONS environmental variable is 1, otherwise an environment variable or direct textbox input is needed.
     if pii_identification_method == "AWS Comprehend":
         print("Trying to connect to AWS Comprehend service")
         if aws_access_key_textbox and aws_secret_key_textbox:
             print("Connecting to Comprehend using AWS access key and secret keys from textboxes.")
-            print("aws_access_key_textbox:", aws_access_key_textbox)
-            print("aws_secret_access_key:", aws_secret_key_textbox)
             comprehend_client = boto3.client('comprehend', 
                 aws_access_key_id=aws_access_key_textbox, 
                 aws_secret_access_key=aws_secret_key_textbox)
@@ -372,8 +387,8 @@ def choose_and_run_redactor(file_paths:List[str],
              comprehend_query_number,
              comprehend_client,
              textract_client,
-             custom_recogniser_word_list,
-             redact_whole_page_list,
+             custom_recogniser_word_list_flat,
+             redact_whole_page_list_flat,
              max_fuzzy_spelling_mistakes_num,
              match_fuzzy_whole_phrase_bool,
              log_files_output_paths=log_files_output_paths,
@@ -409,8 +424,8 @@ def choose_and_run_redactor(file_paths:List[str],
             pii_identification_method,
             comprehend_query_number,
             comprehend_client,
-            custom_recogniser_word_list,
-            redact_whole_page_list,
+            custom_recogniser_word_list_flat,
+            redact_whole_page_list_flat,
             max_fuzzy_spelling_mistakes_num,
             match_fuzzy_whole_phrase_bool)
 
@@ -444,15 +459,6 @@ def choose_and_run_redactor(file_paths:List[str],
 
             out_file_paths.append(out_redacted_pdf_file_path)
 
-            #logs_output_file_name = out_orig_pdf_file_path + "_decision_process_output.csv"
-            #all_decision_process_table.to_csv(logs_output_file_name, index = None, encoding="utf-8")
-            #log_files_output_paths.append(logs_output_file_name)
-
-            # Convert OCR result bounding boxes to relative values
-            #print("all_line_level_ocr_results_df:", all_line_level_ocr_results_df)
-            #print("page_sizes:", page_sizes)
-            #print("all_line_level_ocr_results_df:", all_line_level_ocr_results_df)
-
             page_sizes_df = pd.DataFrame(page_sizes)
 
             page_sizes_df["page"] = page_sizes_df["page"].astype(int)
@@ -473,33 +479,26 @@ def choose_and_run_redactor(file_paths:List[str],
 
             # Save the gradio_annotation_boxes to a review csv file            
             try:
-                #print("annotations_all_pages before in choose and run redactor:", annotations_all_pages)
-                #print("all_decision_process_table before in choose and run redactor:", all_decision_process_table)
-                #print("page_sizes before in choose and run redactor:", page_sizes)
 
-                review_df = convert_annotation_json_to_review_df(annotations_all_pages, all_decision_process_table, page_sizes)
+                review_file_state = convert_annotation_json_to_review_df(annotations_all_pages, all_decision_process_table, page_sizes)
 
-                #print("annotation_all_pages:", annotations_all_pages)
-                #print("all_decision_process_table after in choose and run redactor:", all_decision_process_table)
-                #print("review_df after in choose and run redactor:", review_df)
-
-                review_df["page"] = review_df["page"].astype(int)
-                if "image_height" not in review_df.columns:
-                    review_df = review_df.merge(page_sizes_df, on="page", how="left")
+                review_file_state["page"] = review_file_state["page"].astype(int)
+                if "image_height" not in review_file_state.columns:
+                    review_file_state = review_file_state.merge(page_sizes_df, on="page", how="left")
 
                 # If all coordinates all greater than one, this is a absolute image coordinates - change back to relative coordinates
-                if review_df["xmin"].max() >= 1 and review_df["xmax"].max() >= 1 and review_df["ymin"].max() >= 1 and review_df["ymax"].max() >= 1:
-                    review_df["xmin"] = review_df["xmin"] / review_df["image_width"]
-                    review_df["xmax"] = review_df["xmax"] / review_df["image_width"]
-                    review_df["ymin"] = review_df["ymin"] / review_df["image_height"]
-                    review_df["ymax"] = review_df["ymax"] / review_df["image_height"]
+                if review_file_state["xmin"].max() >= 1 and review_file_state["xmax"].max() >= 1 and review_file_state["ymin"].max() >= 1 and review_file_state["ymax"].max() >= 1:
+                    review_file_state["xmin"] = review_file_state["xmin"] / review_file_state["image_width"]
+                    review_file_state["xmax"] = review_file_state["xmax"] / review_file_state["image_width"]
+                    review_file_state["ymin"] = review_file_state["ymin"] / review_file_state["image_height"]
+                    review_file_state["ymax"] = review_file_state["ymax"] / review_file_state["image_height"]
 
                 # Don't need page sizes in outputs
-                review_df.drop(["image_width", "image_height", "mediabox_width", "mediabox_height", "cropbox_width", "cropbox_height"], axis=1, inplace=True, errors="ignore")
+                review_file_state.drop(["image_width", "image_height", "mediabox_width", "mediabox_height", "cropbox_width", "cropbox_height"], axis=1, inplace=True, errors="ignore")
 
-                #print("review_df:", review_df)
+                #print("review_file_state:", review_file_state)
                 
-                review_df.to_csv(out_review_file_path, index=None)
+                review_file_state.to_csv(out_review_file_path, index=None)
                 out_file_paths.append(out_review_file_path)
 
                 #print("Saved review file to csv")
@@ -550,10 +549,15 @@ def choose_and_run_redactor(file_paths:List[str],
     
     # Ensure no duplicated output files
     log_files_output_paths = list(set(log_files_output_paths))
-    out_file_paths = list(set(out_file_paths))    
-    review_out_file_paths = [prepared_pdf_file_paths[0], out_review_file_path]
+    out_file_paths = list(set(out_file_paths))
 
-    return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_df, page_sizes, document_cropboxes
+    # Output file paths
+    if not out_review_file_path:
+        review_out_file_paths = [prepared_pdf_file_paths[0]]
+    else:
+        review_out_file_paths = [prepared_pdf_file_paths[0], out_review_file_path]
+
+    return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state, page_sizes, document_cropboxes
 
 def convert_pikepdf_coords_to_pymupdf(pymupdf_page, pikepdf_bbox, type="pikepdf_annot"):
     '''

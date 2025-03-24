@@ -11,7 +11,7 @@ from gradio_image_annotation import image_annotator
 from gradio_image_annotation.image_annotator import AnnotatedImageData
 
 from tools.config import output_folder, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, DEFAULT_ALLOW_LIST_PATH
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, reset_review_vars, merge_csv_files, load_all_output_files
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, reset_review_vars, merge_csv_files, load_all_output_files, update_dataframe
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3, RUN_AWS_FUNCTIONS, bucket_name
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
@@ -145,11 +145,11 @@ with app:
     ## Settings page variables
     default_deny_list_file_name = "default_deny_list.csv"
     default_deny_list_loc = output_folder + "/" + default_deny_list_file_name    
-    in_deny_list_text_in = gr.Textbox(value="Deny list", visible=False)
+    in_deny_list_text_in = gr.Textbox(value="deny_list", visible=False)
 
     fully_redacted_list_file_name = "default_fully_redacted_list.csv"
     fully_redacted_list_loc = output_folder + "/" + fully_redacted_list_file_name    
-    in_fully_redacted_text_in = gr.Textbox(value="Fully redacted page list", visible=False)
+    in_fully_redacted_text_in = gr.Textbox(value="fully_redacted_pages_list", visible=False)
 
     # S3 settings for default allow list load
     s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=bucket_name, visible=False)
@@ -337,19 +337,19 @@ with app:
         with gr.Accordion("Custom allow, deny, and full page redaction lists", open = True):
             with gr.Row():
                 with gr.Column():
-                    in_allow_list = gr.File(label="Import allow list file - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will not be redacted.", file_count="multiple", height=file_input_height)
+                    in_allow_list = gr.File(label="Import allow list file - csv table with one column of a different word/phrase on each row (case insensitive). Terms in this file will not be redacted.", file_count="multiple", height=file_input_height)
                     in_allow_list_text = gr.Textbox(label="Custom allow list load status")
                 with gr.Column():
-                    in_deny_list = gr.File(label="Import custom deny list - csv table with one column of a different word/phrase on each row (case sensitive). Terms in this file will always be redacted.", file_count="multiple", height=file_input_height)
+                    in_deny_list = gr.File(label="Import custom deny list - csv table with one column of a different word/phrase on each row (case insensitive). Terms in this file will always be redacted.", file_count="multiple", height=file_input_height)
                     in_deny_list_text = gr.Textbox(label="Custom deny list load status")
                 with gr.Column():
                     in_fully_redacted_list = gr.File(label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.", file_count="multiple", height=file_input_height)
                     in_fully_redacted_list_text = gr.Textbox(label="Fully redacted page list load status")
-            with gr.Accordion("Manually modify custom allow, deny, and full page redaction lists", open = False):
+            with gr.Accordion("Manually modify custom allow, deny, and full page redaction lists (NOTE: you need to press Enter after modifying/adding an entry to the lists to apply them)", open = False):
                 with gr.Row():
-                    in_allow_list_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="in_allow_list_df", visible=True, type="pandas")
-                    in_deny_list_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="in_deny_list_df", visible=True, type="pandas")
-                    in_fully_redacted_list_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="in_full_redacted_list_df", visible=True, type="pandas")
+                    in_allow_list_state = gr.Dataframe(value=pd.DataFrame(), headers=["allow_list"], col_count=(1, "fixed"), row_count = (0, "dynamic"), label="Allow list", visible=True, type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True)
+                    in_deny_list_state = gr.Dataframe(value=pd.DataFrame(), headers=["deny_list"], col_count=(1, "fixed"), row_count = (0, "dynamic"), label="Deny list", visible=True, type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True)
+                    in_fully_redacted_list_state = gr.Dataframe(value=pd.DataFrame(), headers=["fully_redacted_pages_list"], col_count=(1, "fixed"), row_count = (0, "dynamic"), label="Fully redacted pages", visible=True, type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True, datatype='number')
             
         with gr.Accordion("Select entity types to redact", open = True):
                 in_redact_entities = gr.Dropdown(value=chosen_redact_entities, choices=full_entity_list, multiselect=True, label="Local PII identification model (click empty space in box for full list)")
@@ -504,10 +504,10 @@ with app:
     in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets]).\
                   success(fn=get_input_file_names, inputs=[in_data_files], outputs=[data_file_name_no_extension_textbox, data_file_name_with_extension_textbox, data_full_file_name_textbox, data_file_name_textbox_list])
 
-    tabular_data_redact_btn.click(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, first_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state], api_name="redact_data")
+    tabular_data_redact_btn.click(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list_state, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, first_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state], api_name="redact_data")
 
     # If the output file count text box changes, keep going with redacting each data file until done
-    text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, second_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state]).\
+    text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list_state, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, second_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state]).\
     success(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title])
 
     ###
@@ -522,6 +522,11 @@ with app:
     in_allow_list.change(fn=custom_regex_load, inputs=[in_allow_list], outputs=[in_allow_list_text, in_allow_list_state])
     in_deny_list.change(fn=custom_regex_load, inputs=[in_deny_list, in_deny_list_text_in], outputs=[in_deny_list_text, in_deny_list_state])
     in_fully_redacted_list.change(fn=custom_regex_load, inputs=[in_fully_redacted_list, in_fully_redacted_text_in], outputs=[in_fully_redacted_list_text, in_fully_redacted_list_state])
+
+    # The following allows for more reliable updates of the data in the custom list dataframes
+    in_allow_list_state.input(update_dataframe, inputs=[in_allow_list_state], outputs=[in_allow_list_state])
+    in_deny_list_state.input(update_dataframe, inputs=[in_deny_list_state], outputs=[in_deny_list_state])
+    in_fully_redacted_list_state.input(update_dataframe, inputs=[in_fully_redacted_list_state], outputs=[in_fully_redacted_list_state])
 
     # Merge multiple review csv files together
     merge_multiple_review_files_btn.click(fn=merge_csv_files, inputs=multiple_review_files_in_out, outputs=multiple_review_files_in_out)

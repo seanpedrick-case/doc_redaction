@@ -152,7 +152,6 @@ def update_recogniser_dataframes(image_annotator_object:AnnotatedImageData, reco
     elif recogniser_dataframe_modified.iloc[0,0] == "":
         recogniser_dataframe_modified, recogniser_dataframe_out, recogniser_entities_dropdown_value, recogniser_entities_list, text_entities_drop, page_entities_drop = get_filtered_recogniser_dataframe_and_dropdowns(image_annotator_object, recogniser_dataframe_modified, recogniser_entities_dropdown_value, text_dropdown_value, page_dropdown_value, review_df, page_sizes)
     else:        
-        print("recogniser dataframe is not empty")
         review_dataframe, text_entities_drop, page_entities_drop = update_entities_df_recogniser_entities(recogniser_entities_dropdown_value, recogniser_dataframe_modified, page_dropdown_value, text_dropdown_value)
         recogniser_dataframe_out = gr.Dataframe(review_dataframe[["page", "label", "text"]], show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"])
         
@@ -600,14 +599,12 @@ def reset_dropdowns():
     return gr.Dropdown(value="ALL", allow_custom_value=True), gr.Dropdown(value="ALL", allow_custom_value=True), gr.Dropdown(value="ALL", allow_custom_value=True)
     
 def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
-        print("evt.row_value[0]:", evt.row_value[0])
 
         row_value_page = evt.row_value[0] # This is the page number value
 
         if isinstance(row_value_page, list):
             row_value_page = row_value_page[0]
 
-        print("row_value_page:", row_value_page)
         return row_value_page
 
 def convert_image_coords_to_adobe(pdf_page_width:float, pdf_page_height:float, image_width:float, image_height:float, x1:float, y1:float, x2:float, y2:float):

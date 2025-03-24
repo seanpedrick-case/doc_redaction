@@ -827,14 +827,14 @@ def convert_annotation_json_to_review_df(all_annotations:List[dict], redaction_d
     # If all coordinates all greater than one, this is a absolute image coordinates - change back to relative coordinates
     if "xmin" in review_file_df.columns:
         if review_file_df["xmin"].max() >= 1 and review_file_df["xmax"].max() >= 1 and review_file_df["ymin"].max() >= 1 and review_file_df["ymax"].max() >= 1:
-            print("review file df has large coordinates")
+            #print("review file df has large coordinates")
             review_file_df["page"] = review_file_df["page"].astype(int)
 
             if "image_width" not in review_file_df.columns and not page_sizes_df.empty:                            
                 review_file_df = review_file_df.merge(page_sizes_df, on="page", how="left")
 
             if "image_width" in review_file_df.columns:
-                print("Dividing coordinates in review file")
+                #print("Dividing coordinates in review file")
                 review_file_df["xmin"] = review_file_df["xmin"] / review_file_df["image_width"]
                 review_file_df["xmax"] = review_file_df["xmax"] / review_file_df["image_width"]
                 review_file_df["ymin"] = review_file_df["ymin"] / review_file_df["image_height"]
@@ -896,7 +896,7 @@ def convert_annotation_json_to_review_df(all_annotations:List[dict], redaction_d
 
         # Handle missing matches using a proximity-based approach
         #if merged_df['text'].isnull().sum() > 0:
-        print("Attempting tolerance-based merge for text")
+        #print("Attempting tolerance-based merge for text")
         # Convert coordinates to numpy arrays for KDTree lookup
         tree = cKDTree(df2[['xmin', 'ymin', 'xmax', 'ymax']].values)
         query_coords = df1[['xmin', 'ymin', 'xmax', 'ymax']].values
