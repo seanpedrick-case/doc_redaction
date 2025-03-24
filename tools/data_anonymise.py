@@ -13,12 +13,11 @@ from typing import List, Dict, Any
 from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine, DictAnalyzerResult, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
-from tools.aws_functions import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY
 
-from tools.helper_functions import output_folder, get_file_name_without_type, read_file, detect_file_type
+from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, output_folder
+from tools.helper_functions import get_file_name_without_type, read_file, detect_file_type
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_word_list_recogniser, CustomWordFuzzyRecognizer, custom_entities
 from tools.custom_image_analyser_engine import do_aws_comprehend_call
-
 # Use custom version of analyze_dict to be able to track progress
 from tools.presidio_analyzer_custom import analyze_dict
 

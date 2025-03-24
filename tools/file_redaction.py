@@ -8,38 +8,29 @@ import copy
 
 from tqdm import tqdm
 from PIL import Image, ImageChops, ImageFile, ImageDraw
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 from typing import List, Dict, Tuple
 import pandas as pd
 
-#from presidio_image_redactor.entities import ImageRecognizerResult
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer, LTChar, LTTextLine, LTTextLineHorizontal, LTAnno
 from pikepdf import Pdf, Dictionary, Name
-import pymupdf
-from pymupdf import Rect
-from fitz import Page
+from pymupdf import Rect, Page
 import gradio as gr
 from gradio import Progress
 from collections import defaultdict  # For efficient grouping
 
-from presidio_analyzer import RecognizerResult
-from tools.aws_functions import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY
+from tools.config import output_folder, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, page_break_value, max_time_value, LOAD_TRUNCATED_IMAGES
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction, merge_text_bounding_boxes
-from tools.file_conversion import process_file, image_dpi, convert_review_json_to_pandas_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords
+from tools.file_conversion import process_file, convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer
-from tools.helper_functions import get_file_name_without_type, output_folder, clean_unicode_text, get_or_create_env_var, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
+from tools.helper_functions import get_file_name_without_type, clean_unicode_text, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.file_conversion import process_file, is_pdf, is_pdf_or_image, prepare_image_or_pdf
 from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult, load_and_convert_textract_json
-from tools.presidio_analyzer_custom import recognizer_result_from_dict 
 
-# Number of pages to loop through before breaking. Currently set very high, as functions are breaking on time metrics (e.g. every 105 seconds), rather than on number of pages redacted.
-page_break_value = get_or_create_env_var('page_break_value', '50000')
-print(f'The value of page_break_value is {page_break_value}')
-
-max_time_value = get_or_create_env_var('max_time_value', '999999')
-print(f'The value of max_time_value is {max_time_value}')
-
+ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
+if not MAX_IMAGE_PIXELS: Image.MAX_IMAGE_PIXELS = None
+else: Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+image_dpi = float(IMAGES_DPI)
 
 def bounding_boxes_overlap(box1, box2):
     """Check if two bounding boxes overlap."""
@@ -103,6 +94,7 @@ def choose_and_run_redactor(file_paths:List[str],
  review_file_state:pd.DataFrame=[],
  output_folder:str=output_folder,
  document_cropboxes:List=[],
+ page_sizes:List[dict]=[],
  progress=gr.Progress(track_tqdm=True)):
     '''
     This function orchestrates the redaction process based on the specified method and parameters. It takes the following inputs:
@@ -143,6 +135,7 @@ def choose_and_run_redactor(file_paths:List[str],
     - review_file_state (pd.DataFrame, optional): Output review file dataframe.
     - output_folder (str, optional): Output folder for results.
     - document_cropboxes (List, optional): List of document cropboxes for the PDF.
+    - page_sizes (List[dict], optional): List of dictionaries of PDF page sizes in PDF or image format.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
     The function returns a redacted document along with processing logs.
@@ -239,7 +232,7 @@ def choose_and_run_redactor(file_paths:List[str],
         estimate_total_processing_time = sum_numbers_before_seconds(combined_out_message)
         print("Estimated total processing time:", str(estimate_total_processing_time))
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state, page_sizes
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state, page_sizes, document_cropboxes
     
     # If we have reached the last page, return message and outputs
     if current_loop_page >= number_of_pages:
@@ -255,7 +248,7 @@ def choose_and_run_redactor(file_paths:List[str],
         
             review_out_file_paths.extend(out_review_file_path)
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state, page_sizes
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_file_state, page_sizes, document_cropboxes
 
     # Create allow list
     # If string, assume file path
@@ -484,7 +477,7 @@ def choose_and_run_redactor(file_paths:List[str],
                 #print("all_decision_process_table before in choose and run redactor:", all_decision_process_table)
                 #print("page_sizes before in choose and run redactor:", page_sizes)
 
-                review_df = convert_review_json_to_pandas_df(annotations_all_pages, all_decision_process_table, page_sizes)
+                review_df = convert_annotation_json_to_review_df(annotations_all_pages, all_decision_process_table, page_sizes)
 
                 #print("annotation_all_pages:", annotations_all_pages)
                 #print("all_decision_process_table after in choose and run redactor:", all_decision_process_table)
@@ -560,7 +553,7 @@ def choose_and_run_redactor(file_paths:List[str],
     out_file_paths = list(set(out_file_paths))    
     review_out_file_paths = [prepared_pdf_file_paths[0], out_review_file_path]
 
-    return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_df, page_sizes
+    return out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, prepared_pdf_image_paths, review_df, page_sizes, document_cropboxes
 
 def convert_pikepdf_coords_to_pymupdf(pymupdf_page, pikepdf_bbox, type="pikepdf_annot"):
     '''

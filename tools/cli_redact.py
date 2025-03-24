@@ -1,12 +1,13 @@
 import argparse
 import os
-from tools.helper_functions import ensure_output_folder_exists, get_or_create_env_var, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
+from tools.config import get_or_create_env_var
+from tools.helper_functions import ensure_output_folder_exists,tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector
 from tools.file_conversion import get_input_file_names, prepare_image_or_pdf
 from tools.file_redaction import choose_and_run_redactor
 import pandas as pd
 from datetime import datetime
 
-chosen_comprehend_entities = ['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER', 'CREDIT_DEBIT_CVV',          'CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS',
+chosen_comprehend_entities = ['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER', 'CREDIT_DEBIT_CVV', 'CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS',
                                 'NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD',
                                 'IP_ADDRESS','MAC_ADDRESS','LICENSE_PLATE',
                                 'VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER',

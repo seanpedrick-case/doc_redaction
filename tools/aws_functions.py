@@ -3,37 +3,13 @@ import pandas as pd
 import boto3
 import tempfile
 import os
-from tools.helper_functions import get_or_create_env_var
-from dotenv import load_dotenv
+from tools.config import AWS_REGION, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET
+
 
 PandasDataFrame = Type[pd.DataFrame]
 
 # Get AWS credentials
-bucket_name=""
-
-RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
-print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
-
-AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
-print(f'The value of AWS_REGION is {AWS_REGION}')
-
-# If you have an aws_config env file in the config folder, you can load in AWS keys this way
-AWS_CONFIG_PATH = get_or_create_env_var('AWS_CONFIG_PATH', '/env/aws_config.env')
-print(f'The value of AWS_CONFIG_PATH is {AWS_CONFIG_PATH}')
-
-if os.path.exists(AWS_CONFIG_PATH):
-    print("Loading AWS keys from config folder")
-    load_dotenv(AWS_CONFIG_PATH)
-
-AWS_ACCESS_KEY = get_or_create_env_var('AWS_ACCESS_KEY', '')
-if AWS_ACCESS_KEY:
-    print(f'AWS_ACCESS_KEY found in environment variables')
-
-AWS_SECRET_KEY = get_or_create_env_var('AWS_SECRET_KEY', '')
-if AWS_SECRET_KEY:
-    print(f'AWS_SECRET_KEY found in environment variables')
-
-
+bucket_name = DOCUMENT_REDACTION_BUCKET
 
 def get_assumed_role_info():
     sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'
@@ -49,14 +25,11 @@ def get_assumed_role_info():
     return assumed_role_arn, assumed_role_name
 
 if RUN_AWS_FUNCTIONS == "1":
-    try:
-        bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
+    try:        
         session = boto3.Session()   
-
-        #print("session:", session)
             
     except Exception as e:
-        print("Could not start boto3 session:", e)    
+        print("Could not start boto3 session:", e)
 
     try:
         assumed_role_arn, assumed_role_name = get_assumed_role_info()

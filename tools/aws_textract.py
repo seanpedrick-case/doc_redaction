@@ -1,5 +1,4 @@
 import boto3
-#from PIL import Image
 from typing import List
 import io
 import os
@@ -7,12 +6,10 @@ import json
 from collections import defaultdict
 import pikepdf
 import time
-# Example: converting this single page to an image
-#from pdf2image import convert_from_bytes
 from tools.custom_image_analyser_engine import OCRResult, CustomImageRecognizerResult
-from tools.aws_functions import AWS_ACCESS_KEY, AWS_SECRET_KEY
+from tools.config import AWS_ACCESS_KEY, AWS_SECRET_KEY
 
-def extract_textract_metadata(response):
+def extract_textract_metadata(response:object):
     """Extracts metadata from an AWS Textract response."""
 
     #print("Document metadata:", response['DocumentMetadata'])
@@ -83,8 +80,7 @@ def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str=""
     # Return a list containing the wrapped response and the metadata
     return wrapped_response, request_metadata  # Return as a list to match the desired structure
 
-
-def convert_pike_pdf_page_to_bytes(pdf, page_num):
+def convert_pike_pdf_page_to_bytes(pdf:object, page_num:int):
     # Create a new empty PDF
     new_pdf = pikepdf.Pdf.new()
 
@@ -109,8 +105,7 @@ def convert_pike_pdf_page_to_bytes(pdf, page_num):
 
     return pdf_bytes
 
-
-def json_to_ocrresult(json_data, page_width, page_height, page_no):
+def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_no:int):
     '''
     Convert the json response from textract to the OCRResult format used elsewhere in the code. Looks for lines, words, and signatures. Handwriting and signatures are set aside especially for later in case the user wants to override the default behaviour and redact all handwriting/signatures.
     '''
@@ -274,7 +269,7 @@ def json_to_ocrresult(json_data, page_width, page_height, page_no):
 
     return all_ocr_results, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, ocr_results_with_children
 
-def load_and_convert_textract_json(textract_json_file_path, log_files_output_paths):
+def load_and_convert_textract_json(textract_json_file_path:str, log_files_output_paths:str):
     """
     Loads Textract JSON from a file, detects if conversion is needed,
     and converts if necessary.
@@ -316,8 +311,6 @@ def load_and_convert_textract_json(textract_json_file_path, log_files_output_pat
         print("Invalid Textract JSON format: 'Blocks' missing.")
         print("textract data:", textract_data)
         return {}, True, log_files_output_paths  # Return empty data if JSON is not recognized
-
-
 
 # Load Textract JSON output (assuming it's stored in a variable called `textract_output`)
 def restructure_textract_output(textract_output:object):

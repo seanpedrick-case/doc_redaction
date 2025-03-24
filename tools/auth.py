@@ -1,32 +1,12 @@
-
-import os
+#import os
 import boto3
-import gradio as gr
+#import gradio as gr
 import hmac
 import hashlib
 import base64
+from tools.config import client_id, client_secret, user_pool_id
 
-def get_or_create_env_var(var_name, default_value):
-    # Get the environment variable if it exists
-    value = os.environ.get(var_name)
-    
-    # If it doesn't exist, set it to the default value
-    if value is None:
-        os.environ[var_name] = default_value
-        value = default_value
-    
-    return value
-
-client_id = get_or_create_env_var('AWS_CLIENT_ID', '')
-#print(f'The value of AWS_CLIENT_ID is {client_id}')
-
-client_secret = get_or_create_env_var('AWS_CLIENT_SECRET', '')
-#print(f'The value of AWS_CLIENT_SECRET is {client_secret}')
-
-user_pool_id = get_or_create_env_var('AWS_USER_POOL_ID', '')
-#print(f'The value of AWS_USER_POOL_ID is {user_pool_id}')
-
-def calculate_secret_hash(client_id, client_secret, username):
+def calculate_secret_hash(client_id:str, client_secret:str, username:str):
     message = username + client_id
     dig = hmac.new(
         str(client_secret).encode('utf-8'),

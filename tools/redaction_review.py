@@ -1,3 +1,5 @@
+import os
+import re
 import gradio as gr
 import pandas as pd
 import numpy as np
@@ -7,18 +9,18 @@ import uuid
 from typing import List
 from gradio_image_annotation import image_annotator
 from gradio_image_annotation.image_annotator import AnnotatedImageData
-from tools.file_conversion import is_pdf, convert_review_json_to_pandas_df, convert_pandas_df_to_review_json, CUSTOM_BOX_COLOUR
-from tools.helper_functions import get_file_name_without_type, output_folder, detect_file_type
-from tools.file_redaction import redact_page_with_pymupdf
-import json
-import os
-import re
+from pymupdf import Document, Rect
 import pymupdf
-from fitz import Document, Rect
+#from fitz 
 from PIL import ImageDraw, Image
 from collections import defaultdict
 
-Image.MAX_IMAGE_PIXELS = None
+from tools.config import output_folder, CUSTOM_BOX_COLOUR, MAX_IMAGE_PIXELS
+from tools.file_conversion import is_pdf, convert_annotation_json_to_review_df, convert_review_df_to_annotation_json
+from tools.helper_functions import get_file_name_without_type,  detect_file_type
+from tools.file_redaction import redact_page_with_pymupdf
+
+if not MAX_IMAGE_PIXELS: Image.MAX_IMAGE_PIXELS = None
 
 def decrease_page(number:int):
     '''
@@ -110,9 +112,7 @@ def get_filtered_recogniser_dataframe_and_dropdowns(image_annotator_object:Annot
     recogniser_dataframe_out = recogniser_dataframe_modified
 
     try:
-        review_dataframe = convert_review_json_to_pandas_df(image_annotator_object, review_df, page_sizes)
-
-        print("in get_filtered_recogniser_dataframe_and_dropdowns, recogniser_dropdown_value:", recogniser_dropdown_value)
+        review_dataframe = convert_annotation_json_to_review_df(image_annotator_object, review_df, page_sizes)
 
         recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(review_dataframe, "label")
         recogniser_entities_drop = gr.Dropdown(value=recogniser_dropdown_value, choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)
@@ -139,7 +139,6 @@ def get_filtered_recogniser_dataframe_and_dropdowns(image_annotator_object:Annot
         page_entities_drop = gr.Dropdown(value=page_dropdown_value, choices=recogniser_dataframe_out["page"].astype(str).unique().tolist(), allow_custom_value=True, interactive=True)
 
     return recogniser_dataframe_out, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list, text_entities_drop, page_entities_drop
-
 
 def update_recogniser_dataframes(image_annotator_object:AnnotatedImageData, recogniser_dataframe_modified:pd.DataFrame, recogniser_entities_dropdown_value:str="ALL", text_dropdown_value:str="ALL", page_dropdown_value:str="ALL", review_df:pd.DataFrame=[], page_sizes:list[str]=[]):
     '''
@@ -168,7 +167,6 @@ def update_recogniser_dataframes(image_annotator_object:AnnotatedImageData, reco
 
     return recogniser_entities_list, recogniser_dataframe_out, recogniser_dataframe_modified, recogniser_entities_drop, text_entities_drop, page_entities_drop
 
-
 def undo_last_removal(backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base):
     return backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base
 
@@ -191,15 +189,24 @@ def exclude_selected_items_from_redaction(review_df: pd.DataFrame, selected_rows
         # Keep only the rows that do not have a match in selected_rows_df
         out_review_df = merged_df[merged_df['_merge'] == 'left_only'].drop(columns=['_merge'])
 
-        out_image_annotations_state = convert_pandas_df_to_review_json(out_review_df, image_file_paths, page_sizes)
-        recogniser_entity_dataframe_base = out_review_df[["page", "label", "text"]]
+        out_image_annotations_state = convert_review_df_to_annotation_json(out_review_df, image_file_paths, page_sizes)
+        out_recogniser_entity_dataframe_base = out_review_df[["page", "label", "text"]]
     
+    # Either there is nothing left in the selection dataframe, or the review dataframe
     else:
         out_review_df = review_df
-        recogniser_entity_dataframe_base = pd.DataFrame()
-        out_image_annotations_state = {}
+        out_recogniser_entity_dataframe_base = recogniser_entity_dataframe_base
+
+        out_image_annotations_state = []
+
+        for page_no, page in enumerate(image_file_paths):
+            annotation = {}
+            annotation["image"] = image_file_paths[page_no]
+            annotation["boxes"] = []
+
+            out_image_annotations_state.append(annotation)
     
-    return out_review_df, out_image_annotations_state, recogniser_entity_dataframe_base, backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base
+    return out_review_df, out_image_annotations_state, out_recogniser_entity_dataframe_base, backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base
 
 def update_annotator(image_annotator_object:AnnotatedImageData,
                      page_num:int,
@@ -315,8 +322,6 @@ def modify_existing_page_redactions(image_annotator_object:AnnotatedImageData,
     if not current_page:
         current_page = 1
 
-    print("in modify_existing_page_redactions - recogniser_entities_dropdown_value:", recogniser_entities_dropdown_value)
-    
     image_annotator_object['image'] = all_image_annotations[previous_page - 1]["image"]
 
     if clear_all == False:
@@ -471,10 +476,10 @@ def apply_redactions(image_annotator_object:AnnotatedImageData,
             #print("page_sizes before conversion in apply redactions:", page_sizes)
 
             # Convert json to csv and also save this
-            review_df = convert_review_json_to_pandas_df(all_image_annotations, review_file_state, page_sizes=page_sizes)
+            review_df = convert_annotation_json_to_review_df(all_image_annotations, review_file_state, page_sizes=page_sizes)[["image",	"page",	"text",	"label","color", "xmin", "ymin", "xmax",	"ymax"]]
             out_review_file_file_path = output_folder + file_name_with_ext + '_review_file.csv'
 
-            print("Saving review file after convert_review_json function in apply redactions")
+            #print("Saving review file after convert_annotation_json_to_review_df function in apply redactions")
             review_df.to_csv(out_review_file_file_path, index=None)
             output_files.append(out_review_file_file_path)
 
@@ -589,6 +594,9 @@ def update_entities_df_text(choice:str, df:pd.DataFrame, label_dropdown_value:st
     return filtered_df, recogniser_entities_drop, page_entities_drop
     
 def reset_dropdowns():
+    '''
+    Return Gradio dropdown objects with value 'ALL'.
+    '''
     return gr.Dropdown(value="ALL", allow_custom_value=True), gr.Dropdown(value="ALL", allow_custom_value=True), gr.Dropdown(value="ALL", allow_custom_value=True)
     
 def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
@@ -612,10 +620,13 @@ def convert_image_coords_to_adobe(pdf_page_width:float, pdf_page_height:float, i
     - image_width: Width of the source image
     - image_height: Height of the source image
     - x1, y1, x2, y2: Coordinates in image space
+    - page_sizes: List of dicts containing sizes of page as pymupdf page or PIL image
     
     Returns:
     - Tuple of converted coordinates (x1, y1, x2, y2) in Adobe PDF space
     '''
+
+    
     
     # Calculate scaling factors
     scale_width = pdf_page_width / image_width
@@ -636,12 +647,34 @@ def convert_image_coords_to_adobe(pdf_page_width:float, pdf_page_height:float, i
     
     return pdf_x1, pdf_y1, pdf_x2, pdf_y2
 
+def convert_pymupdf_coords_to_adobe(x1: float, y1: float, x2: float, y2: float):
+    """
+    Converts coordinates from PyMuPDF (fitz) space to Adobe PDF space.
+    
+    Parameters:
+    - pdf_page_width: Width of the PDF page
+    - pdf_page_height: Height of the PDF page
+    - x1, y1, x2, y2: Coordinates in PyMuPDF space
+    
+    Returns:
+    - Tuple of converted coordinates (x1, y1, x2, y2) in Adobe PDF space
+    """
+    
+    # PyMuPDF and Adobe PDF coordinates are similar, but ensure y1 is always the lower value
+    pdf_x1, pdf_x2 = x1, x2
+    
+    # Ensure y1 is the bottom coordinate and y2 is the top
+    pdf_y1, pdf_y2 = min(y1, y2), max(y1, y2)
+    
+    return pdf_x1, pdf_y1, pdf_x2, pdf_y2
 
-def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:List[str], document_cropboxes:List=[]):
+
+def create_xfdf(review_file_df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:List[str], document_cropboxes:List=[], page_sizes:List[dict]=[]):
     '''
     Create an xfdf file from a review csv file and a pdf
     '''
-    
+    pages_are_images = True
+
     # Create root element
     xfdf = Element('xfdf', xmlns="http://ns.adobe.com/xfdf/", xml_space="preserve")
     
@@ -651,13 +684,49 @@ def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:L
     
     # Add annots
     annots = SubElement(xfdf, 'annots')
+
+    # Check if page size object exists, and if current coordinates are in relative format or image coordinates format.
+    if page_sizes:        
+        page_sizes_df = pd.DataFrame(page_sizes)
+
+        # If there are no image coordinates, then convert coordinates to pymupdf coordinates prior to export
+        if len(page_sizes_df.loc[page_sizes_df["image_width"].isnull(),"image_width"]) == len(page_sizes_df["image_width"]):
+            print("No image dimensions found, using pymupdf coordinates for conversion.")
+
+            if "mediabox_width" not in review_file_df.columns:            
+                    review_file_df = review_file_df.merge(page_sizes_df, how="left", on = "page")
+            
+            # If all coordinates are less or equal to one, this is a relative page scaling - change back to image coordinates
+            if review_file_df["xmin"].max() <= 1 and review_file_df["xmax"].max() <= 1 and review_file_df["ymin"].max() <= 1 and review_file_df["ymax"].max() <= 1:
+                review_file_df["xmin"] = review_file_df["xmin"] * review_file_df["mediabox_width"]
+                review_file_df["xmax"] = review_file_df["xmax"] * review_file_df["mediabox_width"]
+                review_file_df["ymin"] = review_file_df["ymin"] * review_file_df["mediabox_height"]
+                review_file_df["ymax"] = review_file_df["ymax"] * review_file_df["mediabox_height"]
+
+            pages_are_images = False
+
+        # If no nulls, then can do image coordinate conversion
+        elif len(page_sizes_df.loc[page_sizes_df["image_width"].isnull(),"image_width"]) == 0:
+
+            if "image_width" not in review_file_df.columns:            
+                    review_file_df = review_file_df.merge(page_sizes_df, how="left", on = "page")
+            
+            # If all coordinates are less or equal to one, this is a relative page scaling - change back to image coordinates
+            if review_file_df["xmin"].max() <= 1 and review_file_df["xmax"].max() <= 1 and review_file_df["ymin"].max() <= 1 and review_file_df["ymax"].max() <= 1:
+                review_file_df["xmin"] = review_file_df["xmin"] * review_file_df["image_width"]
+                review_file_df["xmax"] = review_file_df["xmax"] * review_file_df["image_width"]
+                review_file_df["ymin"] = review_file_df["ymin"] * review_file_df["image_height"]
+                review_file_df["ymax"] = review_file_df["ymax"] * review_file_df["image_height"]
+
+                pages_are_images = True
     
-    for _, row in df.iterrows():
+    # Go through each row of the review_file_df, create an entry in the output Adobe xfdf file.
+    for _, row in review_file_df.iterrows():
         page_python_format = int(row["page"])-1
 
         pymupdf_page = pymupdf_doc.load_page(page_python_format)
 
-        # Load cropbox sizes
+        # Load cropbox sizes. Set cropbox to the original cropbox sizes from when the document was loaded into the app.
         if document_cropboxes:
             #print("Document cropboxes:", document_cropboxes)
 
@@ -672,12 +741,11 @@ def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:L
         else:
             print("Document cropboxes not found.")
 
+        
         pdf_page_height = pymupdf_page.mediabox.height
         pdf_page_width = pymupdf_page.mediabox.width 
 
         image = image_paths[page_python_format]
-
-        #print("image:", image)
 
         if isinstance(image, str):
             image = Image.open(image)
@@ -695,16 +763,22 @@ def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:L
         redact_annot.set('page', str(int(row['page']) - 1))
         
         # Convert coordinates
-        x1, y1, x2, y2 = convert_image_coords_to_adobe(
-            pdf_page_width,
-            pdf_page_height,
-            image_page_width,
-            image_page_height,
-            row['xmin'],
-            row['ymin'],
-            row['xmax'],
-            row['ymax']
-        )
+        if pages_are_images == True:
+            x1, y1, x2, y2 = convert_image_coords_to_adobe(
+                pdf_page_width,
+                pdf_page_height,
+                image_page_width,
+                image_page_height,
+                row['xmin'],
+                row['ymin'],
+                row['xmax'],
+                row['ymax']
+            )
+        else:
+            x1, y1, x2, y2 = convert_pymupdf_coords_to_adobe(row['xmin'],
+                row['ymin'],
+                row['xmax'],
+                row['ymax'])
 
         if CUSTOM_BOX_COLOUR == "grey":
             colour_str = "0.5,0.5,0.5"        
@@ -756,12 +830,13 @@ def create_xfdf(df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:L
     
     return xml_str
 
-def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths:List[str], output_folder:str = output_folder, document_cropboxes:List=[]):
+def convert_df_to_xfdf(input_files:List[str], pdf_doc:Document, image_paths:List[str], output_folder:str = output_folder, document_cropboxes:List=[], page_sizes:List[dict]=[]):
     '''
     Load in files to convert a review file into an Adobe comment file format
     '''
     output_paths = []
     pdf_name = ""
+    file_path_name = ""
 
     if isinstance(input_files, str):
         file_paths_list = [input_files]
@@ -778,29 +853,29 @@ def convert_df_to_xfdf(input_files:List[str], pdf_doc, image_paths:List[str], ou
         else:
             file_path = file.name
     
-    file_path_name = get_file_name_without_type(file_path)
-    file_path_end = detect_file_type(file_path)
+        file_path_name = get_file_name_without_type(file_path)
+        file_path_end = detect_file_type(file_path)
 
-    if file_path_end == "pdf":
-        pdf_name = os.path.basename(file_path)
+        if file_path_end == "pdf":
+            pdf_name = os.path.basename(file_path)
 
-    if file_path_end == "csv":
-        # If no pdf name, just get the name of the file path
-        if not pdf_name:
-            pdf_name = file_path_name
-        # Read CSV file
-        df = pd.read_csv(file_path)
+        if file_path_end == "csv":
+            # If no pdf name, just get the name of the file path
+            if not pdf_name:
+                pdf_name = file_path_name
+            # Read CSV file
+            review_file_df = pd.read_csv(file_path)
 
-        df.fillna('', inplace=True)  # Replace NaN with an empty string
+            review_file_df.fillna('', inplace=True)  # Replace NaN in review file with an empty string
 
-        xfdf_content = create_xfdf(df, pdf_name, pdf_doc, image_paths, document_cropboxes)
+            xfdf_content = create_xfdf(review_file_df, pdf_name, pdf_doc, image_paths, document_cropboxes, page_sizes)
 
-        output_path = output_folder + file_path_name + "_adobe.xfdf"        
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(xfdf_content)
+            output_path = output_folder + file_path_name + "_adobe.xfdf"        
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(xfdf_content)
 
-        output_paths.append(output_path)
+            output_paths.append(output_path)
 
     return output_paths
 
@@ -841,7 +916,7 @@ def convert_adobe_coords_to_image(pdf_page_width:float, pdf_page_height:float, i
     
     return image_x1, image_y1, image_x2, image_y2
 
-def parse_xfdf(xfdf_path):
+def parse_xfdf(xfdf_path:str):
     '''
     Parse the XFDF file and extract redaction annotations.
     

@@ -1,13 +1,14 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
-from tools.helper_functions import get_file_name_without_type, output_folder, tesseract_ocr_option, text_ocr_option, textract_option, read_file, get_or_create_env_var
+
 from PIL import Image, ImageFile
 import os
 import re
 import time
 import json
 import pymupdf
+from pymupdf import Document
 import pandas as pd
-import numpy as np
+#import numpy as np
 import shutil
 from pymupdf import Rect
 from fitz import Page
@@ -19,9 +20,13 @@ from pdf2image import convert_from_path
 from PIL import Image
 from scipy.spatial import cKDTree
 
-image_dpi = 300.0
-ImageFile.LOAD_TRUNCATED_IMAGES = True
-Image.MAX_IMAGE_PIXELS = None
+from tools.config import output_folder, IMAGES_DPI, LOAD_TRUNCATED_IMAGES, MAX_IMAGE_PIXELS, CUSTOM_BOX_COLOUR
+from tools.helper_functions import get_file_name_without_type, tesseract_ocr_option, text_ocr_option, textract_option, read_file
+
+image_dpi = float(IMAGES_DPI)
+if not MAX_IMAGE_PIXELS: Image.MAX_IMAGE_PIXELS = None
+else: Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
 
 def is_pdf_or_image(filename):
     """
@@ -54,8 +59,7 @@ def is_pdf(filename):
 # %%
 ## Convert pdf to image if necessary
 
-CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "")
-print(f'The value of CUSTOM_BOX_COLOUR is {CUSTOM_BOX_COLOUR}')
+
 
 def check_image_size_and_reduce(out_path:str, image:Image):
     '''
@@ -360,6 +364,27 @@ def redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colou
 
     return whole_page_img_annotation_box
 
+def create_page_size_objects(pymupdf_doc:Document, image_sizes_width:List[float], image_sizes_height:List[float]):
+    page_sizes = []
+    original_cropboxes = []
+
+    for page_no, page in enumerate(pymupdf_doc):
+        reported_page_no = page_no + 1
+        
+        pymupdf_page = pymupdf_doc.load_page(page_no)
+        original_cropboxes.append(pymupdf_page.cropbox)  # Save original CropBox
+
+        # Create a page_sizes_object.
+        # If images have been created, then image width an height come from this value. Otherwise, they are set to the cropbox size
+        if image_sizes_width and image_sizes_height:
+            out_page_image_sizes = {"page":reported_page_no, "image_width":image_sizes_width[page_no], "image_height":image_sizes_height[page_no], "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":pymupdf_page.cropbox.width, "cropbox_height":pymupdf_page.cropbox.height}
+        else:
+            out_page_image_sizes = {"page":reported_page_no, "image_width":pd.NA(), "image_height":pd.NA(), "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":pymupdf_page.cropbox.width, "cropbox_height":pymupdf_page.cropbox.height}
+        
+        page_sizes.append(out_page_image_sizes)
+
+    return page_sizes, original_cropboxes
+
 def prepare_image_or_pdf(
     file_paths: List[str],
     in_redact_method: str,
@@ -371,6 +396,7 @@ def prepare_image_or_pdf(
     prepare_for_review:bool = False,
     in_fully_redacted_list:List[int]=[],
     output_folder:str=output_folder,
+    prepare_images:bool=True,
     progress: Progress = Progress(track_tqdm=True)
 ) -> tuple[List[str], List[str]]:
     """
@@ -390,6 +416,7 @@ def prepare_image_or_pdf(
         prepare_for_review(optional, bool): Is this preparation step preparing pdfs and json files to review current redactions?
         in_fully_redacted_list(optional, List of int): A list of pages to fully redact
         output_folder (optional, str): The output folder for file save
+        prepare_images (optional, bool): A boolean indicating whether to create images for each PDF page. Defaults to true
         progress (optional, Progress): Progress tracker for the operation
         
 
@@ -400,6 +427,10 @@ def prepare_image_or_pdf(
     tic = time.perf_counter()
     json_from_csv = False
     original_cropboxes = []  # Store original CropBox values
+    converted_file_paths = []
+    image_file_paths = []
+    pymupdf_doc = []
+    review_file_csv = pd.DataFrame()
 
     if isinstance(in_fully_redacted_list, pd.DataFrame):
         if not in_fully_redacted_list.empty:
@@ -425,11 +456,6 @@ def prepare_image_or_pdf(
     # If out message or converted_file_paths are blank, change to a list so it can be appended to
     if isinstance(out_message, str):
         out_message = [out_message]  
-
-    converted_file_paths = []
-    image_file_paths = []
-    pymupdf_doc = []
-    review_file_csv = pd.DataFrame()
 
     if not file_paths:
         file_paths = []
@@ -496,23 +522,35 @@ def prepare_image_or_pdf(
         # If a pdf, load as a pymupdf document
         if is_pdf(file_path):
             pymupdf_doc = pymupdf.open(file_path)
+            pymupdf_pages = pymupdf_doc.page_count
 
             # Load cropbox dimensions to use later  
 
             converted_file_path = file_path
-            image_file_paths, image_sizes_width, image_sizes_height = process_file(file_path, prepare_for_review)
-            page_sizes = []
 
-            for i, page in enumerate(pymupdf_doc):
-                page_no = i
-                reported_page_no = i + 1
+            if prepare_images==True:
+                image_file_paths, image_sizes_width, image_sizes_height = process_file(file_path, prepare_for_review)
+            else:
+                print("Skipping image preparation")
+                image_file_paths=[]
+                image_sizes_width=[]
+                image_sizes_height=[]
+
+            # Create page sizes object
+            # page_sizes = []
+
+            # for i, page in enumerate(pymupdf_doc):
+            #     page_no = i
+            #     reported_page_no = i + 1
                 
-                pymupdf_page = pymupdf_doc.load_page(page_no)
-                original_cropboxes.append(pymupdf_page.cropbox)  # Save original CropBox
+            #     pymupdf_page = pymupdf_doc.load_page(page_no)
+            #     original_cropboxes.append(pymupdf_page.cropbox)  # Save original CropBox
 
-                # Create a page_sizes_object
-                out_page_image_sizes = {"page":reported_page_no, "image_width":image_sizes_width[page_no], "image_height":image_sizes_height[page_no], "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":pymupdf_page.cropbox.width, "cropbox_height":pymupdf_page.cropbox.height}
-                page_sizes.append(out_page_image_sizes)
+            #     # Create a page_sizes_object
+            #     out_page_image_sizes = {"page":reported_page_no, "image_width":image_sizes_width[page_no], "image_height":image_sizes_height[page_no], "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":pymupdf_page.cropbox.width, "cropbox_height":pymupdf_page.cropbox.height}
+            #     page_sizes.append(out_page_image_sizes)
+
+            page_sizes, original_cropboxes = create_page_size_objects(pymupdf_doc, image_sizes_width, image_sizes_height)
 
             #Create base version of the annotation object that doesn't have any annotations in it
             if (not all_annotations_object) & (prepare_for_review == True):
@@ -521,6 +559,7 @@ def prepare_image_or_pdf(
                 for image_path in image_file_paths:
                     annotation = {}
                     annotation["image"] = image_path
+                    annotation["boxes"] = []
 
                     all_annotations_object.append(annotation)
             
@@ -546,7 +585,7 @@ def prepare_image_or_pdf(
 
             #print("image_file_paths:", image_file_paths)
             # Create a page_sizes_object
-            out_page_image_sizes = {"page":1, "image_width":image_sizes_width[page_no], "image_height":image_sizes_height[page_no], "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":original_cropboxes[-1].width, "cropbox_height":original_cropboxes[-1].height}
+            out_page_image_sizes = {"page":1, "image_width":image_sizes_width[0], "image_height":image_sizes_height[0], "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":original_cropboxes[-1].width, "cropbox_height":original_cropboxes[-1].height}
             page_sizes.append(out_page_image_sizes)
 
             converted_file_path = output_folder + file_name_with_ext
@@ -557,7 +596,7 @@ def prepare_image_or_pdf(
 
         elif file_extension in ['.csv']:
             review_file_csv = read_file(file)
-            all_annotations_object = convert_pandas_df_to_review_json(review_file_csv, image_file_paths, page_sizes)
+            all_annotations_object = convert_review_df_to_annotation_json(review_file_csv, image_file_paths, page_sizes)
             json_from_csv = True
             print("Converted CSV review file to json")
 
@@ -708,7 +747,7 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], 
 
     return out_message, out_file_paths
 
-def join_values_within_threshold(df1, df2):
+def join_values_within_threshold(df1:pd.DataFrame, df2:pd.DataFrame):
     # Threshold for matching
     threshold = 5
 
@@ -739,7 +778,7 @@ def join_values_within_threshold(df1, df2):
     print(final_df)
 
 
-def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decision_output:pd.DataFrame=pd.DataFrame(), page_sizes:List[dict]=[]) -> pd.DataFrame:
+def convert_annotation_json_to_review_df(all_annotations:List[dict], redaction_decision_output:pd.DataFrame=pd.DataFrame(), page_sizes:List[dict]=[]) -> pd.DataFrame:
     '''
     Convert the annotation json data to a dataframe format. Add on any text from the initial review_file dataframe by joining on pages/co-ordinates (doesn't work very well currently).
     '''
@@ -887,7 +926,7 @@ def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decis
     #    review_file_df[col] = np.floor(review_file_df[col])
 
     # If colours are saved as list, convert to tuple
-    review_file_df["color"] = review_file_df["color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
+    review_file_df.loc[:,"color"] = review_file_df.loc[:,"color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
 
     # print("page_sizes:", page_sizes)
 
@@ -910,32 +949,35 @@ def convert_review_json_to_pandas_df(all_annotations:List[dict], redaction_decis
 
     review_file_df = review_file_df.sort_values(['page', 'ymin', 'xmin', 'label'])
 
-    review_file_df.to_csv(output_folder + "review_file_test.csv", index=None)
+    #review_file_df.to_csv(output_folder + "review_file_test.csv", index=None)
 
     return review_file_df
 
-def convert_pandas_df_to_review_json(review_file_df: pd.DataFrame, image_paths: List[Image.Image], page_sizes:List[dict]=[]) -> List[dict]:
+def convert_review_df_to_annotation_json(review_file_df:pd.DataFrame, image_paths:List[Image.Image], page_sizes:List[dict]=[]) -> List[dict]:
     '''
     Convert a review csv to a json file for use by the Gradio Annotation object.
     '''
     
-    if page_sizes:
-        
+    # Convert relative co-ordinates into image coordinates for the image annotation output object
+    if page_sizes:        
         page_sizes_df = pd.DataFrame(page_sizes)
 
-        #print(page_sizes_df)
+        # If there are no image coordinates, then just convert the first page to image to be able to see this at least.
+        if len(page_sizes_df.loc[page_sizes_df["image_width"].isnull(),"image_width"]) == len(page_sizes_df["image_width"]):
+            print("No image dimensions found, converting first page.")
 
-        if "image_width" not in review_file_df.columns:
-            review_file_df = review_file_df.merge(page_sizes_df, how="left", on = "page")
+        # If no nulls, then can do image coordinate conversion
+        elif len(page_sizes_df.loc[page_sizes_df["image_width"].isnull(),"image_width"]) == 0:
 
-        #print("review_file_df in convert pandas df to review json function:", review_file_df[["xmin", "xmax", "ymin", "ymax"]])
-        
-        # If all coordinates are less or equal to one, this is a relative page scaling - change back to image coordinates
-        if review_file_df["xmin"].max() <= 1 and review_file_df["xmax"].max() <= 1 and review_file_df["ymin"].max() <= 1 and review_file_df["ymax"].max() <= 1:
-            review_file_df["xmin"] = review_file_df["xmin"] * review_file_df["image_width"]
-            review_file_df["xmax"] = review_file_df["xmax"] * review_file_df["image_width"]
-            review_file_df["ymin"] = review_file_df["ymin"] * review_file_df["image_height"]
-            review_file_df["ymax"] = review_file_df["ymax"] * review_file_df["image_height"]
+            if "image_width" not in review_file_df.columns:            
+                    review_file_df = review_file_df.merge(page_sizes_df, how="left", on = "page")
+            
+            # If all coordinates are less or equal to one, this is a relative page scaling - change back to image coordinates
+            if review_file_df["xmin"].max() <= 1 and review_file_df["xmax"].max() <= 1 and review_file_df["ymin"].max() <= 1 and review_file_df["ymax"].max() <= 1:
+                review_file_df["xmin"] = review_file_df["xmin"] * review_file_df["image_width"]
+                review_file_df["xmax"] = review_file_df["xmax"] * review_file_df["image_width"]
+                review_file_df["ymin"] = review_file_df["ymin"] * review_file_df["image_height"]
+                review_file_df["ymax"] = review_file_df["ymax"] * review_file_df["image_height"]
             
     # Keep only necessary columns
     review_file_df = review_file_df[["image", "page", "xmin", "ymin", "xmax", "ymax", "color", "label"]]
@@ -949,9 +991,8 @@ def convert_pandas_df_to_review_json(review_file_df: pd.DataFrame, image_paths: 
     # Create a list to hold the JSON data
     json_data = []
 
-    for n, pdf_image_path in enumerate(image_paths):
-        reported_page_number = int(n + 1)
-            
+    for page_no, pdf_image_path in enumerate(image_paths):
+        reported_page_number = int(page_no + 1)            
 
         if reported_page_number in review_file_df["page"].values:
 
@@ -969,6 +1010,7 @@ def convert_pandas_df_to_review_json(review_file_df: pd.DataFrame, image_paths: 
         else:
             annotation = {}
             annotation["image"] = pdf_image_path
+            annotation["boxes"] = []
 
         # Append the structured data to the json_data list
         json_data.append(annotation)

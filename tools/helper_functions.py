@@ -9,19 +9,7 @@ import unicodedata
 from typing import List
 from gradio_image_annotation import image_annotator
 from tools.auth import user_pool_id
-
-
-def get_or_create_env_var(var_name, default_value):
-    # Get the environment variable if it exists
-    value = os.environ.get(var_name)
-    
-    # If it doesn't exist, set it to the default value
-    if value is None:
-        os.environ[var_name] = default_value
-        value = default_value
-    
-    return value
-
+from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, output_folder, session_output_folder
 
 # Names for options labels
 text_ocr_option = "Local model - selectable text"
@@ -30,24 +18,6 @@ textract_option = "AWS Textract service - all PDF types"
 
 local_pii_detector = "Local"
 aws_pii_detector  = "AWS Comprehend"
-
-output_folder = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/')
-print(f'The value of GRADIO_OUTPUT_FOLDER is {output_folder}')
-
-session_output_folder = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'False')
-print(f'The value of SESSION_OUTPUT_FOLDER is {session_output_folder}')
-
-input_folder = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/')
-print(f'The value of GRADIO_INPUT_FOLDER is {input_folder}')
-
-# Retrieving or setting CUSTOM_HEADER
-CUSTOM_HEADER = get_or_create_env_var('CUSTOM_HEADER', '')
-print(f'CUSTOM_HEADER found')
-
-# Retrieving or setting CUSTOM_HEADER_VALUE
-CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', '')
-print(f'CUSTOM_HEADER_VALUE found')
-
 
 def reset_state_vars():
     return [], [], pd.DataFrame(), pd.DataFrame(), 0, "", image_annotator(
@@ -268,24 +238,8 @@ def merge_csv_files(file_list):
 
     return output_files
 
-
-
 async def get_connection_params(request: gr.Request, output_folder_textbox:str='/output/'):
 
-    #print("request user:", request.username)
-
-    #request_data = await request.json()  # Parse JSON body
-    #print("All request data:", request_data)
-    #context_value = request_data.get('context') 
-    #if 'context' in request_data:
-    #     print("Request context dictionary:", request_data['context'])
-
-    # print("Request headers dictionary:", request.headers)
-    # print("All host elements", request.client)           
-    # print("IP address:", request.client.host)
-    # print("Query parameters:", dict(request.query_params))
-    # To get the underlying FastAPI items you would need to use await and some fancy @ stuff for a live query: https://fastapi.tiangolo.com/vi/reference/request/
-    #print("Request dictionary to object:", request.request.body())
     print("Session hash:", request.session_hash)
 
     if CUSTOM_HEADER and CUSTOM_HEADER_VALUE:

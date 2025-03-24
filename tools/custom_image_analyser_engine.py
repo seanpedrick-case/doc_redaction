@@ -405,7 +405,7 @@ def bounding_boxes_overlap(box1:List, box2:List):
     return (box1[0] < box2[2] and box2[0] < box1[2] and
             box1[1] < box2[3] and box2[1] < box1[3])
    
-def map_back_entity_results(page_analyser_result, page_text_mapping, all_text_line_results:List[Tuple]):
+def map_back_entity_results(page_analyser_result:dict, page_text_mapping:dict, all_text_line_results:List[Tuple]):
     for entity in page_analyser_result:
         entity_start = entity.start
         entity_end = entity.end
@@ -443,7 +443,7 @@ def map_back_entity_results(page_analyser_result, page_text_mapping, all_text_li
 
     return all_text_line_results
 
-def map_back_comprehend_entity_results(response, current_batch_mapping:List[Tuple], allow_list:List[str], chosen_redact_comprehend_entities:List[str], all_text_line_results:List[Tuple]):
+def map_back_comprehend_entity_results(response:object, current_batch_mapping:List[Tuple], allow_list:List[str], chosen_redact_comprehend_entities:List[str], all_text_line_results:List[Tuple]):
     if not response or "Entities" not in response:
         return all_text_line_results
 
@@ -686,7 +686,7 @@ def run_page_text_redaction(
 
     return page_analysed_bounding_boxes
 
-def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combine_pixel_dist: int = 20, vertical_padding: int = 0):
+def merge_text_bounding_boxes(analyser_results:dict, characters: List[LTChar], combine_pixel_dist: int = 20, vertical_padding: int = 0):
     '''
     Merge identified bounding boxes containing PII that are very close to one another
     '''
@@ -776,7 +776,7 @@ def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combin
     return analysed_bounding_boxes
 
 # Function to combine OCR results into line-level results
-def combine_ocr_results(ocr_results, x_threshold=50, y_threshold=12):
+def combine_ocr_results(ocr_results:dict, x_threshold:float=50.0, y_threshold:float=12.0):
     # Group OCR results into lines based on y_threshold
     lines = []
     current_line = []
