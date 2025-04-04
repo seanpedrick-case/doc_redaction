@@ -769,7 +769,7 @@ def df_select_callback_cost(df: pd.DataFrame, evt: gr.SelectData):
 
         #row_value_df = pd.DataFrame(data={"page":[row_value_code], "label":[row_value_label]})
 
-        return row_value_code
+        return row_value_code[0]
 
 def update_selected_review_df_row_colour(redaction_row_selection:pd.DataFrame, review_df:pd.DataFrame, colour:tuple=(0,0,255)):
     '''
