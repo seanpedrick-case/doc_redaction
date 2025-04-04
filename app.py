@@ -584,23 +584,27 @@ with app:
     # Get connection details on app load
     app.load(get_connection_params, inputs=[output_folder_textbox, input_folder_textbox], outputs=[session_hash_state, output_folder_textbox, session_hash_textbox, input_folder_textbox])
 
-    # If relevant environment variable is set, load in the default allow list file from S3 or locally
+    # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location
     if GET_DEFAULT_ALLOW_LIST == "True" and ALLOW_LIST_PATH:
-        print("Loading allow list from default_allow_list_output_path location:", ALLOW_LIST_PATH)
-        if not os.path.exists(ALLOW_LIST_PATH):
+        if not os.path.exists(ALLOW_LIST_PATH) and S3_ALLOW_LIST_PATH:
             app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_allow_list_file, default_allow_list_output_folder_location]).\
             success(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
-        else:
+            print("Successfully loaded allow list from S3")
+        elif os.path.exists(ALLOW_LIST_PATH):
+            print("Loading allow list from default allow list output path location:", ALLOW_LIST_PATH)
             app.load(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
+        else: print("Could not load in default allow list")
 
     # If relevant environment variable is set, load in the default cost code file from S3 or locally
-    if GET_COST_CODES == "True" and COST_CODES_PATH:
-        print("Loading cost codes from default_cost_codes_path location:", COST_CODES_PATH)
-        if not os.path.exists(COST_CODES_PATH):
+    if GET_COST_CODES == "True" and COST_CODES_PATH:        
+        if not os.path.exists(COST_CODES_PATH) and S3_COST_CODES_PATH:
             app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_cost_codes_file, default_cost_codes_output_folder_location]).\
             success(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location], outputs=[cost_code_dataframe, cost_code_choice_drop])
-        else:
+            print("Successfully loaded cost codes from S3")
+        elif os.path.exists(COST_CODES_PATH):
+            print("Loading cost codes from default cost codes path location:", COST_CODES_PATH)
             app.load(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location], outputs=[cost_code_dataframe, cost_code_choice_drop])
+        else: print("Could not load in cost code data")
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     access_callback = CSVLogger_custom(dataset_file_name=log_file_name)

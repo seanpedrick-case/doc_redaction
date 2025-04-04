@@ -147,19 +147,19 @@ ROOT_PATH = get_or_create_env_var('ROOT_PATH', '')
 
 DEFAULT_CONCURRENCY_LIMIT = get_or_create_env_var('DEFAULT_CONCURRENCY_LIMIT', '5')
 
-GET_DEFAULT_ALLOW_LIST = get_or_create_env_var('GET_DEFAULT_ALLOW_LIST', 'False')
+GET_DEFAULT_ALLOW_LIST = get_or_create_env_var('GET_DEFAULT_ALLOW_LIST', 'True')
 
-ALLOW_LIST_PATH = get_or_create_env_var('ALLOW_LIST_PATH', "config/default_allow_list.csv")
+ALLOW_LIST_PATH = get_or_create_env_var('ALLOW_LIST_PATH', 'config/default_allow_list.csv') #
 
-S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '')
+S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', 'default_allow_list.csv') # This is a path within the DOCUMENT_REDACTION_BUCKET
 
 SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'True')
 
-GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'False')
+GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'True')
 
 COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', 'config/COST_CENTRES.csv') # file should be a csv file with a single table in it that has two columns with a header. First column should contain cost codes, second column should contain a name or description for the cost code
 
-S3_COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', '')
+S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', 'COST_CENTRES.csv') # This is a path within the DOCUMENT_REDACTION_BUCKET
 
 ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, are they compulsory?
 
