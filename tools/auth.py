@@ -4,7 +4,7 @@ import boto3
 import hmac
 import hashlib
 import base64
-from tools.config import client_id, client_secret, user_pool_id
+from tools.config import AWS_CLIENT_ID, AWS_CLIENT_SECRET, AWS_USER_POOL_ID, AWS_REGION
 
 def calculate_secret_hash(client_id:str, client_secret:str, username:str):
     message = username + client_id
@@ -16,7 +16,7 @@ def calculate_secret_hash(client_id:str, client_secret:str, username:str):
     secret_hash = base64.b64encode(dig).decode()
     return secret_hash
 
-def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id, client_id:str=client_id, client_secret:str=client_secret):
+def authenticate_user(username:str, password:str, user_pool_id:str=AWS_USER_POOL_ID, client_id:str=AWS_CLIENT_ID, client_secret:str=AWS_CLIENT_SECRET):
     """Authenticates a user against an AWS Cognito user pool.
 
     Args:
@@ -30,7 +30,7 @@ def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id,
         bool: True if the user is authenticated, False otherwise.
     """
 
-    client = boto3.client('cognito-idp')  # Cognito Identity Provider client
+    client = boto3.client('cognito-idp', region_name=AWS_REGION)  # Cognito Identity Provider client
 
     # Compute the secret hash
     secret_hash = calculate_secret_hash(client_id, client_secret, username)

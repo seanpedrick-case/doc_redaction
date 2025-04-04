@@ -2,17 +2,17 @@ pdfminer.six==20240706
 pdf2image==1.17.0
 pymupdf==1.25.3
 opencv-python==4.10.0.84
-presidio_analyzer==2.2.357
-presidio_anonymizer==2.2.357
-presidio-image-redactor==0.0.55
+presidio_analyzer==2.2.358
+presidio_anonymizer==2.2.358
+presidio-image-redactor==0.0.56
 pikepdf==9.5.2
 pandas==2.2.3
-nltk==3.9.1
+#nltk==3.9.1 # Not required
 scikit-learn==1.6.1
 spacy==3.8.4
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
 #en_core_web_sm @ https://github.com/explosion/spacy-#models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz
-gradio==5.22.0
+gradio==5.23.3
 boto3==1.37.17
 pyarrow==19.0.1
 openpyxl==3.1.5

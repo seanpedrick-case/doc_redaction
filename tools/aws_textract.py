@@ -7,7 +7,7 @@ from collections import defaultdict
 import pikepdf
 import time
 from tools.custom_image_analyser_engine import OCRResult, CustomImageRecognizerResult
-from tools.config import AWS_ACCESS_KEY, AWS_SECRET_KEY
+from tools.config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
 
 def extract_textract_metadata(response:object):
     """Extracts metadata from an AWS Textract response."""
@@ -25,7 +25,7 @@ def extract_textract_metadata(response:object):
         #'NumberOfPages': number_of_pages
     })
 
-def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str="", handwrite_signature_checkbox:List[str]=["Redact all identified handwriting", "Redact all identified signatures"]):
+def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str="", handwrite_signature_checkbox:List[str]=["Extract handwriting", "Redact all identified signatures"]):
     '''
     Analyse page with AWS Textract
     '''
@@ -34,9 +34,9 @@ def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str=""
             if AWS_ACCESS_KEY and AWS_SECRET_KEY:
                 client = boto3.client('textract', 
                 aws_access_key_id=AWS_ACCESS_KEY, 
-                aws_secret_access_key=AWS_SECRET_KEY)
+                aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION)
             else:
-                client = boto3.client('textract')
+                client = boto3.client('textract', region_name=AWS_REGION)
         except:
             print("Cannot connect to AWS Textract")
             return [], ""  # Return an empty list and an empty string
@@ -75,7 +75,11 @@ def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str=""
         'data': response
     }
 
+    #print("response:", response)
+
     request_metadata = extract_textract_metadata(response)  # Metadata comes out as a string
+
+    #print("request_metadata:", request_metadata)
 
     # Return a list containing the wrapped response and the metadata
     return wrapped_response, request_metadata  # Return as a list to match the desired structure
@@ -124,6 +128,8 @@ def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_
     #if "pages" in json_data:
     # Find the specific page data
     page_json_data = json_data #next((page for page in json_data["pages"] if page["page_no"] == page_no), None)
+
+    #print("page_json_data:", page_json_data)
 
     if "Blocks" in page_json_data:
         # Access the data for the specific page
@@ -271,8 +277,7 @@ def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_
 
 def load_and_convert_textract_json(textract_json_file_path:str, log_files_output_paths:str):
     """
-    Loads Textract JSON from a file, detects if conversion is needed,
-    and converts if necessary.
+    Loads Textract JSON from a file, detects if conversion is needed, and converts if necessary.
     """
     
     if not os.path.exists(textract_json_file_path):
@@ -295,15 +300,16 @@ def load_and_convert_textract_json(textract_json_file_path:str, log_files_output
 
     # Check if conversion is needed
     if "pages" in textract_data:
-        print("JSON already in the new format. No changes needed.")
+        print("JSON already in the correct format for app. No changes needed.")
         return textract_data, False, log_files_output_paths  # No conversion required
 
     if "Blocks" in textract_data:
         print("Need to convert Textract JSON to app format.")
         try:
-            from tools.aws_textract import restructure_textract_output
+            
             textract_data = restructure_textract_output(textract_data)
             return textract_data, False, log_files_output_paths  # Successfully converted
+        
         except Exception as e:
             print("Failed to convert JSON data to app format due to:", e)
             return {}, True, log_files_output_paths  # Conversion failed
@@ -312,33 +318,35 @@ def load_and_convert_textract_json(textract_json_file_path:str, log_files_output
         print("textract data:", textract_data)
         return {}, True, log_files_output_paths  # Return empty data if JSON is not recognized
 
-# Load Textract JSON output (assuming it's stored in a variable called `textract_output`)
-def restructure_textract_output(textract_output:object):
-    '''
-    Reorganise textract output that comes from the bulk textract analysis option on AWS to format that works in this app.
-    '''
-    pages_dict = defaultdict(lambda: {"page_no": None, "data": {"Blocks": []}})
+def restructure_textract_output(textract_output: dict):
+    """
+    Reorganise Textract output from the bulk Textract analysis option on AWS 
+    into a format that works in this redaction app, reducing size.
+    """
+    pages_dict = {}
 
-    # Extract number of pages from DocumentMetadata
-    total_pages = textract_output.get("DocumentMetadata", {}).get("Pages", 1)
+    # Extract total pages from DocumentMetadata
+    document_metadata = textract_output.get("DocumentMetadata", {})
 
     for block in textract_output.get("Blocks", []):
-        page_no = block.get("Page", 1)  # Default to 1 if not present
+        page_no = block.get("Page", 1)  # Default to 1 if missing
+
+        # Initialize page structure if not already present
+        if page_no not in pages_dict:
+            pages_dict[page_no] = {"page_no": str(page_no), "data": {"Blocks": []}}
+
+        # Keep only essential fields to reduce size
+        filtered_block = {
+            key: block[key] for key in ["BlockType", "Confidence", "Text", "Geometry", "Page", "Id", "Relationships"]
+            if key in block
+        }
         
-        # Ensure page metadata is only set once
-        if pages_dict[page_no]["page_no"] is None:
-            pages_dict[page_no]["page_no"] = str(page_no)
+        pages_dict[page_no]["data"]["Blocks"].append(filtered_block)
 
-        # Add block to corresponding page
-        pages_dict[page_no]["data"]["Blocks"].append(block)
-
-    # Convert dictionary to sorted list of pages
+    # Convert pages dictionary to a sorted list
     structured_output = {
+        "DocumentMetadata": document_metadata,  # Store metadata separately
         "pages": [pages_dict[page] for page in sorted(pages_dict.keys())]
     }
-
-    # Add DocumentMetadata to the first page's data (optional)
-    if structured_output["pages"]:
-        structured_output["pages"][0]["data"]["DocumentMetadata"] = textract_output.get("DocumentMetadata", {})
 
     return structured_output

@@ -14,7 +14,7 @@ from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine, DictAnalyzerR
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
 
-from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, output_folder
+from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, OUTPUT_FOLDER
 from tools.helper_functions import get_file_name_without_type, read_file, detect_file_type
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_word_list_recogniser, CustomWordFuzzyRecognizer, custom_entities
 from tools.custom_image_analyser_engine import do_aws_comprehend_call
@@ -218,7 +218,7 @@ def anonymise_data_files(file_paths: List[str],
                          log_files_output_paths: list = [],
                          in_excel_sheets: list = [],
                          first_loop_state: bool = False,
-                         output_folder: str = output_folder,
+                         output_folder: str = OUTPUT_FOLDER,
                          in_deny_list:list[str]=[],
                          max_fuzzy_spelling_mistakes_num:int=0,
                          pii_identification_method:str="Local",
@@ -335,7 +335,7 @@ def anonymise_data_files(file_paths: List[str],
             file_type = ""
             out_file_part = anon_file
 
-            out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+            out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=OUTPUT_FOLDER)
         else:
             # If file is an xlsx, we are going to run through all the Excel sheets to anonymise them separately.
             file_type = detect_file_type(anon_file)
@@ -419,7 +419,7 @@ def anon_wrapper_func(
     chosen_redact_comprehend_entities:List[str]=[], 
     comprehend_query_number:int=0,
     comprehend_client:botocore.client.BaseClient="",
-    output_folder: str = output_folder
+    output_folder: str = OUTPUT_FOLDER
 ):
     """
     This function wraps the anonymisation process for a given dataframe. It filters the dataframe based on chosen columns, applies the specified anonymisation strategy using the anonymise_script function, and exports the anonymised data to a file.
