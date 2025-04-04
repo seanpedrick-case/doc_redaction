@@ -977,7 +977,6 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
     }
 
     page.apply_redactions(images=0, graphics=0)
-
     page.set_cropbox(original_cropbox)  # Set CropBox to original size
     page.clean_contents()
 

@@ -561,8 +561,8 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                             image = None
 
                     pymupdf_page = pdf_doc.load_page(i) #doc.load_page(current_page -1)
-                    original_cropboxes.append(pymupdf_page.cropbox.irect)
-                    pymupdf_page.set_cropbox = pymupdf_page.mediabox
+                    original_cropboxes.append(pymupdf_page.cropbox)
+                    pymupdf_page.set_cropbox(pymupdf_page.mediabox)
 
                     pymupdf_page = redact_page_with_pymupdf(page=pymupdf_page, page_annotations=all_image_annotations[i], image=image, original_cropbox=original_cropboxes[-1], page_sizes_df= page_sizes_df) # image=image,
             else:
