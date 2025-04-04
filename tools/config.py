@@ -85,7 +85,7 @@ MAX_IMAGE_PIXELS = get_or_create_env_var('MAX_IMAGE_PIXELS', '') # Changed to No
 # File I/O config
 ###
 
-SESSION_OUTPUT_FOLDER = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'False') # i.e. do you want your input and output folders saved within a subfolder based on session hash value within output/input folders 
+SESSION_OUTPUT_FOLDER = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'True') # i.e. do you want your input and output folders saved within a subfolder based on session hash value within output/input folders 
 
 OUTPUT_FOLDER = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/') # 'output/'
 INPUT_FOLDER = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/') # 'input/'
@@ -145,21 +145,21 @@ GRADIO_SERVER_PORT = int(get_or_create_env_var('GRADIO_SERVER_PORT', '7860'))
 
 ROOT_PATH = get_or_create_env_var('ROOT_PATH', '')
 
-DEFAULT_CONCURRENCY_LIMIT = get_or_create_env_var('DEFAULT_CONCURRENCY_LIMIT', '5')
+DEFAULT_CONCURRENCY_LIMIT = get_or_create_env_var('DEFAULT_CONCURRENCY_LIMIT', '3')
 
-GET_DEFAULT_ALLOW_LIST = get_or_create_env_var('GET_DEFAULT_ALLOW_LIST', 'True')
+GET_DEFAULT_ALLOW_LIST = get_or_create_env_var('GET_DEFAULT_ALLOW_LIST', 'False')
 
-ALLOW_LIST_PATH = get_or_create_env_var('ALLOW_LIST_PATH', 'config/default_allow_list.csv') #
+ALLOW_LIST_PATH = get_or_create_env_var('ALLOW_LIST_PATH', '') # config/default_allow_list.csv
 
-S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', 'default_allow_list.csv') # This is a path within the DOCUMENT_REDACTION_BUCKET
+S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_allow_list.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
 
 SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'True')
 
-GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'True')
+GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'False')
 
-COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', 'config/COST_CENTRES.csv') # file should be a csv file with a single table in it that has two columns with a header. First column should contain cost codes, second column should contain a name or description for the cost code
+COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', '') # 'config/COST_CENTRES.csv' # file should be a csv file with a single table in it that has two columns with a header. First column should contain cost codes, second column should contain a name or description for the cost code
 
-S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', 'COST_CENTRES.csv') # This is a path within the DOCUMENT_REDACTION_BUCKET
+S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', '') # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
 
 ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, are they compulsory?
 
