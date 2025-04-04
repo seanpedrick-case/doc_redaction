@@ -3,37 +3,8 @@ import pandas as pd
 import boto3
 import tempfile
 import os
-from tools.helper_functions import get_or_create_env_var
-from dotenv import load_dotenv
-
+from tools.config import AWS_REGION, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET
 PandasDataFrame = Type[pd.DataFrame]
-
-# Get AWS credentials
-bucket_name=""
-
-RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
-print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
-
-AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
-print(f'The value of AWS_REGION is {AWS_REGION}')
-
-# If you have an aws_config env file in the config folder, you can load in AWS keys this way
-AWS_CONFIG_PATH = get_or_create_env_var('AWS_CONFIG_PATH', '/env/aws_config.env')
-print(f'The value of AWS_CONFIG_PATH is {AWS_CONFIG_PATH}')
-
-if os.path.exists(AWS_CONFIG_PATH):
-    print("Loading AWS keys from config folder")
-    load_dotenv(AWS_CONFIG_PATH)
-
-AWS_ACCESS_KEY = get_or_create_env_var('AWS_ACCESS_KEY', '')
-if AWS_ACCESS_KEY:
-    print(f'AWS_ACCESS_KEY found in environment variables')
-
-AWS_SECRET_KEY = get_or_create_env_var('AWS_SECRET_KEY', '')
-if AWS_SECRET_KEY:
-    print(f'AWS_SECRET_KEY found in environment variables')
-
-
 
 def get_assumed_role_info():
     sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'
@@ -49,18 +20,16 @@ def get_assumed_role_info():
     return assumed_role_arn, assumed_role_name
 
 if RUN_AWS_FUNCTIONS == "1":
-    try:
-        bucket_name = os.environ['DOCUMENT_REDACTION_BUCKET']
-        session = boto3.Session()   
-
-        #print("session:", session)
+    try:        
+        session = boto3.Session(region_name=AWS_REGION)   
             
     except Exception as e:
-        print("Could not start boto3 session:", e)    
+        print("Could not start boto3 session:", e)
 
     try:
         assumed_role_arn, assumed_role_name = get_assumed_role_info()
 
+        print("Successfully assumed ARN role")
         print("Assumed Role ARN:", assumed_role_arn)
         print("Assumed Role Name:", assumed_role_name)
 
@@ -68,17 +37,17 @@ if RUN_AWS_FUNCTIONS == "1":
         print("Could not get assumed role from STS:", e)
 
 # Download direct from S3 - requires login credentials
-def download_file_from_s3(bucket_name, key, local_file_path_and_name):
+def download_file_from_s3(bucket_name:str, key:str, local_file_path_and_name:str):
 
-    s3 = boto3.client('s3')
+    s3 = boto3.client('s3', region_name=AWS_REGION)
     s3.download_file(bucket_name, key, local_file_path_and_name)
-    print(f"File downloaded from S3: s3://{bucket_name}/{key} to {local_file_path_and_name}")
+    print(f"File downloaded from s3://{bucket_name}/{key} to {local_file_path_and_name}")
                          
-def download_folder_from_s3(bucket_name, s3_folder, local_folder):
+def download_folder_from_s3(bucket_name:str, s3_folder:str, local_folder:str):
     """
     Download all files from an S3 folder to a local folder.
     """
-    s3 = boto3.client('s3')
+    s3 = boto3.client('s3', region_name=AWS_REGION)
 
     # List objects in the specified S3 folder
     response = s3.list_objects_v2(Bucket=bucket_name, Prefix=s3_folder)
@@ -99,11 +68,11 @@ def download_folder_from_s3(bucket_name, s3_folder, local_folder):
         except Exception as e:
             print(f"Error downloading 's3://{bucket_name}/{object_key}':", e)
 
-def download_files_from_s3(bucket_name, s3_folder, local_folder, filenames):
+def download_files_from_s3(bucket_name:str, s3_folder:str, local_folder:str, filenames:List[str]):
     """
     Download specific files from an S3 folder to a local folder.
     """
-    s3 = boto3.client('s3')
+    s3 = boto3.client('s3', region_name=AWS_REGION)
 
     print("Trying to download file: ", filenames)
 
@@ -132,7 +101,7 @@ def download_files_from_s3(bucket_name, s3_folder, local_folder, filenames):
         except Exception as e:
             print(f"Error downloading 's3://{bucket_name}/{object_key}':", e)
 
-def load_data_from_aws(in_aws_keyword_file, aws_password="", bucket_name=bucket_name):
+def load_data_from_aws(in_aws_keyword_file, aws_password:str="", bucket_name:str=DOCUMENT_REDACTION_BUCKET):
 
     temp_dir = tempfile.mkdtemp()
     local_address_stub = temp_dir + '/doc-redaction/'
@@ -183,7 +152,7 @@ def load_data_from_aws(in_aws_keyword_file, aws_password="", bucket_name=bucket_
 
     return files, out_message
 
-def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=bucket_name):
+def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=DOCUMENT_REDACTION_BUCKET):
     """
     Uploads a file from local machine to Amazon S3.
 
@@ -197,7 +166,7 @@ def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=buck
     """
     final_out_message = []
 
-    s3_client = boto3.client('s3')
+    s3_client = boto3.client('s3', region_name=AWS_REGION)
 
     if isinstance(local_file_paths, str):
         local_file_paths = [local_file_paths]

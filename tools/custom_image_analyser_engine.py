@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import time
 import cv2
 import copy
+import botocore
 from copy import deepcopy
 from pdfminer.layout import LTChar
 import PIL
@@ -399,12 +400,12 @@ class ContrastSegmentedImageEnhancer(ImagePreprocessor):
             adjusted_contrast = contrast
         return adjusted_image, contrast, adjusted_contrast
 
-def bounding_boxes_overlap(box1, box2):
+def bounding_boxes_overlap(box1:List, box2:List):
     """Check if two bounding boxes overlap."""
     return (box1[0] < box2[2] and box2[0] < box1[2] and
             box1[1] < box2[3] and box2[1] < box1[3])
    
-def map_back_entity_results(page_analyser_result, page_text_mapping, all_text_line_results):
+def map_back_entity_results(page_analyser_result:dict, page_text_mapping:dict, all_text_line_results:List[Tuple]):
     for entity in page_analyser_result:
         entity_start = entity.start
         entity_end = entity.end
@@ -442,7 +443,7 @@ def map_back_entity_results(page_analyser_result, page_text_mapping, all_text_li
 
     return all_text_line_results
 
-def map_back_comprehend_entity_results(response, current_batch_mapping, allow_list, chosen_redact_comprehend_entities, all_text_line_results):
+def map_back_comprehend_entity_results(response:object, current_batch_mapping:List[Tuple], allow_list:List[str], chosen_redact_comprehend_entities:List[str], all_text_line_results:List[Tuple]):
     if not response or "Entities" not in response:
         return all_text_line_results
 
@@ -489,7 +490,7 @@ def map_back_comprehend_entity_results(response, current_batch_mapping, allow_li
 
     return all_text_line_results
 
-def do_aws_comprehend_call(current_batch, current_batch_mapping, comprehend_client, language, allow_list, chosen_redact_comprehend_entities, all_text_line_results):
+def do_aws_comprehend_call(current_batch:str, current_batch_mapping:List[Tuple], comprehend_client:botocore.client.BaseClient, language:str, allow_list:List[str], chosen_redact_comprehend_entities:List[str], all_text_line_results:List[Tuple]):
     if not current_batch:
         return all_text_line_results
 
@@ -685,7 +686,7 @@ def run_page_text_redaction(
 
     return page_analysed_bounding_boxes
 
-def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combine_pixel_dist: int = 20, vertical_padding: int = 0):
+def merge_text_bounding_boxes(analyser_results:dict, characters: List[LTChar], combine_pixel_dist: int = 20, vertical_padding: int = 0):
     '''
     Merge identified bounding boxes containing PII that are very close to one another
     '''
@@ -775,7 +776,7 @@ def merge_text_bounding_boxes(analyser_results, characters: List[LTChar], combin
     return analysed_bounding_boxes
 
 # Function to combine OCR results into line-level results
-def combine_ocr_results(ocr_results, x_threshold=50, y_threshold=12):
+def combine_ocr_results(ocr_results:dict, x_threshold:float=50.0, y_threshold:float=12.0):
     # Group OCR results into lines based on y_threshold
     lines = []
     current_line = []
@@ -913,7 +914,8 @@ class CustomImageAnalyzerEngine:
         ocr_results_with_children: Dict[str, Dict],
         chosen_redact_comprehend_entities: List[str],
         pii_identification_method: str = "Local",
-        comprehend_client = "",      
+        comprehend_client = "",
+        custom_entities:List[str]=custom_entities,   
         **text_analyzer_kwargs
     ) -> List[CustomImageRecognizerResult]:
 

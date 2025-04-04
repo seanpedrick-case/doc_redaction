@@ -16,7 +16,7 @@ NOTE: for ensuring that spaCy models are loaded into the program correctly in re
 
 9.Run the following (This helped me: https://github.com/pyinstaller/pyinstaller/issues/8108):
 
-a) In command line: pyi-makespec --additional-hooks-dir="build_deps" --add-data "tesseract/:tesseract/" --add-data "poppler/poppler-24.02.0/:poppler/poppler-24.02.0/" --collect-data=gradio_client  --collect-data=gradio --hidden-import=gradio_image_annotation --collect-data=gradio_image_annotation --collect-all=gradio_image_annotation --hidden-import pyarrow.vendored.version --hidden-import pydicom.encoders --hidden-import=safehttpx --collect-all=safehttpx --hidden-import=presidio_analyzer --collect-all=presidio_analyzer --hidden-import=presidio_anonymizer --collect-all=presidio_anonymizer --hidden-import=presidio_image_redactor --collect-all=presidio_image_redactor --name DocRedactApp_0.3.0 app.py
+a) In command line: pyi-makespec --additional-hooks-dir="build_deps" --add-data "tesseract/:tesseract/" --add-data "poppler/poppler-24.02.0/:poppler/poppler-24.02.0/" --collect-data=gradio_client  --collect-data=gradio --hidden-import=gradio_image_annotation --collect-data=gradio_image_annotation --collect-all=gradio_image_annotation --hidden-import pyarrow.vendored.version --hidden-import pydicom.encoders --hidden-import=safehttpx --collect-all=safehttpx --hidden-import=presidio_analyzer --collect-all=presidio_analyzer --hidden-import=presidio_anonymizer --collect-all=presidio_anonymizer --hidden-import=presidio_image_redactor --collect-all=presidio_image_redactor --name DocRedactApp_0.4.0 app.py
 
 # Add --onefile  to the above if you would like everything packaged as a single exe, although this will need to be extracted upon starting the app, slowing down initialisation time significantly.
 
@@ -32,12 +32,12 @@ a = Analysis(
 
 hook-presidio-image-redactor.py
 
-c) Back in command line, run this: pyinstaller --clean --noconfirm DocRedactApp_0.3.0.spec
+c) Back in command line, run this: pyinstaller --clean --noconfirm DocRedactApp_0.4.0.spec
 
 
 9. A 'dist' folder will be created with the executable inside along with all dependencies('dist\redaction').
 
-10. go to dist/APP-NAME/gradio/component_meta.py and modify the start of the 'create_or_modify_pyi(...' function to this:
+10. go to dist/APP-NAME/internal/gradio/component_meta.py and modify the start of the 'create_or_modify_pyi(...' function to this:
 
 def create_or_modify_pyi(
     component_class: type, class_name: str, events: list[str | EventListener]

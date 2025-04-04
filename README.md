@@ -317,8 +317,8 @@ The Redaction Settings tab now has boxes for entering the AWS access key and sec
 ### Picking up AWS access keys through an .env file
 The app also has the capability of picking up AWS access key details through a .env file located in a '/config/aws_config.env' file (default), or alternative .env file location specified by the environment variable AWS_CONFIG_PATH. The env file should look like the following with just two lines:
 
-AWS_ACCESS_KEY=<your-access-key>
-AWS_SECRET_KEY=<your-secret-key>
+AWS_ACCESS_KEY= your-access-key
+AWS_SECRET_KEY= your-secret-key
 
 The app should then pick up these keys when trying to access the AWS Textract and Comprehend services during redaction.
 

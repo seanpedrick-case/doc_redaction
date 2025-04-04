@@ -8,9 +8,7 @@ from collections.abc import Sequence
 from multiprocessing import Lock
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
 from gradio_client import utils as client_utils
-
 import gradio as gr
 from gradio import utils, wasm_utils
 

@@ -1,16 +1,15 @@
 import boto3
-#from PIL import Image
 from typing import List
 import io
-#import json
+import os
+import json
+from collections import defaultdict
 import pikepdf
 import time
-# Example: converting this single page to an image
-#from pdf2image import convert_from_bytes
 from tools.custom_image_analyser_engine import OCRResult, CustomImageRecognizerResult
-from tools.aws_functions import AWS_ACCESS_KEY, AWS_SECRET_KEY
+from tools.config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
 
-def extract_textract_metadata(response):
+def extract_textract_metadata(response:object):
     """Extracts metadata from an AWS Textract response."""
 
     #print("Document metadata:", response['DocumentMetadata'])
@@ -26,7 +25,7 @@ def extract_textract_metadata(response):
         #'NumberOfPages': number_of_pages
     })
 
-def analyse_page_with_textract(pdf_page_bytes, page_no, client="", handwrite_signature_checkbox:List[str]=["Redact all identified handwriting", "Redact all identified signatures"]):
+def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str="", handwrite_signature_checkbox:List[str]=["Extract handwriting", "Redact all identified signatures"]):
     '''
     Analyse page with AWS Textract
     '''
@@ -35,9 +34,9 @@ def analyse_page_with_textract(pdf_page_bytes, page_no, client="", handwrite_sig
             if AWS_ACCESS_KEY and AWS_SECRET_KEY:
                 client = boto3.client('textract', 
                 aws_access_key_id=AWS_ACCESS_KEY, 
-                aws_secret_access_key=AWS_SECRET_KEY)
+                aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION)
             else:
-                client = boto3.client('textract')
+                client = boto3.client('textract', region_name=AWS_REGION)
         except:
             print("Cannot connect to AWS Textract")
             return [], ""  # Return an empty list and an empty string
@@ -65,19 +64,27 @@ def analyse_page_with_textract(pdf_page_bytes, page_no, client="", handwrite_sig
             time.sleep(5)
             response = client.detect_document_text(Document={'Bytes': pdf_page_bytes})
 
+     # Add the 'Page' attribute to each block
+    if "Blocks" in response:
+        for block in response["Blocks"]:
+            block["Page"] = page_no  # Inject the page number into each block
+
     # Wrap the response with the page number in the desired format
     wrapped_response = {
         'page_no': page_no,
         'data': response
     }
 
+    #print("response:", response)
+
     request_metadata = extract_textract_metadata(response)  # Metadata comes out as a string
+
+    #print("request_metadata:", request_metadata)
 
     # Return a list containing the wrapped response and the metadata
     return wrapped_response, request_metadata  # Return as a list to match the desired structure
 
-
-def convert_pike_pdf_page_to_bytes(pdf, page_num):
+def convert_pike_pdf_page_to_bytes(pdf:object, page_num:int):
     # Create a new empty PDF
     new_pdf = pikepdf.Pdf.new()
 
@@ -102,8 +109,7 @@ def convert_pike_pdf_page_to_bytes(pdf, page_num):
 
     return pdf_bytes
 
-
-def json_to_ocrresult(json_data, page_width, page_height, page_no):
+def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_no:int):
     '''
     Convert the json response from textract to the OCRResult format used elsewhere in the code. Looks for lines, words, and signatures. Handwriting and signatures are set aside especially for later in case the user wants to override the default behaviour and redact all handwriting/signatures.
     '''
@@ -122,6 +128,8 @@ def json_to_ocrresult(json_data, page_width, page_height, page_no):
     #if "pages" in json_data:
     # Find the specific page data
     page_json_data = json_data #next((page for page in json_data["pages"] if page["page_no"] == page_no), None)
+
+    #print("page_json_data:", page_json_data)
 
     if "Blocks" in page_json_data:
         # Access the data for the specific page
@@ -266,3 +274,79 @@ def json_to_ocrresult(json_data, page_width, page_height, page_no):
             i += 1
 
     return all_ocr_results, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, ocr_results_with_children
+
+def load_and_convert_textract_json(textract_json_file_path:str, log_files_output_paths:str):
+    """
+    Loads Textract JSON from a file, detects if conversion is needed, and converts if necessary.
+    """
+    
+    if not os.path.exists(textract_json_file_path):
+        print("No existing Textract results file found.")
+        return {}, True, log_files_output_paths  # Return empty dict and flag indicating missing file
+    
+    no_textract_file = False
+    print("Found existing Textract json results file.")
+
+    # Track log files
+    if textract_json_file_path not in log_files_output_paths:
+        log_files_output_paths.append(textract_json_file_path)
+
+    try:
+        with open(textract_json_file_path, 'r', encoding='utf-8') as json_file:
+            textract_data = json.load(json_file)
+    except json.JSONDecodeError:
+        print("Error: Failed to parse Textract JSON file. Returning empty data.")
+        return {}, True, log_files_output_paths  # Indicate failure
+
+    # Check if conversion is needed
+    if "pages" in textract_data:
+        print("JSON already in the correct format for app. No changes needed.")
+        return textract_data, False, log_files_output_paths  # No conversion required
+
+    if "Blocks" in textract_data:
+        print("Need to convert Textract JSON to app format.")
+        try:
+            
+            textract_data = restructure_textract_output(textract_data)
+            return textract_data, False, log_files_output_paths  # Successfully converted
+        
+        except Exception as e:
+            print("Failed to convert JSON data to app format due to:", e)
+            return {}, True, log_files_output_paths  # Conversion failed
+    else:
+        print("Invalid Textract JSON format: 'Blocks' missing.")
+        print("textract data:", textract_data)
+        return {}, True, log_files_output_paths  # Return empty data if JSON is not recognized
+
+def restructure_textract_output(textract_output: dict):
+    """
+    Reorganise Textract output from the bulk Textract analysis option on AWS 
+    into a format that works in this redaction app, reducing size.
+    """
+    pages_dict = {}
+
+    # Extract total pages from DocumentMetadata
+    document_metadata = textract_output.get("DocumentMetadata", {})
+
+    for block in textract_output.get("Blocks", []):
+        page_no = block.get("Page", 1)  # Default to 1 if missing
+
+        # Initialize page structure if not already present
+        if page_no not in pages_dict:
+            pages_dict[page_no] = {"page_no": str(page_no), "data": {"Blocks": []}}
+
+        # Keep only essential fields to reduce size
+        filtered_block = {
+            key: block[key] for key in ["BlockType", "Confidence", "Text", "Geometry", "Page", "Id", "Relationships"]
+            if key in block
+        }
+        
+        pages_dict[page_no]["data"]["Blocks"].append(filtered_block)
+
+    # Convert pages dictionary to a sorted list
+    structured_output = {
+        "DocumentMetadata": document_metadata,  # Store metadata separately
+        "pages": [pages_dict[page] for page in sorted(pages_dict.keys())]
+    }
+
+    return structured_output

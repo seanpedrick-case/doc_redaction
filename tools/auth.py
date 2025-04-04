@@ -1,32 +1,12 @@
-
-import os
+#import os
 import boto3
-import gradio as gr
+#import gradio as gr
 import hmac
 import hashlib
 import base64
+from tools.config import AWS_CLIENT_ID, AWS_CLIENT_SECRET, AWS_USER_POOL_ID, AWS_REGION
 
-def get_or_create_env_var(var_name, default_value):
-    # Get the environment variable if it exists
-    value = os.environ.get(var_name)
-    
-    # If it doesn't exist, set it to the default value
-    if value is None:
-        os.environ[var_name] = default_value
-        value = default_value
-    
-    return value
-
-client_id = get_or_create_env_var('AWS_CLIENT_ID', '')
-#print(f'The value of AWS_CLIENT_ID is {client_id}')
-
-client_secret = get_or_create_env_var('AWS_CLIENT_SECRET', '')
-#print(f'The value of AWS_CLIENT_SECRET is {client_secret}')
-
-user_pool_id = get_or_create_env_var('AWS_USER_POOL_ID', '')
-#print(f'The value of AWS_USER_POOL_ID is {user_pool_id}')
-
-def calculate_secret_hash(client_id, client_secret, username):
+def calculate_secret_hash(client_id:str, client_secret:str, username:str):
     message = username + client_id
     dig = hmac.new(
         str(client_secret).encode('utf-8'),
@@ -36,7 +16,7 @@ def calculate_secret_hash(client_id, client_secret, username):
     secret_hash = base64.b64encode(dig).decode()
     return secret_hash
 
-def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id, client_id:str=client_id, client_secret:str=client_secret):
+def authenticate_user(username:str, password:str, user_pool_id:str=AWS_USER_POOL_ID, client_id:str=AWS_CLIENT_ID, client_secret:str=AWS_CLIENT_SECRET):
     """Authenticates a user against an AWS Cognito user pool.
 
     Args:
@@ -50,7 +30,7 @@ def authenticate_user(username:str, password:str, user_pool_id:str=user_pool_id,
         bool: True if the user is authenticated, False otherwise.
     """
 
-    client = boto3.client('cognito-idp')  # Cognito Identity Provider client
+    client = boto3.client('cognito-idp', region_name=AWS_REGION)  # Cognito Identity Provider client
 
     # Compute the secret hash
     secret_hash = calculate_secret_hash(client_id, client_secret, username)
