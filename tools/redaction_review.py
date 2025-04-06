@@ -114,7 +114,7 @@ def get_filtered_recogniser_dataframe_and_dropdowns(page_image_annotator_object:
         page_entities_for_drop = update_dropdown_list_based_on_dataframe(review_dataframe, "page")
         page_entities_drop = gr.Dropdown(value=page_dropdown_value, choices=page_entities_for_drop, allow_custom_value=True, interactive=True)
 
-        recogniser_dataframe_out_gr = gr.Dataframe(review_dataframe[["page", "label", "text"]], show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True)
+        recogniser_dataframe_out_gr = gr.Dataframe(review_dataframe[["page", "label", "text"]], show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True, max_height=400)
 
         recogniser_dataframe_out = review_dataframe[["page", "label", "text"]]
 
@@ -151,7 +151,7 @@ def update_recogniser_dataframes(page_image_annotator_object:AnnotatedImageData,
 
         review_dataframe, text_entities_drop, page_entities_drop = update_entities_df_recogniser_entities(recogniser_entities_dropdown_value, recogniser_dataframe_out, page_dropdown_value, text_dropdown_value)
 
-        recogniser_dataframe_out_gr = gr.Dataframe(review_dataframe[["page", "label", "text"]], show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True)
+        recogniser_dataframe_out_gr = gr.Dataframe(review_dataframe[["page", "label", "text"]], show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True, max_height=400)
         
         recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(recogniser_dataframe_out, "label")
         recogniser_entities_drop = gr.Dropdown(value=recogniser_entities_dropdown_value, choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)
@@ -180,10 +180,6 @@ def update_annotator_page_from_review_df(review_df: pd.DataFrame,
     out_image_annotations_state = current_image_annotations_state
     out_current_page_annotator = current_page_annotator
 
-    print("page_sizes:", page_sizes)
-
-    review_df.to_csv(OUTPUT_FOLDER + "review_df_in_update_annotator.csv")
-
     if not review_df.empty:
 
         out_image_annotations_state = convert_review_df_to_annotation_json(review_df, image_file_paths, page_sizes)
@@ -194,9 +190,6 @@ def update_annotator_page_from_review_df(review_df: pd.DataFrame,
             out_current_page_annotator = out_image_annotations_state[current_page-1]
 
     return out_current_page_annotator, out_image_annotations_state
-
-
-
 
 def exclude_selected_items_from_redaction(review_df: pd.DataFrame,
                                           selected_rows_df: pd.DataFrame,
@@ -241,7 +234,7 @@ def update_annotator_object_and_filter_df(
                     recogniser_entities_dropdown_value:str="ALL",
                     page_dropdown_value:str="ALL",
                     text_dropdown_value:str="ALL",
-                    recogniser_dataframe_base:gr.Dataframe=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[]}), type="pandas", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True),
+                    recogniser_dataframe_base:gr.Dataframe=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[]}), type="pandas", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True, show_search='filter', max_height=400),
                     zoom:int=100,
                     review_df:pd.DataFrame=[],
                     page_sizes:List[dict]=[],
@@ -584,6 +577,7 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                 output_files.append(orig_pdf_file_path)
 
         try:
+            print("Saving review file.")
             review_df = convert_annotation_json_to_review_df(all_image_annotations, review_file_state.copy(), page_sizes=page_sizes)[["image",	"page",	"label","color", "xmin", "ymin", "xmax", "ymax", "text"]]#.drop_duplicates(subset=["image",	"page",	"text",	"label","color", "xmin", "ymin", "xmax", "ymax"])
             out_review_file_file_path = output_folder + file_name_with_ext + '_review_file.csv'
 
@@ -765,11 +759,20 @@ def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
 def df_select_callback_cost(df: pd.DataFrame, evt: gr.SelectData):
 
         row_value_code = evt.row_value[0] # This is the value for cost code
-        row_value_label = evt.row_value[1] # This is the label number value
+        #row_value_label = evt.row_value[1] # This is the label number value
 
         #row_value_df = pd.DataFrame(data={"page":[row_value_code], "label":[row_value_label]})
 
         return row_value_code
+
+def df_select_callback_ocr(df: pd.DataFrame, evt: gr.SelectData):
+
+        row_value_page = evt.row_value[0] # This is the page_number value
+        row_value_text = evt.row_value[1] # This is the text contents
+
+        row_value_df = pd.DataFrame(data={"page":[row_value_page], "text":[row_value_text]})
+
+        return row_value_page, row_value_df
 
 def update_selected_review_df_row_colour(redaction_row_selection:pd.DataFrame, review_df:pd.DataFrame, colour:tuple=(0,0,255)):
     '''
@@ -889,12 +892,12 @@ def create_xfdf(review_file_df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, i
     annots = SubElement(xfdf, 'annots')
 
     # Check if page size object exists, and if current coordinates are in relative format or image coordinates format.
-    if page_sizes:        
+    if page_sizes: 
+        
         page_sizes_df = pd.DataFrame(page_sizes)
 
         # If there are no image coordinates, then convert coordinates to pymupdf coordinates prior to export
-        #if len(page_sizes_df.loc[page_sizes_df["image_width"].isnull(),"image_width"]) == len(page_sizes_df["image_width"]):
-        print("Using pymupdf coordinates for conversion.")
+        #print("Using pymupdf coordinates for conversion.")
 
         pages_are_images = False
 

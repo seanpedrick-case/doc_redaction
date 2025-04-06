@@ -100,6 +100,7 @@ def choose_and_run_redactor(file_paths:List[str],
  review_file_path:str="",
  input_folder:str=INPUT_FOLDER,
  textract_query_number:int=0,
+ ocr_file_path:str="",
  prepare_images:bool=True,
  progress=gr.Progress(track_tqdm=True)):
     '''
@@ -148,6 +149,7 @@ def choose_and_run_redactor(file_paths:List[str],
     - review_file_path (str, optional): The latest review file path created by the app
     - input_folder (str, optional): The custom input path, if provided
     - textract_query_number (int, optional): The number of textract queries up until this point.
+    - ocr_file_path (str, optional): The latest ocr file path created by the app
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
@@ -211,9 +213,9 @@ def choose_and_run_redactor(file_paths:List[str],
         print("Completed last file")
         current_loop_page = 0
 
-        if isinstance(out_message, list):
+        if isinstance(out_message, list) and out_message:
             combined_out_message = combined_out_message + '\n'.join(out_message)
-        else:
+        elif out_message:
             combined_out_message = combined_out_message + '\n' + out_message
 
         # Only send across review file if redaction has been done
@@ -226,7 +228,7 @@ def choose_and_run_redactor(file_paths:List[str],
         estimate_total_processing_time = sum_numbers_before_seconds(combined_out_message)
         print("Estimated total processing time:", str(estimate_total_processing_time))
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, textract_query_number
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, textract_query_number, ocr_file_path
 
     #if first_loop_state == False:
     # Prepare documents and images as required if they don't already exist
@@ -257,7 +259,7 @@ def choose_and_run_redactor(file_paths:List[str],
     # Call prepare_image_or_pdf only if needed
     if prepare_images_flag is not None:# and first_loop_state==True:
         #print("Calling preparation function. prepare_images_flag:", prepare_images_flag)
-        out_message, prepared_pdf_file_paths, pdf_image_file_paths, annotate_max_pages, annotate_max_pages_bottom, pymupdf_doc, annotations_all_pages, review_file_state, document_cropboxes, page_sizes, textract_output_found, all_img_details_state = prepare_image_or_pdf(
+        out_message, prepared_pdf_file_paths, pdf_image_file_paths, annotate_max_pages, annotate_max_pages_bottom, pymupdf_doc, annotations_all_pages, review_file_state, document_cropboxes, page_sizes, textract_output_found, all_img_details_state, placeholder_ocr_results_df = prepare_image_or_pdf(
             file_paths_loop, text_extraction_method, 0, out_message, True, 
             annotate_max_pages, annotations_all_pages, document_cropboxes, redact_whole_page_list, 
             output_folder, prepare_images=prepare_images_flag, page_sizes=page_sizes, input_folder=input_folder
@@ -279,7 +281,8 @@ def choose_and_run_redactor(file_paths:List[str],
 
         # Set to a very high number so as not to mix up with subsequent file processing by the user
         current_loop_page = 999
-        combined_out_message = combined_out_message + "\n" + out_message
+        if out_message:
+            combined_out_message = combined_out_message + "\n" + out_message
 
         # Only send across review file if redaction has been done
         if pii_identification_method != no_redaction_option:
@@ -288,7 +291,7 @@ def choose_and_run_redactor(file_paths:List[str],
                 #review_file_path = [x for x in out_file_paths if "review_file" in x]
                 if review_file_path: review_out_file_paths.append(review_file_path)
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, textract_query_number
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, textract_query_number, ocr_file_path
 
     # Load/create allow list
     # If string, assume file path
@@ -513,14 +516,14 @@ def choose_and_run_redactor(file_paths:List[str],
                 all_line_level_ocr_results_df = all_line_level_ocr_results_df[["page", "text", "left", "top", "width", "height"]]
             else: all_line_level_ocr_results_df = pd.DataFrame(columns=["page", "text", "left", "top", "width", "height"])
            
-            all_text_output_file_name = orig_pdf_file_path + "_ocr_output.csv"
+            ocr_file_path = orig_pdf_file_path + "_ocr_output.csv"
 
             all_line_level_ocr_results_df.sort_values(["page", "top", "left"], inplace=True)
 
-            all_line_level_ocr_results_df.to_csv(all_text_output_file_name, index = None, encoding="utf-8")
-            out_file_paths.append(all_text_output_file_name)
+            all_line_level_ocr_results_df.to_csv(ocr_file_path, index = None, encoding="utf-8")
+            out_file_paths.append(ocr_file_path)
 
-            duplication_file_path_outputs.append(all_text_output_file_name)
+            duplication_file_path_outputs.append(ocr_file_path)
 
             # Convert the gradio annotation boxes to relative coordinates
             # Convert annotations_all_pages to a consistent relative coordinate format output
@@ -543,9 +546,10 @@ def choose_and_run_redactor(file_paths:List[str],
                 out_file_paths.append(review_file_path)
 
             # Make a combined message for the file                
-            if isinstance(out_message, list):
+            if isinstance(out_message, list) and out_message:
                 combined_out_message = combined_out_message + '\n'.join(out_message)  # Ensure out_message is a list of strings
-            else: combined_out_message = combined_out_message + '\n' + out_message
+            elif out_message:
+                combined_out_message = combined_out_message + '\n' + out_message
 
             toc = time.perf_counter()
             time_taken = toc - tic
@@ -588,7 +592,7 @@ def choose_and_run_redactor(file_paths:List[str],
     if not review_file_path: review_out_file_paths = [prepared_pdf_file_paths[-1]]
     else: review_out_file_paths = [prepared_pdf_file_paths[-1], review_file_path]
 
-    return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, textract_query_number
+    return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, textract_query_number, ocr_file_path
 
 def convert_pikepdf_coords_to_pymupdf(pymupdf_page:Page, pikepdf_bbox, type="pikepdf_annot"):
     '''
