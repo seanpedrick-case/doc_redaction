@@ -251,7 +251,7 @@ def get_input_file_names(file_input:List[str]):
         file_extension = os.path.splitext(file_path)[1].lower()
 
         # Check if the file is in acceptable types
-        if (file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet']) & ("review_file" not in file_path_without_ext):
+        if (file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet']) & ("review_file" not in file_path_without_ext) & ("ocr_output" not in file_path_without_ext):
             all_relevant_files.append(file_path_without_ext)
             file_name_with_extension = file_path_without_ext + file_extension
             full_file_name = file_path
@@ -480,6 +480,7 @@ def prepare_image_or_pdf(
     pymupdf_doc = []
     all_img_details = []    
     review_file_csv = pd.DataFrame()
+    all_line_level_ocr_results_df = pd.DataFrame()
 
     if isinstance(in_fully_redacted_list, pd.DataFrame):
         if not in_fully_redacted_list.empty:
@@ -512,7 +513,7 @@ def prepare_image_or_pdf(
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details
+        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df
 
     progress(0.1, desc='Preparing file')
 
@@ -600,11 +601,17 @@ def prepare_image_or_pdf(
             pymupdf_doc.save(converted_file_path, garbage=4, deflate=True, clean=True)
 
         elif file_extension in ['.csv']:
-            review_file_csv = read_file(file)
-            all_annotations_object = convert_review_df_to_annotation_json(review_file_csv, image_file_paths, page_sizes)
-            json_from_csv = True
-            print("Converted CSV review file to json")
+            if '_review_file' in file_path_without_ext:
+                #print("file_path:", file_path)
+                review_file_csv = read_file(file_path)
+                all_annotations_object = convert_review_df_to_annotation_json(review_file_csv, image_file_paths, page_sizes)
+                json_from_csv = True
+                print("Converted CSV review file to image annotation object")
+            elif '_ocr_output' in file_path_without_ext:
+                all_line_level_ocr_results_df = read_file(file_path)
+                json_from_csv = False
 
+        # NEW IF STATEMENT
         # If the file name ends with redactions.json, assume it is an annoations object, overwrite the current variable
         if (file_extension in ['.json']) | (json_from_csv == True):
 
@@ -623,11 +630,10 @@ def prepare_image_or_pdf(
 
                 # Use shutil to copy the file directly
                 shutil.copy2(file_path, out_textract_path)  # Preserves metadata
-
-                textract_output_found = True
-                
+                textract_output_found = True                
                 continue
 
+            # NEW IF STATEMENT
             # If you have an annotations object from the above code
             if all_annotations_object:
 
@@ -669,7 +675,6 @@ def prepare_image_or_pdf(
                             print("Page", annotation_page_number, "image file not found.")
 
                         all_annotations_object[i] = annotation
-
                 
                 if isinstance(in_fully_redacted_list, list):
                     in_fully_redacted_list = pd.DataFrame(data={"fully_redacted_pages_list":in_fully_redacted_list})
@@ -717,6 +722,9 @@ def prepare_image_or_pdf(
                 else:
                     print(f"Skipping {file_path}: Expected 1 JSON file, found {len(json_files)}")
 
+        elif file_extension in ['.csv'] and "ocr_output" in file_path:
+            continue
+
         # Must be something else, return with error message
         else:
             if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
@@ -744,7 +752,7 @@ def prepare_image_or_pdf(
 
     number_of_pages = len(image_file_paths)
         
-    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details
+    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi, output_folder:str=OUTPUT_FOLDER, input_folder:str=INPUT_FOLDER):
     file_path_without_ext = get_file_name_without_type(in_file_path)
@@ -1196,7 +1204,7 @@ def create_annotation_dicts_from_annotation_df(
 
     # Check if the DataFrame is empty or lacks necessary columns
     if all_image_annotations_df.empty or 'image' not in all_image_annotations_df.columns:
-        print("Warning: Annotation DataFrame is empty or missing 'image' column.")
+        #print("Warning: Annotation DataFrame is empty or missing 'image' column.")
         return list(image_dict.values()) # Return based on page_sizes only
 
     # 2. Define columns to extract for boxes and check availability

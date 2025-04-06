@@ -53,7 +53,7 @@ def load_in_default_cost_codes(cost_codes_path:str):
 
     out_dropdown = gr.Dropdown(value="", label="Choose cost code for analysis", choices=dropdown_choices, allow_custom_value=True)
     
-    return cost_codes_df, out_dropdown
+    return cost_codes_df, cost_codes_df, out_dropdown
 
 def enforce_cost_codes(enforce_cost_code_textbox, cost_code_choice):
     if enforce_cost_code_textbox == "True":
@@ -485,4 +485,10 @@ def calculate_time_taken(number_of_pages:str,
     calculated_time_taken = (page_conversion_time_taken + page_extraction_time_taken + page_redaction_time_taken)/60
 
     return calculated_time_taken
+
+def reset_base_dataframe(df:pd.DataFrame):
+    return df
+
+def reset_ocr_base_dataframe(df:pd.DataFrame):
+    return df.iloc[:, [0,1]]
     

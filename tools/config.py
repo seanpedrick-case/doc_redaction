@@ -161,7 +161,7 @@ COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', '') # 'config/COST_CE
 
 S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', '') # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
 
-ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, are they compulsory?
+ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, is it compulsory to choose one before redacting?
 
 if ENFORCE_COST_CODES == 'True': GET_COST_CODES = 'True'
 if GET_COST_CODES == 'True': ENFORCE_COST_CODES = 'False'
