@@ -577,7 +577,7 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                 output_files.append(orig_pdf_file_path)
 
         try:
-            print("Saving review file.")
+            #print("Saving review file.")
             review_df = convert_annotation_json_to_review_df(all_image_annotations, review_file_state.copy(), page_sizes=page_sizes)[["image",	"page",	"label","color", "xmin", "ymin", "xmax", "ymax", "text"]]#.drop_duplicates(subset=["image",	"page",	"text",	"label","color", "xmin", "ymin", "xmax", "ymax"])
             out_review_file_file_path = output_folder + file_name_with_ext + '_review_file.csv'
 
@@ -755,6 +755,18 @@ def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
         row_value_df = pd.DataFrame(data={"page":[row_value_page], "label":[row_value_label], "text":[row_value_text]})
 
         return row_value_page, row_value_df
+
+def df_select_callback_textract_api(df: pd.DataFrame, evt: gr.SelectData):
+        
+        #print("evt.data:", evt._data)
+
+        row_value_job_id = evt.row_value[0] # This is the page number value
+        # row_value_label = evt.row_value[1] # This is the label number value
+        row_value_job_type = evt.row_value[2] # This is the text number value
+
+        row_value_df = pd.DataFrame(data={"job_id":[row_value_job_id], "label":[row_value_job_type]})
+
+        return row_value_job_id, row_value_job_type, row_value_df
 
 def df_select_callback_cost(df: pd.DataFrame, evt: gr.SelectData):
 

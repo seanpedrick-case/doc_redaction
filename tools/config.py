@@ -1,12 +1,13 @@
 import os
 import tempfile
 import socket
+import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from tldextract import TLDExtract
 
 today_rev = datetime.now().strftime("%Y%m%d")
-host_name = socket.gethostname()
+HOST_NAME = socket.gethostname()
 
 # Set or retrieve configuration variables for the redaction app
 
@@ -28,28 +29,40 @@ def get_or_create_env_var(var_name:str, default_value:str, print_val:bool=False)
     return value
 
 
-# If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. '/env/app_config.env'
-APP_CONFIG_PATH = get_or_create_env_var('APP_CONFIG_PATH', '')
+# If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
+APP_CONFIG_PATH = get_or_create_env_var('APP_CONFIG_PATH', 'config/app_config.env')
 
+if APP_CONFIG_PATH:
+    if os.path.exists(APP_CONFIG_PATH):
+        print(f"Loading app variables from config file {APP_CONFIG_PATH}")
+        load_dotenv(APP_CONFIG_PATH)
+    else:
+        print("App config file not found at location:", APP_CONFIG_PATH)
 
-if os.path.exists(APP_CONFIG_PATH):
-    print(f"Loading APP variables from config file {APP_CONFIG_PATH}")
-    load_dotenv(APP_CONFIG_PATH)
+# Report logging to console?
+LOGGING = get_or_create_env_var('LOGGING', 'False')
+
+if LOGGING == 'True':
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 ###
 # AWS CONFIG
 ###
 
-# If you have an aws_config env file in the config folder, you can load in AWS keys this way, e.g. '/env/aws_config.env'
-AWS_CONFIG_PATH = get_or_create_env_var('AWS_CONFIG_PATH', '')
+# If you have an aws_config env file in the config folder, you can load in AWS keys this way, e.g. 'env/aws_config.env'
+AWS_CONFIG_PATH = get_or_create_env_var('AWS_CONFIG_PATH', 'config/aws_config.env')
 
-if os.path.exists(AWS_CONFIG_PATH):
-    print(f"Loading AWS variables from config file {AWS_CONFIG_PATH}")
-    load_dotenv(AWS_CONFIG_PATH)
+if AWS_CONFIG_PATH:
+    if os.path.exists(AWS_CONFIG_PATH):
+        print(f"Loading AWS variables from config file {AWS_CONFIG_PATH}")
+        load_dotenv(AWS_CONFIG_PATH)
+    else:
+        print("AWS config file not found at location:", AWS_CONFIG_PATH)
 
 RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
 
-AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
+AWS_REGION = get_or_create_env_var('AWS_REGION', '')
 
 AWS_CLIENT_ID = get_or_create_env_var('AWS_CLIENT_ID', '')
 
@@ -65,14 +78,28 @@ if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
 
 DOCUMENT_REDACTION_BUCKET = get_or_create_env_var('DOCUMENT_REDACTION_BUCKET', '')
 
+SHOW_BULK_TEXTRACT_CALL_OPTIONS = get_or_create_env_var('SHOW_BULK_TEXTRACT_CALL_OPTIONS', 'False') # This feature not currently implemented
+
+TEXTRACT_BULK_ANALYSIS_BUCKET = get_or_create_env_var('TEXTRACT_BULK_ANALYSIS_BUCKET', '')
+
+TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER = get_or_create_env_var('TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER', 'input')
+
+TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER = get_or_create_env_var('TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER', 'output')
+
+LOAD_PREVIOUS_TEXTRACT_JOBS_S3 = get_or_create_env_var('LOAD_PREVIOUS_TEXTRACT_JOBS_S3', 'False') # Whether or not to load previous Textract jobs from S3
+
+TEXTRACT_JOBS_S3_LOC = get_or_create_env_var('TEXTRACT_JOBS_S3_LOC', 'output') # Subfolder in the DOCUMENT_REDACTION_BUCKET where the Textract jobs are stored
+
+TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var('TEXTRACT_JOBS_LOCAL_LOC', 'output') # Local subfolder where the Textract jobs are stored
+
 # Custom headers e.g. if routing traffic through Cloudfront
 # Retrieving or setting CUSTOM_HEADER
 CUSTOM_HEADER = get_or_create_env_var('CUSTOM_HEADER', '')
-if CUSTOM_HEADER: print(f'CUSTOM_HEADER found')
+#if CUSTOM_HEADER: print(f'CUSTOM_HEADER found')
 
 # Retrieving or setting CUSTOM_HEADER_VALUE
 CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', '')
-if CUSTOM_HEADER_VALUE: print(f'CUSTOM_HEADER_VALUE found')
+#if CUSTOM_HEADER_VALUE: print(f'CUSTOM_HEADER_VALUE found')
 
 ###
 # Images config
@@ -84,8 +111,7 @@ MAX_IMAGE_PIXELS = get_or_create_env_var('MAX_IMAGE_PIXELS', '') # Changed to No
 ###
 # File I/O config
 ###
-
-SESSION_OUTPUT_FOLDER = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'True') # i.e. do you want your input and output folders saved within a subfolder based on session hash value within output/input folders 
+SESSION_OUTPUT_FOLDER = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'False') # i.e. do you want your input and output folders saved within a subfolder based on session hash value within output/input folders 
 
 OUTPUT_FOLDER = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/') # 'output/'
 INPUT_FOLDER = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/') # 'input/'
@@ -99,12 +125,14 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
         if OUTPUT_FOLDER == "TEMP": OUTPUT_FOLDER = temp_dir + "/"
         if INPUT_FOLDER == "TEMP": INPUT_FOLDER = temp_dir + "/"
 
-FEEDBACK_LOGS_FOLDER = get_or_create_env_var('FEEDBACK_LOGS_FOLDER', 'feedback/' + today_rev + '/' + host_name + '/')
+# By default, logs are put into a subfolder of today's date and the host name of the instance running the app. This is to avoid at all possible the possibility of log files from one instance overwriting the logs of another instance on S3. If running the app on one system always, or just locally, it is not necessary to make the log folders so specific.
+# Another way to address this issue would be to write logs to another type of storage, e.g. database such as dynamodb. I may look into this in future.
 
-USAGE_LOGS_FOLDER = get_or_create_env_var('USAGE_LOGS_FOLDER', 'logs/' + today_rev + '/' + host_name + '/')
+FEEDBACK_LOGS_FOLDER = get_or_create_env_var('FEEDBACK_LOGS_FOLDER', 'feedback/' + today_rev + '/' + HOST_NAME + '/')
+ACCESS_LOGS_FOLDER = get_or_create_env_var('ACCESS_LOGS_FOLDER', 'logs/' + today_rev + '/' + HOST_NAME + '/')
+USAGE_LOGS_FOLDER = get_or_create_env_var('USAGE_LOGS_FOLDER', 'usage/' + today_rev + '/' + HOST_NAME + '/')
 
-ACCESS_LOGS_FOLDER = get_or_create_env_var('ACCESS_LOGS_FOLDER', 'usage/' + today_rev + '/' + host_name + '/')
-
+# Should the redacted file name be included in the logs? In some instances, the names of the files themselves could be sensitive, and should not be disclosed beyond the app. So, by default this is false.
 DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS', 'False')
 
 ###
@@ -114,7 +142,6 @@ TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "tesseract/")
 
 POPPLER_FOLDER = get_or_create_env_var('POPPLER_FOLDER', "poppler/poppler-24.02.0/Library/bin/")
 
-SHOW_BULK_TEXTRACT_CALL_OPTIONS = get_or_create_env_var('SHOW_BULK_TEXTRACT_CALL_OPTIONS', 'False') # This feature not currently implemented
 
 # Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).
 PAGE_BREAK_VALUE = get_or_create_env_var('PAGE_BREAK_VALUE', '99999')
@@ -153,9 +180,11 @@ ALLOW_LIST_PATH = get_or_create_env_var('ALLOW_LIST_PATH', '') # config/default_
 
 S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_allow_list.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
 
-SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'True')
+SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'False')
 
 GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'False')
+
+DEFAULT_COST_CODE = get_or_create_env_var('DEFAULT_COST_CODE', '')
 
 COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', '') # 'config/COST_CENTRES.csv' # file should be a csv file with a single table in it that has two columns with a header. First column should contain cost codes, second column should contain a name or description for the cost code
 
@@ -164,4 +193,3 @@ S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', '') # COST_CENT
 ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, is it compulsory to choose one before redacting?
 
 if ENFORCE_COST_CODES == 'True': GET_COST_CODES = 'True'
-if GET_COST_CODES == 'True': ENFORCE_COST_CODES = 'False'

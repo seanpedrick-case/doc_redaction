@@ -181,7 +181,7 @@ def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min
     widths = [result[2] for result in results]
     heights = [result[3] for result in results]
 
-    print("PDF has been converted to images.")
+    #print("PDF has been converted to images.")
     return images, widths, heights, results
 
 # Function to take in a file path, decide if it is an image or pdf, then process appropriately.
@@ -208,7 +208,7 @@ def process_file_for_image_creation(file_path:str, prepare_for_review:bool=False
 
     # Check if the file is a PDF
     elif file_extension == '.pdf':
-        print(f"{file_path} is a PDF file. Converting to image set")
+        # print(f"{file_path} is a PDF file. Converting to image set")
 
         # Run your function for processing PDF files here
         img_path, image_sizes_width, image_sizes_height, all_img_details = convert_pdf_to_images(file_path, prepare_for_review, input_folder=input_folder, create_images=create_images)
@@ -417,12 +417,29 @@ def create_page_size_objects(pymupdf_doc:Document, image_sizes_width:List[float]
         pymupdf_page = pymupdf_doc.load_page(page_no)
         original_cropboxes.append(pymupdf_page.cropbox)  # Save original CropBox
 
-        # Create a page_sizes_object.
-        # If images have been created, then image width an height come from this value. Otherwise, they are set to the cropbox size
+        # Create a page_sizes_object. If images have been created, then image width an height come from this value. Otherwise, they are set to the cropbox size        
+        out_page_image_sizes = {
+            "page":reported_page_no,                                            
+            "mediabox_width":pymupdf_page.mediabox.width,
+            "mediabox_height": pymupdf_page.mediabox.height,
+            "cropbox_width":pymupdf_page.cropbox.width,
+            "cropbox_height":pymupdf_page.cropbox.height,
+            "original_cropbox":original_cropboxes[-1],
+            "image_path":image_file_paths[page_no]}
+        
+        # cropbox_x_offset: Distance from MediaBox left edge to CropBox left edge
+        # This is simply the difference in their x0 coordinates.
+        out_page_image_sizes['cropbox_x_offset'] = pymupdf_page.cropbox.x0 - pymupdf_page.mediabox.x0
+
+        # cropbox_y_offset_from_top: Distance from MediaBox top edge to CropBox top edge
+        # MediaBox top y = mediabox.y1
+        # CropBox top y = cropbox.y1
+        # The difference is mediabox.y1 - cropbox.y1
+        out_page_image_sizes['cropbox_y_offset_from_top'] = pymupdf_page.mediabox.y1 - pymupdf_page.cropbox.y1
+        
         if image_sizes_width and image_sizes_height:
-            out_page_image_sizes = {"page":reported_page_no, "image_path":image_file_paths[page_no], "image_width":image_sizes_width[page_no], "image_height":image_sizes_height[page_no], "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":pymupdf_page.cropbox.width, "cropbox_height":pymupdf_page.cropbox.height, "original_cropbox":original_cropboxes[-1]}
-        else:
-            out_page_image_sizes = {"page":reported_page_no, "image_path":image_file_paths[page_no], "image_width":pd.NA, "image_height":pd.NA, "mediabox_width":pymupdf_page.mediabox.width, "mediabox_height": pymupdf_page.mediabox.height, "cropbox_width":pymupdf_page.cropbox.width, "cropbox_height":pymupdf_page.cropbox.height, "original_cropbox":original_cropboxes[-1]}
+            out_page_image_sizes["image_width"] = image_sizes_width[page_no]
+            out_page_image_sizes["image_height"] = image_sizes_height[page_no]        
         
         page_sizes.append(out_page_image_sizes)
 
@@ -434,7 +451,7 @@ def prepare_image_or_pdf(
     latest_file_completed: int = 0,
     out_message: List[str] = [],
     first_loop_state: bool = False,
-    number_of_pages:int = 1,
+    number_of_pages:int = 0,
     all_annotations_object:List = [],
     prepare_for_review:bool = False,
     in_fully_redacted_list:List[int]=[],
@@ -481,6 +498,9 @@ def prepare_image_or_pdf(
     all_img_details = []    
     review_file_csv = pd.DataFrame()
     all_line_level_ocr_results_df = pd.DataFrame()
+    out_textract_path = ""
+    combined_out_message = ""
+    final_out_message = ""
 
     if isinstance(in_fully_redacted_list, pd.DataFrame):
         if not in_fully_redacted_list.empty:
@@ -494,7 +514,7 @@ def prepare_image_or_pdf(
     else:
         print("Now redacting file", str(latest_file_completed))
   
-    # If out message or converted_file_paths are blank, change to a list so it can be appended to
+    # If combined out message or converted_file_paths are blank, change to a list so it can be appended to
     if isinstance(out_message, str): out_message = [out_message]
 
     if not file_paths: file_paths = []
@@ -521,15 +541,9 @@ def prepare_image_or_pdf(
         file_paths_list = [file_paths]
         file_paths_loop = file_paths_list
     else:
-        if prepare_for_review == False:
-            file_paths_list = file_paths
-            file_paths_loop = [file_paths_list[int(latest_file_completed)]]
-        else:
-            file_paths_list = file_paths
-            file_paths_loop = file_paths
-             # Sort files to prioritise PDF files first, then JSON files. This means that the pdf can be loaded in, and pdf page path locations can be added to the json
-            file_paths_loop = sorted(file_paths_loop, key=lambda x: (os.path.splitext(x)[1] != '.pdf', os.path.splitext(x)[1] != '.json'))      
-
+        file_paths_list = file_paths
+        file_paths_loop = sorted(file_paths_list, key=lambda x: (os.path.splitext(x)[1] != '.pdf', os.path.splitext(x)[1] != '.json')) 
+        
     # Loop through files to load in
     for file in file_paths_loop:
         converted_file_path = []
@@ -592,7 +606,6 @@ def prepare_image_or_pdf(
 
             image_file_paths, image_sizes_width, image_sizes_height, all_img_details = process_file_for_image_creation(file_path_str, prepare_for_review, input_folder, create_images=True)
 
-
             # Create a page_sizes_object
             page_sizes, original_cropboxes = create_page_size_objects(pymupdf_doc, image_sizes_width, image_sizes_height, image_file_paths)
 
@@ -612,7 +625,8 @@ def prepare_image_or_pdf(
                 json_from_csv = False
 
         # NEW IF STATEMENT
-        # If the file name ends with redactions.json, assume it is an annoations object, overwrite the current variable
+        # If the file name ends with .json, check if we are loading for review. If yes, assume it is an annoations object, overwrite the current annotations object. If false, assume this is a Textract object, load in to Textract
+
         if (file_extension in ['.json']) | (json_from_csv == True):
 
             if (file_extension in ['.json']) &  (prepare_for_review == True):
@@ -624,9 +638,14 @@ def prepare_image_or_pdf(
                     all_annotations_object = json.loads(file_path)  # Use loads for string content
 
             # Assume it's a textract json
-            elif (file_extension == '.json') and (prepare_for_review is not True):
+            elif (file_extension in ['.json']) and (prepare_for_review != True):
+                print("Saving Textract output")
                 # Copy it to the output folder so it can be used later.
-                out_textract_path = os.path.join(output_folder, file_path_without_ext + "_textract.json")
+                output_textract_json_file_name = file_path_without_ext
+                if not file_path.endswith("_textract.json"): output_textract_json_file_name = file_path_without_ext + "_textract.json"
+                else: output_textract_json_file_name = file_path_without_ext + ".json"
+
+                out_textract_path = os.path.join(output_folder, output_textract_json_file_name)
 
                 # Use shutil to copy the file directly
                 shutil.copy2(file_path, out_textract_path)  # Preserves metadata
@@ -748,11 +767,11 @@ def prepare_image_or_pdf(
         print(out_time)
 
         out_message.append(out_time)
-        out_message_out = '\n'.join(out_message)
+        combined_out_message = '\n'.join(out_message)
 
-    number_of_pages = len(image_file_paths)
+    number_of_pages = len(page_sizes)#len(image_file_paths)
         
-    return out_message_out, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df
+    return combined_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi, output_folder:str=OUTPUT_FOLDER, input_folder:str=INPUT_FOLDER):
     file_path_without_ext = get_file_name_without_type(in_file_path)

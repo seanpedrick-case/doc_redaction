@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm AS builder
 
 # Install system dependencies. Need to specify -y for poppler to get it to install
 RUN apt-get update \
@@ -27,7 +27,7 @@ COPY lambda_entrypoint.py .
 COPY entrypoint.sh .
 
 # Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
+FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm
 
 # Define a build argument with a default value
 ARG APP_MODE=gradio

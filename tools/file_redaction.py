@@ -205,7 +205,7 @@ def choose_and_run_redactor(file_paths:List[str],
     latest_file_completed = int(latest_file_completed)
 
     if isinstance(file_paths,str): number_of_files = 1
-    else: number_of_files = len(file_paths)
+    else: number_of_files = len(file_paths_list)
 
     # If we have already redacted the last file, return the input out_message and file list to the relevant outputs
     if latest_file_completed >= number_of_files:
@@ -764,28 +764,66 @@ def move_page_info(file_path: str) -> str:
     
     return new_file_path
 
-def prepare_custom_image_recogniser_result_annotation_box(page:Page, annot:dict, image:Image):
+def prepare_custom_image_recogniser_result_annotation_box(page:Page, annot:dict, image:Image, page_sizes_df:pd.DataFrame):
     '''
     Prepare an image annotation box and coordinates based on a CustomImageRecogniserResult, PyMuPDF page, and PIL Image.
     '''
 
     img_annotation_box = {}
 
+    # For efficient lookup, set 'page' as index if it's not already
+    if 'page' in page_sizes_df.columns:
+        page_sizes_df = page_sizes_df.set_index('page')
+    # PyMuPDF page numbers are 0-based, DataFrame index assumed 1-based
+    page_num_one_based = page.number + 1
+
+    pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = 0, 0, 0, 0 # Initialize defaults
+
+
     if image:
         pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = convert_image_coords_to_pymupdf(page, annot, image)
+        
     else:
-        pymupdf_x1 = annot.left
-        pymupdf_x2 = annot.left + annot.width
-        pymupdf_y1 = annot.top
-        pymupdf_y2 = annot.top + annot.height
+        # --- Calculate coordinates when no image is present ---
+        # Assumes annot coords are normalized relative to MediaBox (top-left origin)
+        try:
+            # 1. Get MediaBox dimensions from the DataFrame
+            page_info = page_sizes_df.loc[page_num_one_based]
+            mb_width = page_info['mediabox_width']
+            mb_height = page_info['mediabox_height']
+            x_offset = page_info['cropbox_x_offset']
+            y_offset = page_info['cropbox_y_offset_from_top']
 
-    x1 = pymupdf_x1
-    x2 = pymupdf_x2
 
-    img_annotation_box["xmin"] = annot.left
-    img_annotation_box["ymin"] = annot.top 
-    img_annotation_box["xmax"] = annot.left + annot.width
-    img_annotation_box["ymax"] = annot.top + annot.height
+            # Check for invalid dimensions
+            if mb_width <= 0 or mb_height <= 0:
+                print(f"Warning: Invalid MediaBox dimensions ({mb_width}x{mb_height}) for page {page_num_one_based}. Setting coords to 0.")
+            else:
+                pymupdf_x1 = annot.left - x_offset
+                pymupdf_x2 = annot.left + annot.width - x_offset
+                pymupdf_y1 = annot.top - y_offset
+                pymupdf_y2 = annot.top + annot.height - y_offset
+
+        except KeyError:
+            print(f"Warning: Page number {page_num_one_based} not found in page_sizes_df. Cannot get MediaBox dimensions. Setting coords to 0.")
+        except AttributeError as e:
+             print(f"Error accessing attributes ('left', 'top', etc.) on 'annot' object for page {page_num_one_based}: {e}")
+        except Exception as e:
+            print(f"Error during coordinate calculation for page {page_num_one_based}: {e}")
+
+    rect = Rect(pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2)  # Create the PyMuPDF Rect
+
+    # Now creating image annotation object
+    image_x1 = annot.left
+    image_x2 = annot.left + annot.width
+    image_y1 = annot.top
+    image_y2 = annot.top + annot.height
+
+    # Create image annotation boxes
+    img_annotation_box["xmin"] = image_x1
+    img_annotation_box["ymin"] = image_y1 
+    img_annotation_box["xmax"] = image_x2 # annot.left + annot.width
+    img_annotation_box["ymax"] = image_y2 # annot.top + annot.height
     img_annotation_box["color"] = (0,0,0)
     try:
         img_annotation_box["label"] = str(annot.entity_type)
@@ -795,11 +833,10 @@ def prepare_custom_image_recogniser_result_annotation_box(page:Page, annot:dict,
     if hasattr(annot, 'text') and annot.text:
         img_annotation_box["text"] = str(annot.text)
     else:
-        img_annotation_box["text"] = ""
-
-    rect = Rect(x1, pymupdf_y1, x2, pymupdf_y2)  # Create the PyMuPDF Rect
+        img_annotation_box["text"] = ""    
 
     return img_annotation_box, rect
+
 
 def convert_pikepdf_annotations_to_result_annotation_box(page:Page, annot:dict, image:Image=None, convert_pikepdf_to_pymupdf_coords:bool=True, page_sizes_df:pd.DataFrame=pd.DataFrame(), image_dimensions:dict={}):
     '''
@@ -951,8 +988,9 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
                 rect = Rect(pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2)  # Create the PyMuPDF Rect
 
             # Else should be CustomImageRecognizerResult
-            elif isinstance(annot, CustomImageRecognizerResult):               
-                img_annotation_box, rect = prepare_custom_image_recogniser_result_annotation_box(page, annot, image)
+            elif isinstance(annot, CustomImageRecognizerResult):
+                #print("annot is a CustomImageRecognizerResult")           
+                img_annotation_box, rect = prepare_custom_image_recogniser_result_annotation_box(page, annot, image, page_sizes_df)
 
         # Else it should be a pikepdf annotation object
         else:
@@ -1211,7 +1249,7 @@ def redact_image_pdf(file_path:str,
     # If running Textract, check if file already exists. If it does, load in existing data
     if text_extraction_method == textract_option:                
         textract_json_file_path = output_folder + file_name + "_textract.json"
-        textract_data, is_missing, log_files_output_paths = load_and_convert_textract_json(textract_json_file_path, log_files_output_paths)
+        textract_data, is_missing, log_files_output_paths = load_and_convert_textract_json(textract_json_file_path, log_files_output_paths, page_sizes_df)
         original_textract_data = textract_data.copy()
 
     ###
