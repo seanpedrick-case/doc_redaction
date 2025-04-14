@@ -648,7 +648,7 @@ with app:
 
     # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location
     if GET_DEFAULT_ALLOW_LIST == "True" and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
-        if not os.path.exists(ALLOW_LIST_PATH) and S3_ALLOW_LIST_PATH:
+        if not os.path.exists(ALLOW_LIST_PATH) and S3_ALLOW_LIST_PATH and RUN_AWS_FUNCTIONS == 1:
             app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_allow_list_file, default_allow_list_output_folder_location]).\
             success(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
             print("Successfully loaded allow list from S3")
@@ -659,7 +659,7 @@ with app:
 
     # If relevant environment variable is set, load in the default cost code file from S3 or locally
     if GET_COST_CODES == "True" and (COST_CODES_PATH or S3_COST_CODES_PATH):  
-        if not os.path.exists(COST_CODES_PATH) and S3_COST_CODES_PATH:
+        if not os.path.exists(COST_CODES_PATH) and S3_COST_CODES_PATH and RUN_AWS_FUNCTIONS == 1:
             app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_cost_codes_file, default_cost_codes_output_folder_location]).\
             success(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location, default_cost_code_textbox], outputs=[cost_code_dataframe, cost_code_dataframe_base, cost_code_choice_drop])
             print("Successfully loaded cost codes from S3")

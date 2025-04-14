@@ -40,9 +40,20 @@ if RUN_AWS_FUNCTIONS == "1":
 def download_file_from_s3(bucket_name:str, key:str, local_file_path_and_name:str, RUN_AWS_FUNCTIONS:str = RUN_AWS_FUNCTIONS):
 
     if RUN_AWS_FUNCTIONS == "1":
-        s3 = boto3.client('s3', region_name=AWS_REGION)
-        s3.download_file(bucket_name, key, local_file_path_and_name)
-        print(f"File downloaded from s3://{bucket_name}/{key} to {local_file_path_and_name}")
+
+        try:
+            print("bucket_name:", bucket_name)
+            print("key:", key)
+            print("local_file_path_and_name:", local_file_path_and_name)
+
+            # Ensure the local directory exists
+            os.makedirs(os.path.dirname(local_file_path_and_name), exist_ok=True)
+
+            s3 = boto3.client('s3', region_name=AWS_REGION)
+            s3.download_file(bucket_name, key, local_file_path_and_name)
+            print(f"File downloaded from s3://{bucket_name}/{key} to {local_file_path_and_name}")
+        except Exception as e:
+            print("Could not download file:", key, "from s3 due to", e)
 
                          
 def download_folder_from_s3(bucket_name:str, s3_folder:str, local_folder:str, RUN_AWS_FUNCTIONS:str = RUN_AWS_FUNCTIONS):

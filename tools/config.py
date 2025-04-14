@@ -59,6 +59,8 @@ def add_folder_to_path(folder_path: str):
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
 
+ensure_folder_exists("config/")
+
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
 APP_CONFIG_PATH = get_or_create_env_var('APP_CONFIG_PATH', 'config/app_config.env') # e.g. config/app_config.env
 
@@ -204,7 +206,10 @@ REDACTION_LANGUAGE = get_or_create_env_var("REDACTION_LANGUAGE", "en") # Current
 ###
 
 TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tld/.tld_set_snapshot')
-extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
+try:
+    extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
+except:
+    extract = TLDExtract(cache_dir=None)
 
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
@@ -232,7 +237,7 @@ else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
 SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'False')
 
-GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'False')
+GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'True')
 
 DEFAULT_COST_CODE = get_or_create_env_var('DEFAULT_COST_CODE', '')
 
