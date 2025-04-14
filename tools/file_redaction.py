@@ -330,7 +330,7 @@ def choose_and_run_redactor(file_paths:List[str],
     
 
     # Try to connect to AWS services directly only if RUN_AWS_FUNCTIONS environmental variable is 1, otherwise an environment variable or direct textbox input is needed.
-    if pii_identification_method == "AWS Comprehend":
+    if pii_identification_method == aws_pii_detector:
         if aws_access_key_textbox and aws_secret_key_textbox:
             print("Connecting to Comprehend using AWS access key and secret keys from textboxes.")
             comprehend_client = boto3.client('comprehend', 
@@ -349,7 +349,8 @@ def choose_and_run_redactor(file_paths:List[str],
             out_message = "Cannot connect to AWS Comprehend service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
             print(out_message)
             raise Exception(out_message)
-    else: comprehend_client = ""
+    else: 
+        comprehend_client = ""
         
     # Try to connect to AWS Textract Client if using that text extraction method
     if text_extraction_method == textract_option:   
@@ -365,13 +366,17 @@ def choose_and_run_redactor(file_paths:List[str],
             print("Getting Textract credentials from environment variables.")
             textract_client = boto3.client('textract', 
                 aws_access_key_id=AWS_ACCESS_KEY, 
-                aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION)        
+                aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION) 
+        elif textract_output_found==True:
+            print("Existing Textract data found for file, no need to connect to AWS Textract")
+            textract_client = boto3.client('textract', region_name=AWS_REGION)      
         else:
             textract_client = ""
-            out_message_warning = "Cannot connect to AWS Textract service."
-            print(out_message_warning)
-            #raise Warning(out_message)
-    else: textract_client = ""
+            out_message = "Cannot connect to AWS Textract service."
+            print(out_message)
+            raise Exception(out_message)
+    else: 
+        textract_client = ""
 
     # Check if output_folder exists, create it if it doesn't
     if not os.path.exists(output_folder): os.makedirs(output_folder)
@@ -1208,8 +1213,7 @@ def redact_image_pdf(file_path:str,
 
     tic = time.perf_counter()
 
-    file_name = get_file_name_without_type(file_path)
-    
+    file_name = get_file_name_without_type(file_path)    
     comprehend_query_number_new = 0
 
     # Update custom word list analyser object with any new words that have been added to the custom deny list
@@ -1323,6 +1327,8 @@ def redact_image_pdf(file_path:str,
     
             # Check if page exists in existing textract data. If not, send to service to analyse
             if text_extraction_method == textract_option:
+                text_blocks = []
+
                 if not textract_data:
                     try:
                         # Convert the image_path to bytes using an in-memory buffer
@@ -1365,12 +1371,15 @@ def redact_image_pdf(file_path:str,
                             textract_data["pages"].append(text_blocks)
 
                         except Exception as e:
-                            print("Textract extraction for page", reported_page_number, "failed due to:", e)
+                            out_message = "Textract extraction for page " + reported_page_number + " failed due to:" + str(e)
+                            print(out_message)                            
                             text_blocks = []
-                            new_request_metadata = "Failed Textract API call"
+                            new_request_metadata = "Failed Textract API call"                          
 
                             # Check if "pages" key exists, if not, initialise it as an empty list
-                            if "pages" not in textract_data: textract_data["pages"] = []                        
+                            if "pages" not in textract_data: textract_data["pages"] = []
+
+                            raise Exception(out_message)
                         
                         request_metadata = request_metadata + "\n" + new_request_metadata
                         

@@ -232,10 +232,10 @@ def check_for_existing_textract_file(doc_file_name_no_extension_textbox:str, out
     else:
         return False
 
-# Following function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
+# 
 def add_folder_to_path(folder_path: str):
     '''
-    Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist.
+    Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist. Function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
     '''
 
     if os.path.exists(folder_path) and os.path.isdir(folder_path):

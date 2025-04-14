@@ -28,16 +28,45 @@ def get_or_create_env_var(var_name:str, default_value:str, print_val:bool=False)
     
     return value
 
+def ensure_folder_exists(output_folder:str):
+    """Checks if the specified folder exists, creates it if not."""   
+
+    if not os.path.exists(output_folder):
+        # Create the folder if it doesn't exist
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"Created the {output_folder} folder.")
+    else:
+        print(f"The {output_folder} folder already exists.")
+
+def add_folder_to_path(folder_path: str):
+    '''
+    Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist. Function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
+    '''
+
+    if os.path.exists(folder_path) and os.path.isdir(folder_path):
+        print(folder_path, "folder exists.")
+
+        # Resolve relative path to absolute path
+        absolute_path = os.path.abspath(folder_path)
+
+        current_path = os.environ['PATH']
+        if absolute_path not in current_path.split(os.pathsep):
+            full_path_extension = absolute_path + os.pathsep + current_path
+            os.environ['PATH'] = full_path_extension
+            #print(f"Updated PATH with: ", full_path_extension)
+        else:
+            print(f"Directory {folder_path} already exists in PATH.")
+    else:
+        print(f"Folder not found at {folder_path} - not added to PATH")
 
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
-APP_CONFIG_PATH = get_or_create_env_var('APP_CONFIG_PATH', 'config/app_config.env')
+APP_CONFIG_PATH = get_or_create_env_var('APP_CONFIG_PATH', 'config/app_config.env') # e.g. config/app_config.env
 
 if APP_CONFIG_PATH:
     if os.path.exists(APP_CONFIG_PATH):
         print(f"Loading app variables from config file {APP_CONFIG_PATH}")
         load_dotenv(APP_CONFIG_PATH)
-    else:
-        print("App config file not found at location:", APP_CONFIG_PATH)
+    else: print("App config file not found at location:", APP_CONFIG_PATH)
 
 # Report logging to console?
 LOGGING = get_or_create_env_var('LOGGING', 'False')
@@ -51,14 +80,13 @@ if LOGGING == 'True':
 ###
 
 # If you have an aws_config env file in the config folder, you can load in AWS keys this way, e.g. 'env/aws_config.env'
-AWS_CONFIG_PATH = get_or_create_env_var('AWS_CONFIG_PATH', 'config/aws_config.env')
+AWS_CONFIG_PATH = get_or_create_env_var('AWS_CONFIG_PATH', '') # e.g. config/aws_config.env
 
 if AWS_CONFIG_PATH:
     if os.path.exists(AWS_CONFIG_PATH):
         print(f"Loading AWS variables from config file {AWS_CONFIG_PATH}")
         load_dotenv(AWS_CONFIG_PATH)
-    else:
-        print("AWS config file not found at location:", AWS_CONFIG_PATH)
+    else: print("AWS config file not found at location:", AWS_CONFIG_PATH)
 
 RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
 
@@ -116,6 +144,9 @@ SESSION_OUTPUT_FOLDER = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'False') 
 OUTPUT_FOLDER = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/') # 'output/'
 INPUT_FOLDER = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/') # 'input/'
 
+ensure_folder_exists(OUTPUT_FOLDER)
+ensure_folder_exists(INPUT_FOLDER)
+
 # Allow for files to be saved in a temporary folder for increased security in some instances
 if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP": 
     # Create a temporary directory
@@ -128,19 +159,35 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
 # By default, logs are put into a subfolder of today's date and the host name of the instance running the app. This is to avoid at all possible the possibility of log files from one instance overwriting the logs of another instance on S3. If running the app on one system always, or just locally, it is not necessary to make the log folders so specific.
 # Another way to address this issue would be to write logs to another type of storage, e.g. database such as dynamodb. I may look into this in future.
 
-FEEDBACK_LOGS_FOLDER = get_or_create_env_var('FEEDBACK_LOGS_FOLDER', 'feedback/' + today_rev + '/' + HOST_NAME + '/')
-ACCESS_LOGS_FOLDER = get_or_create_env_var('ACCESS_LOGS_FOLDER', 'logs/' + today_rev + '/' + HOST_NAME + '/')
-USAGE_LOGS_FOLDER = get_or_create_env_var('USAGE_LOGS_FOLDER', 'usage/' + today_rev + '/' + HOST_NAME + '/')
+USE_LOG_SUBFOLDERS = get_or_create_env_var('USE_LOG_SUBFOLDERS', 'True')
+
+if USE_LOG_SUBFOLDERS == "True":
+    day_log_subfolder = today_rev + '/'
+    host_name_subfolder = HOST_NAME + '/'
+    full_log_subfolder = day_log_subfolder + host_name_subfolder
+else:
+    full_log_subfolder = ""
+
+FEEDBACK_LOGS_FOLDER = get_or_create_env_var('FEEDBACK_LOGS_FOLDER', 'feedback/' + full_log_subfolder)
+ACCESS_LOGS_FOLDER = get_or_create_env_var('ACCESS_LOGS_FOLDER', 'logs/' + full_log_subfolder)
+USAGE_LOGS_FOLDER = get_or_create_env_var('USAGE_LOGS_FOLDER', 'usage/' + full_log_subfolder)
+
+ensure_folder_exists(FEEDBACK_LOGS_FOLDER)
+ensure_folder_exists(ACCESS_LOGS_FOLDER)
+ensure_folder_exists(USAGE_LOGS_FOLDER)
 
 # Should the redacted file name be included in the logs? In some instances, the names of the files themselves could be sensitive, and should not be disclosed beyond the app. So, by default this is false.
 DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS', 'False')
 
 ###
 # REDACTION CONFIG
-###
-TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "tesseract/")
 
-POPPLER_FOLDER = get_or_create_env_var('POPPLER_FOLDER', "poppler/poppler-24.02.0/Library/bin/")
+# Create Tesseract and Poppler folders if you have installed them locally
+TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "") # e.g. tesseract/
+POPPLER_FOLDER = get_or_create_env_var('POPPLER_FOLDER', "") # e.g. poppler/poppler-24.02.0/Library/bin/
+
+if TESSERACT_FOLDER: add_folder_to_path(TESSERACT_FOLDER)
+if POPPLER_FOLDER: add_folder_to_path(POPPLER_FOLDER)
 
 
 # Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).

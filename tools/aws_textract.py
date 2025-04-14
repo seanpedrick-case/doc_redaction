@@ -39,12 +39,10 @@ def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str=""
             else:
                 client = boto3.client('textract', region_name=AWS_REGION)
         except:
-            print("Cannot connect to AWS Textract")
+            out_message = "Cannot connect to AWS Textract"
+            print(out_message)
+            raise Exception(out_message)
             return [], ""  # Return an empty list and an empty string
-
-    #print("Analysing page with AWS Textract")
-    #print("pdf_page_bytes:", pdf_page_bytes)
-    #print("handwrite_signature_checkbox:", handwrite_signature_checkbox)
     
     # Redact signatures if specified
     if "Redact all identified signatures" in handwrite_signature_checkbox:
@@ -138,6 +136,7 @@ def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_
     # This is a new page
     elif "page_no" in page_json_data:
         text_blocks = page_json_data["data"]["Blocks"]
+    else: text_blocks = []
 
     is_signature = False
     is_handwriting = False

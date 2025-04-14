@@ -5,7 +5,7 @@ import gradio as gr
 from gradio_image_annotation import image_annotator
 
 from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, TESSERACT_FOLDER, POPPLER_FOLDER, REDACTION_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_BULK_TEXTRACT_CALL_OPTIONS, TEXTRACT_BULK_ANALYSIS_BUCKET, TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, no_redaction_option, reset_review_vars, merge_csv_files, load_all_output_files, update_dataframe, check_for_existing_textract_file, load_in_default_cost_codes, enforce_cost_codes, calculate_aws_costs, calculate_time_taken, reset_base_dataframe, reset_ocr_base_dataframe, update_cost_code_dataframe_from_dropdown_select
+from tools.helper_functions import put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, no_redaction_option, reset_review_vars, merge_csv_files, load_all_output_files, update_dataframe, check_for_existing_textract_file, load_in_default_cost_codes, enforce_cost_codes, calculate_aws_costs, calculate_time_taken, reset_base_dataframe, reset_ocr_base_dataframe, update_cost_code_dataframe_from_dropdown_select
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names, convert_review_df_to_annotation_json
@@ -19,11 +19,6 @@ from tools.textract_batch_call import analyse_document_with_textract_api, poll_b
 
 # Suppress downcasting warnings
 pd.set_option('future.no_silent_downcasting', True)
-
-add_folder_to_path(TESSERACT_FOLDER)
-add_folder_to_path(POPPLER_FOLDER)
-
-ensure_output_folder_exists(OUTPUT_FOLDER)
 
 chosen_comprehend_entities = ['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD', 'IP_ADDRESS','MAC_ADDRESS', 'LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER', 'INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER']
 
@@ -369,8 +364,8 @@ with app:
         with gr.Accordion("Identify duplicate pages to redact", open = True):            
             in_duplicate_pages = gr.File(label="Upload multiple 'ocr_output.csv' data files from redaction jobs here to compare", file_count="multiple", height=file_input_height, file_types=['.csv'])
             with gr.Row():
-                duplicate_threshold_value = gr.Number(value=0.9, label="Minimum similarity to be considered a duplicate (maximum = 1)", scale  =1)
-                find_duplicate_pages_btn = gr.Button(value="Identify duplicate pages", variant="primary", scale = 5)                
+                duplicate_threshold_value = gr.Number(value=0.9, label="Minimum similarity to be considered a duplicate (maximum = 1)", scale =1)
+                find_duplicate_pages_btn = gr.Button(value="Identify duplicate pages", variant="primary", scale = 4)                
 
             duplicate_pages_out = gr.File(label="Duplicate pages analysis output", file_count="multiple", height=file_input_height, file_types=['.csv'])
 
@@ -588,7 +583,7 @@ with app:
     
     # Review OCR text buttom
     all_line_level_ocr_results_df.select(df_select_callback_ocr, inputs=[all_line_level_ocr_results_df], outputs=[annotate_current_page, selected_entity_dataframe_row], scroll_to_output=True)
-    reset_all_ocr_results_btn.click(reset_base_dataframe, inputs=[all_line_level_ocr_results_df_base], outputs=[all_line_level_ocr_results_df])
+    reset_all_ocr_results_btn.click(reset_ocr_base_dataframe, inputs=[all_line_level_ocr_results_df_base], outputs=[all_line_level_ocr_results_df])
     
     # Convert review file to xfdf Adobe format
     convert_review_file_to_adobe_btn.click(fn=get_input_file_names, inputs=[output_review_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count]).\
