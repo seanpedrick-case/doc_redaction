@@ -4,7 +4,7 @@ import pandas as pd
 import gradio as gr
 from gradio_image_annotation import image_annotator
 
-from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, TESSERACT_FOLDER, POPPLER_FOLDER, REDACTION_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_BULK_TEXTRACT_CALL_OPTIONS, TEXTRACT_BULK_ANALYSIS_BUCKET, TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE
+from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, TESSERACT_FOLDER, POPPLER_FOLDER, REDACTION_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_BULK_TEXTRACT_CALL_OPTIONS, TEXTRACT_BULK_ANALYSIS_BUCKET, TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE, OUTPUT_COST_CODES_PATH, OUTPUT_ALLOW_LIST_PATH
 from tools.helper_functions import put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, no_redaction_option, reset_review_vars, merge_csv_files, load_all_output_files, update_dataframe, check_for_existing_textract_file, load_in_default_cost_codes, enforce_cost_codes, calculate_aws_costs, calculate_time_taken, reset_base_dataframe, reset_ocr_base_dataframe, update_cost_code_dataframe_from_dropdown_select
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3
 from tools.file_redaction import choose_and_run_redactor
@@ -147,7 +147,7 @@ with app:
     # S3 settings for default allow list load
     s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=DOCUMENT_REDACTION_BUCKET, visible=False)
     s3_default_allow_list_file = gr.Textbox(label = "Default allow list file", value=S3_ALLOW_LIST_PATH, visible=False)
-    default_allow_list_output_folder_location = gr.Textbox(label = "Output default allow list location", value=ALLOW_LIST_PATH, visible=False)
+    default_allow_list_output_folder_location = gr.Textbox(label = "Output default allow list location", value=OUTPUT_ALLOW_LIST_PATH, visible=False)
 
     s3_bulk_textract_default_bucket = gr.Textbox(label = "Default Textract bulk S3 bucket", value=TEXTRACT_BULK_ANALYSIS_BUCKET, visible=False)
     s3_bulk_textract_input_subfolder = gr.Textbox(label = "Default Textract bulk S3 input folder", value=TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER, visible=False)
@@ -159,7 +159,7 @@ with app:
     local_bulk_textract_logs_subfolder = gr.Textbox(label = "Default Textract bulk S3 output folder", value=TEXTRACT_JOBS_LOCAL_LOC, visible=False)       
 
     s3_default_cost_codes_file = gr.Textbox(label = "Default cost centre file", value=S3_COST_CODES_PATH, visible=False)
-    default_cost_codes_output_folder_location = gr.Textbox(label = "Output default cost centre location", value=COST_CODES_PATH, visible=False)
+    default_cost_codes_output_folder_location = gr.Textbox(label = "Output default cost centre location", value=OUTPUT_COST_CODES_PATH, visible=False)
     enforce_cost_code_textbox = gr.Textbox(label = "Enforce cost code textbox", value=ENFORCE_COST_CODES, visible=False)
     default_cost_code_textbox = gr.Textbox(label = "Default cost code textbox", value=DEFAULT_COST_CODE, visible=False)
 
@@ -647,7 +647,7 @@ with app:
     # If relevant environment variable is set, load in the Textract job details
 
     # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location
-    if GET_DEFAULT_ALLOW_LIST == "True" and ALLOW_LIST_PATH:
+    if GET_DEFAULT_ALLOW_LIST == "True" and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
         if not os.path.exists(ALLOW_LIST_PATH) and S3_ALLOW_LIST_PATH:
             app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_allow_list_file, default_allow_list_output_folder_location]).\
             success(load_in_default_allow_list, inputs = [default_allow_list_output_folder_location], outputs=[in_allow_list])
@@ -658,7 +658,7 @@ with app:
         else: print("Could not load in default allow list")
 
     # If relevant environment variable is set, load in the default cost code file from S3 or locally
-    if GET_COST_CODES == "True" and COST_CODES_PATH:  
+    if GET_COST_CODES == "True" and (COST_CODES_PATH or S3_COST_CODES_PATH):  
         if not os.path.exists(COST_CODES_PATH) and S3_COST_CODES_PATH:
             app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_cost_codes_file, default_cost_codes_output_folder_location]).\
             success(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location, default_cost_code_textbox], outputs=[cost_code_dataframe, cost_code_dataframe_base, cost_code_choice_drop])
