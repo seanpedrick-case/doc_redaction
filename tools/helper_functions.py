@@ -9,7 +9,7 @@ import unicodedata
 from typing import List
 from math import ceil
 from gradio_image_annotation import image_annotator
-from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID
+from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC
 
 # Names for options labels
 text_ocr_option = "Local model - selectable text"
@@ -31,7 +31,7 @@ def reset_state_vars():
             show_share_button=False,
             show_remove_button=False,
             interactive=False
-        ), [], [], pd.DataFrame(), pd.DataFrame(), [], [], ""
+        ), [], [], pd.DataFrame(), pd.DataFrame(), [], [], "", False
 
 def reset_ocr_results_state():
     return pd.DataFrame(), pd.DataFrame(), []
@@ -44,22 +44,53 @@ def load_in_default_allow_list(allow_list_file_path):
         allow_list_file_path = [allow_list_file_path]
     return allow_list_file_path
 
-def load_in_default_cost_codes(cost_codes_path:str):
+def load_in_default_cost_codes(cost_codes_path:str, default_cost_code:str=""):
+    '''
+    Load in the cost codes list from file.
+    '''
     cost_codes_df = pd.read_csv(cost_codes_path)
+    dropdown_choices = cost_codes_df.iloc[:, 0].astype(str).tolist()
 
-    dropdown_choices = cost_codes_df.iloc[:,0].to_list()
-    dropdown_choices.insert(0, "")
+    # Avoid inserting duplicate or empty cost code values
+    if default_cost_code and default_cost_code not in dropdown_choices:
+        dropdown_choices.insert(0, default_cost_code)
 
+    # Always have a blank option at the top
+    if "" not in dropdown_choices:
+        dropdown_choices.insert(0, "")
 
-    out_dropdown = gr.Dropdown(value="", label="Choose cost code for analysis", choices=dropdown_choices, allow_custom_value=True)
+    out_dropdown = gr.Dropdown(
+        value=default_cost_code if default_cost_code in dropdown_choices else "",
+        label="Choose cost code for analysis",
+        choices=dropdown_choices,
+        allow_custom_value=False
+    )
     
     return cost_codes_df, cost_codes_df, out_dropdown
 
-def enforce_cost_codes(enforce_cost_code_textbox, cost_code_choice):
+def enforce_cost_codes(enforce_cost_code_textbox:str, cost_code_choice:str, cost_code_df:pd.DataFrame, verify_cost_codes:bool=True):
+    '''
+    Check if the enforce cost codes variable is set to true, and then check that a cost cost has been chosen. If not, raise an error. Then, check against the values in the cost code dataframe to ensure that the cost code exists.
+    '''
+
     if enforce_cost_code_textbox == "True":
         if not cost_code_choice:
             raise Exception("Please choose a cost code before continuing")
+        
+        if verify_cost_codes == True:
+            if cost_code_df.empty:
+                raise Exception("No cost codes present in dataframe for verification")
+            else:
+                valid_cost_codes_list = list(cost_code_df.iloc[:,0].unique())
+
+                if not cost_code_choice in valid_cost_codes_list:
+                    raise Exception("Selected cost code not found in list. Please contact Finance if you cannot find the correct cost code from the given list of suggestions.")
     return
+
+def update_cost_code_dataframe_from_dropdown_select(cost_dropdown_selection:str, cost_code_df:pd.DataFrame):
+    cost_code_df = cost_code_df.loc[cost_code_df.iloc[:,0] == cost_dropdown_selection, :
+                                    ]
+    return cost_code_df
 
 def update_dataframe(df:pd.DataFrame):
     df_copy = df.copy()
@@ -201,10 +232,10 @@ def check_for_existing_textract_file(doc_file_name_no_extension_textbox:str, out
     else:
         return False
 
-# Following function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
+# 
 def add_folder_to_path(folder_path: str):
     '''
-    Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist.
+    Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist. Function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
     '''
 
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
@@ -271,7 +302,14 @@ def merge_csv_files(file_list:List[str], output_folder:str=OUTPUT_FOLDER):
 
     return output_files
 
-async def get_connection_params(request: gr.Request, output_folder_textbox:str=OUTPUT_FOLDER, input_folder_textbox:str=INPUT_FOLDER, session_output_folder:str=SESSION_OUTPUT_FOLDER):
+async def get_connection_params(request: gr.Request,
+                                output_folder_textbox:str=OUTPUT_FOLDER,
+                                input_folder_textbox:str=INPUT_FOLDER,
+                                session_output_folder:str=SESSION_OUTPUT_FOLDER,
+                                textract_document_upload_input_folder:str=TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER,
+                                textract_document_upload_output_folder:str=TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER,
+                                s3_textract_document_logs_subfolder:str=TEXTRACT_JOBS_S3_LOC,
+                                local_textract_document_logs_subfolder:str=TEXTRACT_JOBS_LOCAL_LOC):
 
     #print("Session hash:", request.session_hash)
 
@@ -323,6 +361,13 @@ async def get_connection_params(request: gr.Request, output_folder_textbox:str=O
     if session_output_folder == 'True':
         output_folder = output_folder_textbox + out_session_hash + "/"
         input_folder = input_folder_textbox + out_session_hash + "/"
+
+        textract_document_upload_input_folder = textract_document_upload_input_folder + "/" + out_session_hash
+        textract_document_upload_output_folder = textract_document_upload_output_folder + "/" + out_session_hash
+
+        s3_textract_document_logs_subfolder = s3_textract_document_logs_subfolder + "/" + out_session_hash
+        local_textract_document_logs_subfolder = local_textract_document_logs_subfolder + "/" + out_session_hash + "/"
+
     else:
         output_folder = output_folder_textbox
         input_folder = input_folder_textbox
@@ -330,8 +375,7 @@ async def get_connection_params(request: gr.Request, output_folder_textbox:str=O
     if not os.path.exists(output_folder): os.mkdir(output_folder)
     if not os.path.exists(input_folder): os.mkdir(input_folder)
 
-
-    return out_session_hash, output_folder, out_session_hash, input_folder
+    return out_session_hash, output_folder, out_session_hash, input_folder, textract_document_upload_input_folder, textract_document_upload_output_folder, s3_textract_document_logs_subfolder, local_textract_document_logs_subfolder
 
 def clean_unicode_text(text:str):
     # Step 1: Normalise unicode characters to decompose any special forms
@@ -374,6 +418,8 @@ def calculate_aws_costs(number_of_pages:str,
                         pii_identification_method:str,
                         textract_output_found_checkbox:bool,
                         only_extract_text_radio:bool,
+                        convert_to_gbp:bool=True,
+                        usd_gbp_conversion_rate:float=0.76,
                         textract_page_cost:float=1.5/1000,
                         textract_signature_cost:float=2.0/1000,
                         comprehend_unit_cost:float=0.0001,
@@ -391,6 +437,8 @@ def calculate_aws_costs(number_of_pages:str,
     - pii_identification_method_drop: The method of personally-identifiable information removal.
     - textract_output_found_checkbox: Whether existing Textract results have been found in the output folder. Assumes that results exist for all pages and files in the output folder.
     - only_extract_text_radio (bool, optional): Option to only extract text from the document rather than redact.
+    - convert_to_gbp (bool, optional): Should suggested costs be converted from USD to GBP.
+    - usd_gbp_conversion_rate (float, optional): Conversion rate used for USD to GBP. Last changed 14th April 2025.
     - textract_page_cost (float, optional): AWS pricing for Textract text extraction per page ($).
     - textract_signature_cost (float, optional): Additional AWS cost above standard AWS Textract extraction for extracting signatures.
     - comprehend_unit_cost (float, optional): Cost per 'unit' (300 character minimum) for identifying PII in text with AWS Comprehend.
@@ -418,6 +466,9 @@ def calculate_aws_costs(number_of_pages:str,
             pii_identification_cost = comprehend_page_cost * number_of_pages
 
     calculated_aws_cost = calculated_aws_cost + text_extraction_cost + pii_identification_cost
+
+    if convert_to_gbp == True:
+        calculated_aws_cost *= usd_gbp_conversion_rate
 
     return calculated_aws_cost
 

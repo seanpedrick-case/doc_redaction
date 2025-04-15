@@ -6,6 +6,7 @@ import json
 from collections import defaultdict
 import pikepdf
 import time
+import pandas as pd
 from tools.custom_image_analyser_engine import OCRResult, CustomImageRecognizerResult
 from tools.config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
 
@@ -38,12 +39,10 @@ def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str=""
             else:
                 client = boto3.client('textract', region_name=AWS_REGION)
         except:
-            print("Cannot connect to AWS Textract")
+            out_message = "Cannot connect to AWS Textract"
+            print(out_message)
+            raise Exception(out_message)
             return [], ""  # Return an empty list and an empty string
-
-    #print("Analysing page with AWS Textract")
-    #print("pdf_page_bytes:", pdf_page_bytes)
-    #print("handwrite_signature_checkbox:", handwrite_signature_checkbox)
     
     # Redact signatures if specified
     if "Redact all identified signatures" in handwrite_signature_checkbox:
@@ -137,6 +136,7 @@ def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_
     # This is a new page
     elif "page_no" in page_json_data:
         text_blocks = page_json_data["data"]["Blocks"]
+    else: text_blocks = []
 
     is_signature = False
     is_handwriting = False
@@ -275,7 +275,7 @@ def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_
 
     return all_ocr_results, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, ocr_results_with_children
 
-def load_and_convert_textract_json(textract_json_file_path:str, log_files_output_paths:str):
+def load_and_convert_textract_json(textract_json_file_path:str, log_files_output_paths:str, page_sizes_df:pd.DataFrame):
     """
     Loads Textract JSON from a file, detects if conversion is needed, and converts if necessary.
     """
@@ -307,7 +307,7 @@ def load_and_convert_textract_json(textract_json_file_path:str, log_files_output
         print("Need to convert Textract JSON to app format.")
         try:
             
-            textract_data = restructure_textract_output(textract_data)
+            textract_data = restructure_textract_output(textract_data, page_sizes_df)
             return textract_data, False, log_files_output_paths  # Successfully converted
         
         except Exception as e:
@@ -318,7 +318,7 @@ def load_and_convert_textract_json(textract_json_file_path:str, log_files_output
         print("textract data:", textract_data)
         return {}, True, log_files_output_paths  # Return empty data if JSON is not recognized
 
-def restructure_textract_output(textract_output: dict):
+def restructure_textract_output(textract_output: dict, page_sizes_df:pd.DataFrame):
     """
     Reorganise Textract output from the bulk Textract analysis option on AWS 
     into a format that works in this redaction app, reducing size.
@@ -328,10 +328,62 @@ def restructure_textract_output(textract_output: dict):
     # Extract total pages from DocumentMetadata
     document_metadata = textract_output.get("DocumentMetadata", {})
 
+    # For efficient lookup, set 'page' as index if it's not already
+    if 'page' in page_sizes_df.columns:
+        page_sizes_df = page_sizes_df.set_index('page')
+
     for block in textract_output.get("Blocks", []):
         page_no = block.get("Page", 1)  # Default to 1 if missing
 
-        # Initialize page structure if not already present
+        # --- Geometry Conversion Logic ---
+        try:
+            page_info = page_sizes_df.loc[page_no]
+            cb_width = page_info['cropbox_width']
+            cb_height = page_info['cropbox_height']
+            mb_width = page_info['mediabox_width']
+            mb_height = page_info['mediabox_height']
+            cb_x_offset = page_info['cropbox_x_offset']
+            cb_y_offset_top = page_info['cropbox_y_offset_from_top']
+
+            # Check if conversion is needed (and avoid division by zero)
+            needs_conversion = (
+                abs(cb_width - mb_width) > 1e-6 or \
+                abs(cb_height - mb_height) > 1e-6
+            ) and mb_width > 1e-6 and mb_height > 1e-6 # Avoid division by zero
+
+            if needs_conversion and 'Geometry' in block:
+                geometry = block['Geometry'] # Work directly on the block's geometry
+
+                # --- Convert BoundingBox ---
+                if 'BoundingBox' in geometry:
+                    bbox = geometry['BoundingBox']
+                    old_left = bbox['Left']
+                    old_top = bbox['Top']
+                    old_width = bbox['Width']
+                    old_height = bbox['Height']
+
+                    # Calculate absolute coordinates within CropBox
+                    abs_cb_x = old_left * cb_width
+                    abs_cb_y = old_top * cb_height
+                    abs_cb_width = old_width * cb_width
+                    abs_cb_height = old_height * cb_height
+
+                    # Calculate absolute coordinates relative to MediaBox top-left
+                    abs_mb_x = cb_x_offset + abs_cb_x
+                    abs_mb_y = cb_y_offset_top + abs_cb_y
+
+                    # Convert back to normalized coordinates relative to MediaBox
+                    bbox['Left'] = abs_mb_x / mb_width
+                    bbox['Top'] = abs_mb_y / mb_height
+                    bbox['Width'] = abs_cb_width / mb_width
+                    bbox['Height'] = abs_cb_height / mb_height
+        except KeyError:
+            print(f"Warning: Page number {page_no} not found in page_sizes_df. Skipping coordinate conversion for this block.")
+            # Decide how to handle missing page info: skip conversion, raise error, etc.
+        except ZeroDivisionError:
+             print(f"Warning: MediaBox width or height is zero for page {page_no}. Skipping coordinate conversion for this block.")
+
+        # Initialise page structure if not already present
         if page_no not in pages_dict:
             pages_dict[page_no] = {"page_no": str(page_no), "data": {"Blocks": []}}
 
