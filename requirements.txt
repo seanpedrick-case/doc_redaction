@@ -18,8 +18,8 @@ openpyxl==3.1.5
 Faker==36.1.1
 python-levenshtein==0.26.1
 spaczz==0.6.1
-# The following version includes rotation and image zoom options
-git+https://github.com/seanpedrick-case/gradio_image_annotator.git@v0.3.1 # This version also has the option to use default labels
+# The following version 
+https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.1/gradio_image_annotation-0.3.1-py3-none-any.whl # This version includes rotation, image zoom, and default labels, as well as the option to include id for annotation boxes
 rapidfuzz==3.12.1
 python-dotenv==1.0.1
 numpy==1.26.4
