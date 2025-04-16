@@ -11,17 +11,15 @@ scikit-learn==1.6.1
 spacy==3.8.4
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
 #en_core_web_sm @ https://github.com/explosion/spacy-#models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz
-#gradio==5.23.3 # Using latest version of Gradio 5.25.0 below as it fixes the table select issues while filtered
-https://gradio-pypi-previews.s3.amazonaws.com/3e66dcbc9f3b1d106f5488fb1dca51f0787e6d79/gradio-5.25.0-py3-none-any.whl
+gradio==5.25.2
 boto3==1.37.29
 pyarrow==19.0.1
 openpyxl==3.1.5
 Faker==36.1.1
 python-levenshtein==0.26.1
 spaczz==0.6.1
-#gradio_image_annotation==0.2.5
 # The following version includes rotation and image zoom options
-https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.0/gradio_image_annotation-0.3.0-py3-none-any.whl
+git+https://github.com/seanpedrick-case/gradio_image_annotator.git@v0.3.1 # This version also has the option to use default labels
 rapidfuzz==3.12.1
 python-dotenv==1.0.1
 numpy==1.26.4

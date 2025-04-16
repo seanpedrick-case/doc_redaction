@@ -10,15 +10,8 @@ from io import StringIO
 from urllib.parse import urlparse
 from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError, TokenRetrievalError
 
-# MY_LOCAL_PDF = r"C:\path\to\your\document.pdf" # Use raw string for Windows paths
-# MY_S3_BUCKET = TEXTRACT_BULK_ANALYSIS_BUCKET # MUST BE UNIQUE GLOBALLY
-# MY_S3_INPUT_PREFIX = session_hash_textbox          # Folder in the bucket for uploads
-# MY_S3_OUTPUT_PREFIX = session_hash_textbox        # Folder in the bucket for results
-# MY_LOCAL_OUTPUT_DIR = OUTPUT_FOLDER      # Local folder to save JSON
-# MY_AWS_REGION = AWS_REGION                     # e.g., 'us-east-1', 'eu-west-1'
 from tools.config import TEXTRACT_BULK_ANALYSIS_BUCKET, OUTPUT_FOLDER, AWS_REGION, DOCUMENT_REDACTION_BUCKET, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC
-from tools.aws_textract import json_to_ocrresult
-
+#from tools.aws_textract import json_to_ocrresult
 
 def analyse_document_with_textract_api(
     local_pdf_path: str,
@@ -202,9 +195,13 @@ def analyse_document_with_textract_api(
 def return_job_status(job_id:str,
                      response:dict,
                      attempts:int,
-                     poll_interval_seconds: int = 5,
+                     poll_interval_seconds: int = 0,
                      max_polling_attempts: int = 1 # ~10 minutes total wait time
                      ):
+    '''
+    Poll Textract for the current status of a previously-submitted job.
+    '''
+
     job_status = response['JobStatus']
     logging.info(f"Polling attempt {attempts}/{max_polling_attempts}. Job status: {job_status}")
 
@@ -232,7 +229,11 @@ def download_textract_job_files(s3_client:str,
                                 s3_output_key_prefix:str,
                                 pdf_filename:str,
                                 job_id:str,
-                                local_output_dir:str):
+                                local_output_dir:str):    
+    '''
+    Download and combine selected job files from the AWS Textract service.
+    '''
+
     list_response = s3_client.list_objects_v2(
         Bucket=s3_bucket_name,
         Prefix=s3_output_key_prefix
@@ -329,9 +330,13 @@ def poll_bulk_textract_analysis_progress_and_download(
     load_s3_jobs_loc:str=TEXTRACT_JOBS_S3_LOC,
     load_local_jobs_loc:str=TEXTRACT_JOBS_LOCAL_LOC,    
     aws_region: str = AWS_REGION, # Optional: specify region if not default
+    load_jobs_from_s3:str = LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     poll_interval_seconds: int = 1,
     max_polling_attempts: int = 1 # ~10 minutes total wait time):
     ):
+    '''
+    Poll AWS for the status of a Textract API job. Return status, and if finished, combine and download results into a locally-stored json file for further processing by the app.
+    '''
 
     if job_id:
         # Initialize boto3 clients
@@ -349,7 +354,7 @@ def poll_bulk_textract_analysis_progress_and_download(
 
         # Update Textract document history df
         try:
-            job_df = load_in_textract_job_details(load_s3_jobs=LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
+            job_df = load_in_textract_job_details(load_s3_jobs=load_jobs_from_s3,
                                         load_s3_jobs_loc=load_s3_jobs_loc,
                                         load_local_jobs_loc=load_local_jobs_loc)
         except Exception as e:
@@ -431,14 +436,15 @@ def poll_bulk_textract_analysis_progress_and_download(
 
     return downloaded_file_path, job_status, job_df
 
-
-
 def load_in_textract_job_details(load_s3_jobs:str=LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
                                      load_s3_jobs_loc:str=TEXTRACT_JOBS_S3_LOC,
                                      load_local_jobs_loc:str=TEXTRACT_JOBS_LOCAL_LOC,
                                      document_redaction_bucket:str=DOCUMENT_REDACTION_BUCKET,
                                      aws_region:str=AWS_REGION):
-        
+    '''
+    Load in a dataframe of jobs previous submitted to the Textract API service.
+    '''
+
     job_df = pd.DataFrame(columns=['job_id','file_name','job_type','signature_extraction','s3_location','job_date_time'])
 
     # Initialize boto3 clients
@@ -477,7 +483,6 @@ def load_in_textract_job_details(load_s3_jobs:str=LOAD_PREVIOUS_TEXTRACT_JOBS_S3
             job_df = job_df.loc[job_df["job_date_time"] >= cutoff_time,:]
 
     return job_df
-
 
 def download_textract_output(job_id:str,
                              output_bucket:str,
