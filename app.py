@@ -670,7 +670,9 @@ with app:
             app.load(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location, default_cost_code_textbox], outputs=[cost_code_dataframe, cost_code_dataframe_base, cost_code_choice_drop])
         else: print("Could not load in cost code data")
 
-    ### LOGGING
+    ###
+    # LOGGING
+    ###
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     access_callback = CSVLogger_custom(dataset_file_name=log_file_name)

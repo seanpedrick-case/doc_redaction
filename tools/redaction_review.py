@@ -351,7 +351,8 @@ def update_annotator_object_and_filter_df(
         show_share_button=False,
         show_remove_button=False,
         handles_cursor=True,
-        interactive=True
+        interactive=True,
+        use_default_label=True
         )        
 
         return out_image_annotator, page_number_reported_gradio, page_number_reported_gradio, page_num_reported, recogniser_entities_dropdown_value, recogniser_dataframe_out_gr, recogniser_dataframe_modified, text_entities_drop, page_entities_drop, page_sizes, all_image_annotations

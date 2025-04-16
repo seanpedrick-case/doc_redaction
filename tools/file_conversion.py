@@ -1036,7 +1036,7 @@ def do_proximity_match_all_pages_for_text(df1:pd.DataFrame, df2:pd.DataFrame, th
     # Check for NaN or infinite values in query_coords and filter them out
     finite_mask = np.isfinite(query_coords).all(axis=1)
     if not finite_mask.all():
-        print("Warning: query_coords contains non-finite values. Filtering out non-finite entries.")
+        #print("Warning: query_coords contains non-finite values. Filtering out non-finite entries.")
         query_coords = query_coords[finite_mask]  # Filter out rows with NaN or infinite values
     else:
         pass
