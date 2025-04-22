@@ -444,18 +444,18 @@ def load_in_textract_job_details(load_s3_jobs:str=LOAD_PREVIOUS_TEXTRACT_JOBS_S3
     '''
     Load in a dataframe of jobs previous submitted to the Textract API service.
     '''
-
     job_df = pd.DataFrame(columns=['job_id','file_name','job_type','signature_extraction','s3_location','job_date_time'])
 
     # Initialize boto3 clients
     session = boto3.Session(region_name=aws_region)
     s3_client = session.client('s3')
 
-    local_output_path = f'{load_local_jobs_loc}/textract_job_log_files.csv'
+    local_output_path = f'{load_local_jobs_loc}/textract_document_jobs.csv'
 
     if load_s3_jobs == 'True':
+        s3_output_key = f'{load_s3_jobs_loc}/textract_document_jobs.csv'
 
-        s3_output_key = f'{load_s3_jobs_loc}/textract_job_log_files.csv'
+        print("s3_output_key:", s3_output_key)
                 
         try:
             s3_client.head_object(Bucket=document_redaction_bucket, Key=s3_output_key)

@@ -42,10 +42,6 @@ def download_file_from_s3(bucket_name:str, key:str, local_file_path_and_name:str
     if RUN_AWS_FUNCTIONS == "1":
 
         try:
-            print("bucket_name:", bucket_name)
-            print("key:", key)
-            print("local_file_path_and_name:", local_file_path_and_name)
-
             # Ensure the local directory exists
             os.makedirs(os.path.dirname(local_file_path_and_name), exist_ok=True)
 

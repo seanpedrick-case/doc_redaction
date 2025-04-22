@@ -15,7 +15,7 @@ import pymupdf
 from PIL import ImageDraw, Image
 
 from tools.config import OUTPUT_FOLDER, CUSTOM_BOX_COLOUR, MAX_IMAGE_PIXELS, INPUT_FOLDER
-from tools.file_conversion import is_pdf, convert_annotation_json_to_review_df, convert_review_df_to_annotation_json, process_single_page_for_image_conversion, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes
+from tools.file_conversion import is_pdf, convert_annotation_json_to_review_df, convert_review_df_to_annotation_json, process_single_page_for_image_conversion, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, divide_coordinates_by_page_sizes
 from tools.helper_functions import get_file_name_without_type,  detect_file_type
 from tools.file_redaction import redact_page_with_pymupdf
 
@@ -99,6 +99,8 @@ def get_filtered_recogniser_dataframe_and_dropdowns(page_image_annotator_object:
     review_dataframe = review_df
 
     try:
+        #print("converting annotation json in get_filtered_recogniser...")
+
         review_dataframe = convert_annotation_json_to_review_df(page_image_annotator_object, review_df, page_sizes)
 
         recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(review_dataframe, "label")
@@ -114,13 +116,13 @@ def get_filtered_recogniser_dataframe_and_dropdowns(page_image_annotator_object:
         page_entities_for_drop = update_dropdown_list_based_on_dataframe(review_dataframe, "page")
         page_entities_drop = gr.Dropdown(value=page_dropdown_value, choices=page_entities_for_drop, allow_custom_value=True, interactive=True)
 
-        recogniser_dataframe_out_gr = gr.Dataframe(review_dataframe[["page", "label", "text"]], show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True, max_height=400)
+        recogniser_dataframe_out_gr = gr.Dataframe(review_dataframe[["page", "label", "text", "id"]], show_search="filter", col_count=(4, "fixed"), type="pandas", headers=["page", "label", "text", "id"], show_fullscreen_button=True, wrap=True, max_height=400, static_columns=[0,1,2,3])
 
-        recogniser_dataframe_out = review_dataframe[["page", "label", "text"]]
+        recogniser_dataframe_out = review_dataframe[["page", "label", "text", "id"]]
 
     except Exception as e:
         print("Could not extract recogniser information:", e)
-        recogniser_dataframe_out = recogniser_dataframe_base[["page", "label", "text"]]
+        recogniser_dataframe_out = recogniser_dataframe_base[["page", "label", "text", "id"]]
 
         label_choices = review_dataframe["label"].astype(str).unique().tolist()
         text_choices = review_dataframe["text"].astype(str).unique().tolist()
@@ -151,7 +153,7 @@ def update_recogniser_dataframes(page_image_annotator_object:AnnotatedImageData,
 
         review_dataframe, text_entities_drop, page_entities_drop = update_entities_df_recogniser_entities(recogniser_entities_dropdown_value, recogniser_dataframe_out, page_dropdown_value, text_dropdown_value)
 
-        recogniser_dataframe_out_gr = gr.Dataframe(review_dataframe[["page", "label", "text"]], show_search="filter", col_count=(3, "fixed"), type="pandas", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True, max_height=400)
+        recogniser_dataframe_out_gr = gr.Dataframe(review_dataframe[["page", "label", "text", "id"]], show_search="filter", col_count=(4, "fixed"), type="pandas", headers=["page", "label", "text", "id"], show_fullscreen_button=True, wrap=True, max_height=400, static_columns=[0,1,2,3])
         
         recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(recogniser_dataframe_out, "label")
         recogniser_entities_drop = gr.Dropdown(value=recogniser_entities_dropdown_value, choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)
@@ -179,15 +181,32 @@ def update_annotator_page_from_review_df(review_df: pd.DataFrame,
     '''
     out_image_annotations_state = current_image_annotations_state
     out_current_page_annotator = current_page_annotator
+    gradio_annotator_current_page_number = current_page
 
     if not review_df.empty:
+        #print("review_df just before convert_review_df:", review_df)
+        # First, check that the image on the current page is valid, replace with what exists in page_sizes object if not
+        if not gradio_annotator_current_page_number: gradio_annotator_current_page_number = 0
 
+        # Check bounding values for current page and page max
+        if gradio_annotator_current_page_number > 0: page_num_reported = gradio_annotator_current_page_number
+        elif gradio_annotator_current_page_number == 0: page_num_reported = 1 # minimum possible reported page is 1
+        else: 
+            gradio_annotator_current_page_number = 0
+            page_num_reported = 1
+
+        # Ensure page displayed can't exceed number of pages in document
+        page_max_reported = len(out_image_annotations_state)
+        if page_num_reported > page_max_reported: page_num_reported = page_max_reported
+
+        page_num_reported_zero_indexed = page_num_reported - 1        
         out_image_annotations_state = convert_review_df_to_annotation_json(review_df, image_file_paths, page_sizes)
 
-        print("out_image_annotations_state[current_page-1]:", out_image_annotations_state[current_page-1])
+        page_image_annotator_object, out_image_annotations_state = replace_images_in_image_annotation_object(out_image_annotations_state, out_image_annotations_state[page_num_reported_zero_indexed], page_sizes, page_num_reported)    
 
-        if previous_page == current_page:
-            out_current_page_annotator = out_image_annotations_state[current_page-1]
+        out_image_annotations_state[page_num_reported_zero_indexed] = page_image_annotator_object
+
+        out_current_page_annotator = out_image_annotations_state[page_num_reported_zero_indexed]
 
     return out_current_page_annotator, out_image_annotations_state
 
@@ -206,24 +225,30 @@ def exclude_selected_items_from_redaction(review_df: pd.DataFrame,
     backup_recogniser_entity_dataframe_base = recogniser_entity_dataframe_base
 
     if not selected_rows_df.empty and not review_df.empty:
-        # Ensure selected_rows_df has the same relevant columns
-        selected_subset = selected_rows_df[['label', 'page', 'text']].drop_duplicates(subset=['label', 'page', 'text'])
+        use_id = (
+            "id" in selected_rows_df.columns 
+            and "id" in review_df.columns 
+            and not selected_rows_df["id"].isnull().all() 
+            and not review_df["id"].isnull().all()
+        )
 
-        # Perform anti-join using merge with an indicator column
-        merged_df = review_df.merge(selected_subset, on=['label', 'page', 'text'], how='left', indicator=True)
-        
-        # Keep only the rows that do not have a match in selected_rows_df
+        selected_merge_cols = ["id"] if use_id else ["label", "page", "text"]
+
+        # Subset and drop duplicates from selected_rows_df
+        selected_subset = selected_rows_df[selected_merge_cols].drop_duplicates(subset=selected_merge_cols)
+
+        # Perform anti-join using merge with indicator
+        merged_df = review_df.merge(selected_subset, on=selected_merge_cols, how='left', indicator=True)
         out_review_df = merged_df[merged_df['_merge'] == 'left_only'].drop(columns=['_merge'])
 
         out_image_annotations_state = convert_review_df_to_annotation_json(out_review_df, image_file_paths, page_sizes)
 
-        out_recogniser_entity_dataframe_base = out_review_df[["page", "label", "text"]]
+        out_recogniser_entity_dataframe_base = out_review_df[["page", "label", "text", "id"]]
     
     # Either there is nothing left in the selection dataframe, or the review dataframe
     else:
         out_review_df = review_df
         out_recogniser_entity_dataframe_base = recogniser_entity_dataframe_base
-
         out_image_annotations_state = image_annotations_state
 
     return out_review_df, out_image_annotations_state, out_recogniser_entity_dataframe_base, backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base
@@ -234,7 +259,7 @@ def update_annotator_object_and_filter_df(
                     recogniser_entities_dropdown_value:str="ALL",
                     page_dropdown_value:str="ALL",
                     text_dropdown_value:str="ALL",
-                    recogniser_dataframe_base:gr.Dataframe=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[]}), type="pandas", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True, show_search='filter', max_height=400),
+                    recogniser_dataframe_base:gr.Dataframe=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[], "id":[]}), type="pandas", headers=["page", "label", "text", "id"], show_fullscreen_button=True, wrap=True, show_search='filter', max_height=400, static_columns=[0,1,2,3]),
                     zoom:int=100,
                     review_df:pd.DataFrame=[],
                     page_sizes:List[dict]=[],
@@ -244,6 +269,8 @@ def update_annotator_object_and_filter_df(
     Update a gradio_image_annotation object with new annotation data.
     '''
     zoom_str = str(zoom) + '%'
+
+    #print("all_image_annotations at start of update_annotator_object_and_filter_df[-1]:", all_image_annotations[-1])
     
     if not gradio_annotator_current_page_number: gradio_annotator_current_page_number = 0
 
@@ -295,10 +322,7 @@ def update_annotator_object_and_filter_df(
 
         replaced_image_path = current_image_path
 
-    if review_df.empty: review_df = pd.DataFrame(columns=["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"])
-
-    ##
-    
+    if review_df.empty: review_df = pd.DataFrame(columns=["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text", "id"])
     review_df.loc[review_df["page"]==page_num_reported, 'image'] = replaced_image_path
 
     # Update dropdowns and review selection dataframe with the updated annotator object
@@ -313,18 +337,26 @@ def update_annotator_object_and_filter_df(
     images_list[page_num_reported_zero_indexed] = replaced_image_path
 
     all_image_annotations[page_num_reported_zero_indexed]['image'] = replaced_image_path
-    
+
     # Multiply out image_annotation coordinates from relative to absolute if necessary
     all_image_annotations_df = convert_annotation_data_to_dataframe(all_image_annotations)
 
     all_image_annotations_df = multiply_coordinates_by_page_sizes(all_image_annotations_df, page_sizes_df, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax")   
 
+    #print("all_image_annotations_df[-1] just before creating annotation dicts:", all_image_annotations_df.iloc[-1, :])
+
     all_image_annotations = create_annotation_dicts_from_annotation_df(all_image_annotations_df, page_sizes)
+
+    #print("all_image_annotations[-1] after creating annotation dicts:", all_image_annotations[-1])
+
+
 
     # Remove blank duplicate entries
     all_image_annotations = remove_duplicate_images_with_blank_boxes(all_image_annotations)
 
     current_page_image_annotator_object = all_image_annotations[page_num_reported_zero_indexed]
+
+    #print("current_page_image_annotator_object that goes into annotator object:", current_page_image_annotator_object)
 
     page_number_reported_gradio = gr.Number(label = "Current page", value=page_num_reported, precision=0)
     
@@ -537,7 +569,7 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                 page_sizes_df = pd.DataFrame(page_sizes)
                 page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(pd.to_numeric, errors="coerce")
 
-                for i in progress.tqdm(range(0, number_of_pages), desc="Saving redactions to file", unit = "pages"):
+                for i in progress.tqdm(range(0, number_of_pages), desc="Saving redacted pages to file", unit = "pages"):
            
                     image_loc = all_image_annotations[i]['image']
 
@@ -561,7 +593,9 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                     pymupdf_page = redact_page_with_pymupdf(page=pymupdf_page, page_annotations=all_image_annotations[i], image=image, original_cropbox=original_cropboxes[-1], page_sizes_df= page_sizes_df) # image=image,
             else:
                 print("File type not recognised.")
-                    
+
+            progress(0.9, "Saving output files")
+
             #try:
             if pdf_doc:
                 out_pdf_file_path = output_folder + file_name_without_ext + "_redacted.pdf"
@@ -579,7 +613,14 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
 
         try:
             #print("Saving review file.")
-            review_df = convert_annotation_json_to_review_df(all_image_annotations, review_file_state.copy(), page_sizes=page_sizes)[["image",	"page",	"label","color", "xmin", "ymin", "xmax", "ymax", "text"]]#.drop_duplicates(subset=["image",	"page",	"text",	"label","color", "xmin", "ymin", "xmax", "ymax"])
+            review_df = convert_annotation_json_to_review_df(all_image_annotations, review_file_state.copy(), page_sizes=page_sizes)
+
+            page_sizes_df = pd.DataFrame(page_sizes)
+            page_sizes_df .loc[:, "page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+            review_df = divide_coordinates_by_page_sizes(review_df, page_sizes_df)
+
+            review_df = review_df[["image",	"page",	"label","color", "xmin", "ymin", "xmax", "ymax", "text", "id"]]
+
             out_review_file_file_path = output_folder + file_name_with_ext + '_review_file.csv'
 
             review_df.to_csv(out_review_file_file_path, index=None)
@@ -752,8 +793,9 @@ def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
         row_value_page = evt.row_value[0] # This is the page number value
         row_value_label = evt.row_value[1] # This is the label number value
         row_value_text = evt.row_value[2] # This is the text number value
+        row_value_id = evt.row_value[3] # This is the text number value
 
-        row_value_df = pd.DataFrame(data={"page":[row_value_page], "label":[row_value_label], "text":[row_value_text]})
+        row_value_df = pd.DataFrame(data={"page":[row_value_page], "label":[row_value_label], "text":[row_value_text], "id":[row_value_id]})
 
         return row_value_page, row_value_df
 
@@ -787,25 +829,61 @@ def df_select_callback_ocr(df: pd.DataFrame, evt: gr.SelectData):
 
         return row_value_page, row_value_df
 
-def update_selected_review_df_row_colour(redaction_row_selection:pd.DataFrame, review_df:pd.DataFrame, colour:tuple=(0,0,255)):
+def update_selected_review_df_row_colour(redaction_row_selection:pd.DataFrame, review_df:pd.DataFrame, previous_id:str="", previous_colour:str='(0, 0, 0)', page_sizes:List[dict]=[], output_folder:str=OUTPUT_FOLDER, colour:str='(1, 0, 255)'):
     '''
     Update the colour of a single redaction box based on the values in a selection row
     '''
     colour_tuple =  str(tuple(colour))
 
-    if "color" not in review_df.columns: review_df["color"] = None
+    if "color" not in review_df.columns: review_df["color"] = '(0, 0, 0)'
+    if "id" not in review_df.columns:
+        review_df = fill_missing_ids(review_df)
 
     # Reset existing highlight colours
-    review_df.loc[review_df["color"]==colour_tuple, "color"] = review_df.loc[review_df["color"]==colour_tuple, "color"].apply(lambda _: '(0, 0, 0)')
+    review_df.loc[review_df["id"]==previous_id, "color"] = review_df.loc[review_df["id"]==previous_id, "color"].apply(lambda _: previous_colour)
+    review_df.loc[review_df["color"].astype(str)==colour, "color"] = review_df.loc[review_df["color"].astype(str)==colour, "color"].apply(lambda _: '(0, 0, 0)')
 
-    review_df = review_df.merge(redaction_row_selection, on=["page", "label", "text"], indicator=True, how="left")
-    review_df.loc[review_df["_merge"]=="both", "color"] =  review_df.loc[review_df["_merge"] == "both", "color"].apply(lambda _: '(0, 0, 255)')
+    if not redaction_row_selection.empty and not review_df.empty:
+        use_id = (
+            "id" in redaction_row_selection.columns 
+            and "id" in review_df.columns 
+            and not redaction_row_selection["id"].isnull().all() 
+            and not review_df["id"].isnull().all()
+        )
+
+        selected_merge_cols = ["id"] if use_id else ["label", "page", "text"]        
+
+        review_df = review_df.merge(redaction_row_selection[selected_merge_cols], on=selected_merge_cols, indicator=True, how="left")
+
+    if "_merge" in review_df.columns:
+        filtered_reviews = review_df.loc[review_df["_merge"]=="both"]
+    else:
+        filtered_reviews = pd.DataFrame()
+
+    if not filtered_reviews.empty:
+        previous_colour = str(filtered_reviews["color"].values[0])
+        previous_id = filtered_reviews["id"].values[0]
+        review_df.loc[review_df["_merge"]=="both", "color"] =  review_df.loc[review_df["_merge"] == "both", "color"].apply(lambda _: colour)
+    else:
+        # Handle the case where no rows match the condition
+        print("No reviews found with _merge == 'both'")
+        previous_colour = '(0, 0, 0)'
+        review_df.loc[review_df["color"]==colour, "color"] = previous_colour
+        previous_id =''
 
     review_df.drop("_merge", axis=1, inplace=True)
 
-    review_df.to_csv(OUTPUT_FOLDER + "review_df_in_update_selected_review.csv")
+    # Ensure that all output coordinates are in proportional size
+    #page_sizes_df = pd.DataFrame(page_sizes)
+    #page_sizes_df .loc[:, "page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+    #print("review_df before divide:", review_df)
+    #print("page_sizes_df before divide:", page_sizes_df)
+    #review_df = divide_coordinates_by_page_sizes(review_df, page_sizes_df)
+    #print("review_df after divide:", review_df)
 
-    return review_df
+    review_df = review_df[["image", "page", "label", "color", "xmin","ymin", "xmax", "ymax", "text", "id"]]
+
+    return review_df, previous_id, previous_colour
 
 def update_boxes_color(images: list, redaction_row_selection: pd.DataFrame, colour: tuple = (0, 255, 0)):
     """

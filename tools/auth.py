@@ -69,5 +69,7 @@ def authenticate_user(username:str, password:str, user_pool_id:str=AWS_USER_POOL
     except client.exceptions.UserNotFoundException:
         return False
     except Exception as e:
-        print(f"An error occurred: {e}")
+        out_message = f"An error occurred: {e}"
+        print(out_message)
+        raise Exception(out_message)
         return False 
