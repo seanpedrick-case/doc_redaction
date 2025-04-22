@@ -205,6 +205,7 @@ with app:
     job_output_textbox = gr.Textbox(value="", label="Textract call outputs", visible=False)
 
     textract_job_output_file = gr.File(label="Textract job output files", height=file_input_height, visible=False)
+    convert_textract_outputs_to_ocr_results = gr.Button("Placeholder - Convert Textract job outputs to OCR results (needs relevant document file uploaded above)", variant="secondary", visible=False)
 
     ###
     # UI DESIGN
