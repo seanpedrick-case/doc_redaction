@@ -15,7 +15,7 @@ from tools.auth import authenticate_user
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.find_duplicate_pages import identify_similar_pages
-from tools.textract_batch_call import analyse_document_with_textract_api, poll_bulk_textract_analysis_progress_and_download, load_in_textract_job_details, check_for_provided_job_id
+from tools.textract_batch_call import analyse_document_with_textract_api, poll_bulk_textract_analysis_progress_and_download, load_in_textract_job_details, check_for_provided_job_id, check_textract_outputs_exist
 
 # Suppress downcasting warnings
 pd.set_option('future.no_silent_downcasting', True)
@@ -153,6 +153,8 @@ with app:
     s3_bulk_textract_input_subfolder = gr.Textbox(label = "Default Textract bulk S3 input folder", value=TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER, visible=False)
     s3_bulk_textract_output_subfolder = gr.Textbox(label = "Default Textract bulk S3 output folder", value=TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER, visible=False)
     successful_textract_api_call_number = gr.Number(precision=0, value=0, visible=False)
+    no_redaction_method_drop = gr.Radio(label = """Placeholder for no redaction method after downloading Textract outputs""", value = no_redaction_option, choices=[no_redaction_option], visible=False)
+    textract_only_method_drop = gr.Radio(label="""Placeholder for Textract method after downloading Textract outputs""", value = textract_option, choices=[textract_option], visible=False)
 
     load_s3_bulk_textract_logs_bool = gr.Textbox(label = "Load Textract logs or not", value=LOAD_PREVIOUS_TEXTRACT_JOBS_S3, visible=False)    
     s3_bulk_textract_logs_subfolder = gr.Textbox(label = "Default Textract bulk S3 input folder", value=TEXTRACT_JOBS_S3_LOC, visible=False)
@@ -164,7 +166,7 @@ with app:
     default_cost_code_textbox = gr.Textbox(label = "Default cost code textbox", value=DEFAULT_COST_CODE, visible=False)
 
     # Base tables that are not modified subsequent to load
-    recogniser_entity_dataframe_base = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[]}), col_count=3, type="pandas", visible=False, label="recogniser_entity_dataframe_base", show_search="filter", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True)
+    recogniser_entity_dataframe_base = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[], "id":[]}), col_count=4, type="pandas", visible=False, label="recogniser_entity_dataframe_base", show_search="filter", headers=["page", "label", "text", "id"], show_fullscreen_button=True, wrap=True, static_columns=[0,1,2,3])
     all_line_level_ocr_results_df_base = gr.Dataframe(value=pd.DataFrame(), headers=["page", "text"], col_count=(2, 'fixed'), row_count = (0, "dynamic"),  label="All OCR results", type="pandas", wrap=True, show_fullscreen_button=True, show_search='filter', show_label=False, show_copy_button=True, visible=False)
     all_line_level_ocr_results_df_placeholder = gr.Dataframe(visible=False)
     cost_code_dataframe_base = gr.Dataframe(value=pd.DataFrame(), row_count = (0, "dynamic"), label="Cost codes", type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True, show_search='filter', wrap=True, max_height=200, visible=False)
@@ -203,6 +205,7 @@ with app:
     job_output_textbox = gr.Textbox(value="", label="Textract call outputs", visible=False)
 
     textract_job_output_file = gr.File(label="Textract job output files", height=file_input_height, visible=False)
+    convert_textract_outputs_to_ocr_results = gr.Button("Placeholder - Convert Textract job outputs to OCR results (needs relevant document file uploaded above)", variant="secondary", visible=False)
 
     ###
     # UI DESIGN
@@ -263,8 +266,10 @@ with app:
                             job_id_textbox = gr.Textbox(label = "Job ID to check status", value='', visible=True)     
                             check_state_of_textract_api_call_btn = gr.Button("Check status of Textract job and download", variant="secondary", visible=True)
                     with gr.Row():
-                        job_current_status = gr.Textbox(value="", label="Analysis job current status", visible=True)
-                        textract_job_output_file = gr.File(label="Textract job output files", height=100, visible=True)           
+                        job_current_status = gr.Textbox(value="", label="Analysis job current status", visible=True)                            
+                        textract_job_output_file = gr.File(label="Textract job output files", height=100, visible=True)
+
+                    convert_textract_outputs_to_ocr_results = gr.Button("Convert Textract job outputs to OCR results (needs relevant document file uploaded above)", variant="secondary", visible=True)           
 
             gr.Markdown("""If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the Redaction Settings tab.""")      
             document_redact_btn = gr.Button("Extract text and redact document", variant="primary", scale = 4)
@@ -298,8 +303,8 @@ with app:
             with gr.Column(scale=2):
                 with gr.Row(equal_height=True):                       
                     annotation_last_page_button = gr.Button("Previous page", scale = 4)
-                    annotate_current_page = gr.Number(value=0, label="Current page", precision=0, scale = 2, min_width=50)
-                    annotate_max_pages = gr.Number(value=0, label="Total pages", precision=0, interactive=False, scale = 2, min_width=50)
+                    annotate_current_page = gr.Number(value=1, label="Current page", precision=0, scale = 2, min_width=50)
+                    annotate_max_pages = gr.Number(value=1, label="Total pages", precision=0, interactive=False, scale = 2, min_width=50)
                     annotation_next_page_button = gr.Button("Next page", scale = 4)
 
                 zoom_str = str(annotator_zoom_number) + '%'
@@ -336,7 +341,7 @@ with app:
                         recogniser_entity_dropdown = gr.Dropdown(label="Redaction category", value="ALL", allow_custom_value=True)
                         page_entity_dropdown = gr.Dropdown(label="Page", value="ALL", allow_custom_value=True)                    
                     text_entity_dropdown = gr.Dropdown(label="Text", value="ALL", allow_custom_value=True)
-                    recogniser_entity_dataframe = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[]}), col_count=(3,"fixed"), type="pandas", label="Search results. Click to go to page", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True, max_height=400)
+                    recogniser_entity_dataframe = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[], "id":[]}), col_count=(4,"fixed"), type="pandas", label="Search results. Click to go to page", headers=["page", "label", "text", "id"], show_fullscreen_button=True, wrap=True, max_height=400, static_columns=[0,1,2,3])
 
                     with gr.Row(equal_height=True):
                         exclude_selected_row_btn = gr.Button(value="Exclude specific row from redactions")
@@ -346,7 +351,9 @@ with app:
                         
                     undo_last_removal_btn = gr.Button(value="Undo last element removal")
                     
-                    selected_entity_dataframe_row = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[]}), col_count=3, type="pandas", visible=False, label="selected_entity_dataframe_row", headers=["page", "label", "text"], show_fullscreen_button=True, wrap=True)
+                    selected_entity_dataframe_row = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[], "id":[]}), col_count=4, type="pandas", visible=False, label="selected_entity_dataframe_row", headers=["page", "label", "text", "id"], show_fullscreen_button=True, wrap=True)
+                    selected_entity_id = gr.Textbox(value="", label="selected_entity_id", visible=False)
+                    selected_entity_colour = gr.Textbox(value="", label="selected_entity_colour", visible=False)
 
                 with gr.Accordion("Search all extracted text", open=True):                    
                     all_line_level_ocr_results_df = gr.Dataframe(value=pd.DataFrame(), headers=["page", "text"], col_count=(2, 'fixed'), row_count = (0, "dynamic"),  label="All OCR results", visible=True, type="pandas", wrap=True, show_fullscreen_button=True, show_search='filter', show_label=False, show_copy_button=True, max_height=400)
@@ -520,6 +527,13 @@ with app:
     success(fn=check_for_existing_textract_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[textract_output_found_checkbox])
 
     textract_job_detail_df.select(df_select_callback_textract_api, inputs=[textract_output_found_checkbox], outputs=[job_id_textbox, job_type_dropdown, selected_job_id_row])
+
+
+    convert_textract_outputs_to_ocr_results.click(fn=check_for_existing_textract_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[textract_output_found_checkbox]).\
+        success(fn= check_textract_outputs_exist, inputs=[textract_output_found_checkbox]).\
+        success(fn = reset_state_vars, outputs=[all_image_annotations_state, all_line_level_ocr_results_df_base, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state, recogniser_entity_dataframe, recogniser_entity_dataframe_base, pdf_doc_state, duplication_file_path_outputs_list_state, redaction_output_summary_textbox, is_a_textract_api_call]).\
+        success(fn= choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, textract_only_method_drop, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, redaction_output_summary_textbox, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, actual_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_base, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, no_redaction_method_drop, comprehend_query_number, max_fuzzy_spelling_mistakes_num, match_fuzzy_whole_phrase_bool, aws_access_key_textbox, aws_secret_key_textbox, annotate_max_pages, review_file_state, output_folder_textbox, document_cropboxes, page_sizes, textract_output_found_checkbox, only_extract_text_radio, duplication_file_path_outputs_list_state, latest_review_file_path, input_folder_textbox, textract_query_number, latest_ocr_file_path],
+                    outputs=[redaction_output_summary_textbox, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, actual_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_base, all_decision_process_table_state, comprehend_query_number, output_review_files, annotate_max_pages, annotate_max_pages_bottom, prepared_pdf_state, images_pdf_state, review_file_state, page_sizes, duplication_file_path_outputs_list_state, in_duplicate_pages, latest_review_file_path, textract_query_number, latest_ocr_file_path])
     
     ###
     # REVIEW PDF REDACTIONS
@@ -546,17 +560,22 @@ with app:
 
     # Apply page redactions
     annotation_button_apply.click(apply_redactions_to_review_df_and_files, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, output_folder_textbox, save_pdf_state, page_sizes], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output, review_file_state], scroll_to_output=True)
+
+    # Save current page redactions
+    update_current_page_redactions_btn.click(update_all_page_annotation_object_based_on_previous_page, inputs = [annotator, annotate_current_page, annotate_current_page, all_image_annotations_state, page_sizes], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
+    success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_state, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_sizes, all_image_annotations_state]).\
+    success(apply_redactions_to_review_df_and_files, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, output_folder_textbox, do_not_save_pdf_state, page_sizes], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output, review_file_state])
     
     # Review table controls
     recogniser_entity_dropdown.select(update_entities_df_recogniser_entities, inputs=[recogniser_entity_dropdown, recogniser_entity_dataframe_base, page_entity_dropdown, text_entity_dropdown], outputs=[recogniser_entity_dataframe, text_entity_dropdown, page_entity_dropdown])
     page_entity_dropdown.select(update_entities_df_page, inputs=[page_entity_dropdown, recogniser_entity_dataframe_base, recogniser_entity_dropdown, text_entity_dropdown], outputs=[recogniser_entity_dataframe, recogniser_entity_dropdown, text_entity_dropdown])
     text_entity_dropdown.select(update_entities_df_text, inputs=[text_entity_dropdown, recogniser_entity_dataframe_base, recogniser_entity_dropdown, page_entity_dropdown], outputs=[recogniser_entity_dataframe, recogniser_entity_dropdown, page_entity_dropdown])
 
-    recogniser_entity_dataframe.select(df_select_callback, inputs=[recogniser_entity_dataframe], outputs=[annotate_current_page, selected_entity_dataframe_row])#.\
-        #success(update_selected_review_df_row_colour, inputs=[selected_entity_dataframe_row, review_file_state], outputs=[review_file_state]).\
-        #success(update_annotator_page_from_review_df, inputs=[review_file_state, images_pdf_state, page_sizes, annotate_current_page, annotate_previous_page, all_image_annotations_state, annotator], outputs=[annotator, all_image_annotations_state])
-    
-    
+    # Clicking on a cell in the recogniser entity dataframe will take you to that page, and also highlight the target redaction box in blue
+    recogniser_entity_dataframe.select(df_select_callback, inputs=[recogniser_entity_dataframe], outputs=[annotate_current_page, selected_entity_dataframe_row]).\
+        success(update_selected_review_df_row_colour, inputs=[selected_entity_dataframe_row, review_file_state, selected_entity_id, selected_entity_colour, page_sizes], outputs=[review_file_state, selected_entity_id, selected_entity_colour]).\
+        success(update_annotator_page_from_review_df, inputs=[review_file_state, images_pdf_state, page_sizes, annotate_current_page, annotate_previous_page, all_image_annotations_state, annotator], outputs=[annotator, all_image_annotations_state])
+   
     reset_dropdowns_btn.click(reset_dropdowns, inputs=[recogniser_entity_dataframe_base], outputs=[recogniser_entity_dropdown, text_entity_dropdown, page_entity_dropdown]).\
         success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_state, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_sizes, all_image_annotations_state])
     
@@ -577,9 +596,7 @@ with app:
         success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_state, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_sizes, all_image_annotations_state]).\
         success(apply_redactions_to_review_df_and_files, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, output_folder_textbox, do_not_save_pdf_state, page_sizes], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output, review_file_state])
     
-    update_current_page_redactions_btn.click(update_all_page_annotation_object_based_on_previous_page, inputs = [annotator, annotate_current_page, annotate_current_page, all_image_annotations_state, page_sizes], outputs = [all_image_annotations_state, annotate_previous_page, annotate_current_page_bottom]).\
-        success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_state, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_sizes, all_image_annotations_state]).\
-        success(apply_redactions_to_review_df_and_files, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, output_folder_textbox, do_not_save_pdf_state, page_sizes], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output, review_file_state])
+
     
     # Review OCR text buttom
     all_line_level_ocr_results_df.select(df_select_callback_ocr, inputs=[all_line_level_ocr_results_df], outputs=[annotate_current_page, selected_entity_dataframe_row], scroll_to_output=True)
@@ -717,7 +734,7 @@ if __name__ == "__main__":
     if RUN_DIRECT_MODE == "0":
         
         if os.environ['COGNITO_AUTH'] == "1":
-            app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+            app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
         else:
             app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
     

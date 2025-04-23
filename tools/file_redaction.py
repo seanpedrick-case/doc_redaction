@@ -21,7 +21,7 @@ from collections import defaultdict  # For efficient grouping
 
 from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction, merge_text_bounding_boxes
-from tools.file_conversion import convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords, is_pdf, is_pdf_or_image, prepare_image_or_pdf, divide_coordinates_by_page_sizes, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, divide_coordinates_by_page_sizes, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes
+from tools.file_conversion import convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords, is_pdf, is_pdf_or_image, prepare_image_or_pdf, divide_coordinates_by_page_sizes, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, divide_coordinates_by_page_sizes, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, fill_missing_box_ids
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer
 from tools.helper_functions import get_file_name_without_type, clean_unicode_text, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, no_redaction_option
 from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult, load_and_convert_textract_json
@@ -166,10 +166,10 @@ def choose_and_run_redactor(file_paths:List[str],
 
     # Ensure all_pages_decision_process_table is in correct format for downstream processes
     if isinstance(all_pages_decision_process_table,list):
-        if not all_pages_decision_process_table: all_pages_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "boundingBox", "text", "start","end","score"])
+        if not all_pages_decision_process_table: all_pages_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "boundingBox", "text", "start","end","score", "id"])
     elif isinstance(all_pages_decision_process_table, pd.DataFrame):
         if all_pages_decision_process_table.empty:
-            all_pages_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "boundingBox", "text", "start","end","score"])
+            all_pages_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "boundingBox", "text", "start","end","score", "id"])
 
      # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -211,6 +211,7 @@ def choose_and_run_redactor(file_paths:List[str],
     if latest_file_completed >= number_of_files:
 
         print("Completed last file")
+        progress(0.95, "Completed last file, performing final checks")
         current_loop_page = 0
 
         if isinstance(out_message, list) and out_message:
@@ -383,7 +384,7 @@ def choose_and_run_redactor(file_paths:List[str],
    
     progress(0.5, desc="Extracting text and redacting document")
 
-    all_pages_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax",	"ymin",	"ymax",	"text"])
+    all_pages_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "boundingBox", "text", "start","end","score", "id"])
     all_line_level_ocr_results_df = pd.DataFrame()
 
     # Run through file loop, redact each file at a time
@@ -502,6 +503,8 @@ def choose_and_run_redactor(file_paths:List[str],
             if latest_file_completed != len(file_paths_list):
                 print("Completed file number:", str(latest_file_completed), "there are more files to do")                    
 
+            progress(0.9, "Saving redacted PDF file")
+            
             # Save redacted file
             if pii_identification_method != no_redaction_option:
                 if is_pdf(file_path) == False:
@@ -512,7 +515,7 @@ def choose_and_run_redactor(file_paths:List[str],
                     #            
                 else:
                     out_redacted_pdf_file_path = output_folder + pdf_file_name_without_ext + "_redacted.pdf"
-                    print("saving redacted pdf file:", out_redacted_pdf_file_path)
+                    print("Saving redacted PDF file:", out_redacted_pdf_file_path)
                     pymupdf_doc.save(out_redacted_pdf_file_path, garbage=4, deflate=True, clean=True)
 
                 out_file_paths.append(out_redacted_pdf_file_path)
@@ -522,7 +525,6 @@ def choose_and_run_redactor(file_paths:List[str],
             else: all_line_level_ocr_results_df = pd.DataFrame(columns=["page", "text", "left", "top", "width", "height"])
            
             ocr_file_path = orig_pdf_file_path + "_ocr_output.csv"
-
             all_line_level_ocr_results_df.sort_values(["page", "top", "left"], inplace=True)
 
             all_line_level_ocr_results_df.to_csv(ocr_file_path, index = None, encoding="utf-8")
@@ -538,6 +540,8 @@ def choose_and_run_redactor(file_paths:List[str],
             annotations_all_pages = create_annotation_dicts_from_annotation_df(all_image_annotations_df, page_sizes)
 
             annotations_all_pages = remove_duplicate_images_with_blank_boxes(annotations_all_pages)
+
+
 
             # Save the gradio_annotation_boxes to a review csv file        
             review_file_state = convert_annotation_json_to_review_df(annotations_all_pages, all_pages_decision_process_table, page_sizes=page_sizes)
@@ -838,7 +842,10 @@ def prepare_custom_image_recogniser_result_annotation_box(page:Page, annot:dict,
     if hasattr(annot, 'text') and annot.text:
         img_annotation_box["text"] = str(annot.text)
     else:
-        img_annotation_box["text"] = ""    
+        img_annotation_box["text"] = ""
+
+    # Assign an id
+    img_annotation_box = fill_missing_box_ids(img_annotation_box)  
 
     return img_annotation_box, rect
 
@@ -953,6 +960,10 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
         page_annotations = page_annotations["boxes"]
 
     for annot in page_annotations:
+            
+        
+        
+
         # Check if an Image recogniser result, or a Gradio annotation object
         if (isinstance(annot, CustomImageRecognizerResult)) | isinstance(annot, dict):
 
@@ -960,6 +971,7 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
 
             # Should already be in correct format if img_annotator_box is an input
             if isinstance(annot, dict):
+                annot = fill_missing_box_ids(annot)
                 img_annotation_box = annot
 
                 box_coordinates = (img_annotation_box['xmin'], img_annotation_box['ymin'], img_annotation_box['xmax'], img_annotation_box['ymax'])
@@ -1003,6 +1015,8 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
             else: convert_pikepdf_to_pymupdf_coords = False
 
             img_annotation_box, rect = convert_pikepdf_annotations_to_result_annotation_box(page, annot, image, convert_pikepdf_to_pymupdf_coords, page_sizes_df, image_dimensions=image_dimensions)
+
+            img_annotation_box = fill_missing_box_ids(img_annotation_box)
 
             #print("image_dimensions:", image_dimensions)
             #print("annot:", annot)
@@ -1155,7 +1169,7 @@ def redact_image_pdf(file_path:str,
                      page_break_return:bool=False,
                      annotations_all_pages:List=[],
                      all_line_level_ocr_results_df:pd.DataFrame = pd.DataFrame(),
-                     all_pages_decision_process_table:pd.DataFrame = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "boundingBox", "text", "start","end","score"]),
+                     all_pages_decision_process_table:pd.DataFrame = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "boundingBox", "text", "start","end","score", "id"]),
                      pymupdf_doc:Document = [],
                      pii_identification_method:str="Local",
                      comprehend_query_number:int=0,
@@ -1490,10 +1504,14 @@ def redact_image_pdf(file_path:str,
                 'start': result.start,
                 'end': result.end,
                 'score': result.score,
-                'page': reported_page_number                
+                'page': reported_page_number             
             } for result in page_merged_redaction_bboxes])
 
             all_pages_decision_process_table_list.append(decision_process_table)
+
+            decision_process_table = fill_missing_ids(decision_process_table)
+            #decision_process_table.to_csv("output/decision_process_table_with_ids.csv")
+
 
             # Convert to DataFrame and add to ongoing logging table
             line_level_ocr_results_df = pd.DataFrame([{
@@ -1739,12 +1757,16 @@ def create_text_redaction_process_results(analyser_results, analysed_bounding_bo
         analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']] = analysed_bounding_boxes_df_new['boundingBox'].apply(pd.Series)
 
         # Convert the new columns to integers (if needed)
-        analysed_bounding_boxes_df_new.loc[:, ['xmin', 'ymin', 'xmax', 'ymax']] = (analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
+        #analysed_bounding_boxes_df_new.loc[:, ['xmin', 'ymin', 'xmax', 'ymax']] = (analysed_bounding_boxes_df_new[['xmin', 'ymin', 'xmax', 'ymax']].astype(float) / 5).round() * 5
 
         analysed_bounding_boxes_df_text = analysed_bounding_boxes_df_new['result'].astype(str).str.split(",",expand=True).replace(".*: ", "", regex=True)
         analysed_bounding_boxes_df_text.columns = ["label", "start", "end", "score"]
         analysed_bounding_boxes_df_new = pd.concat([analysed_bounding_boxes_df_new, analysed_bounding_boxes_df_text], axis = 1)
         analysed_bounding_boxes_df_new['page'] = page_num + 1
+
+        #analysed_bounding_boxes_df_new = fill_missing_ids(analysed_bounding_boxes_df_new)
+        analysed_bounding_boxes_df_new.to_csv("output/analysed_bounding_boxes_df_new_with_ids.csv")
+
         decision_process_table = pd.concat([decision_process_table, analysed_bounding_boxes_df_new], axis = 0).drop('result', axis=1)
     
     return decision_process_table
@@ -1786,7 +1808,7 @@ def redact_text_pdf(
     page_break_return: bool = False,  # Flag to indicate if a page break should be returned
     annotations_all_pages: List[dict] = [],  # List of annotations across all pages
     all_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(),  # DataFrame for OCR results
-    all_pages_decision_process_table:pd.DataFrame = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax",	"ymin",	"ymax",	"text"]),  # DataFrame for decision process table
+    all_pages_decision_process_table:pd.DataFrame = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax",	"text", "id"]),  # DataFrame for decision process table
     pymupdf_doc: List = [],  # List of PyMuPDF documents
     pii_identification_method: str = "Local",
     comprehend_query_number:int = 0,
@@ -1967,7 +1989,7 @@ def redact_text_pdf(
                     pymupdf_page, page_image_annotations = redact_page_with_pymupdf(pymupdf_page, pikepdf_redaction_annotations_on_page, image_path, redact_whole_page=redact_whole_page, convert_pikepdf_to_pymupdf_coords=True, original_cropbox=original_cropboxes[page_no], page_sizes_df=page_sizes_df)
 
                     # Create decision process table
-                    page_decision_process_table = create_text_redaction_process_results(page_analyser_results, page_redaction_bounding_boxes, current_loop_page)     
+                    page_decision_process_table = create_text_redaction_process_results(page_analyser_results, page_redaction_bounding_boxes, current_loop_page)  
 
                     if not page_decision_process_table.empty:
                         all_pages_decision_process_table_list.append(page_decision_process_table)
@@ -2035,7 +2057,7 @@ def redact_text_pdf(
 
             return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
         
-    # Write decision logs
+    # Write all page outputs
     all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list)
     all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_df_list)
     

@@ -164,7 +164,7 @@ def analyse_document_with_textract_api(
         }])
 
         # File path
-        log_file_path = os.path.join(local_output_dir, "textract_job_log_files.csv")
+        log_file_path = os.path.join(local_output_dir, "textract_document_jobs.csv")
 
         # Check if file exists
         file_exists = os.path.exists(log_file_path)
@@ -444,18 +444,16 @@ def load_in_textract_job_details(load_s3_jobs:str=LOAD_PREVIOUS_TEXTRACT_JOBS_S3
     '''
     Load in a dataframe of jobs previous submitted to the Textract API service.
     '''
-
     job_df = pd.DataFrame(columns=['job_id','file_name','job_type','signature_extraction','s3_location','job_date_time'])
 
     # Initialize boto3 clients
     session = boto3.Session(region_name=aws_region)
     s3_client = session.client('s3')
 
-    local_output_path = f'{load_local_jobs_loc}/textract_job_log_files.csv'
+    local_output_path = f'{load_local_jobs_loc}/textract_document_jobs.csv'
 
     if load_s3_jobs == 'True':
-
-        s3_output_key = f'{load_s3_jobs_loc}/textract_job_log_files.csv'
+        s3_output_key = f'{load_s3_jobs_loc}/textract_document_jobs.csv'
                 
         try:
             s3_client.head_object(Bucket=document_redaction_bucket, Key=s3_output_key)
@@ -524,3 +522,9 @@ def download_textract_output(job_id:str,
         print(f"Output file downloaded to: {local_file_path}")
     except Exception as e:
         print(f"Error downloading file: {e}")
+
+def check_textract_outputs_exist(textract_output_found_checkbox):
+        if textract_output_found_checkbox == True:
+            print("Textract outputs found")
+            return
+        else: raise Exception("Relevant Tetract outputs not found. Please ensure you have selected to correct results output and you have uploaded the relevant document file in 'Choose document or image file...' above")
