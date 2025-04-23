@@ -22,6 +22,7 @@ def analyse_document_with_textract_api(
     local_output_dir: str = OUTPUT_FOLDER,    
     analyse_signatures:List[str] = [],
     successful_job_number:int=0,
+    total_document_page_count:int=1,
     general_s3_bucket_name: str = DOCUMENT_REDACTION_BUCKET,
     aws_region: str = AWS_REGION # Optional: specify region if not default
     ):
@@ -39,6 +40,7 @@ def analyse_document_with_textract_api(
         local_output_dir (str, optional): Local directory to save the downloaded JSON results.        
         analyse_signatures (List[str], optional): Analyse signatures? Default is no.
         successful_job_number (int): The number of successful jobs that have been submitted in this session.
+        total_document_page_count (int): The number of pages in the document
         aws_region (str, optional): AWS region name. Defaults to boto3 default region.
 
     Returns:
@@ -189,8 +191,9 @@ def analyse_document_with_textract_api(
         raise
 
     successful_job_number += 1
+    total_number_of_textract_page_calls = total_document_page_count
 
-    return f"Textract analysis job submitted, job ID:{job_id}", job_id, job_type, successful_job_number, is_a_textract_api_call
+    return f"Textract analysis job submitted, job ID:{job_id}", job_id, job_type, successful_job_number, is_a_textract_api_call, total_number_of_textract_page_calls
 
 def return_job_status(job_id:str,
                      response:dict,
@@ -457,9 +460,9 @@ def load_in_textract_job_details(load_s3_jobs:str=LOAD_PREVIOUS_TEXTRACT_JOBS_S3
                 
         try:
             s3_client.head_object(Bucket=document_redaction_bucket, Key=s3_output_key)
-            print(f"File exists. Downloading from '{s3_output_key}' to '{local_output_path}'...")
+            #print(f"File exists. Downloading from '{s3_output_key}' to '{local_output_path}'...")
             s3_client.download_file(document_redaction_bucket, s3_output_key, local_output_path)
-            print("Download successful.")
+            #print("Download successful.")
         except ClientError as e:
             if e.response['Error']['Code'] == '404':
                 print("Log file does not exist in S3.")
@@ -527,4 +530,4 @@ def check_textract_outputs_exist(textract_output_found_checkbox):
         if textract_output_found_checkbox == True:
             print("Textract outputs found")
             return
-        else: raise Exception("Relevant Tetract outputs not found. Please ensure you have selected to correct results output and you have uploaded the relevant document file in 'Choose document or image file...' above")
+        else: raise Exception("Relevant Textract outputs not found. Please ensure you have selected to correct results output and you have uploaded the relevant document file in 'Choose document or image file...' above")
