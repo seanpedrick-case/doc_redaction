@@ -99,7 +99,7 @@ def choose_and_run_redactor(file_paths:List[str],
  duplication_file_path_outputs:list=[],
  review_file_path:str="",
  input_folder:str=INPUT_FOLDER,
- textract_query_number:int=0,
+ total_textract_query_number:int=0,
  ocr_file_path:str="",
  prepare_images:bool=True,
  progress=gr.Progress(track_tqdm=True)):
@@ -148,7 +148,7 @@ def choose_and_run_redactor(file_paths:List[str],
     - duplication_file_outputs (list, optional): List to allow for export to the duplication function page.
     - review_file_path (str, optional): The latest review file path created by the app
     - input_folder (str, optional): The custom input path, if provided
-    - textract_query_number (int, optional): The number of textract queries up until this point.
+    - total_textract_query_number (int, optional): The number of textract queries up until this point.
     - ocr_file_path (str, optional): The latest ocr file path created by the app
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
@@ -160,7 +160,7 @@ def choose_and_run_redactor(file_paths:List[str],
     out_message = ""    
     pdf_file_name_with_ext = ""
     pdf_file_name_without_ext = ""    
-    request_metadata = ""
+    blank_request_metadata = []
     all_textract_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
     review_out_file_paths = [prepared_pdf_file_paths[0]]  
 
@@ -229,7 +229,7 @@ def choose_and_run_redactor(file_paths:List[str],
         estimate_total_processing_time = sum_numbers_before_seconds(combined_out_message)
         print("Estimated total processing time:", str(estimate_total_processing_time))
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, textract_query_number, ocr_file_path
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path
 
     #if first_loop_state == False:
     # Prepare documents and images as required if they don't already exist
@@ -292,7 +292,7 @@ def choose_and_run_redactor(file_paths:List[str],
                 #review_file_path = [x for x in out_file_paths if "review_file" in x]
                 if review_file_path: review_out_file_paths.append(review_file_path)
 
-        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, textract_query_number, ocr_file_path
+        return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page,precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = False, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path
 
     # Load/create allow list
     # If string, assume file path
@@ -422,7 +422,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
             print("Redacting file " + pdf_file_name_with_ext + " as an image-based file")
 
-            pymupdf_doc, all_pages_decision_process_table, out_file_paths, new_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number = redact_image_pdf(file_path,
+            pymupdf_doc, all_pages_decision_process_table, out_file_paths, new_textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number = redact_image_pdf(file_path,
              pdf_image_file_paths,
              language,
              chosen_redact_entities,
@@ -432,7 +432,7 @@ def choose_and_run_redactor(file_paths:List[str],
              page_max,
              text_extraction_method,
              handwrite_signature_checkbox,
-             request_metadata,
+             blank_request_metadata,
              current_loop_page,
              page_break_return,
              annotations_all_pages,
@@ -453,7 +453,10 @@ def choose_and_run_redactor(file_paths:List[str],
              output_folder=output_folder)
                         
             # Save Textract request metadata (if exists)
-            if new_request_metadata: all_textract_request_metadata.append(new_request_metadata)              
+            
+            if new_textract_request_metadata and isinstance(new_textract_request_metadata, list):
+                all_textract_request_metadata.extend(new_textract_request_metadata)
+                
 
         elif text_extraction_method == text_ocr_option:
             
@@ -541,8 +544,6 @@ def choose_and_run_redactor(file_paths:List[str],
 
             annotations_all_pages = remove_duplicate_images_with_blank_boxes(annotations_all_pages)
 
-
-
             # Save the gradio_annotation_boxes to a review csv file        
             review_file_state = convert_annotation_json_to_review_df(annotations_all_pages, all_pages_decision_process_table, page_sizes=page_sizes)
 
@@ -575,7 +576,7 @@ def choose_and_run_redactor(file_paths:List[str],
             estimated_time_taken_state += time_taken
 
    # If textract requests made, write to logging file. Alos record number of Textract requests
-    if all_textract_request_metadata:
+    if all_textract_request_metadata and isinstance(all_textract_request_metadata, list): 
         all_request_metadata_str = '\n'.join(all_textract_request_metadata).strip()
 
         all_textract_request_metadata_file_path = output_folder + pdf_file_name_without_ext + "_textract_metadata.txt"   
@@ -587,11 +588,8 @@ def choose_and_run_redactor(file_paths:List[str],
         if all_textract_request_metadata_file_path not in log_files_output_paths:
             log_files_output_paths.append(all_textract_request_metadata_file_path)
 
-        new_textract_queries = len(all_textract_request_metadata)
-
-        textract_query_number += new_textract_queries
-
-    #if combined_out_message: out_message = combined_out_message
+        new_textract_query_numbers = len(all_textract_request_metadata)
+        total_textract_query_number += new_textract_query_numbers
     
     # Ensure no duplicated output files
     log_files_output_paths = sorted(list(set(log_files_output_paths)))
@@ -601,7 +599,7 @@ def choose_and_run_redactor(file_paths:List[str],
     if not review_file_path: review_out_file_paths = [prepared_pdf_file_paths[-1]]
     else: review_out_file_paths = [prepared_pdf_file_paths[-1], review_file_path]
 
-    return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, textract_query_number, ocr_file_path
+    return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path
 
 def convert_pikepdf_coords_to_pymupdf(pymupdf_page:Page, pikepdf_bbox, type="pikepdf_annot"):
     '''
@@ -1164,7 +1162,7 @@ def redact_image_pdf(file_path:str,
                      page_max:int=999,
                      text_extraction_method:str=tesseract_ocr_option,
                      handwrite_signature_checkbox:List[str]=["Extract handwriting", "Extract signatures"],
-                     request_metadata:str="",
+                     textract_request_metadata:list=[],
                      current_loop_page:int=0,
                      page_break_return:bool=False,
                      annotations_all_pages:List=[],
@@ -1200,7 +1198,7 @@ def redact_image_pdf(file_path:str,
     - page_max (int, optional): The maximum page number to end redaction at. Defaults to 999.
     - text_extraction_method (str, optional): The type of analysis to perform on the PDF. Defaults to tesseract_ocr_option.
     - handwrite_signature_checkbox (List[str], optional): A list of options for redacting handwriting and signatures. Defaults to ["Extract handwriting", "Extract signatures"].
-    - request_metadata (str, optional): Metadata related to the redaction request. Defaults to an empty string.
+    - textract_request_metadata (list, optional): Metadata related to the redaction request. Defaults to an empty string.
     - page_break_return (bool, optional): Indicates if the function should return after a page break. Defaults to False.
     - annotations_all_pages (List, optional): List of annotations on all pages that is used by the gradio_image_annotation object.
     - all_line_level_ocr_results_df (pd.DataFrame, optional): All line level OCR results for the document as a Pandas dataframe,
@@ -1350,7 +1348,7 @@ def redact_image_pdf(file_path:str,
                         image.save(image_buffer, format='PNG')  # Save as PNG, or adjust format if needed
                         pdf_page_as_bytes = image_buffer.getvalue()
 
-                        text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
+                        text_blocks, new_textract_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
                         
                         if textract_json_file_path not in log_files_output_paths:
                             log_files_output_paths.append(textract_json_file_path)
@@ -1359,9 +1357,9 @@ def redact_image_pdf(file_path:str,
                     except Exception as e:
                         print("Textract extraction for page", reported_page_number, "failed due to:", e)
                         textract_data = {"pages":[]}
-                        new_request_metadata = "Failed Textract API call"
+                        new_textract_request_metadata = "Failed Textract API call"
                     
-                    request_metadata = request_metadata + "\n" + new_request_metadata
+                    textract_request_metadata.append(new_textract_request_metadata)
 
                 else:                    
                     # Check if the current reported_page_number exists in the loaded JSON
@@ -1376,7 +1374,7 @@ def redact_image_pdf(file_path:str,
                             image.save(image_buffer, format='PNG')  # Save as PNG, or adjust format if needed
                             pdf_page_as_bytes = image_buffer.getvalue()
 
-                            text_blocks, new_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
+                            text_blocks, new_textract_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
 
                             # Check if "pages" key exists, if not, initialise it as an empty list
                             if "pages" not in textract_data: textract_data["pages"] = []
@@ -1388,14 +1386,14 @@ def redact_image_pdf(file_path:str,
                             out_message = "Textract extraction for page " + reported_page_number + " failed due to:" + str(e)
                             print(out_message)                            
                             text_blocks = []
-                            new_request_metadata = "Failed Textract API call"                          
+                            new_textract_request_metadata = "Failed Textract API call"                          
 
                             # Check if "pages" key exists, if not, initialise it as an empty list
                             if "pages" not in textract_data: textract_data["pages"] = []
 
                             raise Exception(out_message)
                         
-                        request_metadata = request_metadata + "\n" + new_request_metadata
+                        textract_request_metadata.append(new_textract_request_metadata)
                         
                     else:
                         # If the page exists, retrieve the data
@@ -1563,7 +1561,7 @@ def redact_image_pdf(file_path:str,
 
                 current_loop_page += 1
 
-                return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+                return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
 
         # If it's an image file
         if is_pdf(file_path) == False:
@@ -1599,7 +1597,7 @@ def redact_image_pdf(file_path:str,
             all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list)
             all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_df_list)
 
-            return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+            return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
                
     if text_extraction_method == textract_option:
         # Write the updated existing textract data back to the JSON file
@@ -1619,7 +1617,7 @@ def redact_image_pdf(file_path:str,
 
     all_line_level_ocr_results_df = divide_coordinates_by_page_sizes(all_line_level_ocr_results_df, page_sizes_df, xmin="left", xmax="width", ymin="top", ymax="height")
 
-    return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
+    return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number
 
 
 ###

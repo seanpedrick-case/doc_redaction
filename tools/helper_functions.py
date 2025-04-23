@@ -31,7 +31,7 @@ def reset_state_vars():
             show_share_button=False,
             show_remove_button=False,
             interactive=False
-        ), [], [], pd.DataFrame(), pd.DataFrame(), [], [], "", False
+        ), [], [], pd.DataFrame(), pd.DataFrame(), [], [], "", False, 0
 
 def reset_ocr_results_state():
     return pd.DataFrame(), pd.DataFrame(), []
