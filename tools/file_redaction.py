@@ -258,8 +258,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
 
     # Call prepare_image_or_pdf only if needed
-    if prepare_images_flag is not None:# and first_loop_state==True:
-        #print("Calling preparation function. prepare_images_flag:", prepare_images_flag)
+    if prepare_images_flag is not None:
         out_message, prepared_pdf_file_paths, pdf_image_file_paths, annotate_max_pages, annotate_max_pages_bottom, pymupdf_doc, annotations_all_pages, review_file_state, document_cropboxes, page_sizes, textract_output_found, all_img_details_state, placeholder_ocr_results_df = prepare_image_or_pdf(
             file_paths_loop, text_extraction_method, 0, out_message, True, 
             annotate_max_pages, annotations_all_pages, document_cropboxes, redact_whole_page_list, 
@@ -333,7 +332,7 @@ def choose_and_run_redactor(file_paths:List[str],
     # Try to connect to AWS services directly only if RUN_AWS_FUNCTIONS environmental variable is 1, otherwise an environment variable or direct textbox input is needed.
     if pii_identification_method == aws_pii_detector:
         if aws_access_key_textbox and aws_secret_key_textbox:
-            print("Connecting to Comprehend using AWS access key and secret keys from textboxes.")
+            print("Connecting to Comprehend using AWS access key and secret keys from user input.")
             comprehend_client = boto3.client('comprehend', 
                 aws_access_key_id=aws_access_key_textbox, 
                 aws_secret_access_key=aws_secret_key_textbox, region_name=AWS_REGION)
@@ -356,7 +355,7 @@ def choose_and_run_redactor(file_paths:List[str],
     # Try to connect to AWS Textract Client if using that text extraction method
     if text_extraction_method == textract_option:   
         if aws_access_key_textbox and aws_secret_key_textbox:
-            print("Connecting to Textract using AWS access key and secret keys from textboxes.")
+            print("Connecting to Textract using AWS access key and secret keys from user input.")
             textract_client = boto3.client('textract', 
                 aws_access_key_id=aws_access_key_textbox, 
                 aws_secret_access_key=aws_secret_key_textbox, region_name=AWS_REGION)
@@ -401,7 +400,7 @@ def choose_and_run_redactor(file_paths:List[str],
             is_a_pdf = is_pdf(file_path) == True
             if is_a_pdf == False and text_extraction_method == text_ocr_option:
                 # If user has not submitted a pdf, assume it's an image
-                print("File is not a pdf, assuming that image analysis needs to be used.")
+                print("File is not a PDF, assuming that image analysis needs to be used.")
                 text_extraction_method = tesseract_ocr_option
         else:
             out_message = "No file selected"
@@ -862,17 +861,6 @@ def convert_pikepdf_annotations_to_result_annotation_box(page:Page, annot:dict, 
 
     rect = Rect(pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2)
 
-    # if image or image_dimensions:
-    #     print("Dividing result by image coordinates")
-
-    #     image_x1, image_y1, image_x2, image_y2 = convert_pymupdf_to_image_coords(page, pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2, image, image_dimensions=image_dimensions)
-
-    #     img_annotation_box["xmin"] = image_x1
-    #     img_annotation_box["ymin"] = image_y1
-    #     img_annotation_box["xmax"] = image_x2
-    #     img_annotation_box["ymax"] = image_y2
-
-    # else:
     convert_df = pd.DataFrame({
                             "page": [page_no],
                             "xmin": [pymupdf_x1],
@@ -1015,9 +1003,6 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
             img_annotation_box, rect = convert_pikepdf_annotations_to_result_annotation_box(page, annot, image, convert_pikepdf_to_pymupdf_coords, page_sizes_df, image_dimensions=image_dimensions)
 
             img_annotation_box = fill_missing_box_ids(img_annotation_box)
-
-            #print("image_dimensions:", image_dimensions)
-            #print("annot:", annot)
 
         all_image_annotation_boxes.append(img_annotation_box)
 
@@ -1285,8 +1270,6 @@ def redact_image_pdf(file_path:str,
         page_handwriting_recogniser_results = []
         page_break_return = False
         reported_page_number = str(page_no + 1)
-
-        #print("page_sizes_df for row:", page_sizes_df.loc[page_sizes_df["page"] == (page_no + 1)])
         
         # Try to find image location
         try:
@@ -1328,7 +1311,7 @@ def redact_image_pdf(file_path:str,
 
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
 
-            # If using Tesseract, need to check if we have page as image_path
+            # If using Tesseract
             if text_extraction_method == tesseract_ocr_option:
                 #print("image_path:", image_path)
                 #print("print(type(image_path)):", print(type(image_path)))
@@ -1449,7 +1432,6 @@ def redact_image_pdf(file_path:str,
                     # Assume image_path is an image
                     image = image_path
 
-                print("image:", image)
 
                 fill = (0, 0, 0)   # Fill colour for redactions
                 draw = ImageDraw.Draw(image)
@@ -1631,8 +1613,6 @@ def get_text_container_characters(text_container:LTTextContainer):
                     for line in text_container
                     if isinstance(line, LTTextLine) or isinstance(line, LTTextLineHorizontal)
                     for char in line]
-        
-        #print("Initial characters:", characters)
     
         return characters
     return []
@@ -1762,9 +1742,6 @@ def create_text_redaction_process_results(analyser_results, analysed_bounding_bo
         analysed_bounding_boxes_df_new = pd.concat([analysed_bounding_boxes_df_new, analysed_bounding_boxes_df_text], axis = 1)
         analysed_bounding_boxes_df_new['page'] = page_num + 1
 
-        #analysed_bounding_boxes_df_new = fill_missing_ids(analysed_bounding_boxes_df_new)
-        analysed_bounding_boxes_df_new.to_csv("output/analysed_bounding_boxes_df_new_with_ids.csv")
-
         decision_process_table = pd.concat([decision_process_table, analysed_bounding_boxes_df_new], axis = 0).drop('result', axis=1)
     
     return decision_process_table
@@ -1772,7 +1749,6 @@ def create_text_redaction_process_results(analyser_results, analysed_bounding_bo
 def create_pikepdf_annotations_for_bounding_boxes(analysed_bounding_boxes):
     pikepdf_redaction_annotations_on_page = []
     for analysed_bounding_box in analysed_bounding_boxes:
-        #print("analysed_bounding_box:", analysed_bounding_boxes)
 
         bounding_box = analysed_bounding_box["boundingBox"]
         annotation = Dictionary(
@@ -1997,7 +1973,6 @@ def redact_text_pdf(
                     pass
                     #print("Not redacting page:", page_no)
 
-                #print("page_image_annotations after page", reported_page_number, "are", page_image_annotations)
 
                 # Join extracted text outputs for all lines together
                 if not page_text_ocr_outputs.empty:

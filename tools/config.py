@@ -237,7 +237,7 @@ else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
 SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'False')
 
-GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'False')
+GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'True')
 
 DEFAULT_COST_CODE = get_or_create_env_var('DEFAULT_COST_CODE', '')
 
@@ -246,7 +246,7 @@ COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', '') # 'config/COST_CE
 S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', '') # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
 
 if COST_CODES_PATH: OUTPUT_COST_CODES_PATH = COST_CODES_PATH
-else: OUTPUT_COST_CODES_PATH = 'config/COST_CENTRES.csv'
+else: OUTPUT_COST_CODES_PATH = ''
 
 ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, is it compulsory to choose one before redacting?
 
