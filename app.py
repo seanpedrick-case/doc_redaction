@@ -4,9 +4,9 @@ import pandas as pd
 import gradio as gr
 from gradio_image_annotation import image_annotator
 
-from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, TESSERACT_FOLDER, POPPLER_FOLDER, REDACTION_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_BULK_TEXTRACT_CALL_OPTIONS, TEXTRACT_BULK_ANALYSIS_BUCKET, TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE, OUTPUT_COST_CODES_PATH, OUTPUT_ALLOW_LIST_PATH, COGNITO_AUTH
+from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, TESSERACT_FOLDER, POPPLER_FOLDER, REDACTION_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE, OUTPUT_COST_CODES_PATH, OUTPUT_ALLOW_LIST_PATH, COGNITO_AUTH, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_ACCESS_LOG_HEADERS, CSV_ACCESS_LOG_HEADERS, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_FEEDBACK_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, USAGE_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_USAGE_LOG_HEADERS, CSV_USAGE_LOG_HEADERS
 from tools.helper_functions import put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, no_redaction_option, reset_review_vars, merge_csv_files, load_all_output_files, update_dataframe, check_for_existing_textract_file, load_in_default_cost_codes, enforce_cost_codes, calculate_aws_costs, calculate_time_taken, reset_base_dataframe, reset_ocr_base_dataframe, update_cost_code_dataframe_from_dropdown_select
-from tools.aws_functions import upload_file_to_s3, download_file_from_s3
+from tools.aws_functions import upload_file_to_s3, download_file_from_s3, upload_log_file_to_s3
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
 from tools.redaction_review import apply_redactions_to_review_df_and_files, update_all_page_annotation_object_based_on_previous_page, decrease_page, increase_page, update_annotator_object_and_filter_df, update_entities_df_recogniser_entities, update_entities_df_page, update_entities_df_text, df_select_callback, convert_df_to_xfdf, convert_xfdf_to_dataframe, reset_dropdowns, exclude_selected_items_from_redaction, undo_last_removal, update_selected_review_df_row_colour, update_all_entity_df_dropdowns, df_select_callback_cost, update_other_annotator_number_from_current, update_annotator_page_from_review_df, df_select_callback_ocr, df_select_callback_textract_api
@@ -43,6 +43,22 @@ if RUN_AWS_FUNCTIONS == "1":
 else:
     default_ocr_val = text_ocr_option
     default_pii_detector = local_pii_detector
+
+SAVE_LOGS_TO_CSV = eval(SAVE_LOGS_TO_CSV)
+SAVE_LOGS_TO_DYNAMODB = eval(SAVE_LOGS_TO_DYNAMODB)
+
+print("SAVE_LOGS_TO_CSV:", SAVE_LOGS_TO_CSV)
+print("SAVE_LOGS_TO_DYNAMODB:", SAVE_LOGS_TO_DYNAMODB)
+
+if CSV_ACCESS_LOG_HEADERS: CSV_ACCESS_LOG_HEADERS = eval(CSV_ACCESS_LOG_HEADERS)
+if CSV_FEEDBACK_LOG_HEADERS: CSV_FEEDBACK_LOG_HEADERS = eval(CSV_FEEDBACK_LOG_HEADERS)
+if CSV_USAGE_LOG_HEADERS: CSV_USAGE_LOG_HEADERS = eval(CSV_USAGE_LOG_HEADERS)
+
+if DYNAMODB_ACCESS_LOG_HEADERS: DYNAMODB_ACCESS_LOG_HEADERS = eval(DYNAMODB_ACCESS_LOG_HEADERS)
+if DYNAMODB_FEEDBACK_LOG_HEADERS: DYNAMODB_FEEDBACK_LOG_HEADERS = eval(DYNAMODB_FEEDBACK_LOG_HEADERS)
+if DYNAMODB_USAGE_LOG_HEADERS: DYNAMODB_USAGE_LOG_HEADERS = eval(DYNAMODB_USAGE_LOG_HEADERS)
+
+print
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Base(), fill_width=True)
@@ -149,9 +165,9 @@ with app:
     s3_default_allow_list_file = gr.Textbox(label = "Default allow list file", value=S3_ALLOW_LIST_PATH, visible=False)
     default_allow_list_output_folder_location = gr.Textbox(label = "Output default allow list location", value=OUTPUT_ALLOW_LIST_PATH, visible=False)
 
-    s3_bulk_textract_default_bucket = gr.Textbox(label = "Default Textract bulk S3 bucket", value=TEXTRACT_BULK_ANALYSIS_BUCKET, visible=False)
-    s3_bulk_textract_input_subfolder = gr.Textbox(label = "Default Textract bulk S3 input folder", value=TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER, visible=False)
-    s3_bulk_textract_output_subfolder = gr.Textbox(label = "Default Textract bulk S3 output folder", value=TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER, visible=False)
+    s3_bulk_textract_default_bucket = gr.Textbox(label = "Default Textract bulk S3 bucket", value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, visible=False)
+    s3_bulk_textract_input_subfolder = gr.Textbox(label = "Default Textract bulk S3 input folder", value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, visible=False)
+    s3_bulk_textract_output_subfolder = gr.Textbox(label = "Default Textract bulk S3 output folder", value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, visible=False)
     successful_textract_api_call_number = gr.Number(precision=0, value=0, visible=False)
     no_redaction_method_drop = gr.Radio(label = """Placeholder for no redaction method after downloading Textract outputs""", value = no_redaction_option, choices=[no_redaction_option], visible=False)
     textract_only_method_drop = gr.Radio(label="""Placeholder for Textract method after downloading Textract outputs""", value = textract_option, choices=[textract_option], visible=False)
@@ -253,7 +269,7 @@ with app:
                             reset_cost_code_dataframe_button = gr.Button(value="Reset code code table filter")
                             cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible=True)
 
-            if SHOW_BULK_TEXTRACT_CALL_OPTIONS == "True":
+            if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
                 with gr.Accordion("Submit whole document to AWS Textract API (quicker, max 3,000 pages per document)", open = False, visible=True):
                     with gr.Row(equal_height=True):
                         gr.Markdown("""Document will be submitted to AWS Textract API service to extract all text in the document. Processing will take place on (secure) AWS servers, and outputs will be stored on S3 for up to 7 days. To download the results, click 'Check status' below and they will be downloaded if ready.""")
@@ -654,7 +670,7 @@ with app:
 
     # Get connection details on app load
 
-    if SHOW_BULK_TEXTRACT_CALL_OPTIONS == "True":
+    if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
         app.load(get_connection_params, inputs=[output_folder_textbox, input_folder_textbox, session_output_folder_textbox, s3_bulk_textract_input_subfolder, s3_bulk_textract_output_subfolder, s3_bulk_textract_logs_subfolder, local_bulk_textract_logs_subfolder], outputs=[session_hash_state, output_folder_textbox, session_hash_textbox, input_folder_textbox, s3_bulk_textract_input_subfolder, s3_bulk_textract_output_subfolder, s3_bulk_textract_logs_subfolder, local_bulk_textract_logs_subfolder]).\
         success(load_in_textract_job_details, inputs=[load_s3_bulk_textract_logs_bool, s3_bulk_textract_logs_subfolder, local_bulk_textract_logs_subfolder], outputs=[textract_job_detail_df])
     else:
@@ -681,7 +697,7 @@ with app:
             print("Downloading cost codes from S3")
             app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_cost_codes_file, default_cost_codes_output_folder_location]).\
             success(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location, default_cost_code_textbox], outputs=[cost_code_dataframe, cost_code_dataframe_base, cost_code_choice_drop])
-            print("Successfully loaded cost codes from S3")
+            print("Successfully loaded cost codesc from S3")
         elif os.path.exists(COST_CODES_PATH):
             print("Loading cost codes from default cost codes path location:", COST_CODES_PATH)
             app.load(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location, default_cost_code_textbox], outputs=[cost_code_dataframe, cost_code_dataframe_base, cost_code_choice_drop])
@@ -691,44 +707,47 @@ with app:
     # LOGGING
     ###
 
+    ### ACCESS LOGS
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     access_callback = CSVLogger_custom(dataset_file_name=log_file_name)
-    access_callback.setup([session_hash_textbox, host_name_textbox], ACCESS_LOGS_FOLDER)
-    
-    session_hash_textbox.change(lambda *args: access_callback.flag(list(args)), [session_hash_textbox, host_name_textbox], None, preprocess=False).\
-    success(fn = upload_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+    access_callback.setup([session_hash_textbox, host_name_textbox], ACCESS_LOGS_FOLDER)    
+    session_hash_textbox.change(lambda *args: access_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB, dynamodb_table_name=ACCESS_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_ACCESS_LOG_HEADERS, replacement_headers=CSV_ACCESS_LOG_HEADERS), [session_hash_textbox, host_name_textbox], None, preprocess=False).\
+    success(fn = upload_log_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
+    ### FEEDBACK LOGS
     # User submitted feedback for pdf redactions
     pdf_callback = CSVLogger_custom(dataset_file_name=log_file_name)
     pdf_callback.setup([pdf_feedback_radio, pdf_further_details_text, doc_file_name_no_extension_textbox], FEEDBACK_LOGS_FOLDER)
-    pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args)), [pdf_feedback_radio, pdf_further_details_text, doc_file_name_no_extension_textbox], None, preprocess=False).\
-    success(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[pdf_further_details_text])
+    pdf_submit_feedback_btn.click(lambda *args: pdf_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB, dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS, replacement_headers=CSV_FEEDBACK_LOG_HEADERS), [pdf_feedback_radio, pdf_further_details_text, doc_file_name_no_extension_textbox], None, preprocess=False).\
+    success(fn = upload_log_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[pdf_further_details_text])
 
     # User submitted feedback for data redactions
     data_callback = CSVLogger_custom(dataset_file_name=log_file_name)
     data_callback.setup([data_feedback_radio, data_further_details_text, data_full_file_name_textbox], FEEDBACK_LOGS_FOLDER)
-    data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args)), [data_feedback_radio, data_further_details_text, data_full_file_name_textbox], None, preprocess=False).\
-    success(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[data_further_details_text])
+    data_submit_feedback_btn.click(lambda *args: data_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB, dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS, replacement_headers=CSV_FEEDBACK_LOG_HEADERS), [data_feedback_radio, data_further_details_text, data_full_file_name_textbox], None, preprocess=False).\
+    success(fn = upload_log_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state], outputs=[data_further_details_text])
 
-    # Log processing time/token usage when making a query
-    usage_callback = CSVLogger_custom(dataset_file_name=log_file_name)    
+    ### USAGE LOGS
+    # Log processing usage - time taken for redaction queries, and also logs for queries to Textract/Comprehend
+
+    usage_callback = CSVLogger_custom(dataset_file_name=log_file_name) 
 
     if DISPLAY_FILE_NAMES_IN_LOGS == 'True':
         usage_callback.setup([session_hash_textbox, doc_file_name_no_extension_textbox, data_full_file_name_textbox, total_pdf_page_count, actual_time_taken_number, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], USAGE_LOGS_FOLDER)
 
-        latest_file_completed_text.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, doc_file_name_no_extension_textbox, data_full_file_name_textbox, total_pdf_page_count, actual_time_taken_number, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], None, preprocess=False).\
-        success(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+        latest_file_completed_text.change(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB, dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, doc_file_name_no_extension_textbox, data_full_file_name_textbox, total_pdf_page_count, actual_time_taken_number, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], None, preprocess=False).\
+        success(fn = upload_log_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
-        successful_textract_api_call_number.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, doc_file_name_no_extension_textbox, data_full_file_name_textbox, total_pdf_page_count, actual_time_taken_number, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], None, preprocess=False).\
-        success(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+        successful_textract_api_call_number.change(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB, dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, doc_file_name_no_extension_textbox, data_full_file_name_textbox, total_pdf_page_count, actual_time_taken_number, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], None, preprocess=False).\
+        success(fn = upload_log_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
     else:
         usage_callback.setup([session_hash_textbox, blank_doc_file_name_no_extension_textbox_for_logs, data_full_file_name_textbox, actual_time_taken_number, total_pdf_page_count, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], USAGE_LOGS_FOLDER)
 
-        latest_file_completed_text.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, blank_doc_file_name_no_extension_textbox_for_logs, data_full_file_name_textbox, actual_time_taken_number, total_pdf_page_count, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], None, preprocess=False).\
-        success(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+        latest_file_completed_text.change(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB, dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, blank_doc_file_name_no_extension_textbox_for_logs, data_full_file_name_textbox, actual_time_taken_number, total_pdf_page_count, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], None, preprocess=False).\
+        success(fn = upload_log_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
-        successful_textract_api_call_number.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, blank_doc_file_name_no_extension_textbox_for_logs, data_full_file_name_textbox, actual_time_taken_number, total_pdf_page_count, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], None, preprocess=False).\
-        success(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+        successful_textract_api_call_number.change(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB, dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, blank_doc_file_name_no_extension_textbox_for_logs, data_full_file_name_textbox, actual_time_taken_number, total_pdf_page_count, textract_query_number, pii_identification_method_drop, comprehend_query_number, cost_code_choice_drop, handwrite_signature_checkbox, host_name_textbox, text_extract_method_radio, is_a_textract_api_call], None, preprocess=False).\
+        success(fn = upload_log_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 if __name__ == "__main__":
     if RUN_DIRECT_MODE == "0":

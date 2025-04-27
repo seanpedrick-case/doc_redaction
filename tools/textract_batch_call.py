@@ -10,7 +10,7 @@ from io import StringIO
 from urllib.parse import urlparse
 from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError, TokenRetrievalError
 
-from tools.config import TEXTRACT_BULK_ANALYSIS_BUCKET, OUTPUT_FOLDER, AWS_REGION, DOCUMENT_REDACTION_BUCKET, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC
+from tools.config import TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, OUTPUT_FOLDER, AWS_REGION, DOCUMENT_REDACTION_BUCKET, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC
 #from tools.aws_textract import json_to_ocrresult
 
 def analyse_document_with_textract_api(
@@ -18,7 +18,7 @@ def analyse_document_with_textract_api(
     s3_input_prefix: str,
     s3_output_prefix: str,
     job_df:pd.DataFrame,
-    s3_bucket_name: str = TEXTRACT_BULK_ANALYSIS_BUCKET,
+    s3_bucket_name: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
     local_output_dir: str = OUTPUT_FOLDER,    
     analyse_signatures:List[str] = [],
     successful_job_number:int=0,
@@ -328,7 +328,7 @@ def poll_bulk_textract_analysis_progress_and_download(
     s3_output_prefix: str,
     pdf_filename:str,
     job_df:pd.DataFrame,
-    s3_bucket_name: str = TEXTRACT_BULK_ANALYSIS_BUCKET,
+    s3_bucket_name: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
     local_output_dir: str = OUTPUT_FOLDER,
     load_s3_jobs_loc:str=TEXTRACT_JOBS_S3_LOC,
     load_local_jobs_loc:str=TEXTRACT_JOBS_LOCAL_LOC,    

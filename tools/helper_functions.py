@@ -9,7 +9,7 @@ import unicodedata
 from typing import List
 from math import ceil
 from gradio_image_annotation import image_annotator
-from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC
+from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC
 
 # Names for options labels
 text_ocr_option = "Local model - selectable text"
@@ -306,8 +306,8 @@ async def get_connection_params(request: gr.Request,
                                 output_folder_textbox:str=OUTPUT_FOLDER,
                                 input_folder_textbox:str=INPUT_FOLDER,
                                 session_output_folder:str=SESSION_OUTPUT_FOLDER,
-                                textract_document_upload_input_folder:str=TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER,
-                                textract_document_upload_output_folder:str=TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER,
+                                textract_document_upload_input_folder:str=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
+                                textract_document_upload_output_folder:str=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
                                 s3_textract_document_logs_subfolder:str=TEXTRACT_JOBS_S3_LOC,
                                 local_textract_document_logs_subfolder:str=TEXTRACT_JOBS_LOCAL_LOC):
 

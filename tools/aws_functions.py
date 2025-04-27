@@ -3,7 +3,7 @@ import pandas as pd
 import boto3
 import tempfile
 import os
-from tools.config import AWS_REGION, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET
+from tools.config import AWS_REGION, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SAVE_LOGS_TO_CSV
 PandasDataFrame = Type[pd.DataFrame]
 
 def get_assumed_role_info():
@@ -136,6 +136,62 @@ def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=DOCU
     final_out_message_str = ""
 
     if RUN_AWS_FUNCTIONS == "1":
+        try:
+            if s3_bucket and s3_key and local_file_paths:
+
+                s3_client = boto3.client('s3', region_name=AWS_REGION)
+
+                if isinstance(local_file_paths, str):
+                    local_file_paths = [local_file_paths]
+
+                for file in local_file_paths:
+                    if s3_client:
+                        #print(s3_client)
+                        try:
+                            # Get file name off file path
+                            file_name = os.path.basename(file)
+
+                            s3_key_full = s3_key + file_name
+                            print("S3 key: ", s3_key_full)
+
+                            s3_client.upload_file(file, s3_bucket, s3_key_full)
+                            out_message = "File " + file_name + " uploaded successfully!"
+                            print(out_message)
+                        
+                        except Exception as e:
+                            out_message = f"Error uploading file(s): {e}"
+                            print(out_message)
+
+                        final_out_message.append(out_message)
+                        final_out_message_str = '\n'.join(final_out_message)
+
+                    else: final_out_message_str = "Could not connect to AWS."
+            else: final_out_message_str = "At least one essential variable is empty, could not upload to S3"
+        except Exception as e:
+            final_out_message_str = "Could not upload files to S3 due to: " + str(e)
+            print(final_out_message_str)
+    else:
+        final_out_message_str = "App not set to run AWS functions"
+
+    return final_out_message_str
+
+
+def upload_log_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=DOCUMENT_REDACTION_BUCKET, RUN_AWS_FUNCTIONS:str = RUN_AWS_FUNCTIONS, SAVE_LOGS_TO_CSV:str=SAVE_LOGS_TO_CSV):
+    """
+    Uploads a log file from local machine to Amazon S3.
+
+    Args:
+    - local_file_path: Local file path(s) of the file(s) to upload.
+    - s3_key: Key (path) to the file in the S3 bucket.
+    - s3_bucket: Name of the S3 bucket.
+
+    Returns:
+    - Message as variable/printed to console
+    """
+    final_out_message = []
+    final_out_message_str = ""
+
+    if RUN_AWS_FUNCTIONS == "1" and SAVE_LOGS_TO_CSV == "True":
         try:
             if s3_bucket and s3_key and local_file_paths:
 

@@ -426,7 +426,7 @@ When you click the 'convert .xfdf comment file to review_file.csv' button, the a
 
 ## Using the AWS Textract document API
 
-This option can be enabled by your system admin, in the config file ('SHOW_BULK_TEXTRACT_CALL_OPTIONS' environment variable, and subsequent variables). Using this, you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the 'Redact document' process described here).
+This option can be enabled by your system admin, in the config file ('SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS' environment variable, and subsequent variables). Using this, you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the 'Redact document' process described here).
 
 ### Starting a new Textract API job
 

@@ -838,8 +838,7 @@ def combine_ocr_results(ocr_results:dict, x_threshold:float=50.0, y_threshold:fl
                     height=max(current_bbox.height, result.height)
                 )
                 current_line.append(result)
-            else:
-                
+            else:              
 
                 # Commit the current line and start a new one
                 combined_results.append(current_bbox)
