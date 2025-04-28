@@ -255,10 +255,11 @@ DEFAULT_COST_CODE = get_or_create_env_var('DEFAULT_COST_CODE', '')
 
 COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', '') # 'config/COST_CENTRES.csv' # file should be a csv file with a single table in it that has two columns with a header. First column should contain cost codes, second column should contain a name or description for the cost code
 
-S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', '') # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
-
+S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', '') # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET  
+    
+# A default path in case s3 cost code location is provided but no local cost code location given
 if COST_CODES_PATH: OUTPUT_COST_CODES_PATH = COST_CODES_PATH
-else: OUTPUT_COST_CODES_PATH = ''
+else: OUTPUT_COST_CODES_PATH = 'config/cost_codes.csv'
 
 ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, is it compulsory to choose one before redacting?
 

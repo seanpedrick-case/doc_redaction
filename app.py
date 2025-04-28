@@ -719,7 +719,7 @@ with app:
             print("Downloading cost codes from S3")
             app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_cost_codes_file, default_cost_codes_output_folder_location]).\
             success(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location, default_cost_code_textbox], outputs=[cost_code_dataframe, cost_code_dataframe_base, cost_code_choice_drop])
-            print("Successfully loaded cost codesc from S3")
+            print("Successfully loaded cost codes from S3")
         elif os.path.exists(COST_CODES_PATH):
             print("Loading cost codes from default cost codes path location:", COST_CODES_PATH)
             app.load(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location, default_cost_code_textbox], outputs=[cost_code_dataframe, cost_code_dataframe_base, cost_code_choice_drop])
