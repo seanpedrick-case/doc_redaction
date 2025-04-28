@@ -108,19 +108,7 @@ if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
 
 DOCUMENT_REDACTION_BUCKET = get_or_create_env_var('DOCUMENT_REDACTION_BUCKET', '')
 
-SHOW_BULK_TEXTRACT_CALL_OPTIONS = get_or_create_env_var('SHOW_BULK_TEXTRACT_CALL_OPTIONS', 'False') # This feature not currently implemented
 
-TEXTRACT_BULK_ANALYSIS_BUCKET = get_or_create_env_var('TEXTRACT_BULK_ANALYSIS_BUCKET', '')
-
-TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER = get_or_create_env_var('TEXTRACT_BULK_ANALYSIS_INPUT_SUBFOLDER', 'input')
-
-TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER = get_or_create_env_var('TEXTRACT_BULK_ANALYSIS_OUTPUT_SUBFOLDER', 'output')
-
-LOAD_PREVIOUS_TEXTRACT_JOBS_S3 = get_or_create_env_var('LOAD_PREVIOUS_TEXTRACT_JOBS_S3', 'False') # Whether or not to load previous Textract jobs from S3
-
-TEXTRACT_JOBS_S3_LOC = get_or_create_env_var('TEXTRACT_JOBS_S3_LOC', 'output') # Subfolder in the DOCUMENT_REDACTION_BUCKET where the Textract jobs are stored
-
-TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var('TEXTRACT_JOBS_LOCAL_LOC', 'output') # Local subfolder where the Textract jobs are stored
 
 # Custom headers e.g. if routing traffic through Cloudfront
 # Retrieving or setting CUSTOM_HEADER
@@ -161,6 +149,8 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
 # By default, logs are put into a subfolder of today's date and the host name of the instance running the app. This is to avoid at all possible the possibility of log files from one instance overwriting the logs of another instance on S3. If running the app on one system always, or just locally, it is not necessary to make the log folders so specific.
 # Another way to address this issue would be to write logs to another type of storage, e.g. database such as dynamodb. I may look into this in future.
 
+SAVE_LOGS_TO_CSV = get_or_create_env_var('SAVE_LOGS_TO_CSV', 'True')
+
 USE_LOG_SUBFOLDERS = get_or_create_env_var('USE_LOG_SUBFOLDERS', 'True')
 
 if USE_LOG_SUBFOLDERS == "True":
@@ -181,8 +171,28 @@ ensure_folder_exists(USAGE_LOGS_FOLDER)
 # Should the redacted file name be included in the logs? In some instances, the names of the files themselves could be sensitive, and should not be disclosed beyond the app. So, by default this is false.
 DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS', 'False')
 
+# Further customisation options for CSV logs
+
+CSV_ACCESS_LOG_HEADERS = get_or_create_env_var('CSV_ACCESS_LOG_HEADERS', '') # If blank, uses component labels
+CSV_FEEDBACK_LOG_HEADERS = get_or_create_env_var('CSV_FEEDBACK_LOG_HEADERS', '') # If blank, uses component labels
+CSV_USAGE_LOG_HEADERS = get_or_create_env_var('CSV_USAGE_LOG_HEADERS', '["session_hash_textbox",	"doc_full_file_name_textbox",	"data_full_file_name_textbox",	"actual_time_taken_number",	"total_page_count",	"textract_query_number", "pii_detection_method", "comprehend_query_number",  "cost_code", "textract_handwriting_signature", "host_name_textbox", "text_extraction_method", "is_this_a_textract_api_call"]') # If blank, uses component labels
+
+### DYNAMODB logs. Whether to save to DynamoDB, and the headers of the table
+
+SAVE_LOGS_TO_DYNAMODB = get_or_create_env_var('SAVE_LOGS_TO_DYNAMODB', 'False')
+
+ACCESS_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('ACCESS_LOG_DYNAMODB_TABLE_NAME', 'redaction_access_log')
+DYNAMODB_ACCESS_LOG_HEADERS = get_or_create_env_var('DYNAMODB_ACCESS_LOG_HEADERS', '')
+
+FEEDBACK_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('FEEDBACK_LOG_DYNAMODB_TABLE_NAME', 'redaction_feedback')
+DYNAMODB_FEEDBACK_LOG_HEADERS = get_or_create_env_var('DYNAMODB_FEEDBACK_LOG_HEADERS', '')
+
+USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('USAGE_LOG_DYNAMODB_TABLE_NAME', 'redaction_usage')
+DYNAMODB_USAGE_LOG_HEADERS = get_or_create_env_var('DYNAMODB_USAGE_LOG_HEADERS', '')
+
 ###
-# REDACTION CONFIG
+# REDACTION 
+###
 
 # Create Tesseract and Poppler folders if you have installed them locally
 TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "") # e.g. tesseract/
@@ -226,7 +236,7 @@ ROOT_PATH = get_or_create_env_var('ROOT_PATH', '')
 
 DEFAULT_CONCURRENCY_LIMIT = get_or_create_env_var('DEFAULT_CONCURRENCY_LIMIT', '3')
 
-GET_DEFAULT_ALLOW_LIST = get_or_create_env_var('GET_DEFAULT_ALLOW_LIST', 'False')
+GET_DEFAULT_ALLOW_LIST = get_or_create_env_var('GET_DEFAULT_ALLOW_LIST', '')
 
 ALLOW_LIST_PATH = get_or_create_env_var('ALLOW_LIST_PATH', '') # config/default_allow_list.csv
 
@@ -235,19 +245,38 @@ S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_a
 if ALLOW_LIST_PATH: OUTPUT_ALLOW_LIST_PATH = ALLOW_LIST_PATH
 else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
+### COST CODE OPTIONS
+
 SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'False')
 
-GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'False')
+GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'True')
 
 DEFAULT_COST_CODE = get_or_create_env_var('DEFAULT_COST_CODE', '')
 
 COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', '') # 'config/COST_CENTRES.csv' # file should be a csv file with a single table in it that has two columns with a header. First column should contain cost codes, second column should contain a name or description for the cost code
 
-S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', '') # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
-
+S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', '') # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET  
+    
+# A default path in case s3 cost code location is provided but no local cost code location given
 if COST_CODES_PATH: OUTPUT_COST_CODES_PATH = COST_CODES_PATH
-else: OUTPUT_COST_CODES_PATH = 'config/COST_CENTRES.csv'
+else: OUTPUT_COST_CODES_PATH = 'config/cost_codes.csv'
 
 ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, is it compulsory to choose one before redacting?
 
 if ENFORCE_COST_CODES == 'True': GET_COST_CODES = 'True'
+
+### WHOLE DOCUMENT API OPTIONS
+
+SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = get_or_create_env_var('SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS', 'False') # This feature not currently implemented
+
+TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET = get_or_create_env_var('TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET', '')
+
+TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER = get_or_create_env_var('TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER', 'input')
+
+TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER = get_or_create_env_var('TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER', 'output')
+
+LOAD_PREVIOUS_TEXTRACT_JOBS_S3 = get_or_create_env_var('LOAD_PREVIOUS_TEXTRACT_JOBS_S3', 'False') # Whether or not to load previous Textract jobs from S3
+
+TEXTRACT_JOBS_S3_LOC = get_or_create_env_var('TEXTRACT_JOBS_S3_LOC', 'output') # Subfolder in the DOCUMENT_REDACTION_BUCKET where the Textract jobs are stored
+
+TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var('TEXTRACT_JOBS_LOCAL_LOC', 'output') # Local subfolder where the Textract jobs are stored

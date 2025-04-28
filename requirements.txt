@@ -10,8 +10,8 @@ pandas==2.2.3
 scikit-learn==1.6.1
 spacy==3.8.4
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
-gradio==5.25.2
-boto3==1.37.29
+gradio==5.27.1
+boto3==1.38.4
 pyarrow==19.0.1
 openpyxl==3.1.5
 Faker==36.1.1

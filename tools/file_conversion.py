@@ -21,6 +21,7 @@ from PIL import Image
 from scipy.spatial import cKDTree
 import random
 import string
+import warnings # To warn about potential type changes
 
 IMAGE_NUM_REGEX = re.compile(r'_(\d+)\.png$')
 
@@ -461,7 +462,8 @@ def prepare_image_or_pdf(
     input_folder:str=INPUT_FOLDER,
     prepare_images:bool=True,
     page_sizes:list[dict]=[],
-    textract_output_found:bool = False,    
+    textract_output_found:bool = False,
+    local_ocr_output_found:bool = False,   
     progress: Progress = Progress(track_tqdm=True)
 ) -> tuple[List[str], List[str]]:
     """
@@ -483,7 +485,8 @@ def prepare_image_or_pdf(
         output_folder (optional, str): The output folder for file save
         prepare_images (optional, bool): A boolean indicating whether to create images for each PDF page. Defaults to True.
         page_sizes(optional, List[dict]): A list of dicts containing information about page sizes in various formats.
-        textract_output_found (optional, bool): A boolean indicating whether textract output has already been found . Defaults to False.
+        textract_output_found (optional, bool): A boolean indicating whether Textract analysis output has already been found. Defaults to False.
+        local_ocr_output_found (optional, bool): A boolean indicating whether local OCR analysis output has already been found. Defaults to False.
         progress (optional, Progress): Progress tracker for the operation
         
 
@@ -535,7 +538,7 @@ def prepare_image_or_pdf(
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df
+        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, local_ocr_output_found
 
     progress(0.1, desc='Preparing file')
 
@@ -617,11 +620,10 @@ def prepare_image_or_pdf(
 
         elif file_extension in ['.csv']:
             if '_review_file' in file_path_without_ext:
-                #print("file_path:", file_path)
                 review_file_csv = read_file(file_path)
                 all_annotations_object = convert_review_df_to_annotation_json(review_file_csv, image_file_paths, page_sizes)
                 json_from_csv = True
-                print("Converted CSV review file to image annotation object")
+                #print("Converted CSV review file to image annotation object")
             elif '_ocr_output' in file_path_without_ext:
                 all_line_level_ocr_results_df = read_file(file_path)
                 json_from_csv = False
@@ -639,8 +641,8 @@ def prepare_image_or_pdf(
                     # Assuming file_path is a NamedString or similar
                     all_annotations_object = json.loads(file_path)  # Use loads for string content
 
-            # Assume it's a textract json
-            elif (file_extension in ['.json']) and (prepare_for_review != True):
+            # Save Textract file to folder
+            elif (file_extension in ['.json']) and '_textract' in file_path_without_ext: #(prepare_for_review != True):
                 print("Saving Textract output")
                 # Copy it to the output folder so it can be used later.
                 output_textract_json_file_name = file_path_without_ext
@@ -652,6 +654,20 @@ def prepare_image_or_pdf(
                 # Use shutil to copy the file directly
                 shutil.copy2(file_path, out_textract_path)  # Preserves metadata
                 textract_output_found = True                
+                continue
+
+            elif (file_extension in ['.json']) and '_ocr_results_with_words' in file_path_without_ext: #(prepare_for_review != True):
+                print("Saving local OCR output")
+                # Copy it to the output folder so it can be used later.
+                output_ocr_results_with_words_json_file_name = file_path_without_ext
+                if not file_path.endswith("_ocr_results_with_words.json"): output_ocr_results_with_words_json_file_name = file_path_without_ext + "_ocr_results_with_words.json"
+                else: output_ocr_results_with_words_json_file_name = file_path_without_ext + ".json"
+
+                out_ocr_results_with_words_path = os.path.join(output_folder, output_ocr_results_with_words_json_file_name)
+
+                # Use shutil to copy the file directly
+                shutil.copy2(file_path, out_ocr_results_with_words_path)  # Preserves metadata
+                local_ocr_output_found = True                
                 continue
 
             # NEW IF STATEMENT
@@ -773,7 +789,40 @@ def prepare_image_or_pdf(
 
     number_of_pages = len(page_sizes)#len(image_file_paths)
         
-    return combined_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df
+    return combined_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, local_ocr_output_found
+
+def load_and_convert_ocr_results_with_words_json(ocr_results_with_words_json_file_path:str, log_files_output_paths:str, page_sizes_df:pd.DataFrame):
+    """
+    Loads Textract JSON from a file, detects if conversion is needed, and converts if necessary.
+    """
+    
+    if not os.path.exists(ocr_results_with_words_json_file_path):
+        print("No existing OCR results file found.")
+        return [], True, log_files_output_paths  # Return empty dict and flag indicating missing file
+    
+    no_ocr_results_with_words_file = False
+    print("Found existing OCR results json results file.")
+
+    # Track log files
+    if ocr_results_with_words_json_file_path not in log_files_output_paths:
+        log_files_output_paths.append(ocr_results_with_words_json_file_path)
+
+    try:
+        with open(ocr_results_with_words_json_file_path, 'r', encoding='utf-8') as json_file:
+            ocr_results_with_words_data = json.load(json_file)
+    except json.JSONDecodeError:
+        print("Error: Failed to parse OCR results JSON file. Returning empty data.")
+        return [], True, log_files_output_paths  # Indicate failure
+
+    # Check if conversion is needed
+    if "page" and "results" in ocr_results_with_words_data[0]:
+        print("JSON already in the correct format for app. No changes needed.")
+        return ocr_results_with_words_data, False, log_files_output_paths  # No conversion required
+
+    else:
+        print("Invalid OCR result JSON format: 'page' or 'results' key missing.")
+        #print("OCR results with words data:", ocr_results_with_words_data)
+        return [], True, log_files_output_paths  # Return empty data if JSON is not recognized
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi, output_folder:str=OUTPUT_FOLDER, input_folder:str=INPUT_FOLDER):
     file_path_without_ext = get_file_name_without_type(in_file_path)
@@ -850,121 +899,246 @@ def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
 
     return result
 
-def divide_coordinates_by_page_sizes(review_file_df:pd.DataFrame, page_sizes_df:pd.DataFrame, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"):
+def divide_coordinates_by_page_sizes(
+    review_file_df: pd.DataFrame,
+    page_sizes_df: pd.DataFrame,
+    xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"
+) -> pd.DataFrame:
+    """
+    Optimized function to convert absolute image coordinates (>1) to relative coordinates (<=1).
 
-    '''Convert data to same coordinate system. If all coordinates all greater than one, this is a absolute image coordinates - change back to relative coordinates.'''
+    Identifies rows with absolute coordinates, merges page size information,
+    divides coordinates by dimensions, and combines with already-relative rows.
 
-    review_file_df_out = review_file_df
+    Args:
+        review_file_df: Input DataFrame with potentially mixed coordinate systems.
+        page_sizes_df: DataFrame with page dimensions ('page', 'image_width',
+                       'image_height', 'mediabox_width', 'mediabox_height').
+        xmin, xmax, ymin, ymax: Names of the coordinate columns.
 
-    if xmin in review_file_df.columns and not review_file_df.empty:
-        coord_cols = [xmin, xmax, ymin, ymax]
-        for col in coord_cols:
-            review_file_df.loc[:, col] = pd.to_numeric(review_file_df[col], errors="coerce")
+    Returns:
+        DataFrame with coordinates converted to relative system, sorted.
+    """
+    if review_file_df.empty or xmin not in review_file_df.columns:
+        return review_file_df # Return early if empty or key column missing
 
-        review_file_df_orig = review_file_df.copy().loc[(review_file_df[xmin] <= 1) & (review_file_df[xmax] <= 1) & (review_file_df[ymin] <= 1) & (review_file_df[ymax] <= 1),:]
+    # --- Initial Type Conversion ---
+    coord_cols = [xmin, xmax, ymin, ymax]
+    cols_to_convert = coord_cols + ["page"]
+    temp_df = review_file_df.copy() # Work on a copy initially
 
-        #print("review_file_df_orig:", review_file_df_orig)
-        
-        review_file_df_div = review_file_df.loc[(review_file_df[xmin] > 1) & (review_file_df[xmax] > 1) & (review_file_df[ymin] > 1) & (review_file_df[ymax] > 1),:]
-
-        #print("review_file_df_div:", review_file_df_div)
-
-        review_file_df_div.loc[:, "page"] = pd.to_numeric(review_file_df_div["page"], errors="coerce")
-
-        if "image_width" not in review_file_df_div.columns and not page_sizes_df.empty:  
-
-            page_sizes_df["image_width"] = page_sizes_df["image_width"].replace("<NA>", pd.NA)
-            page_sizes_df["image_height"] = page_sizes_df["image_height"].replace("<NA>", pd.NA)
-            review_file_df_div = review_file_df_div.merge(page_sizes_df[["page", "image_width", "image_height", "mediabox_width", "mediabox_height"]], on="page", how="left")
-
-        if "image_width" in review_file_df_div.columns:
-            if review_file_df_div["image_width"].isna().all():  # Check if all are NaN values. If so, assume we only have mediabox coordinates available
-                review_file_df_div["image_width"] = review_file_df_div["image_width"].fillna(review_file_df_div["mediabox_width"]).infer_objects()
-                review_file_df_div["image_height"] = review_file_df_div["image_height"].fillna(review_file_df_div["mediabox_height"]).infer_objects()
-
-            convert_type_cols = ["image_width", "image_height", xmin, xmax, ymin, ymax]
-            review_file_df_div[convert_type_cols] = review_file_df_div[convert_type_cols].apply(pd.to_numeric, errors="coerce")  
-
-            review_file_df_div[xmin] = review_file_df_div[xmin] / review_file_df_div["image_width"]
-            review_file_df_div[xmax] = review_file_df_div[xmax] / review_file_df_div["image_width"]
-            review_file_df_div[ymin] = review_file_df_div[ymin] / review_file_df_div["image_height"]
-            review_file_df_div[ymax] = review_file_df_div[ymax] / review_file_df_div["image_height"]
-
-        # Concatenate the original and modified DataFrames
-        dfs_to_concat = [df for df in [review_file_df_orig, review_file_df_div] if not df.empty]
-        if dfs_to_concat:  # Ensure there's at least one non-empty DataFrame
-            review_file_df_out = pd.concat(dfs_to_concat)
+    for col in cols_to_convert:
+        if col in temp_df.columns:
+            temp_df[col] = pd.to_numeric(temp_df[col], errors="coerce")
         else:
-            review_file_df_out = review_file_df  # Return an original DataFrame instead of raising an error
+            # If essential 'page' or coord column missing, cannot proceed meaningfully
+            if col == 'page' or col in coord_cols:
+                 print(f"Warning: Required column '{col}' not found in review_file_df. Returning original DataFrame.")
+                 return review_file_df
 
-        # Only sort if the DataFrame is not empty and contains the required columns
-        required_sort_columns = {"page", xmin, ymin}
-        if not review_file_df_out.empty and required_sort_columns.issubset(review_file_df_out.columns):
-            review_file_df_out.sort_values(["page", ymin, xmin], inplace=True)
+    # --- Identify Absolute Coordinates ---
+    # Create mask for rows where *all* coordinates are potentially absolute (> 1)
+    # Handle potential NaNs introduced by to_numeric - treat NaN as not absolute.
+    is_absolute_mask = (
+        (temp_df[xmin] > 1) & (temp_df[xmin].notna()) &
+        (temp_df[xmax] > 1) & (temp_df[xmax].notna()) &
+        (temp_df[ymin] > 1) & (temp_df[ymin].notna()) &
+        (temp_df[ymax] > 1) & (temp_df[ymax].notna())
+    )
 
-    review_file_df_out.drop(["image_width", "image_height", "mediabox_width", "mediabox_height"], axis=1, errors="ignore")
+    # --- Separate DataFrames ---
+    df_rel = temp_df[~is_absolute_mask] # Rows already relative or with NaN/mixed coords
+    df_abs = temp_df[is_absolute_mask].copy() # Absolute rows - COPY here to allow modifications
 
-    return review_file_df_out
+    # --- Process Absolute Coordinates ---
+    if not df_abs.empty:
+        # Merge page sizes if necessary
+        if "image_width" not in df_abs.columns and not page_sizes_df.empty:
+            ps_df_copy = page_sizes_df.copy() # Work on a copy of page sizes
 
-def multiply_coordinates_by_page_sizes(review_file_df: pd.DataFrame, page_sizes_df: pd.DataFrame, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"):
+            # Ensure page is numeric for merge key matching
+            ps_df_copy['page'] = pd.to_numeric(ps_df_copy['page'], errors='coerce')
+
+            # Columns to merge from page_sizes
+            merge_cols = ['page', 'image_width', 'image_height', 'mediabox_width', 'mediabox_height']
+            available_merge_cols = [col for col in merge_cols if col in ps_df_copy.columns]
+
+            # Prepare dimension columns in the copy
+            for col in ['image_width', 'image_height', 'mediabox_width', 'mediabox_height']:
+                 if col in ps_df_copy.columns:
+                     # Replace "<NA>" string if present
+                     if ps_df_copy[col].dtype == 'object':
+                          ps_df_copy[col] = ps_df_copy[col].replace("<NA>", pd.NA)
+                     # Convert to numeric
+                     ps_df_copy[col] = pd.to_numeric(ps_df_copy[col], errors='coerce')
+
+            # Perform the merge
+            if 'page' in available_merge_cols: # Check if page exists for merging
+                df_abs = df_abs.merge(
+                    ps_df_copy[available_merge_cols],
+                    on="page",
+                    how="left"
+                )
+            else:
+                 print("Warning: 'page' column not found in page_sizes_df. Cannot merge dimensions.")
 
 
-    if xmin in review_file_df.columns and not review_file_df.empty:
+        # Fallback to mediabox dimensions if image dimensions are missing
+        if "image_width" in df_abs.columns and "mediabox_width" in df_abs.columns:
+             # Check if image_width mostly missing - use .isna().all() or check percentage
+             if df_abs["image_width"].isna().all():
+                 print("Falling back to mediabox dimensions as image_width is entirely missing.")
+                 df_abs["image_width"] = df_abs["image_width"].fillna(df_abs["mediabox_width"])
+                 df_abs["image_height"] = df_abs["image_height"].fillna(df_abs["mediabox_height"])
+             else:
+                  # Optional: Fill only missing image dims if some exist?
+                  # df_abs["image_width"].fillna(df_abs["mediabox_width"], inplace=True)
+                  # df_abs["image_height"].fillna(df_abs["mediabox_height"], inplace=True)
+                  pass # Current logic only falls back if ALL image_width are NaN
 
-        coord_cols = [xmin, xmax, ymin, ymax]
-        for col in coord_cols:
-            review_file_df.loc[:, col] = pd.to_numeric(review_file_df[col], errors="coerce")
+        # Ensure divisor columns are numeric before division
+        divisors_numeric = True
+        for col in ["image_width", "image_height"]:
+            if col in df_abs.columns:
+                 df_abs[col] = pd.to_numeric(df_abs[col], errors='coerce')
+            else:
+                 print(f"Warning: Dimension column '{col}' missing. Cannot perform division.")
+                 divisors_numeric = False
 
-        # Separate absolute vs relative coordinates
-        review_file_df_orig = review_file_df.loc[
-            (review_file_df[xmin] > 1) & (review_file_df[xmax] > 1) & 
-            (review_file_df[ymin] > 1) & (review_file_df[ymax] > 1), :].copy()
 
-        review_file_df = review_file_df.loc[
-            (review_file_df[xmin] <= 1) & (review_file_df[xmax] <= 1) & 
-            (review_file_df[ymin] <= 1) & (review_file_df[ymax] <= 1), :].copy()
-
-        if review_file_df.empty:
-            return review_file_df_orig  # If nothing is left, return the original absolute-coordinates DataFrame
-
-        review_file_df.loc[:, "page"] = pd.to_numeric(review_file_df["page"], errors="coerce")
-
-        if "image_width" not in review_file_df.columns and not page_sizes_df.empty:
-            page_sizes_df[['image_width', 'image_height']] = page_sizes_df[['image_width','image_height']].replace("<NA>", pd.NA)  # Ensure proper NA handling
-            review_file_df = review_file_df.merge(page_sizes_df, on="page", how="left")
-
-        if "image_width" in review_file_df.columns:
-            # Split into rows with/without image size info
-            review_file_df_not_na = review_file_df.loc[review_file_df["image_width"].notna()].copy()
-            review_file_df_na = review_file_df.loc[review_file_df["image_width"].isna()].copy()
-
-            if not review_file_df_not_na.empty:
-                convert_type_cols = ["image_width", "image_height", xmin, xmax, ymin, ymax]
-                review_file_df_not_na[convert_type_cols] = review_file_df_not_na[convert_type_cols].apply(pd.to_numeric, errors="coerce")
-
-                # Multiply coordinates by image sizes
-                review_file_df_not_na[xmin] *= review_file_df_not_na["image_width"]
-                review_file_df_not_na[xmax] *= review_file_df_not_na["image_width"]
-                review_file_df_not_na[ymin] *= review_file_df_not_na["image_height"]
-                review_file_df_not_na[ymax] *= review_file_df_not_na["image_height"]
-
-            # Concatenate the modified and unmodified data
-            review_file_df = pd.concat([df for df in [review_file_df_not_na, review_file_df_na] if not df.empty])
-
-        # Merge with the original absolute-coordinates DataFrame
-        dfs_to_concat = [df for df in [review_file_df_orig, review_file_df] if not df.empty]
-        if dfs_to_concat:  # Ensure there's at least one non-empty DataFrame
-            review_file_df = pd.concat(dfs_to_concat)
+        # Perform division if dimensions are available and numeric
+        if divisors_numeric and "image_width" in df_abs.columns and "image_height" in df_abs.columns:
+             # Use np.errstate to suppress warnings about division by zero or NaN if desired
+             with np.errstate(divide='ignore', invalid='ignore'):
+                df_abs[xmin] = df_abs[xmin] / df_abs["image_width"]
+                df_abs[xmax] = df_abs[xmax] / df_abs["image_width"]
+                df_abs[ymin] = df_abs[ymin] / df_abs["image_height"]
+                df_abs[ymax] = df_abs[ymax] / df_abs["image_height"]
+                # Replace potential infinities with NaN (optional, depending on desired outcome)
+                df_abs.replace([np.inf, -np.inf], np.nan, inplace=True)
         else:
-            review_file_df = pd.DataFrame()  # Return an empty DataFrame instead of raising an error
+             print("Skipping coordinate division due to missing or non-numeric dimension columns.")
 
-        # Only sort if the DataFrame is not empty and contains the required columns
-        required_sort_columns = {"page", "xmin", "ymin"}
-        if not review_file_df.empty and required_sort_columns.issubset(review_file_df.columns):
-            review_file_df.sort_values(["page", "xmin", "ymin"], inplace=True)
 
-    return review_file_df
+    # --- Combine Relative and Processed Absolute DataFrames ---
+    dfs_to_concat = [df for df in [df_rel, df_abs] if not df.empty]
 
+    if dfs_to_concat:
+        final_df = pd.concat(dfs_to_concat, ignore_index=True)
+    else:
+        # If both splits were empty, return an empty DF with original columns
+        print("Warning: Both relative and absolute splits resulted in empty DataFrames.")
+        final_df = pd.DataFrame(columns=review_file_df.columns)
+
+
+    # --- Final Sort ---
+    required_sort_columns = {"page", xmin, ymin}
+    if not final_df.empty and required_sort_columns.issubset(final_df.columns):
+        # Ensure sort columns are numeric before sorting
+        final_df['page'] = pd.to_numeric(final_df['page'], errors='coerce')
+        final_df[ymin] = pd.to_numeric(final_df[ymin], errors='coerce')
+        final_df[xmin] = pd.to_numeric(final_df[xmin], errors='coerce')
+        # Sort by page, ymin, xmin (note order compared to multiply function)
+        final_df.sort_values(["page", ymin, xmin], inplace=True, na_position='last')
+
+
+    # --- Clean Up Columns ---
+    # Correctly drop columns and reassign the result
+    cols_to_drop = ["image_width", "image_height", "mediabox_width", "mediabox_height"]
+    final_df = final_df.drop(columns=cols_to_drop, errors="ignore")
+
+    return final_df
+
+def multiply_coordinates_by_page_sizes(
+    review_file_df: pd.DataFrame,
+    page_sizes_df: pd.DataFrame,
+    xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"
+):
+    """
+    Optimized function to convert relative coordinates to absolute based on page sizes.
+
+    Separates relative (<=1) and absolute (>1) coordinates, merges page sizes
+    for relative coordinates, calculates absolute pixel values, and recombines.
+    """
+    if review_file_df.empty or xmin not in review_file_df.columns:
+        return review_file_df # Return early if empty or key column missing
+
+    coord_cols = [xmin, xmax, ymin, ymax]
+    # Initial type conversion for coordinates and page
+    for col in coord_cols + ["page"]:
+        if col in review_file_df.columns:
+             # Use astype for potentially faster conversion if confident,
+             # but to_numeric is safer for mixed types/errors
+            review_file_df[col] = pd.to_numeric(review_file_df[col], errors="coerce")
+
+    # --- Identify relative coordinates ---
+    # Create mask for rows where *all* coordinates are potentially relative (<= 1)
+    # Handle potential NaNs introduced by to_numeric - treat NaN as not relative here.
+    is_relative_mask = (
+        (review_file_df[xmin].le(1) & review_file_df[xmin].notna()) &
+        (review_file_df[xmax].le(1) & review_file_df[xmax].notna()) &
+        (review_file_df[ymin].le(1) & review_file_df[ymin].notna()) &
+        (review_file_df[ymax].le(1) & review_file_df[ymax].notna())
+    )
+
+    # Separate DataFrames (minimal copies)
+    df_abs = review_file_df[~is_relative_mask].copy() # Keep absolute rows separately
+    df_rel = review_file_df[is_relative_mask].copy()  # Work only with relative rows
+
+    if df_rel.empty:
+        # If no relative coordinates, just sort and return absolute ones (if any)
+        if not df_abs.empty and {"page", xmin, ymin}.issubset(df_abs.columns):
+             df_abs.sort_values(["page", xmin, ymin], inplace=True, na_position='last')
+        return df_abs
+
+    # --- Process relative coordinates ---
+    if "image_width" not in df_rel.columns and not page_sizes_df.empty:
+        # Prepare page_sizes_df for merge
+        page_sizes_df = page_sizes_df.copy() # Avoid modifying original page_sizes_df
+        page_sizes_df['page'] = pd.to_numeric(page_sizes_df['page'], errors='coerce')
+        # Ensure proper NA handling for image dimensions
+        page_sizes_df[['image_width', 'image_height']] = page_sizes_df[['image_width','image_height']].replace("<NA>", pd.NA)
+        page_sizes_df['image_width'] = pd.to_numeric(page_sizes_df['image_width'], errors='coerce')
+        page_sizes_df['image_height'] = pd.to_numeric(page_sizes_df['image_height'], errors='coerce')
+
+        # Merge page sizes
+        df_rel = df_rel.merge(
+            page_sizes_df[['page', 'image_width', 'image_height']],
+            on="page",
+            how="left"
+        )
+
+    # Multiply coordinates where image dimensions are available
+    if "image_width" in df_rel.columns:
+        # Create mask for rows in df_rel that have valid image dimensions
+        has_size_mask = df_rel["image_width"].notna() & df_rel["image_height"].notna()
+
+        # Apply multiplication using .loc and the mask (vectorized and efficient)
+        # Ensure columns are numeric before multiplication (might be redundant if types are good)
+        # df_rel.loc[has_size_mask, coord_cols + ['image_width', 'image_height']] = df_rel.loc[has_size_mask, coord_cols + ['image_width', 'image_height']].apply(pd.to_numeric, errors='coerce')
+
+        df_rel.loc[has_size_mask, xmin] *= df_rel.loc[has_size_mask, "image_width"]
+        df_rel.loc[has_size_mask, xmax] *= df_rel.loc[has_size_mask, "image_width"]
+        df_rel.loc[has_size_mask, ymin] *= df_rel.loc[has_size_mask, "image_height"]
+        df_rel.loc[has_size_mask, ymax] *= df_rel.loc[has_size_mask, "image_height"]
+
+
+    # --- Combine absolute and processed relative DataFrames ---
+    # Use list comprehension to handle potentially empty DataFrames
+    dfs_to_concat = [df for df in [df_abs, df_rel] if not df.empty]
+
+    if not dfs_to_concat:
+        return pd.DataFrame() # Return empty if both are empty
+
+    final_df = pd.concat(dfs_to_concat, ignore_index=True) # ignore_index is good practice after filtering/concat
+
+    # --- Final Sort ---
+    required_sort_columns = {"page", xmin, ymin}
+    if not final_df.empty and required_sort_columns.issubset(final_df.columns):
+        # Handle potential NaNs in sort columns gracefully
+        final_df.sort_values(["page", xmin, ymin], inplace=True, na_position='last')
+
+    return final_df
 
 def do_proximity_match_by_page_for_text(df1:pd.DataFrame, df2:pd.DataFrame):
     '''
@@ -1017,7 +1191,6 @@ def do_proximity_match_by_page_for_text(df1:pd.DataFrame, df2:pd.DataFrame):
     merged_df.drop(columns=['key'], inplace=True)
 
     return merged_df
-
 
 def do_proximity_match_all_pages_for_text(df1:pd.DataFrame, df2:pd.DataFrame, threshold:float=0.03):
     '''
@@ -1142,12 +1315,12 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     # prevents this from being necessary.
 
     # 7. Ensure essential columns exist and set column order
-    essential_box_cols = ["xmin", "xmax", "ymin", "ymax", "text", "id"]
+    essential_box_cols = ["xmin", "xmax", "ymin", "ymax", "text", "id", "label"]
     for col in essential_box_cols:
         if col not in final_df.columns:
             final_df[col] = pd.NA # Add column with NA if it wasn't present in any box
 
-    base_cols = ["image", "page"]
+    base_cols = ["image"]
     extra_box_cols = [col for col in final_df.columns if col not in base_cols and col not in essential_box_cols]
     final_col_order = base_cols + essential_box_cols + sorted(extra_box_cols)
 
@@ -1155,6 +1328,8 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     # Using fill_value=pd.NA isn't strictly needed here as we added missing columns above,
     # but it's good practice if columns could be missing for other reasons.
     final_df = final_df.reindex(columns=final_col_order, fill_value=pd.NA)
+
+    final_df = final_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"])
 
     return final_df
 
@@ -1185,7 +1360,8 @@ def create_annotation_dicts_from_annotation_df(
     available_cols = [col for col in box_cols if col in all_image_annotations_df.columns]
 
     if 'text' in all_image_annotations_df.columns:
-        all_image_annotations_df.loc[all_image_annotations_df['text'].isnull(), 'text'] = ''
+        all_image_annotations_df['text'] = all_image_annotations_df['text'].fillna('')
+        #all_image_annotations_df.loc[all_image_annotations_df['text'].isnull(), 'text'] = ''
 
     if not available_cols:
         print(f"Warning: None of the expected box columns ({box_cols}) found in DataFrame.")
@@ -1226,85 +1402,84 @@ def create_annotation_dicts_from_annotation_df(
 
     return result
 
-def convert_annotation_json_to_review_df(all_annotations: List[dict],
-                                         redaction_decision_output: pd.DataFrame = pd.DataFrame(),
-                                         page_sizes: List[dict] = [],
-                                         do_proximity_match: bool = True) -> pd.DataFrame:
+def convert_annotation_json_to_review_df(
+    all_annotations: List[dict],
+    redaction_decision_output: pd.DataFrame = pd.DataFrame(),
+    page_sizes: List[dict] = [],
+    do_proximity_match: bool = True
+) -> pd.DataFrame:
     '''
     Convert the annotation json data to a dataframe format.
     Add on any text from the initial review_file dataframe by joining based on 'id' if available
     in both sources, otherwise falling back to joining on pages/co-ordinates (if option selected).
+
+    Refactored for improved efficiency, prioritizing ID-based join and conditionally applying
+    coordinate division and proximity matching.
     '''
 
     # 1. Convert annotations to DataFrame
-    # Ensure convert_annotation_data_to_dataframe populates the 'id' column
-    # if 'id' exists in the dictionaries within all_annotations.
-
     review_file_df = convert_annotation_data_to_dataframe(all_annotations)
 
-    # Only keep rows in review_df where there are coordinates
-    review_file_df.dropna(subset='xmin', axis=0, inplace=True)
+    # Only keep rows in review_df where there are coordinates (assuming xmin is representative)
+    # Use .notna() for robustness with potential None or NaN values
+    review_file_df.dropna(subset=['xmin', 'ymin', 'xmax', 'ymax'], how='any', inplace=True)
 
     # Exit early if the initial conversion results in an empty DataFrame
     if review_file_df.empty:
         # Define standard columns for an empty return DataFrame
-        check_columns = ["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text", "id"]
-        # Ensure 'id' is included if it might have been expected
-        return pd.DataFrame(columns=[col for col in check_columns if col != 'id' or 'id' in review_file_df.columns])
+        # Ensure 'id' is included if it was potentially expected based on input structure
+        # We don't know the columns from convert_annotation_data_to_dataframe without seeing it,
+        # but let's assume a standard set and add 'id' if it appeared.
+        standard_cols = ["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]
+        if 'id' in review_file_df.columns:
+             standard_cols.append('id')
+        return pd.DataFrame(columns=standard_cols)
 
-    # 2. Handle page sizes if provided
-    if not page_sizes:
-        page_sizes_df = pd.DataFrame(page_sizes) # Ensure it's a DataFrame
-        # Safely convert page column to numeric
-        page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
-        page_sizes_df.dropna(subset=["page"], inplace=True) # Drop rows where conversion failed
-        page_sizes_df["page"] = page_sizes_df["page"].astype(int) # Convert to int after handling errors/NaNs
+    # Ensure 'id' column exists for logic flow, even if empty
+    if 'id' not in review_file_df.columns:
+        review_file_df['id'] = ''
+    # Do the same for redaction_decision_output if it's not empty
+    if not redaction_decision_output.empty and 'id' not in redaction_decision_output.columns:
+         redaction_decision_output['id'] = ''
 
 
-        # Apply coordinate division if page_sizes_df is not empty after processing
+    # 2. Process page sizes if provided - needed potentially for coordinate division later
+    # Process this once upfront if the data is available
+    page_sizes_df = pd.DataFrame() # Initialize as empty
+    if page_sizes:
+        page_sizes_df = pd.DataFrame(page_sizes)
         if not page_sizes_df.empty:
-            # Ensure 'page' column in review_file_df is numeric for merging
-            if 'page' in review_file_df.columns:
-                 review_file_df['page'] = pd.to_numeric(review_file_df['page'], errors='coerce')
-                 # Drop rows with invalid pages before division
-                 review_file_df.dropna(subset=['page'], inplace=True)
-                 review_file_df['page'] = review_file_df['page'].astype(int)
-                 review_file_df = divide_coordinates_by_page_sizes(review_file_df, page_sizes_df)
-
-                 print("review_file_df after coord divide:", review_file_df)
-
-            # Also apply to redaction_decision_output if it's not empty and has page numbers
-            if not redaction_decision_output.empty and 'page' in redaction_decision_output.columns:
-                redaction_decision_output['page'] = pd.to_numeric(redaction_decision_output['page'], errors='coerce')
-                # Drop rows with invalid pages before division
-                redaction_decision_output.dropna(subset=['page'], inplace=True)
-                redaction_decision_output['page'] = redaction_decision_output['page'].astype(int)
-                redaction_decision_output = divide_coordinates_by_page_sizes(redaction_decision_output, page_sizes_df)
-
-                print("redaction_decision_output after coord divide:", redaction_decision_output)
-        else:
-             print("Warning: Page sizes DataFrame became empty after processing, skipping coordinate division.")
+            # Safely convert page column to numeric and then int
+            page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+            page_sizes_df.dropna(subset=["page"], inplace=True)
+            if not page_sizes_df.empty: # Check again after dropping NaNs
+                page_sizes_df["page"] = page_sizes_df["page"].astype(int)
+            else:
+                 print("Warning: Page sizes DataFrame became empty after processing, coordinate division will be skipped.")
 
 
     # 3. Join additional data from redaction_decision_output if provided
+    text_added_successfully = False # Flag to track if text was added by any method
+
     if not redaction_decision_output.empty:
-        # --- NEW LOGIC: Prioritize joining by 'id' ---
-        id_col_exists_in_review = 'id' in review_file_df.columns
-        id_col_exists_in_redaction = 'id' in redaction_decision_output.columns
-        joined_by_id = False # Flag to track if ID join was successful
+        # --- Attempt to join data based on 'id' column first ---
+
+        # Check if 'id' columns are present and have non-null values in *both* dataframes
+        id_col_exists_in_review = 'id' in review_file_df.columns and not review_file_df['id'].isnull().all() and not (review_file_df['id'] == '').all()
+        id_col_exists_in_redaction = 'id' in redaction_decision_output.columns and not redaction_decision_output['id'].isnull().all() and not (redaction_decision_output['id'] == '').all()
+
 
         if id_col_exists_in_review and id_col_exists_in_redaction:
             #print("Attempting to join data based on 'id' column.")
             try:
-                # Ensure 'id' columns are of compatible types (e.g., string) to avoid merge errors
+                # Ensure 'id' columns are of string type for robust merging
                 review_file_df['id'] = review_file_df['id'].astype(str)
-                # Make a copy to avoid SettingWithCopyWarning if redaction_decision_output is used elsewhere
+                # Make a copy if needed, but try to avoid if redaction_decision_output isn't modified later
+                # Let's use a copy for safety as in the original code
                 redaction_copy = redaction_decision_output.copy()
                 redaction_copy['id'] = redaction_copy['id'].astype(str)
 
-                # Select columns to merge from redaction output.
-                # Primarily interested in 'text', but keep 'id' for the merge key.
-                # Add other columns from redaction_copy if needed.
+                # Select columns to merge from redaction output. Prioritize 'text'.
                 cols_to_merge = ['id']
                 if 'text' in redaction_copy.columns:
                     cols_to_merge.append('text')
@@ -1312,82 +1487,130 @@ def convert_annotation_json_to_review_df(all_annotations: List[dict],
                     print("Warning: 'text' column not found in redaction_decision_output. Cannot merge text using 'id'.")
 
                 # Perform a left merge to keep all annotations and add matching text
-                # Suffixes prevent collision if 'text' already exists and we want to compare/choose
-                original_cols = review_file_df.columns.tolist()
+                # Use a suffix for the text column from the right DataFrame
+                original_text_col_exists = 'text' in review_file_df.columns
+                merge_suffix = '_redaction' if original_text_col_exists else ''
+
                 merged_df = pd.merge(
                     review_file_df,
                     redaction_copy[cols_to_merge],
                     on='id',
                     how='left',
-                    suffixes=('', '_redaction') # Suffix applied to columns from right df if names clash
+                    suffixes=('', merge_suffix)
                 )
 
-                # Update the original 'text' column. Prioritize text from redaction output.
-                # If redaction output had 'text', a 'text_redaction' column now exists.
-                if 'text_redaction' in merged_df.columns:
-                     if 'text' not in merged_df.columns: # If review_file_df didn't have text initially
-                         merged_df['text'] = merged_df['text_redaction']
-                     else:
-                         # Use text from redaction where available, otherwise keep original text
-                         merged_df['text'] = merged_df['text_redaction'].combine_first(merged_df['text'])
+                # Update the 'text' column if a new one was brought in
+                if 'text' + merge_suffix in merged_df.columns:
+                    redaction_text_col = 'text' + merge_suffix
+                    if original_text_col_exists:
+                         # Combine: Use text from redaction where available, otherwise keep original
+                         merged_df['text'] = merged_df[redaction_text_col].combine_first(merged_df['text'])
+                         # Drop the temporary column
+                         merged_df = merged_df.drop(columns=[redaction_text_col])
+                    else:
+                         # Redaction output had text, but review_file_df didn't. Rename the new column.
+                         merged_df = merged_df.rename(columns={redaction_text_col: 'text'})
 
-                     # Remove the temporary column
-                     merged_df = merged_df.drop(columns=['text_redaction'])
+                    text_added_successfully = True # Indicate text was potentially added
 
-                # Ensure final columns match original expectation + potentially new 'text'
-                final_cols = original_cols
-                if 'text' not in final_cols and 'text' in merged_df.columns:
-                    final_cols.append('text') # Make sure text column is kept if newly added
-                 # Reorder/select columns if necessary, ensuring 'id' is kept
-                review_file_df = merged_df[[col for col in final_cols if col in merged_df.columns] + (['id'] if 'id' not in final_cols else [])]
+                review_file_df = merged_df # Update the main DataFrame
 
-
-                #print("Successfully joined data using 'id'.")
-                joined_by_id = True
+                #print("Successfully attempted to join data using 'id'.") # Note: Text might not have been in redaction data
 
             except Exception as e:
-                print(f"Error during 'id'-based merge: {e}. Falling back to proximity match if enabled.")
-                # Fall through to proximity match below if an error occurred
+                print(f"Error during 'id'-based merge: {e}. Checking for proximity match fallback.")
+                # Fall through to proximity match logic below
 
-        # --- Fallback to proximity match ---
-        if not joined_by_id and do_proximity_match:
-            if not id_col_exists_in_review or not id_col_exists_in_redaction:
-                 print("Could not join by 'id' (column missing in one or both sources).")
-            print("Performing proximity match to add text data.")
-            # Match text to review file using proximity
+        # --- Fallback to proximity match if ID join wasn't possible/successful and enabled ---
+        # Note: If id_col_exists_in_review or id_col_exists_in_redaction was False,
+        # the block above was skipped, and we naturally fall here.
+        # If an error occurred in the try block, joined_by_id would implicitly be False
+        # because text_added_successfully wasn't set to True.
 
-            review_file_df = do_proximity_match_all_pages_for_text(df1=review_file_df.copy(), df2=redaction_decision_output.copy())
-        elif not joined_by_id and not do_proximity_match:
-             print("Skipping joining text data (ID join not possible, proximity match disabled).")
-        # --- End of join logic ---
+        # Only attempt proximity match if text wasn't added by ID join and proximity is requested
+        if not text_added_successfully and do_proximity_match:
+             print("Attempting proximity match to add text data.")
 
-    # 4. Ensure required columns exist, filling with blank if they don't
-    # Define base required columns, 'id' might or might not be present initially
-    required_columns = ["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text"]
-    # Add 'id' to required list if it exists in the dataframe at this point
+             # Ensure 'page' columns are numeric before coordinate division and proximity match
+             # (Assuming divide_coordinates_by_page_sizes and do_proximity_match_all_pages_for_text need this)
+             if 'page' in review_file_df.columns:
+                 review_file_df['page'] = pd.to_numeric(review_file_df['page'], errors='coerce').fillna(-1).astype(int) # Use -1 for NaN pages
+                 review_file_df = review_file_df[review_file_df['page'] != -1] # Drop rows where page conversion failed
+             if not redaction_decision_output.empty and 'page' in redaction_decision_output.columns:
+                  redaction_decision_output['page'] = pd.to_numeric(redaction_decision_output['page'], errors='coerce').fillna(-1).astype(int)
+                  redaction_decision_output = redaction_decision_output[redaction_decision_output['page'] != -1]
+
+             # Perform coordinate division IF page_sizes were processed and DataFrame is not empty
+             if not page_sizes_df.empty:
+                  # Apply coordinate division *before* proximity match
+                  review_file_df = divide_coordinates_by_page_sizes(review_file_df, page_sizes_df)
+                  if not redaction_decision_output.empty:
+                       redaction_decision_output = divide_coordinates_by_page_sizes(redaction_decision_output, page_sizes_df)
+
+             # Now perform the proximity match
+             # Note: Potential DataFrame copies happen inside do_proximity_match based on its implementation
+             if not redaction_decision_output.empty:
+                try:
+                    review_file_df = do_proximity_match_all_pages_for_text(
+                        df1=review_file_df, # Pass directly, avoid caller copy if possible by modifying function signature
+                        df2=redaction_decision_output # Pass directly
+                    )
+                    # Assuming do_proximity_match_all_pages_for_text adds/updates the 'text' column
+                    if 'text' in review_file_df.columns:
+                         text_added_successfully = True
+                    print("Proximity match completed.")
+                except Exception as e:
+                    print(f"Error during proximity match: {e}. Text data may not be added.")
+
+        elif not text_added_successfully and not do_proximity_match:
+             print("Skipping joining text data (ID join not possible/failed, proximity match disabled).")
+
+    # 4. Ensure required columns exist and are ordered
+    # Define base required columns. 'id' and 'text' are conditionally added.
+    required_columns_base = ["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax"]
+    final_columns = required_columns_base[:] # Start with base columns
+
+    # Add 'id' and 'text' if they exist in the DataFrame at this point
     if 'id' in review_file_df.columns:
-        required_columns.append('id')
+        final_columns.append('id')
+    if 'text' in review_file_df.columns:
+        final_columns.append('text') # Add text column if it was created/merged
 
-    for col in required_columns:
+    # Add any missing required columns with a default value (e.g., blank string)
+    for col in final_columns:
         if col not in review_file_df.columns:
-            # Decide default value based on column type (e.g., '' for text, np.nan for numeric?)
-            # Using '' for simplicity here.
-            review_file_df[col] = ''
+            # Use appropriate default based on expected type, '' for text/id, np.nan for coords?
+            # Sticking to '' as in original for simplicity, but consider data types.
+            review_file_df[col] = '' # Or np.nan for numerical, but coords already checked by dropna
 
     # Select and order the final set of columns
-    review_file_df = review_file_df[required_columns]
+    # Ensure all selected columns actually exist after adding defaults
+    review_file_df = review_file_df[[col for col in final_columns if col in review_file_df.columns]]
+
 
     # 5. Final processing and sorting
-    # If colours are saved as list, convert to tuple
+    # Convert colours from list to tuple if necessary - apply is okay here unless lists are vast
     if 'color' in review_file_df.columns:
-        review_file_df["color"] = review_file_df["color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
+         # Check if the column actually contains lists before applying lambda
+         if review_file_df['color'].apply(lambda x: isinstance(x, list)).any():
+            review_file_df["color"] = review_file_df["color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
 
     # Sort the results
-    sort_columns = ['page', 'ymin', 'xmin', 'label']
     # Ensure sort columns exist before sorting
+    sort_columns = ['page', 'ymin', 'xmin', 'label']
     valid_sort_columns = [col for col in sort_columns if col in review_file_df.columns]
-    if valid_sort_columns:
-        review_file_df = review_file_df.sort_values(valid_sort_columns)
+    if valid_sort_columns and not review_file_df.empty: # Only sort non-empty df
+         # Convert potential numeric sort columns to appropriate types if necessary
+         # (e.g., 'page', 'ymin', 'xmin') to ensure correct sorting.
+         # dropna(subset=[...], inplace=True) earlier should handle NaNs in coords.
+         # page conversion already done before proximity match.
+         try:
+             review_file_df = review_file_df.sort_values(valid_sort_columns)
+         except TypeError as e:
+              print(f"Warning: Could not sort DataFrame due to type error in sort columns: {e}")
+              # Proceed without sorting
+
+    review_file_df = review_file_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"])
 
     return review_file_df
 
@@ -1472,20 +1695,18 @@ def fill_missing_box_ids(data_input: dict) -> dict:
 
 def fill_missing_ids(df: pd.DataFrame, column_name: str = 'id', length: int = 12) -> pd.DataFrame:
     """
-    Generates unique alphanumeric IDs for rows in a DataFrame column
-    where the value is missing (NaN, None) or an empty string.
+    Optimized: Generates unique alphanumeric IDs for rows in a DataFrame column
+    where the value is missing (NaN, None) or an empty/whitespace string.
 
     Args:
         df (pd.DataFrame): The input Pandas DataFrame.
         column_name (str): The name of the column to check and fill (defaults to 'id').
                            This column will be added if it doesn't exist.
         length (int): The desired length of the generated IDs (defaults to 12).
-                      Cannot exceed the limits that guarantee uniqueness based
-                      on the number of IDs needed and character set size.
 
     Returns:
         pd.DataFrame: The DataFrame with missing/empty IDs filled in the specified column.
-                      Note: The function modifies the DataFrame in place.
+                      Note: The function modifies the DataFrame directly (in-place).
     """
 
     # --- Input Validation ---
@@ -1497,43 +1718,59 @@ def fill_missing_ids(df: pd.DataFrame, column_name: str = 'id', length: int = 12
         raise ValueError("'length' must be a positive integer.")
 
     # --- Ensure Column Exists ---
+    original_dtype = None
     if column_name not in df.columns:
         print(f"Column '{column_name}' not found. Adding it to the DataFrame.")
-        df[column_name] = np.nan # Initialize with NaN
+        # Initialize with None (which Pandas often treats as NaN but allows object dtype)
+        df[column_name] = None
+        # Set original_dtype to object so it likely becomes string later
+        original_dtype = object
+    else:
+        original_dtype = df[column_name].dtype
 
     # --- Identify Rows Needing IDs ---
-    # Check for NaN, None, or empty strings ('')
-    # Convert to string temporarily for robust empty string check, handle potential errors
-    try:
-        df[column_name] = df[column_name].astype(str) #handles NaN/None conversion, .str.strip() removes whitespace
-        is_missing_or_empty = (
-            df[column_name].isna()
-            #| (df[column_name].astype(str).str.strip() == '')
-            #| (df[column_name] == "nan")
-            | (df[column_name].astype(str).str.len() != length)
-        )
-    except Exception as e:
-         # Fallback if conversion to string fails (e.g., column contains complex objects)
-         print(f"Warning: Could not perform reliable empty string check on column '{column_name}' due to data type issues. Checking for NaN/None only. Error: {e}")
-         is_missing_or_empty = df[column_name].isna()
+    # 1. Check for actual null values (NaN, None, NaT)
+    is_null = df[column_name].isna()
+
+    # 2. Check for empty or whitespace-only strings AFTER converting potential values to string
+    #    Only apply string checks on rows that are *not* null to avoid errors/warnings
+    #    Fill NaN temporarily for string operations, then check length or equality
+    is_empty_str = pd.Series(False, index=df.index) # Default to False
+    if not is_null.all(): # Only check strings if there are non-null values
+         temp_str_col = df.loc[~is_null, column_name].astype(str).str.strip()
+         is_empty_str.loc[~is_null] = (temp_str_col == '')
+
+    # Combine the conditions
+    is_missing_or_empty = is_null | is_empty_str
 
     rows_to_fill_index = df.index[is_missing_or_empty]
     num_needed = len(rows_to_fill_index)
 
     if num_needed == 0:
-        #print(f"No missing or empty values found in column '{column_name}'.")
+        # Ensure final column type is consistent if nothing was done
+        if pd.api.types.is_object_dtype(original_dtype) or pd.api.types.is_string_dtype(original_dtype):
+             pass # Likely already object or string
+        else:
+             # If original was numeric/etc., but might contain strings now? Unlikely here.
+             pass # Or convert to object: df[column_name] = df[column_name].astype(object)
+        # print(f"No missing or empty values found requiring IDs in column '{column_name}'.")
         return df
 
     print(f"Found {num_needed} rows requiring a unique ID in column '{column_name}'.")
 
     # --- Get Existing IDs to Ensure Uniqueness ---
-    try:
-        # Get all non-missing, non-empty string values from the column
-        existing_ids = set(df.loc[~is_missing_or_empty, column_name].astype(str))
-    except Exception as e:
-        print(f"Warning: Could not reliably get all existing string IDs from column '{column_name}' due to data type issues. Uniqueness check might be less strict. Error: {e}")
-        # Fallback: Get only non-NaN IDs, potential type issues ignored
-        existing_ids = set(df.loc[df[column_name].notna(), column_name])
+    # Consider only rows that are *not* missing/empty
+    valid_rows = df.loc[~is_missing_or_empty, column_name]
+    # Drop any remaining nulls (shouldn't be any based on mask, but belts and braces)
+    valid_rows = valid_rows.dropna()
+    # Convert to string *only* if not already string/object, then filter out empty strings again
+    if not pd.api.types.is_object_dtype(valid_rows.dtype) and not pd.api.types.is_string_dtype(valid_rows.dtype):
+         existing_ids = set(valid_rows.astype(str).str.strip())
+    else: # Already string or object, just strip and convert to set
+         existing_ids = set(valid_rows.astype(str).str.strip()) # astype(str) handles mixed types in object column
+
+    # Remove empty string from existing IDs if it's there after stripping
+    existing_ids.discard('')
 
 
     # --- Generate Unique IDs ---
@@ -1543,93 +1780,232 @@ def fill_missing_ids(df: pd.DataFrame, column_name: str = 'id', length: int = 12
 
     max_possible_ids = len(character_set) ** length
     if num_needed > max_possible_ids:
-         raise ValueError(f"Cannot generate {num_needed} unique IDs with length {length}. Maximum possible is {max_possible_ids}.")
-    # Add a check for practical limits if needed, e.g., if num_needed is very close to max_possible_ids, generation could be slow.
+        raise ValueError(f"Cannot generate {num_needed} unique IDs with length {length}. Maximum possible is {max_possible_ids}.")
+
+    # Pre-calculate safety break limit
+    max_attempts_per_id = max(1000, num_needed * 10) # Adjust multiplier as needed
 
     #print(f"Generating {num_needed} unique IDs of length {length}...")
     for i in range(num_needed):
         attempts = 0
         while True:
             candidate_id = ''.join(random.choices(character_set, k=length))
-            # Check against *all* existing IDs and *newly* generated ones
+            # Check against *all* known existing IDs and *newly* generated ones
             if candidate_id not in existing_ids and candidate_id not in generated_ids_set:
                 generated_ids_set.add(candidate_id)
                 new_ids_list.append(candidate_id)
                 break # Found a unique ID
             attempts += 1
-            if attempts > num_needed * 100 and attempts > 1000 : # Safety break for unlikely infinite loop
-                 raise RuntimeError(f"Failed to generate a unique ID after {attempts} attempts. Check length and character set or existing IDs.")
+            if attempts > max_attempts_per_id : # Safety break
+                raise RuntimeError(f"Failed to generate a unique ID after {attempts} attempts. Check length, character set, or density of existing IDs.")
 
-        # Optional progress update for large numbers
-        if (i + 1) % 1000 == 0:
-            print(f"Generated {i+1}/{num_needed} IDs...")
+        # Optional progress update
+        # if (i + 1) % 1000 == 0:
+        #    print(f"Generated {i+1}/{num_needed} IDs...")
 
 
     # --- Assign New IDs ---
     # Use the previously identified index to assign the new IDs correctly
-    df.loc[rows_to_fill_index, column_name] = new_ids_list
-    #print(f"Successfully filled {len(new_ids_list)} missing values in column '{column_name}'.")
+    # Assigning string IDs might change the column's dtype to 'object'
+    if not pd.api.types.is_object_dtype(original_dtype) and not pd.api.types.is_string_dtype(original_dtype):
+         warnings.warn(f"Column '{column_name}' dtype might change from '{original_dtype}' to 'object' due to string ID assignment.", UserWarning)
 
-    # The DataFrame 'df' has been modified in place
+    df.loc[rows_to_fill_index, column_name] = new_ids_list
+    print(f"Successfully assigned {len(new_ids_list)} new unique IDs to column '{column_name}'.")
+
+    # Optional: Convert the entire column to string type at the end for consistency
+    # df[column_name] = df[column_name].astype(str)
+
     return df
 
-def convert_review_df_to_annotation_json(review_file_df:pd.DataFrame,
-                                         image_paths:List[Image.Image],
-                                         page_sizes:List[dict]=[]) -> List[dict]:
-    '''
-    Convert a review csv to a json file for use by the Gradio Annotation object.
-    '''
-    # Make sure all relevant cols are float
-    float_cols = ["page", "xmin", "xmax", "ymin", "ymax"]
-    for col in float_cols:
-        review_file_df.loc[:, col] = pd.to_numeric(review_file_df.loc[:, col], errors='coerce')
-    
-    # Convert relative co-ordinates into image coordinates for the image annotation output object
-    if page_sizes:        
+def convert_review_df_to_annotation_json(
+    review_file_df: pd.DataFrame,
+    image_paths: List[str], # List of image file paths
+    page_sizes: List[Dict], # List of dicts like [{'page': 1, 'image_path': '...', 'image_width': W, 'image_height': H}, ...]
+    xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax" # Coordinate column names
+) -> List[Dict]:
+    """
+    Optimized function to convert review DataFrame to Gradio Annotation JSON format.
+
+    Ensures absolute coordinates, handles missing IDs, deduplicates based on key fields,
+    selects final columns, and structures data per image/page based on page_sizes.
+
+    Args:
+        review_file_df: Input DataFrame with annotation data.
+        image_paths: List of image file paths (Note: currently unused if page_sizes provides paths).
+        page_sizes: REQUIRED list of dictionaries, each containing 'page',
+                    'image_path', 'image_width', and 'image_height'. Defines
+                    output structure and dimensions for coordinate conversion.
+        xmin, xmax, ymin, ymax: Names of the coordinate columns.
+
+    Returns:
+        List of dictionaries suitable for Gradio Annotation output, one dict per image/page.
+    """
+    review_file_df = review_file_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"])
+
+    if not page_sizes:
+        raise ValueError("page_sizes argument is required and cannot be empty.")
+
+    # --- Prepare Page Sizes DataFrame ---
+    try:
         page_sizes_df = pd.DataFrame(page_sizes)
-        page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(pd.to_numeric, errors="coerce")
+        required_ps_cols = {'page', 'image_path', 'image_width', 'image_height'}
+        if not required_ps_cols.issubset(page_sizes_df.columns):
+            missing = required_ps_cols - set(page_sizes_df.columns)
+            raise ValueError(f"page_sizes is missing required keys: {missing}")
+        # Convert page sizes columns to appropriate numeric types early
+        page_sizes_df['page'] = pd.to_numeric(page_sizes_df['page'], errors='coerce')
+        page_sizes_df['image_width'] = pd.to_numeric(page_sizes_df['image_width'], errors='coerce')
+        page_sizes_df['image_height'] = pd.to_numeric(page_sizes_df['image_height'], errors='coerce')
+        # Use nullable Int64 for page number consistency
+        page_sizes_df['page'] = page_sizes_df['page'].astype('Int64')
 
-        review_file_df = multiply_coordinates_by_page_sizes(review_file_df, page_sizes_df)
-    
-    review_file_df = fill_missing_ids(review_file_df)
+    except Exception as e:
+        raise ValueError(f"Error processing page_sizes: {e}") from e
 
-    if 'id' not in review_file_df.columns:
-        review_file_df['id'] = ''
-        review_file_df['id'] = review_file_df['id'].astype(str)
-           
-    # Keep only necessary columns
-    review_file_df = review_file_df[["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "id", "text"]].drop_duplicates(subset=["image", "page", "xmin", "ymin", "xmax", "ymax", "label", "id"])
 
-    # If colours are saved as list, convert to tuple
-    review_file_df.loc[:, "color"] = review_file_df.loc[:,"color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
+    # Handle empty input DataFrame gracefully
+    if review_file_df.empty:
+        print("Input review_file_df is empty. Proceeding to generate JSON structure with empty boxes.")
+        # Ensure essential columns exist even if empty for later steps
+        for col in [xmin, xmax, ymin, ymax, "page", "label", "color", "id", "text"]:
+             if col not in review_file_df.columns:
+                 review_file_df[col] = pd.NA
+    else:
+        # --- Coordinate Conversion (if needed) ---
+        coord_cols_to_check = [c for c in [xmin, xmax, ymin, ymax] if c in review_file_df.columns]
+        needs_multiplication = False
+        if coord_cols_to_check:
+            temp_df_numeric = review_file_df[coord_cols_to_check].apply(pd.to_numeric, errors='coerce')
+            if temp_df_numeric.le(1).any().any(): # Check if any numeric coord <= 1 exists
+                 needs_multiplication = True
 
-    # Group the DataFrame by the 'image' column
-    grouped_csv_pages = review_file_df.groupby('page')
-
-    # Create a list to hold the JSON data
-    json_data = []
-
-    for page_no, pdf_image_path in enumerate(page_sizes_df["image_path"]):
-        
-        reported_page_number = int(page_no + 1)
-
-        if reported_page_number in review_file_df["page"].values:
-
-            # Convert each relevant group to a list of box dictionaries
-            selected_csv_pages = grouped_csv_pages.get_group(reported_page_number)
-            annotation_boxes = selected_csv_pages.drop(columns=['image', 'page']).to_dict(orient='records')
-            
-            annotation = {
-                "image": pdf_image_path,
-                "boxes": annotation_boxes
-            }
-
+        if needs_multiplication:
+            #print("Relative coordinates detected or suspected, running multiplication...")
+            review_file_df = multiply_coordinates_by_page_sizes(
+                review_file_df.copy(), # Pass a copy to avoid modifying original outside function
+                page_sizes_df,
+                xmin, xmax, ymin, ymax
+            )
         else:
-            annotation = {}
-            annotation["image"] = pdf_image_path
-            annotation["boxes"] = []
+            #print("No relative coordinates detected or required columns missing, skipping multiplication.")
+            # Still ensure essential coordinate/page columns are numeric if they exist
+            cols_to_convert = [c for c in [xmin, xmax, ymin, ymax, "page"] if c in review_file_df.columns]
+            for col in cols_to_convert:
+                review_file_df[col] = pd.to_numeric(review_file_df[col], errors='coerce')
 
-        # Append the structured data to the json_data list
-        json_data.append(annotation)
+        # Handle potential case where multiplication returns an empty DF
+        if review_file_df.empty:
+            print("DataFrame became empty after coordinate processing.")
+            # Re-add essential columns if they were lost
+            for col in [xmin, xmax, ymin, ymax, "page", "label", "color", "id", "text"]:
+                if col not in review_file_df.columns:
+                    review_file_df[col] = pd.NA
+
+        # --- Fill Missing IDs ---
+        review_file_df = fill_missing_ids(review_file_df.copy()) # Pass a copy
+
+        # --- Deduplicate Based on Key Fields ---
+        base_dedupe_cols = ["page", xmin, ymin, xmax, ymax, "label", "id"]
+        # Identify which deduplication columns actually exist in the DataFrame
+        cols_for_dedupe = [col for col in base_dedupe_cols if col in review_file_df.columns]
+        # Add 'image' column for deduplication IF it exists (matches original logic intent)
+        if "image" in review_file_df.columns:
+            cols_for_dedupe.append("image")
+
+        # Ensure placeholder columns exist if they are needed for deduplication
+        # (e.g., 'label', 'id' should be present after fill_missing_ids)
+        for col in ['label', 'id']:
+            if col in cols_for_dedupe and col not in review_file_df.columns:
+                 # This might indicate an issue in fill_missing_ids or prior steps
+                 print(f"Warning: Column '{col}' needed for dedupe but not found. Adding NA.")
+                 review_file_df[col] = "" # Add default empty string
+
+        if cols_for_dedupe: # Only attempt dedupe if we have columns to check
+            #print(f"Deduplicating based on columns: {cols_for_dedupe}")
+            # Convert relevant columns to string before dedupe to avoid type issues with mixed data (optional, depends on data)
+            # for col in cols_for_dedupe:
+            #    review_file_df[col] = review_file_df[col].astype(str)
+            review_file_df = review_file_df.drop_duplicates(subset=cols_for_dedupe)
+        else:
+            print("Skipping deduplication: No valid columns found to deduplicate by.")
+
+
+    # --- Select and Prepare Final Output Columns ---
+    required_final_cols = ["page", "label", "color", xmin, ymin, xmax, ymax, "id", "text"]
+    # Identify which of the desired final columns exist in the (now potentially deduplicated) DataFrame
+    available_final_cols = [col for col in required_final_cols if col in review_file_df.columns]
+
+    # Ensure essential output columns exist, adding defaults if missing AFTER deduplication
+    for col in required_final_cols:
+         if col not in review_file_df.columns:
+             print(f"Adding missing final column '{col}' with default value.")
+             if col in ['label', 'id', 'text']:
+                 review_file_df[col] = "" # Default empty string
+             elif col == 'color':
+                 review_file_df[col] = None # Default None or a default color tuple
+             else: # page, coordinates
+                 review_file_df[col] = pd.NA # Default NA for numeric/page
+             available_final_cols.append(col) # Add to list of available columns
+
+    # Select only the final desired columns in the correct order
+    review_file_df = review_file_df[available_final_cols]
+
+    # --- Final Formatting ---
+    if not review_file_df.empty:
+        # Convert list colors to tuples (important for some downstream uses)
+        if 'color' in review_file_df.columns:
+            review_file_df['color'] = review_file_df['color'].apply(
+                lambda x: tuple(x) if isinstance(x, list) else x
+            )
+        # Ensure page column is nullable integer type for reliable grouping
+        if 'page' in review_file_df.columns:
+             review_file_df['page'] = review_file_df['page'].astype('Int64')
+
+    # --- Group Annotations by Page ---
+    if 'page' in review_file_df.columns:
+        grouped_annotations = review_file_df.groupby('page')
+        group_keys = set(grouped_annotations.groups.keys()) # Use set for faster lookups
+    else:
+        # Cannot group if page column is missing
+        print("Error: 'page' column missing, cannot group annotations.")
+        grouped_annotations = None
+        group_keys = set()
+
+
+    # --- Build JSON Structure ---
+    json_data = []
+    output_cols_for_boxes = [col for col in ["label", "color", xmin, ymin, xmax, ymax, "id", "text"] if col in review_file_df.columns]
+
+    # Iterate through page_sizes_df to define the structure (one entry per image path)
+    for _, row in page_sizes_df.iterrows():
+        page_num = row['page'] # Already Int64
+        pdf_image_path = row['image_path']
+        annotation_boxes = [] # Default to empty list
+
+        # Check if the page exists in the grouped annotations (using the faster set lookup)
+        # Check pd.notna because page_num could be <NA> if conversion failed
+        if pd.notna(page_num) and page_num in group_keys and grouped_annotations:
+            try:
+                page_group_df = grouped_annotations.get_group(page_num)
+                # Convert the group to list of dicts, selecting only needed box properties
+                # Handle potential NaN coordinates before conversion to JSON
+                annotation_boxes = page_group_df[output_cols_for_boxes].replace({np.nan: None}).to_dict(orient='records')
+
+                # Optional: Round coordinates here if needed AFTER potential multiplication
+                # for box in annotation_boxes:
+                #     for coord in [xmin, ymin, xmax, ymax]:
+                #         if coord in box and box[coord] is not None:
+                #             box[coord] = round(float(box[coord]), 2) # Example: round to 2 decimals
+
+            except KeyError:
+                 print(f"Warning: Group key {page_num} not found despite being in group_keys (should not happen).")
+                 annotation_boxes = [] # Keep empty
+
+        # Append the structured data for this image/page
+        json_data.append({
+            "image": pdf_image_path,
+            "boxes": annotation_boxes
+        })
 
     return json_data

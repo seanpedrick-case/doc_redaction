@@ -6,12 +6,11 @@ import numpy as np
 from xml.etree.ElementTree import Element, SubElement, tostring, parse
 from xml.dom import minidom
 import uuid
-from typing import List
+from typing import List, Tuple
 from gradio_image_annotation import image_annotator
 from gradio_image_annotation.image_annotator import AnnotatedImageData
 from pymupdf import Document, Rect
 import pymupdf
-#from fitz 
 from PIL import ImageDraw, Image
 
 from tools.config import OUTPUT_FOLDER, CUSTOM_BOX_COLOUR, MAX_IMAGE_PIXELS, INPUT_FOLDER
@@ -54,7 +53,6 @@ def update_zoom(current_zoom_level:int, annotate_current_page:int, decrease:bool
             current_zoom_level += 10
         
     return current_zoom_level, annotate_current_page
-
 
 def update_dropdown_list_based_on_dataframe(df:pd.DataFrame, column:str) -> List["str"]:
     '''
@@ -166,49 +164,205 @@ def update_recogniser_dataframes(page_image_annotator_object:AnnotatedImageData,
 
     return recogniser_entities_list, recogniser_dataframe_out_gr, recogniser_dataframe_out, recogniser_entities_drop, text_entities_drop, page_entities_drop
 
-def undo_last_removal(backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base):
+def undo_last_removal(backup_review_state:pd.DataFrame, backup_image_annotations_state:list[dict], backup_recogniser_entity_dataframe_base:pd.DataFrame):
     return backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base
 
-def update_annotator_page_from_review_df(review_df: pd.DataFrame,
-                                          image_file_paths:List[str],
-                                          page_sizes:List[dict],
-                                          current_page:int,
-                                          previous_page:int,
-                                          current_image_annotations_state:List[str],
-                                          current_page_annotator:object):
+def update_annotator_page_from_review_df(
+    review_df: pd.DataFrame,
+    image_file_paths:List[str], # Note: This input doesn't seem used in the original logic flow after the first line was removed
+    page_sizes:List[dict],
+    current_image_annotations_state:List[str], # This should ideally be List[dict] based on its usage
+    current_page_annotator:object, # Should be dict or a custom annotation object for one page
+    selected_recogniser_entity_df_row:pd.DataFrame,
+    input_folder:str,
+    doc_full_file_name_textbox:str
+) -> Tuple[object, List[dict], int, List[dict], pd.DataFrame, int]: # Correcting return types based on usage
     '''
-    Update the visible annotation object with the latest review file information
+    Update the visible annotation object and related objects with the latest review file information,
+    optimizing by processing only the current page's data.
     '''
-    out_image_annotations_state = current_image_annotations_state
-    out_current_page_annotator = current_page_annotator
-    gradio_annotator_current_page_number = current_page
+    # Assume current_image_annotations_state is List[dict] and current_page_annotator is dict
+    out_image_annotations_state: List[dict] = list(current_image_annotations_state) # Make a copy to avoid modifying input in place
+    out_current_page_annotator: dict = current_page_annotator
 
+    # Get the target page number from the selected row
+    # Safely access the page number, handling potential errors or empty DataFrame
+    gradio_annotator_current_page_number: int = 0
+    annotate_previous_page: int = 0 # Renaming for clarity if needed, matches original output
+    if not selected_recogniser_entity_df_row.empty and 'page' in selected_recogniser_entity_df_row.columns:
+        try:
+            # Use .iloc[0] and .item() for robust scalar extraction
+            gradio_annotator_current_page_number = int(selected_recogniser_entity_df_row['page'].iloc[0])
+            annotate_previous_page = gradio_annotator_current_page_number # Store original page number
+        except (IndexError, ValueError, TypeError):
+            print("Warning: Could not extract valid page number from selected_recogniser_entity_df_row. Defaulting to page 0 (or 1).")
+            gradio_annotator_current_page_number = 1 # Or 0 depending on 1-based vs 0-based indexing elsewhere
+
+    # Ensure page number is valid and 1-based for external display/logic
+    if gradio_annotator_current_page_number <= 0:
+        gradio_annotator_current_page_number = 1
+
+    page_max_reported = len(out_image_annotations_state)
+    if gradio_annotator_current_page_number > page_max_reported:
+        gradio_annotator_current_page_number = page_max_reported # Cap at max pages
+
+    page_num_reported_zero_indexed = gradio_annotator_current_page_number - 1
+
+    # Process page sizes DataFrame early, as it's needed for image path handling and potentially coordinate multiplication
+    page_sizes_df = pd.DataFrame(page_sizes)
+    if not page_sizes_df.empty:
+        # Safely convert page column to numeric and then int
+        page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+        page_sizes_df.dropna(subset=["page"], inplace=True)
+        if not page_sizes_df.empty:
+            page_sizes_df["page"] = page_sizes_df["page"].astype(int)
+        else:
+            print("Warning: Page sizes DataFrame became empty after processing.")
+
+    # --- OPTIMIZATION: Process only the current page's data from review_df ---
     if not review_df.empty:
-        #print("review_df just before convert_review_df:", review_df)
-        # First, check that the image on the current page is valid, replace with what exists in page_sizes object if not
-        if not gradio_annotator_current_page_number: gradio_annotator_current_page_number = 0
+        # Filter review_df for the current page
+        # Ensure 'page' column in review_df is comparable to page_num_reported
+        if 'page' in review_df.columns:
+             review_df['page'] = pd.to_numeric(review_df['page'], errors='coerce').fillna(-1).astype(int)
 
-        # Check bounding values for current page and page max
-        if gradio_annotator_current_page_number > 0: page_num_reported = gradio_annotator_current_page_number
-        elif gradio_annotator_current_page_number == 0: page_num_reported = 1 # minimum possible reported page is 1
-        else: 
-            gradio_annotator_current_page_number = 0
-            page_num_reported = 1
+             current_image_path = out_image_annotations_state[page_num_reported_zero_indexed]['image']
 
-        # Ensure page displayed can't exceed number of pages in document
-        page_max_reported = len(out_image_annotations_state)
-        if page_num_reported > page_max_reported: page_num_reported = page_max_reported
+             replaced_image_path, page_sizes_df = replace_placeholder_image_with_real_image(doc_full_file_name_textbox, current_image_path, page_sizes_df, gradio_annotator_current_page_number, input_folder)
 
-        page_num_reported_zero_indexed = page_num_reported - 1        
-        out_image_annotations_state = convert_review_df_to_annotation_json(review_df, image_file_paths, page_sizes)
+             # page_sizes_df has been changed - save back to page_sizes_object
+             page_sizes = page_sizes_df.to_dict(orient='records')
+             review_df.loc[review_df["page"]==gradio_annotator_current_page_number, 'image'] = replaced_image_path
+             images_list = list(page_sizes_df["image_path"])
+             images_list[page_num_reported_zero_indexed] = replaced_image_path
+             out_image_annotations_state[page_num_reported_zero_indexed]['image'] = replaced_image_path
 
-        page_image_annotator_object, out_image_annotations_state = replace_images_in_image_annotation_object(out_image_annotations_state, out_image_annotations_state[page_num_reported_zero_indexed], page_sizes, page_num_reported)    
+             current_page_review_df = review_df[review_df['page'] == gradio_annotator_current_page_number].copy()          
+             current_page_review_df = multiply_coordinates_by_page_sizes(current_page_review_df, page_sizes_df)
 
-        out_image_annotations_state[page_num_reported_zero_indexed] = page_image_annotator_object
+        else:
+            print(f"Warning: 'page' column not found in review_df. Cannot filter for page {gradio_annotator_current_page_number}. Skipping update from review_df.")
+            current_page_review_df = pd.DataFrame() # Empty dataframe if filter fails
 
-        out_current_page_annotator = out_image_annotations_state[page_num_reported_zero_indexed]
+        if not current_page_review_df.empty:
+            # Convert the current page's review data to annotation list format for *this page*
 
-    return out_current_page_annotator, out_image_annotations_state
+            current_page_annotations_list = []
+            # Define expected annotation dict keys, including 'image', 'page', coords, 'label', 'text', 'color' etc.
+            # Assuming review_df has compatible columns
+            expected_annotation_keys = ['label', 'color', 'xmin', 'ymin', 'xmax', 'ymax', 'text', 'id'] # Add/remove as needed
+
+            # Ensure necessary columns exist in current_page_review_df before converting rows
+            for key in expected_annotation_keys:
+                 if key not in current_page_review_df.columns:
+                      # Add missing column with default value
+                      # Use np.nan for numeric, '' for string/object
+                      default_value = np.nan if key in ['xmin', 'ymin', 'xmax', 'ymax'] else ''
+                      current_page_review_df[key] = default_value
+
+            # Convert filtered DataFrame rows to list of dicts
+            # Using .to_dict(orient='records') is efficient for this
+            current_page_annotations_list_raw = current_page_review_df[expected_annotation_keys].to_dict(orient='records')
+
+            current_page_annotations_list = current_page_annotations_list_raw
+
+            # Update the annotations state for the current page
+            # Each entry in out_image_annotations_state seems to be a dict containing keys like 'image', 'page', 'annotations' (List[dict])
+            # Need to update the 'annotations' list for the specific page.
+            # Find the entry for the current page in the state
+            page_state_entry_found = False
+            for i, page_state_entry in enumerate(out_image_annotations_state):
+                # Assuming page_state_entry has a 'page' key (1-based)
+
+                match = re.search(r"(\d+)\.png$", page_state_entry['image'])
+                if match: page_no = int(match.group(1))
+                else: page_no = -1
+
+                if 'image' in page_state_entry and page_no == page_num_reported_zero_indexed:
+                    # Replace the annotations list for this page with the new list from review_df
+                    out_image_annotations_state[i]['boxes'] = current_page_annotations_list
+
+                    # Update the image path as well, based on review_df if available, or keep existing
+                    # Assuming review_df has an 'image' column for this page
+                    if 'image' in current_page_review_df.columns and not current_page_review_df.empty:
+                         # Use the image path from the first row of the filtered review_df
+                         out_image_annotations_state[i]['image'] = current_page_review_df['image'].iloc[0]
+                    page_state_entry_found = True
+                    break
+
+            if not page_state_entry_found:
+                 # This scenario might happen if the current_image_annotations_state didn't initially contain
+                 # an entry for this page number. Depending on the application logic, you might need to
+                 # add a new entry here, but based on the original code's structure, it seems
+                 # out_image_annotations_state is pre-populated for all pages.
+                 print(f"Warning: Entry for page {gradio_annotator_current_page_number} not found in current_image_annotations_state. Cannot update page annotations.")
+
+
+    # --- Image Path and Page Size Handling (already seems focused on current page, keep similar logic) ---
+    # Get the image path for the current page from the updated state
+    # Ensure the entry exists before accessing
+    current_image_path = None
+    if len(out_image_annotations_state) > page_num_reported_zero_indexed and 'image' in out_image_annotations_state[page_num_reported_zero_indexed]:
+         current_image_path = out_image_annotations_state[page_num_reported_zero_indexed]['image']
+    else:
+         print(f"Warning: Could not get image path from state for page index {page_num_reported_zero_indexed}.")
+
+
+    # Replace placeholder image with real image path if needed
+    if current_image_path and not page_sizes_df.empty:
+        try:
+            replaced_image_path, page_sizes_df = replace_placeholder_image_with_real_image(
+                doc_full_file_name_textbox, current_image_path, page_sizes_df,
+                gradio_annotator_current_page_number, input_folder # Use 1-based page number
+            )
+
+            # Update state and review_df with the potentially replaced image path
+            if len(out_image_annotations_state) > page_num_reported_zero_indexed:
+                 out_image_annotations_state[page_num_reported_zero_indexed]['image'] = replaced_image_path
+
+            if 'page' in review_df.columns and 'image' in review_df.columns:
+                 review_df.loc[review_df["page"]==gradio_annotator_current_page_number, 'image'] = replaced_image_path
+
+        except Exception as e:
+             print(f"Error during image path replacement for page {gradio_annotator_current_page_number}: {e}")
+
+
+    # Save back page_sizes_df to page_sizes list format
+    if not page_sizes_df.empty:
+        page_sizes = page_sizes_df.to_dict(orient='records')
+    else:
+        page_sizes = [] # Ensure page_sizes is a list if df is empty
+
+    # --- Re-evaluate Coordinate Multiplication and Duplicate Removal ---
+    # The original code multiplied coordinates for the *entire* document and removed duplicates
+    # across the *entire* document *after* converting the full review_df to state.
+    # With the optimized approach, we updated only one page's annotations in the state.
+
+    # Let's assume remove_duplicate_images_with_blank_boxes expects the raw list of dicts state format:
+    try:
+         out_image_annotations_state = remove_duplicate_images_with_blank_boxes(out_image_annotations_state)
+    except Exception as e:
+         print(f"Error during duplicate removal: {e}. Proceeding without duplicate removal.")
+
+
+    # Select the current page's annotation object from the (potentially updated) state
+    if len(out_image_annotations_state) > page_num_reported_zero_indexed:
+         out_current_page_annotator = out_image_annotations_state[page_num_reported_zero_indexed]
+    else:
+         print(f"Warning: Cannot select current page annotator object for index {page_num_reported_zero_indexed}.")
+         out_current_page_annotator = {} # Or None, depending on expected output type
+
+
+    # The original code returns gradio_annotator_current_page_number as the 3rd value,
+    # which was potentially updated by bounding checks. Keep this.
+    final_page_number_returned = gradio_annotator_current_page_number
+
+    return (out_current_page_annotator,
+            out_image_annotations_state,
+            final_page_number_returned,
+            page_sizes,
+            review_df, # review_df might have its 'page' column type changed, keep it as is or revert if necessary
+            annotate_previous_page) # The original page number from selected_recogniser_entity_df_row
 
 def exclude_selected_items_from_redaction(review_df: pd.DataFrame,
                                           selected_rows_df: pd.DataFrame,
@@ -216,7 +370,7 @@ def exclude_selected_items_from_redaction(review_df: pd.DataFrame,
                                           page_sizes:List[dict],
                                           image_annotations_state:dict,
                                           recogniser_entity_dataframe_base:pd.DataFrame):
-    '''
+    ''' 
     Remove selected items from the review dataframe from the annotation object and review dataframe.
     '''
 
@@ -253,170 +407,7 @@ def exclude_selected_items_from_redaction(review_df: pd.DataFrame,
 
     return out_review_df, out_image_annotations_state, out_recogniser_entity_dataframe_base, backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base
 
-def update_annotator_object_and_filter_df(
-                    all_image_annotations:List[AnnotatedImageData],
-                    gradio_annotator_current_page_number:int,
-                    recogniser_entities_dropdown_value:str="ALL",
-                    page_dropdown_value:str="ALL",
-                    text_dropdown_value:str="ALL",
-                    recogniser_dataframe_base:gr.Dataframe=gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[], "id":[]}), type="pandas", headers=["page", "label", "text", "id"], show_fullscreen_button=True, wrap=True, show_search='filter', max_height=400, static_columns=[0,1,2,3]),
-                    zoom:int=100,
-                    review_df:pd.DataFrame=[],
-                    page_sizes:List[dict]=[],
-                    doc_full_file_name_textbox:str='',
-                    input_folder:str=INPUT_FOLDER):
-    '''
-    Update a gradio_image_annotation object with new annotation data.
-    '''
-    zoom_str = str(zoom) + '%'
-
-    #print("all_image_annotations at start of update_annotator_object_and_filter_df[-1]:", all_image_annotations[-1])
-    
-    if not gradio_annotator_current_page_number: gradio_annotator_current_page_number = 0
-
-    # Check bounding values for current page and page max
-    if gradio_annotator_current_page_number > 0: page_num_reported = gradio_annotator_current_page_number
-    elif gradio_annotator_current_page_number == 0: page_num_reported = 1 # minimum possible reported page is 1
-    else: 
-        gradio_annotator_current_page_number = 0
-        page_num_reported = 1
-
-    # Ensure page displayed can't exceed number of pages in document
-    page_max_reported = len(all_image_annotations)
-    if page_num_reported > page_max_reported: page_num_reported = page_max_reported
-
-    page_num_reported_zero_indexed = page_num_reported - 1
-
-    # First, check that the image on the current page is valid, replace with what exists in page_sizes object if not
-    page_image_annotator_object, all_image_annotations = replace_images_in_image_annotation_object(all_image_annotations, all_image_annotations[page_num_reported_zero_indexed], page_sizes, page_num_reported)    
-
-    all_image_annotations[page_num_reported_zero_indexed] = page_image_annotator_object
-    
-    current_image_path = all_image_annotations[page_num_reported_zero_indexed]['image']
-
-    # If image path is still not valid, load in a new image an overwrite it. Then replace all items in the image annotation object for all pages based on the updated information.
-    page_sizes_df = pd.DataFrame(page_sizes)
-
-    if not os.path.exists(current_image_path):        
-
-        page_num, replaced_image_path, width, height = process_single_page_for_image_conversion(doc_full_file_name_textbox, page_num_reported_zero_indexed, input_folder=input_folder)
-
-        # Overwrite page_sizes values 
-        page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_width"] = width
-        page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_height"] = height
-        page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_path"] = replaced_image_path
-    
-    else:
-        if not page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_width"].isnull().all():
-            width = page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_width"].max()
-            height = page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_height"].max()      
-        else:
-            image = Image.open(current_image_path)
-            width = image.width
-            height = image.height
-
-            page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_width"] = width
-            page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_height"] = height
-
-        page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_path"] = current_image_path
-
-        replaced_image_path = current_image_path
-
-    if review_df.empty: review_df = pd.DataFrame(columns=["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text", "id"])
-    review_df.loc[review_df["page"]==page_num_reported, 'image'] = replaced_image_path
-
-    # Update dropdowns and review selection dataframe with the updated annotator object
-    recogniser_entities_list, recogniser_dataframe_out_gr, recogniser_dataframe_modified, recogniser_entities_dropdown_value, text_entities_drop, page_entities_drop = update_recogniser_dataframes(all_image_annotations, recogniser_dataframe_base, recogniser_entities_dropdown_value, text_dropdown_value, page_dropdown_value, review_df.copy(), page_sizes)
-    
-    recogniser_colour_list = [(0, 0, 0) for _ in range(len(recogniser_entities_list))]
-
-    # page_sizes_df has been changed - save back to page_sizes_object
-    page_sizes = page_sizes_df.to_dict(orient='records')
-
-    images_list = list(page_sizes_df["image_path"])
-    images_list[page_num_reported_zero_indexed] = replaced_image_path
-
-    all_image_annotations[page_num_reported_zero_indexed]['image'] = replaced_image_path
-
-    # Multiply out image_annotation coordinates from relative to absolute if necessary
-    all_image_annotations_df = convert_annotation_data_to_dataframe(all_image_annotations)
-
-    all_image_annotations_df = multiply_coordinates_by_page_sizes(all_image_annotations_df, page_sizes_df, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax")   
-
-    #print("all_image_annotations_df[-1] just before creating annotation dicts:", all_image_annotations_df.iloc[-1, :])
-
-    all_image_annotations = create_annotation_dicts_from_annotation_df(all_image_annotations_df, page_sizes)
-
-    #print("all_image_annotations[-1] after creating annotation dicts:", all_image_annotations[-1])
-
-
-
-    # Remove blank duplicate entries
-    all_image_annotations = remove_duplicate_images_with_blank_boxes(all_image_annotations)
-
-    current_page_image_annotator_object = all_image_annotations[page_num_reported_zero_indexed]
-
-    #print("current_page_image_annotator_object that goes into annotator object:", current_page_image_annotator_object)
-
-    page_number_reported_gradio = gr.Number(label = "Current page", value=page_num_reported, precision=0)
-    
-    ###
-    # If no data, present a blank page
-    if not all_image_annotations:
-        print("No all_image_annotation object found")
-        page_num_reported = 1
-
-        out_image_annotator = image_annotator(
-        value = None,
-        boxes_alpha=0.1,
-        box_thickness=1,
-        label_list=recogniser_entities_list,
-        label_colors=recogniser_colour_list,
-        show_label=False,
-        height=zoom_str,
-        width=zoom_str,
-        box_min_size=1,
-        box_selected_thickness=2,
-        handle_size=4,
-        sources=None,#["upload"],
-        show_clear_button=False,
-        show_share_button=False,
-        show_remove_button=False,
-        handles_cursor=True,
-        interactive=True,
-        use_default_label=True
-        )        
-
-        return out_image_annotator, page_number_reported_gradio, page_number_reported_gradio, page_num_reported, recogniser_entities_dropdown_value, recogniser_dataframe_out_gr, recogniser_dataframe_modified, text_entities_drop, page_entities_drop, page_sizes, all_image_annotations
-    
-    else:
-        ### Present image_annotator outputs
-        out_image_annotator = image_annotator(
-            value = current_page_image_annotator_object,
-            boxes_alpha=0.1,
-            box_thickness=1,
-            label_list=recogniser_entities_list,
-            label_colors=recogniser_colour_list,
-            show_label=False,
-            height=zoom_str,
-            width=zoom_str,
-            box_min_size=1,
-            box_selected_thickness=2,
-            handle_size=4,
-            sources=None,#["upload"],
-            show_clear_button=False,
-            show_share_button=False,
-            show_remove_button=False,
-            handles_cursor=True,
-            interactive=True
-        )
-
-    #print("all_image_annotations at end of update_annotator...:", all_image_annotations)
-    #print("review_df at end of update_annotator_object:", review_df)
-
-    return out_image_annotator, page_number_reported_gradio, page_number_reported_gradio, page_num_reported, recogniser_entities_dropdown_value, recogniser_dataframe_out_gr, recogniser_dataframe_modified, text_entities_drop, page_entities_drop, page_sizes, all_image_annotations
-
-def replace_images_in_image_annotation_object(
+def replace_annotator_object_img_np_array_with_page_sizes_image_path(
         all_image_annotations:List[dict],
         page_image_annotator_object:AnnotatedImageData,
         page_sizes:List[dict],
@@ -444,6 +435,269 @@ def replace_images_in_image_annotation_object(
 
         return page_image_annotator_object, all_image_annotations
 
+def replace_placeholder_image_with_real_image(doc_full_file_name_textbox:str, current_image_path:str, page_sizes_df:pd.DataFrame, page_num_reported:int, input_folder:str):
+        ''' If image path is still not valid, load in a new image an overwrite it. Then replace all items in the image annotation object for all pages based on the updated information.'''
+        page_num_reported_zero_indexed = page_num_reported - 1
+
+        if not os.path.exists(current_image_path):        
+
+            page_num, replaced_image_path, width, height = process_single_page_for_image_conversion(doc_full_file_name_textbox, page_num_reported_zero_indexed, input_folder=input_folder)
+
+            # Overwrite page_sizes values 
+            page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_width"] = width
+            page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_height"] = height
+            page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_path"] = replaced_image_path
+        
+        else:
+            if not page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_width"].isnull().all():
+                width = page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_width"].max()
+                height = page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_height"].max()      
+            else:
+                image = Image.open(current_image_path)
+                width = image.width
+                height = image.height
+
+                page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_width"] = width
+                page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_height"] = height
+
+            page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_path"] = current_image_path
+
+            replaced_image_path = current_image_path
+        
+        return replaced_image_path, page_sizes_df
+
+def update_annotator_object_and_filter_df(
+    all_image_annotations:List[AnnotatedImageData],
+    gradio_annotator_current_page_number:int,
+    recogniser_entities_dropdown_value:str="ALL",
+    page_dropdown_value:str="ALL",
+    text_dropdown_value:str="ALL",
+    recogniser_dataframe_base:gr.Dataframe=None, # Simplified default
+    zoom:int=100,
+    review_df:pd.DataFrame=None, # Use None for default empty DataFrame
+    page_sizes:List[dict]=[],
+    doc_full_file_name_textbox:str='',
+    input_folder:str=INPUT_FOLDER
+) -> Tuple[image_annotator, gr.Number, gr.Number, int, str, gr.Dataframe, pd.DataFrame, List[str], List[str], List[dict], List[AnnotatedImageData]]:
+    '''
+    Update a gradio_image_annotation object with new annotation data for the current page
+    and update filter dataframes, optimizing by processing only the current page's data for display.
+    '''
+    zoom_str = str(zoom) + '%'
+
+    # Handle default empty review_df and recogniser_dataframe_base
+    if review_df is None or not isinstance(review_df, pd.DataFrame):
+         review_df = pd.DataFrame(columns=["image", "page", "label", "color", "xmin", "ymin", "xmax", "ymax", "text", "id"])
+    if recogniser_dataframe_base is None: # Create a simple default if None
+         recogniser_dataframe_base = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[], "id":[]}))
+
+
+    # Handle empty all_image_annotations state early
+    if not all_image_annotations:
+        print("No all_image_annotation object found")
+        # Return blank/default outputs
+        blank_annotator = gr.ImageAnnotator(
+            value = None, boxes_alpha=0.1, box_thickness=1, label_list=[], label_colors=[],
+            show_label=False, height=zoom_str, width=zoom_str, box_min_size=1,
+            box_selected_thickness=2, handle_size=4, sources=None,
+            show_clear_button=False, show_share_button=False, show_remove_button=False,
+            handles_cursor=True, interactive=True, use_default_label=True
+        )
+        blank_df_out_gr = gr.Dataframe(pd.DataFrame(columns=["page", "label", "text", "id"]))
+        blank_df_modified = pd.DataFrame(columns=["page", "label", "text", "id"])
+
+        return (blank_annotator, gr.Number(value=1), gr.Number(value=1), 1,
+                recogniser_entities_dropdown_value, blank_df_out_gr, blank_df_modified,
+                [], [], [], []) # Return empty lists/defaults for other outputs
+
+    # Validate and bound the current page number (1-based logic)
+    page_num_reported = max(1, gradio_annotator_current_page_number) # Minimum page is 1
+    page_max_reported = len(all_image_annotations)
+    if page_num_reported > page_max_reported:
+        page_num_reported = page_max_reported
+
+    page_num_reported_zero_indexed = page_num_reported - 1
+    annotate_previous_page = page_num_reported # Store the determined page number
+
+    # --- Process page sizes DataFrame ---
+    page_sizes_df = pd.DataFrame(page_sizes)
+    if not page_sizes_df.empty:
+        page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+        page_sizes_df.dropna(subset=["page"], inplace=True)
+        if not page_sizes_df.empty:
+            page_sizes_df["page"] = page_sizes_df["page"].astype(int)
+        else:
+            print("Warning: Page sizes DataFrame became empty after processing.")
+
+    # --- Handle Image Path Replacement for the Current Page ---
+    # This modifies the specific page entry within all_image_annotations list
+    # Assuming replace_annotator_object_img_np_array_with_page_sizes_image_path
+    # correctly updates the image path within the list element.
+    if len(all_image_annotations) > page_num_reported_zero_indexed:
+        # Make a shallow copy of the list and deep copy the specific page dict before modification
+        # to avoid modifying the input list unexpectedly if it's used elsewhere.
+        # However, the original code modified the list in place, so we'll stick to that
+        # pattern but acknowledge it.
+        page_object_to_update = all_image_annotations[page_num_reported_zero_indexed]
+
+        # Use the helper function to replace the image path within the page object
+        # Note: This helper returns the potentially modified page_object and the full state.
+        # The full state return seems redundant if only page_object_to_update is modified.
+        # Let's call it and assume it correctly updates the item in the list.
+        updated_page_object, all_image_annotations_after_img_replace = replace_annotator_object_img_np_array_with_page_sizes_image_path(
+             all_image_annotations, page_object_to_update, page_sizes, page_num_reported)
+
+        # The original code immediately re-assigns all_image_annotations.
+        # We'll rely on the function modifying the list element in place or returning the updated list.
+        # Assuming it returns the updated list for robustness:
+        all_image_annotations = all_image_annotations_after_img_replace
+
+
+        # Now handle the actual image file path replacement using replace_placeholder_image_with_real_image
+        current_image_path = updated_page_object.get('image') # Get potentially updated image path
+
+        if current_image_path and not page_sizes_df.empty:
+            try:
+                replaced_image_path, page_sizes_df = replace_placeholder_image_with_real_image(
+                    doc_full_file_name_textbox, current_image_path, page_sizes_df,
+                    page_num_reported, input_folder=input_folder # Use 1-based page num
+                )
+
+                # Update the image path in the state and review_df for the current page
+                # Find the correct entry in all_image_annotations list again by index
+                if len(all_image_annotations) > page_num_reported_zero_indexed:
+                     all_image_annotations[page_num_reported_zero_indexed]['image'] = replaced_image_path
+
+                # Update review_df's image path for this page
+                if 'page' in review_df.columns and 'image' in review_df.columns:
+                     # Ensure review_df page column is numeric for filtering
+                     review_df['page'] = pd.to_numeric(review_df['page'], errors='coerce').fillna(-1).astype(int)
+                     review_df.loc[review_df["page"]==page_num_reported, 'image'] = replaced_image_path
+
+
+            except Exception as e:
+                 print(f"Error during image path replacement for page {page_num_reported}: {e}")
+    else:
+         print(f"Warning: Page index {page_num_reported_zero_indexed} out of bounds for all_image_annotations list.")
+
+
+    # Save back page_sizes_df to page_sizes list format
+    if not page_sizes_df.empty:
+        page_sizes = page_sizes_df.to_dict(orient='records')
+    else:
+        page_sizes = [] # Ensure page_sizes is a list if df is empty
+
+    # --- OPTIMIZATION: Prepare data *only* for the current page for display ---
+    current_page_image_annotator_object = None
+    if len(all_image_annotations) > page_num_reported_zero_indexed:
+        page_data_for_display = all_image_annotations[page_num_reported_zero_indexed]
+
+        # Convert current page annotations list to DataFrame for coordinate multiplication IF needed
+        # Assuming coordinate multiplication IS needed for display if state stores relative coords
+        current_page_annotations_df = convert_annotation_data_to_dataframe([page_data_for_display])
+
+
+        if not current_page_annotations_df.empty and not page_sizes_df.empty:
+             # Multiply coordinates *only* for this page's DataFrame
+             try:
+                 # Need the specific page's size for multiplication
+                 page_size_row = page_sizes_df[page_sizes_df['page'] == page_num_reported]
+                 if not page_size_row.empty:
+                      current_page_annotations_df = multiply_coordinates_by_page_sizes(
+                          current_page_annotations_df, page_size_row, # Pass only the row for the current page
+                          xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax"
+                      )
+             
+             except Exception as e:
+                  print(f"Warning: Error during coordinate multiplication for page {page_num_reported}: {e}. Using original coordinates.")
+                  # If error, proceed with original coordinates or handle as needed
+
+        if "color" not in current_page_annotations_df.columns:
+            current_page_annotations_df['color'] = '(0, 0, 0)'
+
+        # Convert the processed DataFrame back to the list of dicts format for the annotator
+        processed_current_page_annotations_list = current_page_annotations_df[["xmin", "xmax", "ymin", "ymax", "label", "color", "text", "id"]].to_dict(orient='records')
+
+        # Construct the final object expected by the Gradio ImageAnnotator value parameter
+        current_page_image_annotator_object: AnnotatedImageData = {
+            'image': page_data_for_display.get('image'), # Use the (potentially updated) image path
+            'boxes': processed_current_page_annotations_list
+        }
+
+    # --- Update Dropdowns and Review DataFrame ---
+    # This external function still operates on potentially large DataFrames.
+    # It receives all_image_annotations and a copy of review_df.
+    try:
+        recogniser_entities_list, recogniser_dataframe_out_gr, recogniser_dataframe_modified, recogniser_entities_dropdown_value, text_entities_drop, page_entities_drop = update_recogniser_dataframes(
+             all_image_annotations, # Pass the updated full state
+             recogniser_dataframe_base,
+             recogniser_entities_dropdown_value,
+             text_dropdown_value,
+             page_dropdown_value,
+             review_df.copy(), # Keep the copy as per original function call
+             page_sizes # Pass updated page sizes
+        )
+        # Generate default black colors for labels if needed by image_annotator
+        recogniser_colour_list = [(0, 0, 0) for _ in range(len(recogniser_entities_list))]
+
+    except Exception as e:
+        print(f"Error calling update_recogniser_dataframes: {e}. Returning empty/default filter data.")
+        recogniser_entities_list = []
+        recogniser_colour_list = []
+        recogniser_dataframe_out_gr = gr.Dataframe(pd.DataFrame(columns=["page", "label", "text", "id"]))
+        recogniser_dataframe_modified = pd.DataFrame(columns=["page", "label", "text", "id"])
+        text_entities_drop = []
+        page_entities_drop = []
+
+
+    # --- Final Output Components ---
+    page_number_reported_gradio_comp = gr.Number(label = "Current page", value=page_num_reported, precision=0)
+
+    
+
+    ### Present image_annotator outputs
+    # Handle the case where current_page_image_annotator_object couldn't be prepared
+    if current_page_image_annotator_object is None:
+        # This should ideally be covered by the initial empty check for all_image_annotations,
+        # but as a safeguard:
+        print("Warning: Could not prepare annotator object for the current page.")
+        out_image_annotator = image_annotator(value=None, interactive=False) # Present blank/non-interactive
+    else:
+        out_image_annotator = image_annotator(
+            value = current_page_image_annotator_object,
+            boxes_alpha=0.1,
+            box_thickness=1,
+            label_list=recogniser_entities_list, # Use labels from update_recogniser_dataframes
+            label_colors=recogniser_colour_list,
+            show_label=False,
+            height=zoom_str,
+            width=zoom_str,
+            box_min_size=1,
+            box_selected_thickness=2,
+            handle_size=4,
+            sources=None,#["upload"],
+            show_clear_button=False,
+            show_share_button=False,
+            show_remove_button=False,
+            handles_cursor=True,
+            interactive=True # Keep interactive if data is present
+        )
+
+    # The original code returned page_number_reported_gradio twice;
+    # returning the Gradio component and the plain integer value.
+    # Let's match the output signature.
+    return (out_image_annotator,
+            page_number_reported_gradio_comp,
+            page_number_reported_gradio_comp, # Redundant, but matches original return signature
+            page_num_reported, # Plain integer value
+            recogniser_entities_dropdown_value,
+            recogniser_dataframe_out_gr,
+            recogniser_dataframe_modified,
+            text_entities_drop, # List of text entities for dropdown
+            page_entities_drop, # List of page numbers for dropdown
+            page_sizes, # Updated page_sizes list
+            all_image_annotations) # Return the updated full state
+
 def update_all_page_annotation_object_based_on_previous_page(
                                     page_image_annotator_object:AnnotatedImageData,
                                     current_page:int,
@@ -459,12 +713,9 @@ def update_all_page_annotation_object_based_on_previous_page(
     previous_page_zero_index = previous_page -1
  
     if not current_page: current_page = 1
-
-    #print("page_image_annotator_object at start of update_all_page_annotation_object:", page_image_annotator_object)
-      
-    page_image_annotator_object, all_image_annotations = replace_images_in_image_annotation_object(all_image_annotations, page_image_annotator_object, page_sizes, previous_page)
-
-    #print("page_image_annotator_object after replace_images in update_all_page_annotation_object:", page_image_annotator_object)
+    
+    # This replaces the numpy array image object with the image file path
+    page_image_annotator_object, all_image_annotations = replace_annotator_object_img_np_array_with_page_sizes_image_path(all_image_annotations, page_image_annotator_object, page_sizes, previous_page)
 
     if clear_all == False: all_image_annotations[previous_page_zero_index] = page_image_annotator_object
     else: all_image_annotations[previous_page_zero_index]["boxes"] = []
@@ -493,7 +744,7 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
     page_image_annotator_object = all_image_annotations[current_page - 1]   
 
     # This replaces the numpy array image object with the image file path
-    page_image_annotator_object, all_image_annotations = replace_images_in_image_annotation_object(all_image_annotations, page_image_annotator_object, page_sizes, current_page)
+    page_image_annotator_object, all_image_annotations = replace_annotator_object_img_np_array_with_page_sizes_image_path(all_image_annotations, page_image_annotator_object, page_sizes, current_page)
     page_image_annotator_object['image'] = all_image_annotations[current_page - 1]["image"]
 
     if not page_image_annotator_object:
@@ -529,7 +780,7 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                         # Check if all elements are integers in the range 0-255
                         if all(isinstance(c, int) and 0 <= c <= 255 for c in fill):
                             pass
-                            #print("fill:", fill)
+
                         else:
                             print(f"Invalid color values: {fill}. Defaulting to black.")
                             fill = (0, 0, 0)  # Default to black if invalid
@@ -553,7 +804,6 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                 doc = [image]
 
             elif file_extension in '.csv':
-                #print("This is a csv")
                 pdf_doc = []
 
             # If working with pdfs
@@ -797,11 +1047,9 @@ def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
 
         row_value_df = pd.DataFrame(data={"page":[row_value_page], "label":[row_value_label], "text":[row_value_text], "id":[row_value_id]})
 
-        return row_value_page, row_value_df
+        return row_value_df
 
 def df_select_callback_textract_api(df: pd.DataFrame, evt: gr.SelectData):
-        
-        #print("evt.data:", evt._data)
 
         row_value_job_id = evt.row_value[0] # This is the page number value
         # row_value_label = evt.row_value[1] # This is the label number value
@@ -829,59 +1077,108 @@ def df_select_callback_ocr(df: pd.DataFrame, evt: gr.SelectData):
 
         return row_value_page, row_value_df
 
-def update_selected_review_df_row_colour(redaction_row_selection:pd.DataFrame, review_df:pd.DataFrame, previous_id:str="", previous_colour:str='(0, 0, 0)', page_sizes:List[dict]=[], output_folder:str=OUTPUT_FOLDER, colour:str='(1, 0, 255)'):
+def update_selected_review_df_row_colour(
+    redaction_row_selection: pd.DataFrame,
+    review_df: pd.DataFrame,
+    previous_id: str = "",
+    previous_colour: str = '(0, 0, 0)',
+    colour: str = '(1, 0, 255)'
+) -> tuple[pd.DataFrame, str, str]:
     '''
     Update the colour of a single redaction box based on the values in a selection row
+    (Optimized Version)
     '''
-    colour_tuple =  str(tuple(colour))
 
-    if "color" not in review_df.columns: review_df["color"] = '(0, 0, 0)'
+    # Ensure 'color' column exists, default to previous_colour if previous_id is provided
+    if "color" not in review_df.columns:
+        review_df["color"] = previous_colour if previous_id else '(0, 0, 0)'
+
+    # Ensure 'id' column exists
     if "id" not in review_df.columns:
-        review_df = fill_missing_ids(review_df)
+         # Assuming fill_missing_ids is a defined function that returns a DataFrame
+         # It's more efficient if this is handled outside if possible,
+         # or optimized internally.
+         print("Warning: 'id' column not found. Calling fill_missing_ids.")
+         review_df = fill_missing_ids(review_df) # Keep this if necessary, but note it can be slow
 
-    # Reset existing highlight colours
-    review_df.loc[review_df["id"]==previous_id, "color"] = review_df.loc[review_df["id"]==previous_id, "color"].apply(lambda _: previous_colour)
-    review_df.loc[review_df["color"].astype(str)==colour, "color"] = review_df.loc[review_df["color"].astype(str)==colour, "color"].apply(lambda _: '(0, 0, 0)')
+    # --- Optimization 1 & 2: Reset existing highlight colours using vectorized assignment ---
+    # Reset the color of the previously highlighted row
+    if previous_id and previous_id in review_df["id"].values:
+         review_df.loc[review_df["id"] == previous_id, "color"] = previous_colour
+
+    # Reset the color of any row that currently has the highlight colour (handle cases where previous_id might not have been tracked correctly)
+    # Convert to string for comparison only if the dtype might be mixed or not purely string
+    # If 'color' is consistently string, the .astype(str) might be avoidable.
+    # Assuming color is consistently string format like '(R, G, B)'
+    review_df.loc[review_df["color"] == colour, "color"] = '(0, 0, 0)'
+
 
     if not redaction_row_selection.empty and not review_df.empty:
         use_id = (
-            "id" in redaction_row_selection.columns 
-            and "id" in review_df.columns 
-            and not redaction_row_selection["id"].isnull().all() 
+            "id" in redaction_row_selection.columns
+            and "id" in review_df.columns
+            and not redaction_row_selection["id"].isnull().all()
             and not review_df["id"].isnull().all()
         )
 
-        selected_merge_cols = ["id"] if use_id else ["label", "page", "text"]        
+        selected_merge_cols = ["id"] if use_id else ["label", "page", "text"]
 
-        review_df = review_df.merge(redaction_row_selection[selected_merge_cols], on=selected_merge_cols, indicator=True, how="left")
+        # --- Optimization 3: Use inner merge directly ---
+        # Merge to find rows in review_df that match redaction_row_selection
+        merged_reviews = review_df.merge(
+            redaction_row_selection[selected_merge_cols],
+            on=selected_merge_cols,
+            how="inner" # Use inner join as we only care about matches
+        )
 
-    if "_merge" in review_df.columns:
-        filtered_reviews = review_df.loc[review_df["_merge"]=="both"]
+        if not merged_reviews.empty:
+             # Assuming we only expect one match for highlighting a single row
+             # If multiple matches are possible and you want to highlight all,
+             # the logic for previous_id and previous_colour needs adjustment.
+            new_previous_colour = str(merged_reviews["color"].iloc[0])
+            new_previous_id = merged_reviews["id"].iloc[0]
+
+            # --- Optimization 1 & 2: Update color of the matched row using vectorized assignment ---
+
+            if use_id:
+                 # Faster update if using unique 'id' as merge key
+                 review_df.loc[review_df["id"].isin(merged_reviews["id"]), "color"] = colour
+            else:
+                 # More general case using multiple columns - might be slower
+                 # Create a temporary key for comparison
+                 def create_merge_key(df, cols):
+                     return df[cols].astype(str).agg('_'.join, axis=1)
+
+                 review_df_key = create_merge_key(review_df, selected_merge_cols)
+                 merged_reviews_key = create_merge_key(merged_reviews, selected_merge_cols)
+
+                 review_df.loc[review_df_key.isin(merged_reviews_key), "color"] = colour
+
+            previous_colour = new_previous_colour
+            previous_id = new_previous_id
+        else:
+             # No rows matched the selection
+             print("No reviews found matching selection criteria")
+             # The reset logic at the beginning already handles setting color to (0, 0, 0)
+             # if it was the highlight colour and didn't match.
+             # No specific action needed here for color reset beyond what's done initially.
+             previous_colour = '(0, 0, 0)' # Reset previous_colour as no row was highlighted
+             previous_id = '' # Reset previous_id
+
     else:
-        filtered_reviews = pd.DataFrame()
+         # If selection is empty, reset any existing highlights
+         review_df.loc[review_df["color"] == colour, "color"] = '(0, 0, 0)'
+         previous_colour = '(0, 0, 0)'
+         previous_id = ''
 
-    if not filtered_reviews.empty:
-        previous_colour = str(filtered_reviews["color"].values[0])
-        previous_id = filtered_reviews["id"].values[0]
-        review_df.loc[review_df["_merge"]=="both", "color"] =  review_df.loc[review_df["_merge"] == "both", "color"].apply(lambda _: colour)
+
+    # Ensure column order is maintained if necessary, though pandas generally preserves order
+    # Creating a new DataFrame here might involve copying data, consider if this is strictly needed.
+    if set(["image", "page", "label", "color", "xmin","ymin", "xmax", "ymax", "text", "id"]).issubset(review_df.columns):
+        review_df = review_df[["image", "page", "label", "color", "xmin","ymin", "xmax", "ymax", "text", "id"]]
     else:
-        # Handle the case where no rows match the condition
-        print("No reviews found with _merge == 'both'")
-        previous_colour = '(0, 0, 0)'
-        review_df.loc[review_df["color"]==colour, "color"] = previous_colour
-        previous_id =''
+         print("Warning: Not all expected columns are present in review_df for reordering.")
 
-    review_df.drop("_merge", axis=1, inplace=True)
-
-    # Ensure that all output coordinates are in proportional size
-    #page_sizes_df = pd.DataFrame(page_sizes)
-    #page_sizes_df .loc[:, "page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
-    #print("review_df before divide:", review_df)
-    #print("page_sizes_df before divide:", page_sizes_df)
-    #review_df = divide_coordinates_by_page_sizes(review_df, page_sizes_df)
-    #print("review_df after divide:", review_df)
-
-    review_df = review_df[["image", "page", "label", "color", "xmin","ymin", "xmax", "ymax", "text", "id"]]
 
     return review_df, previous_id, previous_colour
 
@@ -988,8 +1285,6 @@ def create_xfdf(review_file_df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, i
         page_sizes_df = pd.DataFrame(page_sizes)
 
         # If there are no image coordinates, then convert coordinates to pymupdf coordinates prior to export
-        #print("Using pymupdf coordinates for conversion.")
-
         pages_are_images = False
 
         if "mediabox_width" not in review_file_df.columns:            
@@ -1041,33 +1336,9 @@ def create_xfdf(review_file_df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, i
                 raise ValueError(f"Invalid cropbox format: {document_cropboxes[page_python_format]}")
         else:
             print("Document cropboxes not found.")
-
         
         pdf_page_height = pymupdf_page.mediabox.height
-        pdf_page_width = pymupdf_page.mediabox.width
-
-        # Check if image dimensions for page exist in page_sizes_df
-        # image_dimensions = {}
-
-        # image_dimensions['image_width'] = page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_width"].max()
-        # image_dimensions['image_height'] = page_sizes_df.loc[page_sizes_df['page']==page_num_reported, "image_height"].max()
-
-        # if pd.isna(image_dimensions['image_width']):
-        #     image_dimensions = {}
-
-        # image = image_paths[page_python_format]
-
-        # if image_dimensions:
-        #     image_page_width, image_page_height = image_dimensions["image_width"], image_dimensions["image_height"]
-        # if isinstance(image, str) and 'placeholder' not in image:
-        #     image = Image.open(image)
-        #     image_page_width, image_page_height = image.size
-        # else:
-        #     try:
-        #         image = Image.open(image)
-        #         image_page_width, image_page_height = image.size
-        #     except Exception as e:
-        #         print("Could not get image sizes due to:", e)        
+        pdf_page_width = pymupdf_page.mediabox.width     
 
         # Create redaction annotation
         redact_annot = SubElement(annots, 'redact')
@@ -1344,8 +1615,6 @@ def convert_xfdf_to_dataframe(file_paths_list:List[str], pymupdf_doc, image_path
             
                 # Optionally, you can add the image path or other relevant information
                 df.loc[_, 'image'] = image_path
-
-                #print('row:', row)
 
     out_file_path = output_folder + file_path_name + "_review_file.csv"
     df.to_csv(out_file_path, index=None)

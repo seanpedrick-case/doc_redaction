@@ -1,10 +1,12 @@
 import re
+import os
 import secrets
 import base64
 import time
 import boto3
 import botocore
 import pandas as pd
+from openpyxl import Workbook, load_workbook
 
 from faker import Faker
 from gradio import Progress
@@ -226,6 +228,7 @@ def anonymise_data_files(file_paths: List[str],
                          comprehend_query_number:int=0,
                          aws_access_key_textbox:str='',
                          aws_secret_key_textbox:str='',
+                         actual_time_taken_number:float=0,
                          progress: Progress = Progress(track_tqdm=True)):
     """
     This function anonymises data files based on the provided parameters.
@@ -252,6 +255,7 @@ def anonymise_data_files(file_paths: List[str],
     - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
     - aws_access_key_textbox (str, optional): AWS access key for account with Textract and Comprehend permissions.
     - aws_secret_key_textbox (str, optional): AWS secret key for account with Textract and Comprehend permissions.
+    - actual_time_taken_number (float, optional): Time taken to do the redaction.
     - progress (Progress, optional): A Progress object to track progress. Defaults to a Progress object with track_tqdm=True.
     """
     
@@ -277,9 +281,16 @@ def anonymise_data_files(file_paths: List[str],
     if not out_file_paths:
         out_file_paths = []  
     
-
-    if in_allow_list:
-        in_allow_list_flat = in_allow_list #[item for sublist in in_allow_list for item in sublist]
+    if isinstance(in_allow_list, list):
+        if in_allow_list:
+            in_allow_list_flat = in_allow_list
+        else:
+            in_allow_list_flat = []
+    elif isinstance(in_allow_list, pd.DataFrame):
+        if not in_allow_list.empty:
+            in_allow_list_flat = list(in_allow_list.iloc[:, 0].unique())
+        else:
+            in_allow_list_flat = []
     else:
         in_allow_list_flat = []
     
@@ -306,7 +317,7 @@ def anonymise_data_files(file_paths: List[str],
         else:
             comprehend_client = ""
             out_message = "Cannot connect to AWS Comprehend service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
-            print(out_message)
+            raise(out_message)
     
     # Check if files and text exist
     if not file_paths:
@@ -314,7 +325,7 @@ def anonymise_data_files(file_paths: List[str],
             file_paths=['open_text']
         else:
             out_message = "Please enter text or a file to redact."
-            return out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
+            raise Exception(out_message)
         
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
     if latest_file_completed >= len(file_paths):
@@ -322,18 +333,18 @@ def anonymise_data_files(file_paths: List[str],
         # Set to a very high number so as not to mess with subsequent file processing by the user
         latest_file_completed = 99
         final_out_message = '\n'.join(out_message)
-        return final_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
+        return final_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, actual_time_taken_number
     
     file_path_loop = [file_paths[int(latest_file_completed)]]
         
-    for anon_file in progress.tqdm(file_path_loop, desc="Anonymising files", unit = "file"):
+    for anon_file in progress.tqdm(file_path_loop, desc="Anonymising files", unit = "files"):
 
         if anon_file=='open_text':
             anon_df = pd.DataFrame(data={'text':[in_text]})
             chosen_cols=['text']
+            out_file_part = anon_file
             sheet_name = ""
             file_type = ""
-            out_file_part = anon_file
 
             out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=OUTPUT_FOLDER)
         else:
@@ -350,26 +361,22 @@ def anonymise_data_files(file_paths: List[str],
                     out_message.append("No Excel sheets selected. Please select at least one to anonymise.")
                     continue
 
-                anon_xlsx = pd.ExcelFile(anon_file)                
-
                 # Create xlsx file:
-                anon_xlsx_export_file_name = output_folder + out_file_part + "_redacted.xlsx"
+                anon_xlsx = pd.ExcelFile(anon_file)                
+                anon_xlsx_export_file_name = output_folder + out_file_part + "_redacted.xlsx"                
 
-                from openpyxl import Workbook
-
-                wb = Workbook()
-                wb.save(anon_xlsx_export_file_name)
+                
 
                 # Iterate through the sheet names
-                for sheet_name in in_excel_sheets:
+                for sheet_name in progress.tqdm(in_excel_sheets, desc="Anonymising sheets", unit = "sheets"):
                     # Read each sheet into a DataFrame
                     if sheet_name not in anon_xlsx.sheet_names:
                         continue
 
                     anon_df = pd.read_excel(anon_file, sheet_name=sheet_name)
 
-                    out_file_paths, out_message, key_string, log_files_output_paths  = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
-                    
+                    out_file_paths, out_message, key_string, log_files_output_paths  = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+
             else:
                 sheet_name = ""
                 anon_df = read_file(anon_file)
@@ -380,23 +387,28 @@ def anonymise_data_files(file_paths: List[str],
         # Increase latest file completed count unless we are at the last file
         if latest_file_completed != len(file_paths):
             print("Completed file number:", str(latest_file_completed))
-            latest_file_completed += 1 
+            latest_file_completed += 1
 
         toc = time.perf_counter()
-        out_time = f"in {toc - tic:0.1f} seconds."
-        print(out_time)    
-        
-        if anon_strat == "encrypt":
-            out_message.append(". Your decryption key is " + key_string + ".")
+        out_time_float = toc - tic
+        out_time = f"in {out_time_float:0.1f} seconds."
+        print(out_time)
+
+        actual_time_taken_number += out_time_float
 
         out_message.append("Anonymisation of file '" + out_file_part + "' successfully completed in")
 
         out_message_out = '\n'.join(out_message)
         out_message_out = out_message_out + " " + out_time
 
+        if anon_strat == "encrypt":
+            out_message_out.append(". Your decryption key is " + key_string)        
+
         out_message_out = out_message_out + "\n\nGo to to the Redaction settings tab to see redaction logs. Please give feedback on the results below to help improve this app."
+
+        out_message_out = re.sub(r'^\n+|^\. ', '', out_message_out).strip()
     
-    return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths
+    return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, actual_time_taken_number
 
 def anon_wrapper_func(
     anon_file: str, 
@@ -495,7 +507,6 @@ def anon_wrapper_func(
     anon_df_out = anon_df_out[all_cols_original_order]
     
     # Export file
-
     #  Rename anonymisation strategy for file path naming
     if anon_strat == "replace with 'REDACTED'": anon_strat_txt = "redact_replace"
     elif anon_strat == "replace with <ENTITY_NAME>": anon_strat_txt = "redact_entity_type"
@@ -507,8 +518,14 @@ def anon_wrapper_func(
 
         anon_export_file_name = anon_xlsx_export_file_name
 
+        if not os.path.exists(anon_xlsx_export_file_name):
+            wb = Workbook()
+            ws = wb.active  # Get the default active sheet
+            ws.title = excel_sheet_name
+            wb.save(anon_xlsx_export_file_name)
+
         # Create a Pandas Excel writer using XlsxWriter as the engine.
-        with pd.ExcelWriter(anon_xlsx_export_file_name, engine='openpyxl', mode='a') as writer:
+        with pd.ExcelWriter(anon_xlsx_export_file_name, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
             # Write each DataFrame to a different worksheet.
             anon_df_out.to_excel(writer, sheet_name=excel_sheet_name, index=None)
 
@@ -532,7 +549,7 @@ def anon_wrapper_func(
 
     # Print result text to output text box if just anonymising open text
     if anon_file=='open_text':
-        out_message = [anon_df_out['text'][0]]
+        out_message = ["'" + anon_df_out['text'][0] + "'"]
 
     return out_file_paths, out_message, key_string, log_files_output_paths
        
@@ -551,8 +568,16 @@ def anonymise_script(df:pd.DataFrame, anon_strat:str, language:str, chosen_redac
     # DataFrame to dict
     df_dict = df.to_dict(orient="list")
 
-    if in_allow_list:
-        in_allow_list_flat = in_allow_list #[item for sublist in in_allow_list for item in sublist]
+    if isinstance(in_allow_list, list):
+        if in_allow_list:
+            in_allow_list_flat = in_allow_list
+        else:
+            in_allow_list_flat = []
+    elif isinstance(in_allow_list, pd.DataFrame):
+        if not in_allow_list.empty:
+            in_allow_list_flat = list(in_allow_list.iloc[:, 0].unique())
+        else:
+            in_allow_list_flat = []
     else:
         in_allow_list_flat = []
 
@@ -577,11 +602,8 @@ def anonymise_script(df:pd.DataFrame, anon_strat:str, language:str, chosen_redac
 
     #analyzer = nlp_analyser #AnalyzerEngine()
     batch_analyzer = BatchAnalyzerEngine(analyzer_engine=nlp_analyser)
-
     anonymizer = AnonymizerEngine()#conflict_resolution=ConflictResolutionStrategy.MERGE_SIMILAR_OR_CONTAINED)
-
-    batch_anonymizer = BatchAnonymizerEngine(anonymizer_engine = anonymizer)
-    
+    batch_anonymizer = BatchAnonymizerEngine(anonymizer_engine = anonymizer)    
     analyzer_results = []
 
     if pii_identification_method == "Local":
@@ -692,12 +714,6 @@ def anonymise_script(df:pd.DataFrame, anon_strat:str, language:str, chosen_redac
     analyse_time_out = f"Analysing the text took {analyse_toc - analyse_tic:0.1f} seconds."
     print(analyse_time_out)
 
-    # Create faker function (note that it has to receive a value)
-    #fake = Faker("en_UK")
-
-    #def fake_first_name(x):
-    #    return fake.first_name()
-
     # Set up the anonymization configuration WITHOUT DATE_TIME
     simple_replace_config = eval('{"DEFAULT": OperatorConfig("replace", {"new_value": "REDACTED"})}')
     replace_config = eval('{"DEFAULT": OperatorConfig("replace")}')
@@ -714,9 +730,13 @@ def anonymise_script(df:pd.DataFrame, anon_strat:str, language:str, chosen_redac
     if anon_strat == "mask": chosen_mask_config = mask_config
     if anon_strat == "encrypt": 
         chosen_mask_config = people_encrypt_config
-        # Generate a 128-bit AES key. Then encode the key using base64 to get a string representation
-        key = secrets.token_bytes(16)  # 128 bits = 16 bytes 
+        key = secrets.token_bytes(16)  # 128 bits = 16 bytes
         key_string = base64.b64encode(key).decode('utf-8')
+        
+        # Now inject the key into the operator config
+        for entity, operator in chosen_mask_config.items():
+            if operator.operator_name == "encrypt":
+                operator.params = {"key": key_string}
     elif anon_strat == "fake_first_name": chosen_mask_config = fake_first_name_config
 
     # I think in general people will want to keep date / times - removed Mar 2025 as I don't want to assume for people.
