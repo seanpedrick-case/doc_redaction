@@ -462,7 +462,8 @@ def prepare_image_or_pdf(
     input_folder:str=INPUT_FOLDER,
     prepare_images:bool=True,
     page_sizes:list[dict]=[],
-    textract_output_found:bool = False,    
+    textract_output_found:bool = False,
+    local_ocr_output_found:bool = False,   
     progress: Progress = Progress(track_tqdm=True)
 ) -> tuple[List[str], List[str]]:
     """
@@ -484,7 +485,8 @@ def prepare_image_or_pdf(
         output_folder (optional, str): The output folder for file save
         prepare_images (optional, bool): A boolean indicating whether to create images for each PDF page. Defaults to True.
         page_sizes(optional, List[dict]): A list of dicts containing information about page sizes in various formats.
-        textract_output_found (optional, bool): A boolean indicating whether textract output has already been found . Defaults to False.
+        textract_output_found (optional, bool): A boolean indicating whether Textract analysis output has already been found. Defaults to False.
+        local_ocr_output_found (optional, bool): A boolean indicating whether local OCR analysis output has already been found. Defaults to False.
         progress (optional, Progress): Progress tracker for the operation
         
 
@@ -536,7 +538,7 @@ def prepare_image_or_pdf(
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df
+        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, local_ocr_output_found
 
     progress(0.1, desc='Preparing file')
 
@@ -639,8 +641,8 @@ def prepare_image_or_pdf(
                     # Assuming file_path is a NamedString or similar
                     all_annotations_object = json.loads(file_path)  # Use loads for string content
 
-            # Assume it's a textract json
-            elif (file_extension in ['.json']) and (prepare_for_review != True):
+            # Save Textract file to folder
+            elif (file_extension in ['.json']) and '_textract' in file_path_without_ext: #(prepare_for_review != True):
                 print("Saving Textract output")
                 # Copy it to the output folder so it can be used later.
                 output_textract_json_file_name = file_path_without_ext
@@ -652,6 +654,20 @@ def prepare_image_or_pdf(
                 # Use shutil to copy the file directly
                 shutil.copy2(file_path, out_textract_path)  # Preserves metadata
                 textract_output_found = True                
+                continue
+
+            elif (file_extension in ['.json']) and '_ocr_results_with_words' in file_path_without_ext: #(prepare_for_review != True):
+                print("Saving local OCR output")
+                # Copy it to the output folder so it can be used later.
+                output_ocr_results_with_words_json_file_name = file_path_without_ext
+                if not file_path.endswith("_ocr_results_with_words.json"): output_ocr_results_with_words_json_file_name = file_path_without_ext + "_ocr_results_with_words.json"
+                else: output_ocr_results_with_words_json_file_name = file_path_without_ext + ".json"
+
+                out_ocr_results_with_words_path = os.path.join(output_folder, output_ocr_results_with_words_json_file_name)
+
+                # Use shutil to copy the file directly
+                shutil.copy2(file_path, out_ocr_results_with_words_path)  # Preserves metadata
+                local_ocr_output_found = True                
                 continue
 
             # NEW IF STATEMENT
@@ -773,7 +789,40 @@ def prepare_image_or_pdf(
 
     number_of_pages = len(page_sizes)#len(image_file_paths)
         
-    return combined_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df
+    return combined_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, local_ocr_output_found
+
+def load_and_convert_ocr_results_with_words_json(ocr_results_with_words_json_file_path:str, log_files_output_paths:str, page_sizes_df:pd.DataFrame):
+    """
+    Loads Textract JSON from a file, detects if conversion is needed, and converts if necessary.
+    """
+    
+    if not os.path.exists(ocr_results_with_words_json_file_path):
+        print("No existing OCR results file found.")
+        return [], True, log_files_output_paths  # Return empty dict and flag indicating missing file
+    
+    no_ocr_results_with_words_file = False
+    print("Found existing OCR results json results file.")
+
+    # Track log files
+    if ocr_results_with_words_json_file_path not in log_files_output_paths:
+        log_files_output_paths.append(ocr_results_with_words_json_file_path)
+
+    try:
+        with open(ocr_results_with_words_json_file_path, 'r', encoding='utf-8') as json_file:
+            ocr_results_with_words_data = json.load(json_file)
+    except json.JSONDecodeError:
+        print("Error: Failed to parse OCR results JSON file. Returning empty data.")
+        return [], True, log_files_output_paths  # Indicate failure
+
+    # Check if conversion is needed
+    if "page" and "results" in ocr_results_with_words_data[0]:
+        print("JSON already in the correct format for app. No changes needed.")
+        return ocr_results_with_words_data, False, log_files_output_paths  # No conversion required
+
+    else:
+        print("Invalid OCR result JSON format: 'page' or 'results' key missing.")
+        #print("OCR results with words data:", ocr_results_with_words_data)
+        return [], True, log_files_output_paths  # Return empty data if JSON is not recognized
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi, output_folder:str=OUTPUT_FOLDER, input_folder:str=INPUT_FOLDER):
     file_path_without_ext = get_file_name_without_type(in_file_path)
@@ -1280,6 +1329,8 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     # but it's good practice if columns could be missing for other reasons.
     final_df = final_df.reindex(columns=final_col_order, fill_value=pd.NA)
 
+    final_df = final_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"])
+
     return final_df
 
 def create_annotation_dicts_from_annotation_df(
@@ -1558,6 +1609,9 @@ def convert_annotation_json_to_review_df(
          except TypeError as e:
               print(f"Warning: Could not sort DataFrame due to type error in sort columns: {e}")
               # Proceed without sorting
+
+    review_file_df = review_file_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"])
+
     return review_file_df
 
 def fill_missing_box_ids(data_input: dict) -> dict:
@@ -1787,6 +1841,8 @@ def convert_review_df_to_annotation_json(
     Returns:
         List of dictionaries suitable for Gradio Annotation output, one dict per image/page.
     """
+    review_file_df = review_file_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"])
+
     if not page_sizes:
         raise ValueError("page_sizes argument is required and cannot be empty.")
 

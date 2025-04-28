@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, Any
 from gradio_client import utils as client_utils
 import gradio as gr
 from gradio import utils, wasm_utils
+from tools.config import AWS_REGION, AWS_ACCESS_KEY, AWS_SECRET_KEY, RUN_AWS_FUNCTIONS
+from botocore.exceptions import NoCredentialsError, TokenRetrievalError
+
 
 if TYPE_CHECKING:
     from gradio.components import Component
@@ -202,12 +205,30 @@ class CSVLogger_custom(FlaggingCallback):
                     line_count = len(list(csv.reader(csvfile))) - 1
 
         if save_to_dynamodb == True:
+
+            if RUN_AWS_FUNCTIONS == "1":
+                try:
+                    print("Connecting to DynamoDB via existing SSO connection")
+                    dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
+                    #client = boto3.client('dynamodb')
+                    
+                    test_connection = dynamodb.meta.client.list_tables()                   
+
+                except Exception as e:
+                    print("No SSO credentials found:", e)                    
+                    if AWS_ACCESS_KEY and AWS_SECRET_KEY:
+                        print("Trying DynamoDB credentials from environment variables")
+                        dynamodb = boto3.resource('dynamodb',aws_access_key_id=AWS_ACCESS_KEY, 
+                            aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION)
+                        # client = boto3.client('dynamodb',aws_access_key_id=AWS_ACCESS_KEY, 
+                        #     aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION)
+                    else:
+                        raise Exception("AWS credentials for DynamoDB logging not found")
+            else:
+                raise Exception("AWS credentials for DynamoDB logging not found")
+            
             if dynamodb_table_name is None:
-                raise ValueError("You must provide a dynamodb_table_name if save_to_dynamodb is True")
-
-            dynamodb = boto3.resource('dynamodb')
-            client = boto3.client('dynamodb')
-
+                raise ValueError("You must provide a dynamodb_table_name if save_to_dynamodb is True")            
             
             if dynamodb_headers:
                 dynamodb_headers = dynamodb_headers

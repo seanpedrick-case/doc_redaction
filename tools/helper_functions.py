@@ -39,6 +39,12 @@ def reset_ocr_results_state():
 def reset_review_vars():
     return pd.DataFrame(), pd.DataFrame()
 
+def reset_data_vars():
+    return 0, [], 0
+
+def reset_aws_call_vars():
+    return 0, 0
+
 def load_in_default_allow_list(allow_list_file_path):
     if isinstance(allow_list_file_path, str):
         allow_list_file_path = [allow_list_file_path]
@@ -201,9 +207,6 @@ def put_columns_in_df(in_file:List[str]):
                 df = pd.read_excel(file_name, sheet_name=sheet_name)
 
                 # Process the DataFrame (e.g., print its contents)
-                print(f"Sheet Name: {sheet_name}")
-                print(df.head())  # Print the first few rows
-
                 new_choices.extend(list(df.columns))
 
             all_sheet_names.extend(new_sheet_names)
@@ -226,7 +229,17 @@ def check_for_existing_textract_file(doc_file_name_no_extension_textbox:str, out
     textract_output_path = os.path.join(output_folder, doc_file_name_no_extension_textbox + "_textract.json")
 
     if os.path.exists(textract_output_path):
-        print("Existing Textract file found.")    
+        print("Existing Textract analysis output file found.")    
+        return True
+    
+    else:
+        return False
+    
+def check_for_existing_local_ocr_file(doc_file_name_no_extension_textbox:str, output_folder:str=OUTPUT_FOLDER):
+    local_ocr_output_path = os.path.join(output_folder, doc_file_name_no_extension_textbox + "_ocr_results_with_words.json")
+
+    if os.path.exists(local_ocr_output_path):
+        print("Existing local OCR analysis output file found.")    
         return True
     
     else:
@@ -477,9 +490,10 @@ def calculate_time_taken(number_of_pages:str,
                         pii_identification_method:str,
                         textract_output_found_checkbox:bool,
                         only_extract_text_radio:bool,
+                        local_ocr_output_found_checkbox:bool,
                         convert_page_time:float=0.5,
-                        textract_page_time:float=1,
-                        comprehend_page_time:float=1,
+                        textract_page_time:float=1.2,
+                        comprehend_page_time:float=1.2,
                         local_text_extraction_page_time:float=0.3,
                         local_pii_redaction_page_time:float=0.5,                        
                         local_ocr_extraction_page_time:float=1.5,
@@ -494,7 +508,9 @@ def calculate_time_taken(number_of_pages:str,
     - number_of_pages: The number of pages in the uploaded document(s).
     - text_extract_method_radio: The method of text extraction.
     - pii_identification_method_drop: The method of personally-identifiable information removal.
+    - textract_output_found_checkbox (bool, optional): Boolean indicating if AWS Textract text extraction outputs have been found.
     - only_extract_text_radio (bool, optional): Option to only extract text from the document rather than redact.
+    - local_ocr_output_found_checkbox (bool, optional): Boolean indicating if local OCR text extraction outputs have been found.
     - textract_page_time (float, optional): Approximate time to query AWS Textract.
     - comprehend_page_time (float, optional): Approximate time to query text on a page with AWS Comprehend.
     - local_text_redaction_page_time (float, optional): Approximate time to extract text on a page with the local text redaction option.
@@ -522,7 +538,8 @@ def calculate_time_taken(number_of_pages:str,
         if textract_output_found_checkbox != True:
             page_extraction_time_taken = number_of_pages * textract_page_time
     elif text_extract_method_radio == local_ocr_option:
-        page_extraction_time_taken = number_of_pages * local_ocr_extraction_page_time
+        if local_ocr_output_found_checkbox != True:
+            page_extraction_time_taken = number_of_pages * local_ocr_extraction_page_time
     elif text_extract_method_radio == text_ocr_option:
         page_conversion_time_taken = number_of_pages * local_text_extraction_page_time
 

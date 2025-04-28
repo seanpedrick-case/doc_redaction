@@ -108,6 +108,174 @@ def convert_pike_pdf_page_to_bytes(pdf:object, page_num:int):
 
     return pdf_bytes
 
+# def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_no:int):
+#     '''
+#     Convert the json response from textract to the OCRResult format used elsewhere in the code. Looks for lines, words, and signatures. Handwriting and signatures are set aside especially for later in case the user wants to override the default behaviour and redact all handwriting/signatures.
+#     '''
+#     all_ocr_results = []
+#     signature_or_handwriting_recogniser_results = []
+#     signature_recogniser_results = []
+#     handwriting_recogniser_results = []
+#     signatures = []
+#     handwriting = []
+#     ocr_results_with_words = {}
+#     text_block={}
+
+#     i = 1
+
+#     # Assuming json_data is structured as a dictionary with a "pages" key
+#     #if "pages" in json_data:
+#     # Find the specific page data
+#     page_json_data = json_data #next((page for page in json_data["pages"] if page["page_no"] == page_no), None)
+
+#     #print("page_json_data:", page_json_data)
+
+#     if "Blocks" in page_json_data:
+#         # Access the data for the specific page
+#         text_blocks = page_json_data["Blocks"]  # Access the Blocks within the page data
+#     # This is a new page
+#     elif "page_no" in page_json_data:
+#         text_blocks = page_json_data["data"]["Blocks"]
+#     else: text_blocks = []
+
+#     is_signature = False
+#     is_handwriting = False
+
+#     for text_block in text_blocks:
+    
+#         if (text_block['BlockType'] == 'LINE') | (text_block['BlockType'] == 'SIGNATURE'): # (text_block['BlockType'] == 'WORD') |
+
+#             # Extract text and bounding box for the line
+#             line_bbox = text_block["Geometry"]["BoundingBox"]
+#             line_left = int(line_bbox["Left"] * page_width)
+#             line_top = int(line_bbox["Top"] * page_height)
+#             line_right = int((line_bbox["Left"] + line_bbox["Width"]) * page_width)
+#             line_bottom = int((line_bbox["Top"] + line_bbox["Height"]) * page_height)
+
+#             width_abs = int(line_bbox["Width"] * page_width)
+#             height_abs = int(line_bbox["Height"] * page_height)
+
+#             if text_block['BlockType'] == 'LINE':
+                
+#                 # Extract text and bounding box for the line
+#                 line_text = text_block.get('Text', '')
+#                 words = []
+#                 current_line_handwriting_results = []  # Track handwriting results for this line
+
+#                 if 'Relationships' in text_block:
+#                     for relationship in text_block['Relationships']:
+#                         if relationship['Type'] == 'CHILD':
+#                             for child_id in relationship['Ids']:
+#                                 child_block = next((block for block in text_blocks if block['Id'] == child_id), None)
+#                                 if child_block and child_block['BlockType'] == 'WORD':
+#                                     word_text = child_block.get('Text', '')
+#                                     word_bbox = child_block["Geometry"]["BoundingBox"]
+#                                     confidence = child_block.get('Confidence','')
+#                                     word_left = int(word_bbox["Left"] * page_width)
+#                                     word_top = int(word_bbox["Top"] * page_height)
+#                                     word_right = int((word_bbox["Left"] + word_bbox["Width"]) * page_width)
+#                                     word_bottom = int((word_bbox["Top"] + word_bbox["Height"]) * page_height)
+
+#                                     # Extract BoundingBox details
+#                                     word_width = word_bbox["Width"]
+#                                     word_height = word_bbox["Height"]
+
+#                                     # Convert proportional coordinates to absolute coordinates
+#                                     word_width_abs = int(word_width * page_width)
+#                                     word_height_abs = int(word_height * page_height)
+                                    
+#                                     words.append({
+#                                         'text': word_text,
+#                                         'bounding_box': (word_left, word_top, word_right, word_bottom)
+#                                     })
+#                                     # Check for handwriting
+#                                     text_type = child_block.get("TextType", '')
+
+#                                     if text_type == "HANDWRITING":
+#                                         is_handwriting = True
+#                                         entity_name = "HANDWRITING"
+#                                         word_end = len(word_text)
+
+#                                         recogniser_result = CustomImageRecognizerResult(
+#                                             entity_type=entity_name,
+#                                             text=word_text,
+#                                             score=confidence,
+#                                             start=0,
+#                                             end=word_end,
+#                                             left=word_left,
+#                                             top=word_top,
+#                                             width=word_width_abs,
+#                                             height=word_height_abs
+#                                         )
+
+#                                         # Add to handwriting collections immediately
+#                                         handwriting.append(recogniser_result)
+#                                         handwriting_recogniser_results.append(recogniser_result)
+#                                         signature_or_handwriting_recogniser_results.append(recogniser_result)
+#                                         current_line_handwriting_results.append(recogniser_result)
+
+#             # If handwriting or signature, add to bounding box               
+
+#             elif (text_block['BlockType'] == 'SIGNATURE'):
+#                 line_text = "SIGNATURE"
+#                 is_signature = True
+#                 entity_name = "SIGNATURE"
+#                 confidence = text_block.get('Confidence', 0)
+#                 word_end = len(line_text)
+
+#                 recogniser_result = CustomImageRecognizerResult(
+#                     entity_type=entity_name,
+#                     text=line_text,
+#                     score=confidence,
+#                     start=0,
+#                     end=word_end,
+#                     left=line_left,
+#                     top=line_top,
+#                     width=width_abs,
+#                     height=height_abs
+#                 )
+
+#                 # Add to signature collections immediately
+#                 signatures.append(recogniser_result)
+#                 signature_recogniser_results.append(recogniser_result)
+#                 signature_or_handwriting_recogniser_results.append(recogniser_result)
+
+#                 words = [{
+#                     'text': line_text,
+#                     'bounding_box': (line_left, line_top, line_right, line_bottom)
+#                 }]
+
+#             ocr_results_with_words["text_line_" + str(i)] = {
+#                 "line": i,
+#                 'text': line_text,
+#                 'bounding_box': (line_left, line_top, line_right, line_bottom),
+#                 'words': words
+#             }         
+
+#             # Create OCRResult with absolute coordinates
+#             ocr_result = OCRResult(line_text, line_left, line_top, width_abs, height_abs)
+#             all_ocr_results.append(ocr_result)
+
+#             is_signature_or_handwriting = is_signature | is_handwriting
+
+#             # If it is signature or handwriting, will overwrite the default behaviour of the PII analyser
+#             if is_signature_or_handwriting:
+#                 if recogniser_result not in signature_or_handwriting_recogniser_results: 
+#                     signature_or_handwriting_recogniser_results.append(recogniser_result)
+
+#                 if is_signature:
+#                     if recogniser_result not in signature_recogniser_results:          
+#                         signature_recogniser_results.append(recogniser_result)
+
+#                 if is_handwriting: 
+#                     if recogniser_result not in handwriting_recogniser_results: 
+#                         handwriting_recogniser_results.append(recogniser_result)
+
+#             i += 1
+
+#     return all_ocr_results, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, ocr_results_with_words
+
+
 def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_no:int):
     '''
     Convert the json response from textract to the OCRResult format used elsewhere in the code. Looks for lines, words, and signatures. Handwriting and signatures are set aside especially for later in case the user wants to override the default behaviour and redact all handwriting/signatures.
@@ -118,7 +286,7 @@ def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_
     handwriting_recogniser_results = []
     signatures = []
     handwriting = []
-    ocr_results_with_children = {}
+    ocr_results_with_words = {}
     text_block={}
 
     i = 1
@@ -141,7 +309,7 @@ def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_
     is_signature = False
     is_handwriting = False
 
-    for text_block in text_blocks:
+    for text_block in text_blocks:    
     
         if (text_block['BlockType'] == 'LINE') | (text_block['BlockType'] == 'SIGNATURE'): # (text_block['BlockType'] == 'WORD') |
 
@@ -244,36 +412,53 @@ def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_
                     'text': line_text,
                     'bounding_box': (line_left, line_top, line_right, line_bottom)
                 }]
+        else:
+            line_text = ""
+            words=[]
+            line_left = 0
+            line_top = 0
+            line_right = 0
+            line_bottom = 0
+            width_abs = 0
+            height_abs = 0
 
-            ocr_results_with_children["text_line_" + str(i)] = {
+        if line_text:
+
+            ocr_results_with_words["text_line_" + str(i)] = {
                 "line": i,
                 'text': line_text,
                 'bounding_box': (line_left, line_top, line_right, line_bottom),
-                'words': words
-            }         
+                'words': words,
+                'page': page_no
+            }
 
             # Create OCRResult with absolute coordinates
             ocr_result = OCRResult(line_text, line_left, line_top, width_abs, height_abs)
             all_ocr_results.append(ocr_result)
 
-            is_signature_or_handwriting = is_signature | is_handwriting
+        is_signature_or_handwriting = is_signature | is_handwriting
 
-            # If it is signature or handwriting, will overwrite the default behaviour of the PII analyser
-            if is_signature_or_handwriting:
-                if recogniser_result not in signature_or_handwriting_recogniser_results: 
-                    signature_or_handwriting_recogniser_results.append(recogniser_result)
+        # If it is signature or handwriting, will overwrite the default behaviour of the PII analyser
+        if is_signature_or_handwriting:
+            if recogniser_result not in signature_or_handwriting_recogniser_results: 
+                signature_or_handwriting_recogniser_results.append(recogniser_result)
 
-                if is_signature:
-                    if recogniser_result not in signature_recogniser_results:          
-                        signature_recogniser_results.append(recogniser_result)
+            if is_signature:
+                if recogniser_result not in signature_recogniser_results:          
+                    signature_recogniser_results.append(recogniser_result)
 
-                if is_handwriting: 
-                    if recogniser_result not in handwriting_recogniser_results: 
-                        handwriting_recogniser_results.append(recogniser_result)
+            if is_handwriting: 
+                if recogniser_result not in handwriting_recogniser_results: 
+                    handwriting_recogniser_results.append(recogniser_result)
 
-            i += 1
+        i += 1
 
-    return all_ocr_results, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, ocr_results_with_children
+    # Add page key to the line level results
+    all_ocr_results_with_page = {"page": page_no, "results": all_ocr_results}
+    ocr_results_with_words_with_page = {"page": page_no, "results": ocr_results_with_words}
+
+    return all_ocr_results_with_page, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, ocr_results_with_words_with_page
+
 
 def load_and_convert_textract_json(textract_json_file_path:str, log_files_output_paths:str, page_sizes_df:pd.DataFrame):
     """
@@ -315,7 +500,7 @@ def load_and_convert_textract_json(textract_json_file_path:str, log_files_output
             return {}, True, log_files_output_paths  # Conversion failed
     else:
         print("Invalid Textract JSON format: 'Blocks' missing.")
-        print("textract data:", textract_data)
+        #print("textract data:", textract_data)
         return {}, True, log_files_output_paths  # Return empty data if JSON is not recognized
 
 def restructure_textract_output(textract_output: dict, page_sizes_df:pd.DataFrame):

@@ -39,6 +39,7 @@ You can now [speak with a chat bot about this user guide](https://huggingface.co
     - [Redacting only specific pages](#redacting-only-specific-pages)
     - [Handwriting and signature redaction](#handwriting-and-signature-redaction)
 - [Reviewing and modifying suggested redactions](#reviewing-and-modifying-suggested-redactions)
+- [Redacting tabular data files (CSV/XLSX) or copy and pasted text](#redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text)
 
 See the [advanced user guide here](#advanced-user-guide):
 - [Merging redaction review files](#merging-redaction-review-files)
@@ -119,11 +120,13 @@ Click 'Redact document'. After loading in the document, the app should be able t
 - **'...ocr_results.csv'** files contain the line-by-line text outputs from the entire document. This file can be useful for later searching through for any terms of interest in the document (e.g. using Excel or a similar program).
 - **'...review_file.csv'** files are the review files that contain details and locations of all of the suggested redactions in the document. This file is key to the [review process](#reviewing-and-modifying-suggested-redactions), and should be downloaded to use later for this.
 
-### Additional AWS Textract outputs
+### Additional AWS Textract / local OCR outputs
 
 If you have used the AWS Textract option for extracting text, you may also see a '..._textract.json' file. This file contains all the relevant extracted text information that comes from the AWS Textract service. You can keep this file and upload it at a later date alongside your input document, which will enable you to skip calling AWS Textract every single time you want to do a redaction task, as follows:
 
 ![Document upload alongside Textract](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/document_upload_with_textract.PNG)
+
+Similarly, if you have used the 'Local OCR method' to extract text, you may see a '..._ocr_results_with_words.json' file. This file works in the same way as the AWS Textract .json results described above, and can be uploaded alongside an input document to save time on text extraction in future in the same way.
 
 ### Downloading output files from previous redaction tasks
 
@@ -307,7 +310,7 @@ To filter the 'Search suggested redactions' table you can:
 Once you have filtered the table, you have a few options underneath on what you can do with the filtered rows:
 
 - Click the 'Exclude specific row from redactions' button to remove only the redaction from the last row you clicked on from the document. 
-- Click the 'Exclude all items in table from redactions' button to remove all redactions visible in the table from the document. 
+- Click the 'Exclude all items in table from redactions' button to remove all redactions visible in the table from the document. **Important:** ensure that you have clicked the blue tick icon next to the search box before doing this, or you will remove all redactions from the document. If you do end up doing this, click the 'Undo last element removal' button below to restore the redactions.
 
 **NOTE**: After excluding redactions using either of the above options, click the 'Reset filters' button below to ensure that the dropdowns and table return to seeing all remaining redactions in the document.
 
@@ -324,6 +327,40 @@ You can navigate through the document using this table. When you click on a row,
 You can search through the extracted text by using the search bar just above the table, which should filter as you type. To apply the filter and 'cut' the table, click on the blue tick inside the box next to your search term. To return the table to its original content, click the button below the table 'Reset OCR output table filter'.
 
 ![Search suggested redaction area](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
+
+## Redacting tabular data files (XLSX/CSV) or copy and pasted text
+
+### Tabular data files (XLSX/CSV)
+
+The app can be used to redact tabular data files such as xlsx or csv files. For this to work properly, your data file needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.
+
+To demonstrate this, we can use [the example csv file 'combined_case_notes.csv'](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv), which is a small dataset of dummy social care case notes. Go to the 'Open text or Excel/csv files' tab. Drop the file into the upload area. After the file is loaded, you should see the suggested columns for redaction in the box underneath. You can select and deselect columns to redact as you wish from this list.
+
+![csv upload](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/file_upload_csv_columns.PNG)
+
+If you were instead to upload an xlsx file, you would see also a list of all the sheets in the xlsx file that can be redacted. The 'Select columns' area underneath will suggest a list of all columns in the file across all sheets.
+
+![xlsx upload](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/file_upload_xlsx_columns.PNG)
+
+Once you have chosen your input file and sheets/columns to redact, you can choose the redaction method. 'Local' will use the same local model as used for documents on the first tab. 'AWS Comprehend' will give better results, at a slight cost.
+
+When you click Redact text/data files, you will see the progress of the redaction task by file and sheet, and you will receive a csv output with the redacted data.
+
+### Choosing output anonymisation format
+You can also choose the anonymisation format of your output results.  Open the tab 'Anonymisation output format' to see the options. By default, any detected PII will be replaced with the word 'REDACTED' in the cell. You can choose one of the following options as the form of replacement for the redacted text:
+- replace with 'REDACTED': Replaced by the word 'REDACTED' (default)
+- replace with <ENTITY_NAME>: Replaced by e.g. 'PERSON' for people, 'EMAIL_ADDRESS' for emails etc.
+- redact completely: Text is removed completely and replaced by nothing.
+- hash: Replaced by a unique long ID code that is consistent with entity text. I.e. a particular name will always have the same ID code.
+- mask: Replace with stars '*'.
+
+### Redacting copy and pasted text
+You can also write open text into an input box and redact that using the same methods as described above. To do this, write or paste text into the 'Enter open text' box that appears when you open the 'Redact open text' tab. Then select a redaction method, and an anonymisation output format as described above. The redacted text will be printed in the output textbox, and will also be saved to a simple csv file in the output file box.  
+
+![Text analysis output](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/text_anonymisation_outputs.PNG)
+
+### Redaction log outputs
+A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the Redaction settings page under 'Log file outputs'.
 
 # ADVANCED USER GUIDE
 
@@ -469,13 +506,12 @@ The app should then pick up these keys when trying to access the AWS Textract an
 
 Again, a lot can potentially go wrong with AWS solutions that are insecure, so before trying the above please consult with your AWS and data security teams.
 
-## Modifying and merging redaction review files
+## Modifying existing redaction review files
 
 You can find the folder containing the files discussed in this section [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/).
 
 As well as serving as inputs to the document redaction app's review function, the 'review_file.csv' output can be modified outside of the app, and also merged with others from multiple redaction attempts on the same file. This gives you the flexibility to change redaction details outside of the app.
 
-### Modifying existing redaction review files
 If you open up a 'review_file' csv output using a spreadsheet software program such as Microsoft Excel you can easily modify redaction properties. Open the file '[Partnership-Agreement-Toolkit_0_0_redacted.pdf_review_file_local.csv](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/Partnership-Agreement-Toolkit_0_0.pdf_review_file_local.csv)', and you should see a spreadshet with just four suggested redactions (see below). The following instructions are for using Excel.
 
 ![Review file before](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/review_file_before.PNG)
