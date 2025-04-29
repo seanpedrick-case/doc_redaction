@@ -43,7 +43,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='DocRedactApp_0.4.0',
+    name='DocRedactApp_0.6.2',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -62,5 +62,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='DocRedactApp_0.6.1',
+    name='DocRedactApp_0.6.2',
 )
