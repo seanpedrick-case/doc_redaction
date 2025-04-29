@@ -3,11 +3,11 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "doc_redaction" # Your application's name
-version = "0.6.1" # Your application's current version
-description = "Redact PDF/image-based documents, or CSV/XLSX files using a Gradio-based GUI interface" # A short description
-readme = "README.md" # Path to your project's README file
-requires-python = ">=3.10" # The minimum Python version required
+name = "doc_redaction"
+version = "0.6.2"
+description = "Redact PDF/image-based documents, or CSV/XLSX files using a Gradio-based GUI interface"
+readme = "README.md"
+requires-python = ">=3.10"
 
 dependencies = [
     "pdfminer.six==20240706",
@@ -45,13 +45,12 @@ repository = "https://github.com/seanpedrick-case/doc_redaction"
 [project.optional-dependencies]
 dev = ["pytest"]
 
-# Optional: You can add configuration for tools used in your project under the [tool] section
-# For example, configuration for a linter like Ruff:
+# Configuration for Ruff linter:
 [tool.ruff]
 line-length = 88
 select = ["E", "F", "I"]
 
-# Optional: Configuration for a formatter like Black:
+# Configuration for a Black formatter:
 [tool.black]
 line-length = 88
 target-version = ['py310']
