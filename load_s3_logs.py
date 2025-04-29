@@ -2,7 +2,7 @@ import boto3
 import pandas as pd
 from io import StringIO
 from datetime import datetime
-from tools.config import DOCUMENT_REDACTION_BUCKET, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
+from tools.config import DOCUMENT_REDACTION_BUCKET, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, OUTPUT_FOLDER
 
 # Combine together log files that can be then used for e.g. dashboarding and financial tracking.
 
@@ -71,7 +71,7 @@ if df_list:
     concatenated_df = pd.concat(df_list, ignore_index=True)
 
     # Save the concatenated DataFrame to a CSV file
-    concatenated_df.to_csv('consolidated_logs.csv', index=False)
-    print("Consolidated CSV saved as 'consolidated_logs.csv'")
+    concatenated_df.to_csv(OUTPUT_FOLDER + 'consolidated_s3_logs.csv', index=False)
+    print("Consolidated CSV saved as 'consolidated_s3_logs.csv'")
 else:
     print("No log files found in the given date range.")

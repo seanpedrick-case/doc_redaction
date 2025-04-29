@@ -2,6 +2,7 @@ from __future__ import annotations
 import contextlib
 import csv
 import datetime
+from datetime import datetime
 import os
 import re
 import boto3
@@ -177,7 +178,7 @@ class CSVLogger_custom(FlaggingCallback):
             csv_data.append(username)
 
 
-        timestamp = str(datetime.datetime.now())
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] # Correct format for Amazon Athena
         csv_data.append(timestamp)
 
         generated_id = str(uuid.uuid4())
