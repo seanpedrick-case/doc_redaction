@@ -276,7 +276,7 @@ def update_annotator_page_from_review_df(
 
                 match = re.search(r"(\d+)\.png$", page_state_entry['image'])
                 if match: page_no = int(match.group(1))
-                else: page_no = -1
+                else: page_no = 0
 
                 if 'image' in page_state_entry and page_no == page_num_reported_zero_indexed:
                     # Replace the annotations list for this page with the new list from review_df

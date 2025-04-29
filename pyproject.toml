@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction" # Your application's name
-version = "0.6.0" # Your application's current version
+version = "0.6.1" # Your application's current version
 description = "Redact PDF/image-based documents, or CSV/XLSX files using a Gradio-based GUI interface" # A short description
 readme = "README.md" # Path to your project's README file
 requires-python = ">=3.10" # The minimum Python version required

@@ -249,7 +249,7 @@ else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
 SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'False')
 
-GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'True')
+GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'False')
 
 DEFAULT_COST_CODE = get_or_create_env_var('DEFAULT_COST_CODE', '')
 

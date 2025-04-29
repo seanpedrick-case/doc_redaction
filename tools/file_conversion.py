@@ -1319,6 +1319,7 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     for col in essential_box_cols:
         if col not in final_df.columns:
             final_df[col] = pd.NA # Add column with NA if it wasn't present in any box
+        final_df[col] = final_df[col].replace({None: pd.NA})
 
     base_cols = ["image"]
     extra_box_cols = [col for col in final_df.columns if col not in base_cols and col not in essential_box_cols]
@@ -1328,8 +1329,8 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     # Using fill_value=pd.NA isn't strictly needed here as we added missing columns above,
     # but it's good practice if columns could be missing for other reasons.
     final_df = final_df.reindex(columns=final_col_order, fill_value=pd.NA)
-
-    final_df = final_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"])
+    final_df = final_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"], how="all")
+    final_df.replace({None: pd.NA})
 
     return final_df
 

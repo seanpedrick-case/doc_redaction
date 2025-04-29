@@ -62,5 +62,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='DocRedactApp_0.4.0',
+    name='DocRedactApp_0.6.1',
 )
