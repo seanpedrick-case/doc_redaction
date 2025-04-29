@@ -536,7 +536,11 @@ def choose_and_run_redactor(file_paths:List[str],
                 if is_pdf(file_path) == False:
                     out_redacted_pdf_file_path = output_folder + pdf_file_name_without_ext + "_redacted.png"
                     # pymupdf_doc is an image list in this case
-                    img = Image.open(pymupdf_doc[-1])
+                    if isinstance(pymupdf_doc[-1], str):
+                        img = Image.open(pymupdf_doc[-1])
+                    # Otherwise could be an image object
+                    else:
+                        img = pymupdf_doc[-1]
                     img.save(out_redacted_pdf_file_path, "PNG" ,resolution=image_dpi)
                     #            
                 else:
@@ -562,13 +566,14 @@ def choose_and_run_redactor(file_paths:List[str],
             # Convert annotations_all_pages to a consistent relative coordinate format output
             page_sizes = page_sizes_df.to_dict(orient="records")
             all_image_annotations_df = convert_annotation_data_to_dataframe(annotations_all_pages)
-            all_image_annotations_df = divide_coordinates_by_page_sizes(all_image_annotations_df, page_sizes_df, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax")                
-            annotations_all_pages = create_annotation_dicts_from_annotation_df(all_image_annotations_df, page_sizes)
 
-            annotations_all_pages = remove_duplicate_images_with_blank_boxes(annotations_all_pages)
+            all_image_annotations_df = divide_coordinates_by_page_sizes(all_image_annotations_df, page_sizes_df, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax")
+
+            annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(all_image_annotations_df, page_sizes)
+            annotations_all_pages_divide = remove_duplicate_images_with_blank_boxes(annotations_all_pages_divide)
 
             # Save the gradio_annotation_boxes to a review csv file        
-            review_file_state = convert_annotation_json_to_review_df(annotations_all_pages, all_pages_decision_process_table, page_sizes=page_sizes)
+            review_file_state = convert_annotation_json_to_review_df(annotations_all_pages_divide, all_pages_decision_process_table, page_sizes=page_sizes)
 
             # Don't need page sizes in outputs
             review_file_state.drop(["image_width", "image_height", "mediabox_width", "mediabox_height", "cropbox_width", "cropbox_height"], axis=1, inplace=True, errors="ignore")
@@ -625,7 +630,7 @@ def choose_and_run_redactor(file_paths:List[str],
     if total_textract_query_number > number_of_pages:
         total_textract_query_number = number_of_pages
 
-    return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words
+    return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages_divide, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words
 
 def convert_pikepdf_coords_to_pymupdf(pymupdf_page:Page, pikepdf_bbox, type="pikepdf_annot"):
     '''
@@ -1352,32 +1357,14 @@ def redact_image_pdf(file_path:str,
 
             # If using Tesseract
             if text_extraction_method == tesseract_ocr_option:
-                #print("image_path:", image_path)
-                #print("print(type(image_path)):", print(type(image_path)))
-                #if not isinstance(image_path, image_path.image_path) or not isinstance(image_path, str): raise Exception("image_path object for page", reported_page_number, "not found, cannot perform local OCR analysis.")
-
-                # Check for existing page_line_level_ocr_results_with_words object:
-
-                # page_line_level_ocr_results = (
-                # all_page_line_level_ocr_results.get('results', [])
-                # if all_page_line_level_ocr_results.get('page') == reported_page_number
-                # else []
-                # )
 
                 if all_page_line_level_ocr_results_with_words:
                     # Find the first dict where 'page' matches
-
-                    #print("all_page_line_level_ocr_results_with_words:", all_page_line_level_ocr_results_with_words)
-
-                    print("All pages available:", [item.get('page') for item in all_page_line_level_ocr_results_with_words])
-                    #print("Looking for page:", reported_page_number)
 
                     matching_page = next(
                     (item for item in all_page_line_level_ocr_results_with_words if int(item.get('page', -1)) == int(reported_page_number)),
                     None
                     )
-
-                    #print("matching_page:", matching_page)
 
                     page_line_level_ocr_results_with_words = matching_page if matching_page else []
                 else: page_line_level_ocr_results_with_words = []
@@ -1388,12 +1375,9 @@ def redact_image_pdf(file_path:str,
                 else:
                     page_word_level_ocr_results = image_analyser.perform_ocr(image_path)
 
-                    print("page_word_level_ocr_results:", page_word_level_ocr_results)
                     page_line_level_ocr_results, page_line_level_ocr_results_with_words = combine_ocr_results(page_word_level_ocr_results, page=reported_page_number)
 
                     all_page_line_level_ocr_results_with_words.append(page_line_level_ocr_results_with_words)
-
-                    print("All pages available:", [item.get('page') for item in all_page_line_level_ocr_results_with_words])
     
             # Check if page exists in existing textract data. If not, send to service to analyse
             if text_extraction_method == textract_option:
@@ -1471,7 +1455,6 @@ def redact_image_pdf(file_path:str,
 
             all_line_level_ocr_results_df_list.append(line_level_ocr_results_df)
 
-
             if pii_identification_method != no_redaction_option:
                 # Step 2: Analyse text and identify PII
                 if chosen_redact_entities or chosen_redact_comprehend_entities:
@@ -1486,7 +1469,7 @@ def redact_image_pdf(file_path:str,
                         entities=chosen_redact_entities,
                         allow_list=allow_list,
                         score_threshold=score_threshold
-                    )                
+                    )               
 
                     comprehend_query_number = comprehend_query_number + comprehend_query_number_new
                     
@@ -1519,20 +1502,20 @@ def redact_image_pdf(file_path:str,
                     # Assume image_path is an image
                     image = image_path
 
-
                 fill = (0, 0, 0)   # Fill colour for redactions
                 draw = ImageDraw.Draw(image)
 
                 all_image_annotations_boxes = []
 
                 for box in page_merged_redaction_bboxes:
+
                     try:
                         x0 = box.left
                         y0 = box.top
                         x1 = x0 + box.width
                         y1 = y0 + box.height
-
                         label = box.entity_type  # Attempt to get the label
+                        text = box.text
                     except AttributeError as e:
                         print(f"Error accessing box attributes: {e}")
                         label = "Redaction"  # Default label if there's an error
@@ -1542,15 +1525,19 @@ def redact_image_pdf(file_path:str,
                         print(f"Invalid coordinates for box: {box}")
                         continue  # Skip this box if coordinates are invalid
 
-                    # Directly append the dictionary with the required keys
-                    all_image_annotations_boxes.append({
+                    img_annotation_box = {
                         "xmin": x0,
                         "ymin": y0,
                         "xmax": x1,
                         "ymax": y1,
                         "label": label,
-                        "color": (0, 0, 0)
-                    })
+                        "color": (0, 0, 0),
+                        "text": text
+                    }
+                    img_annotation_box = fill_missing_box_ids(img_annotation_box) 
+
+                    # Directly append the dictionary with the required keys
+                    all_image_annotations_boxes.append(img_annotation_box)
 
                     # Draw the rectangle
                     try:
@@ -1558,7 +1545,13 @@ def redact_image_pdf(file_path:str,
                     except Exception as e:
                         print(f"Error drawing rectangle: {e}")
 
-                page_image_annotations = {"image": file_path, "boxes": all_image_annotations_boxes}           
+                page_image_annotations = {"image": file_path, "boxes": all_image_annotations_boxes}
+
+                print("page_image_annotations at box drawing:", page_image_annotations)
+
+                redacted_image = image.copy()
+                #redacted_image.save("test_out_image.png")
+         
 
             # Convert decision process to table
             decision_process_table = pd.DataFrame([{
@@ -1577,7 +1570,7 @@ def redact_image_pdf(file_path:str,
             all_pages_decision_process_table_list.append(decision_process_table)
 
             decision_process_table = fill_missing_ids(decision_process_table)
-            #decision_process_table.to_csv("output/decision_process_table_with_ids.csv")
+            decision_process_table.to_csv(output_folder + "decision_process_table_with_ids.csv")
 
             toc = time.perf_counter()
 
@@ -1591,7 +1584,7 @@ def redact_image_pdf(file_path:str,
                 tqdm._instances.clear()
 
                 if is_pdf(file_path) == False:
-                    pdf_image_file_paths.append(image_path)
+                    pdf_image_file_paths.append(redacted_image) # .append(image_path)
                     pymupdf_doc = pdf_image_file_paths
 
                 # Check if the image_path already exists in annotations_all_pages
@@ -1602,7 +1595,6 @@ def redact_image_pdf(file_path:str,
                 else:
                     # Append new annotation if it doesn't exist
                     annotations_all_pages.append(page_image_annotations)
-
 
 
                 if text_extraction_method == textract_option:
@@ -1626,13 +1618,14 @@ def redact_image_pdf(file_path:str,
                 all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list)
                 all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_df_list)
 
+
                 current_loop_page += 1
 
                 return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words
 
         # If it's an image file
         if is_pdf(file_path) == False:
-            pdf_image_file_paths.append(image_path)
+            pdf_image_file_paths.append(redacted_image)#.append(image_path)
             pymupdf_doc = pdf_image_file_paths
 
         # Check if the image_path already exists in annotations_all_pages
