@@ -136,7 +136,7 @@ def process_data(df:pd.DataFrame, column:str):
 def identify_similar_pages(input_files: List[str], similarity_threshold: float = 0.9, output_folder:str=OUTPUT_FOLDER, progress=Progress(track_tqdm=True)):
     output_paths = []
     
-    progress(0.1, desc="Cleaning input texts")
+    progress(0.1, desc="Cleaning input text")
 
     # Load and clean data
     df, output_files = combine_ocr_output_text(input_files)

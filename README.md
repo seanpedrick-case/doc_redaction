@@ -10,7 +10,7 @@ license: agpl-3.0
 ---
 # Document redaction
 
-version: 0.6.2
+version: 0.6.3
 
 Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a walkthrough on how to use the app. Below is a very brief overview.
     
@@ -22,10 +22,7 @@ NOTE: The app is not 100% accurate, and it will miss some personal information. 
 
 # USER GUIDE
 
-## Experiment with the test (public) version of the app
-You can test out many of the features described in this user guide at the [public test version of the app](https://huggingface.co/spaces/seanpedrickcase/document_redaction), which is free. AWS functions (e.g. Textract, Comprehend) are not enabled (unless you have valid API keys).
-
-## Chat over this user guide
+## Chat with this user guide
 You can now [speak with a chat bot about this user guide](https://huggingface.co/spaces/seanpedrickcase/Light-PDF-Web-QA-Chatbot) (beta!)
 
 ## Table of contents

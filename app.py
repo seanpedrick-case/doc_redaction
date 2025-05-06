@@ -4,7 +4,7 @@ import pandas as pd
 import gradio as gr
 from gradio_image_annotation import image_annotator
 
-from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, TESSERACT_FOLDER, POPPLER_FOLDER, REDACTION_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE, OUTPUT_COST_CODES_PATH, OUTPUT_ALLOW_LIST_PATH, COGNITO_AUTH, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_ACCESS_LOG_HEADERS, CSV_ACCESS_LOG_HEADERS, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_FEEDBACK_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, USAGE_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_USAGE_LOG_HEADERS, CSV_USAGE_LOG_HEADERS
+from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, TESSERACT_FOLDER, POPPLER_FOLDER, REDACTION_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE, OUTPUT_COST_CODES_PATH, OUTPUT_ALLOW_LIST_PATH, COGNITO_AUTH, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_ACCESS_LOG_HEADERS, CSV_ACCESS_LOG_HEADERS, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_FEEDBACK_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, USAGE_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_USAGE_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, TEXTRACT_JOBS_S3_INPUT_LOC, AWS_REGION
 from tools.helper_functions import put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, no_redaction_option, reset_review_vars, merge_csv_files, load_all_output_files, update_dataframe, check_for_existing_textract_file, load_in_default_cost_codes, enforce_cost_codes, calculate_aws_costs, calculate_time_taken, reset_base_dataframe, reset_ocr_base_dataframe, update_cost_code_dataframe_from_dropdown_select, check_for_existing_local_ocr_file, reset_data_vars, reset_aws_call_vars
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3, upload_log_file_to_s3
 from tools.file_redaction import choose_and_run_redactor
@@ -15,7 +15,7 @@ from tools.auth import authenticate_user
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.find_duplicate_pages import identify_similar_pages
-from tools.textract_batch_call import analyse_document_with_textract_api, poll_bulk_textract_analysis_progress_and_download, load_in_textract_job_details, check_for_provided_job_id, check_textract_outputs_exist
+from tools.textract_batch_call import analyse_document_with_textract_api, poll_whole_document_textract_analysis_progress_and_download, load_in_textract_job_details, check_for_provided_job_id, check_textract_outputs_exist, replace_existing_pdf_input_for_whole_document_outputs
 
 # Suppress downcasting warnings
 pd.set_option('future.no_silent_downcasting', True)
@@ -54,8 +54,6 @@ if CSV_USAGE_LOG_HEADERS: CSV_USAGE_LOG_HEADERS = eval(CSV_USAGE_LOG_HEADERS)
 if DYNAMODB_ACCESS_LOG_HEADERS: DYNAMODB_ACCESS_LOG_HEADERS = eval(DYNAMODB_ACCESS_LOG_HEADERS)
 if DYNAMODB_FEEDBACK_LOG_HEADERS: DYNAMODB_FEEDBACK_LOG_HEADERS = eval(DYNAMODB_FEEDBACK_LOG_HEADERS)
 if DYNAMODB_USAGE_LOG_HEADERS: DYNAMODB_USAGE_LOG_HEADERS = eval(DYNAMODB_USAGE_LOG_HEADERS)
-
-print
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Base(), fill_width=True)
@@ -170,16 +168,16 @@ with app:
     s3_default_allow_list_file = gr.Textbox(label = "Default allow list file", value=S3_ALLOW_LIST_PATH, visible=False)
     default_allow_list_output_folder_location = gr.Textbox(label = "Output default allow list location", value=OUTPUT_ALLOW_LIST_PATH, visible=False)
 
-    s3_bulk_textract_default_bucket = gr.Textbox(label = "Default Textract bulk S3 bucket", value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, visible=False)
-    s3_bulk_textract_input_subfolder = gr.Textbox(label = "Default Textract bulk S3 input folder", value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, visible=False)
-    s3_bulk_textract_output_subfolder = gr.Textbox(label = "Default Textract bulk S3 output folder", value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, visible=False)
+    s3_whole_document_textract_default_bucket = gr.Textbox(label = "Default Textract whole_document S3 bucket", value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, visible=False)
+    s3_whole_document_textract_input_subfolder = gr.Textbox(label = "Default Textract whole_document S3 input folder", value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, visible=False)
+    s3_whole_document_textract_output_subfolder = gr.Textbox(label = "Default Textract whole_document S3 output folder", value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, visible=False)
     successful_textract_api_call_number = gr.Number(precision=0, value=0, visible=False)
     no_redaction_method_drop = gr.Radio(label = """Placeholder for no redaction method after downloading Textract outputs""", value = no_redaction_option, choices=[no_redaction_option], visible=False)
     textract_only_method_drop = gr.Radio(label="""Placeholder for Textract method after downloading Textract outputs""", value = textract_option, choices=[textract_option], visible=False)
 
-    load_s3_bulk_textract_logs_bool = gr.Textbox(label = "Load Textract logs or not", value=LOAD_PREVIOUS_TEXTRACT_JOBS_S3, visible=False)    
-    s3_bulk_textract_logs_subfolder = gr.Textbox(label = "Default Textract bulk S3 input folder", value=TEXTRACT_JOBS_S3_LOC, visible=False)
-    local_bulk_textract_logs_subfolder = gr.Textbox(label = "Default Textract bulk S3 output folder", value=TEXTRACT_JOBS_LOCAL_LOC, visible=False)       
+    load_s3_whole_document_textract_logs_bool = gr.Textbox(label = "Load Textract logs or not", value=LOAD_PREVIOUS_TEXTRACT_JOBS_S3, visible=False)    
+    s3_whole_document_textract_logs_subfolder = gr.Textbox(label = "Default Textract whole_document S3 input folder", value=TEXTRACT_JOBS_S3_LOC, visible=False)
+    local_whole_document_textract_logs_subfolder = gr.Textbox(label = "Default Textract whole_document S3 output folder", value=TEXTRACT_JOBS_LOCAL_LOC, visible=False)       
 
     s3_default_cost_codes_file = gr.Textbox(label = "Default cost centre file", value=S3_COST_CODES_PATH, visible=False)
     default_cost_codes_output_folder_location = gr.Textbox(label = "Output default cost centre location", value=OUTPUT_COST_CODES_PATH, visible=False)
@@ -214,10 +212,10 @@ with app:
 
     # Textract API call placeholders in case option not selected in config
                 
-    job_name_textbox = gr.Textbox(value="", label="Bulk Textract call", visible=False)
+    job_name_textbox = gr.Textbox(value="", label="whole_document Textract call", visible=False)
     send_document_to_textract_api_btn = gr.Button("Analyse document with AWS Textract", variant="primary", visible=False)
 
-    job_id_textbox = gr.Textbox(label = "Latest job ID for bulk document analysis", value='', visible=False)              
+    job_id_textbox = gr.Textbox(label = "Latest job ID for whole_document document analysis", value='', visible=False)              
     check_state_of_textract_api_call_btn = gr.Button("Check state of Textract document job and download", variant="secondary", visible=False)
     job_current_status = gr.Textbox(value="", label="Analysis job current status", visible=False)
     job_type_dropdown = gr.Dropdown(value="document_text_detection", choices=["document_text_detection", "document_analysis"], label="Job type of Textract analysis job", allow_custom_value=False, visible=False)
@@ -225,6 +223,7 @@ with app:
     selected_job_id_row = gr.Dataframe(pd.DataFrame(columns=['job_id','file_name','job_type','signature_extraction','s3_location','job_date_time']), label="Selected job id row", visible=False, type="pandas", wrap=True)
     is_a_textract_api_call = gr.Checkbox(value=False, label="is_this_a_textract_api_call", visible=False)
     job_output_textbox = gr.Textbox(value="", label="Textract call outputs", visible=False)
+    job_input_textbox = gr.Textbox(value=TEXTRACT_JOBS_S3_INPUT_LOC, label="Textract call outputs", visible=False)
 
     textract_job_output_file = gr.File(label="Textract job output files", height=file_input_height, visible=False)
     convert_textract_outputs_to_ocr_results = gr.Button("Placeholder - Convert Textract job outputs to OCR results (needs relevant document file uploaded above)", variant="secondary", visible=False)
@@ -251,7 +250,7 @@ with app:
         with gr.Accordion("Redact document", open = True):
             in_doc_files = gr.File(label="Choose a document or image file (PDF, JPG, PNG)", file_count= "multiple", file_types=['.pdf', '.jpg', '.png', '.json', '.zip'], height=file_input_height)
 
-            text_extract_method_radio = gr.Radio(label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £2.66 ($3.50) per 1,000 pages with signature detection (default), £1.14 ($1.50) without. Go to Redaction settings - AWS Textract options to remove signature detection.""", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
+            text_extract_method_radio = gr.Radio(label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £2.66 ($3.50) per 1,000 pages with signature detection (default), £1.14 ($1.50) without. Change the settings in the tab below (AWS Textract signature detection) to change this.""", value = default_ocr_val, choices=[text_ocr_option, tesseract_ocr_option, textract_option])
 
             with gr.Accordion("AWS Textract signature detection (default is on)", open = False):
                 handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract extraction settings", choices=["Extract handwriting", "Extract signatures"], value=["Extract handwriting", "Extract signatures"])
@@ -260,7 +259,7 @@ with app:
                 pii_identification_method_drop = gr.Radio(label = """Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""", value = default_pii_detector, choices=[no_redaction_option, local_pii_detector, aws_pii_detector])
             
             if SHOW_COSTS == "True":
-                with gr.Accordion("Estimated costs and time taken", open = True, visible=True):                        
+                with gr.Accordion("Estimated costs and time taken. Note that costs shown only include direct usage of AWS services and do not include other running costs (e.g. storage, run-time costs)", open = True, visible=True):                        
                     with gr.Row(equal_height=True):
                         with gr.Column(scale=1):
                             textract_output_found_checkbox = gr.Checkbox(value= False, label="Existing Textract output file found", interactive=False, visible=True)
@@ -269,10 +268,11 @@ with app:
                             with gr.Row(equal_height=True):
                                 total_pdf_page_count = gr.Number(label = "Total page count", value=0, visible=True)
                                 estimated_aws_costs_number = gr.Number(label = "Approximate AWS Textract and/or Comprehend cost (£)", value=0.00, precision=2, visible=True)
-                                estimated_time_taken_number = gr.Number(label = "Approximate time taken to extract text/redact (minutes)", value=0, visible=True, precision=2)             
+                                estimated_time_taken_number = gr.Number(label = "Approximate time taken to extract text/redact (minutes)", value=0, visible=True, precision=2)       
                 
             if GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True":
-                with gr.Accordion("Apply cost code", open = True, visible=True):
+                with gr.Accordion("Assign task to cost code", open = True, visible=True):
+                    gr.Markdown("Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost.")
                     with gr.Row():
                         cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(), row_count = (0, "dynamic"), label="Existing cost codes", type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True, show_search='filter', visible=True, wrap=True, max_height=200)
                         with gr.Column():
@@ -555,18 +555,24 @@ with app:
     all_line_level_ocr_results_df_base.change(reset_ocr_base_dataframe, inputs=[all_line_level_ocr_results_df_base], outputs=[all_line_level_ocr_results_df])
 
     # Send whole document to Textract for text extraction
-    send_document_to_textract_api_btn.click(analyse_document_with_textract_api, inputs=[prepared_pdf_state, s3_bulk_textract_input_subfolder, s3_bulk_textract_output_subfolder, textract_job_detail_df, s3_bulk_textract_default_bucket, output_folder_textbox, handwrite_signature_checkbox, successful_textract_api_call_number, total_pdf_page_count], outputs=[job_output_textbox, job_id_textbox, job_type_dropdown, successful_textract_api_call_number, is_a_textract_api_call, textract_query_number])
-
+    send_document_to_textract_api_btn.click(analyse_document_with_textract_api, inputs=[prepared_pdf_state, s3_whole_document_textract_input_subfolder, s3_whole_document_textract_output_subfolder, textract_job_detail_df, s3_whole_document_textract_default_bucket, output_folder_textbox, handwrite_signature_checkbox, successful_textract_api_call_number, total_pdf_page_count], outputs=[job_output_textbox, job_id_textbox, job_type_dropdown, successful_textract_api_call_number, is_a_textract_api_call, textract_query_number]).\
+        success(check_for_provided_job_id, inputs=[job_id_textbox]).\
+        success(poll_whole_document_textract_analysis_progress_and_download, inputs=[job_id_textbox, job_type_dropdown, s3_whole_document_textract_output_subfolder, doc_file_name_no_extension_textbox, textract_job_detail_df, s3_whole_document_textract_default_bucket, output_folder_textbox, s3_whole_document_textract_logs_subfolder, local_whole_document_textract_logs_subfolder], outputs = [textract_job_output_file, job_current_status, textract_job_detail_df, doc_file_name_no_extension_textbox]).\
+        success(fn=check_for_existing_textract_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[textract_output_found_checkbox])
+    
     check_state_of_textract_api_call_btn.click(check_for_provided_job_id, inputs=[job_id_textbox]).\
-        success(poll_bulk_textract_analysis_progress_and_download, inputs=[job_id_textbox, job_type_dropdown, s3_bulk_textract_output_subfolder, doc_file_name_no_extension_textbox, textract_job_detail_df, s3_bulk_textract_default_bucket, output_folder_textbox, s3_bulk_textract_logs_subfolder, local_bulk_textract_logs_subfolder], outputs = [textract_job_output_file, job_current_status, textract_job_detail_df]).\
+        success(poll_whole_document_textract_analysis_progress_and_download, inputs=[job_id_textbox, job_type_dropdown, s3_whole_document_textract_output_subfolder, doc_file_name_no_extension_textbox, textract_job_detail_df, s3_whole_document_textract_default_bucket, output_folder_textbox, s3_whole_document_textract_logs_subfolder, local_whole_document_textract_logs_subfolder], outputs = [textract_job_output_file, job_current_status, textract_job_detail_df, doc_file_name_no_extension_textbox]).\
     success(fn=check_for_existing_textract_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[textract_output_found_checkbox])
 
     textract_job_detail_df.select(df_select_callback_textract_api, inputs=[textract_output_found_checkbox], outputs=[job_id_textbox, job_type_dropdown, selected_job_id_row])
 
 
-    convert_textract_outputs_to_ocr_results.click(fn=check_for_existing_textract_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[textract_output_found_checkbox]).\
+    convert_textract_outputs_to_ocr_results.click(replace_existing_pdf_input_for_whole_document_outputs, inputs = [s3_whole_document_textract_input_subfolder, doc_file_name_no_extension_textbox, output_folder_textbox, s3_whole_document_textract_default_bucket, in_doc_files, input_folder_textbox], outputs = [in_doc_files, doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count]).\
+        success(fn = prepare_image_or_pdf, inputs=[in_doc_files, text_extract_method_radio, latest_file_completed_text, redaction_output_summary_textbox, first_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool_false, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_state, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_base, local_ocr_output_found_checkbox]).\
+        success(fn=check_for_existing_textract_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[textract_output_found_checkbox]).\
+        success(fn=check_for_existing_local_ocr_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[local_ocr_output_found_checkbox]).\
         success(fn= check_textract_outputs_exist, inputs=[textract_output_found_checkbox]).\
-        success(fn = reset_state_vars, outputs=[all_image_annotations_state, all_line_level_ocr_results_df_base, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state, recogniser_entity_dataframe, recogniser_entity_dataframe_base, pdf_doc_state, duplication_file_path_outputs_list_state, redaction_output_summary_textbox, is_a_textract_api_call]).\
+        success(fn = reset_state_vars, outputs=[all_image_annotations_state, all_line_level_ocr_results_df_base, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state, recogniser_entity_dataframe, recogniser_entity_dataframe_base, pdf_doc_state, duplication_file_path_outputs_list_state, redaction_output_summary_textbox, is_a_textract_api_call, textract_query_number]).\
         success(fn= choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, textract_only_method_drop, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_text, redaction_output_summary_textbox, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, actual_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_line_level_ocr_results_df_base, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, no_redaction_method_drop, comprehend_query_number, max_fuzzy_spelling_mistakes_num, match_fuzzy_whole_phrase_bool, aws_access_key_textbox, aws_secret_key_textbox, annotate_max_pages, review_file_state, output_folder_textbox, document_cropboxes, page_sizes, textract_output_found_checkbox, only_extract_text_radio, duplication_file_path_outputs_list_state, latest_review_file_path, input_folder_textbox, textract_query_number, latest_ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_children],
                     outputs=[redaction_output_summary_textbox, output_file, output_file_list_state, latest_file_completed_text, log_files_output, log_files_output_list_state, actual_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_line_level_ocr_results_df_base, all_decision_process_table_state, comprehend_query_number, output_review_files, annotate_max_pages, annotate_max_pages_bottom, prepared_pdf_state, images_pdf_state, review_file_state, page_sizes, duplication_file_path_outputs_list_state, in_duplicate_pages, latest_review_file_path, textract_query_number, latest_ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_children])
     
@@ -693,10 +699,10 @@ with app:
     # Get connection details on app load
 
     if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
-        app.load(get_connection_params, inputs=[output_folder_textbox, input_folder_textbox, session_output_folder_textbox, s3_bulk_textract_input_subfolder, s3_bulk_textract_output_subfolder, s3_bulk_textract_logs_subfolder, local_bulk_textract_logs_subfolder], outputs=[session_hash_state, output_folder_textbox, session_hash_textbox, input_folder_textbox, s3_bulk_textract_input_subfolder, s3_bulk_textract_output_subfolder, s3_bulk_textract_logs_subfolder, local_bulk_textract_logs_subfolder]).\
-        success(load_in_textract_job_details, inputs=[load_s3_bulk_textract_logs_bool, s3_bulk_textract_logs_subfolder, local_bulk_textract_logs_subfolder], outputs=[textract_job_detail_df])
+        app.load(get_connection_params, inputs=[output_folder_textbox, input_folder_textbox, session_output_folder_textbox, s3_whole_document_textract_input_subfolder, s3_whole_document_textract_output_subfolder, s3_whole_document_textract_logs_subfolder, local_whole_document_textract_logs_subfolder], outputs=[session_hash_state, output_folder_textbox, session_hash_textbox, input_folder_textbox, s3_whole_document_textract_input_subfolder, s3_whole_document_textract_output_subfolder, s3_whole_document_textract_logs_subfolder, local_whole_document_textract_logs_subfolder]).\
+        success(load_in_textract_job_details, inputs=[load_s3_whole_document_textract_logs_bool, s3_whole_document_textract_logs_subfolder, local_whole_document_textract_logs_subfolder], outputs=[textract_job_detail_df])
     else:
-        app.load(get_connection_params, inputs=[output_folder_textbox, input_folder_textbox, session_output_folder_textbox, s3_bulk_textract_input_subfolder, s3_bulk_textract_output_subfolder, s3_bulk_textract_logs_subfolder, local_bulk_textract_logs_subfolder], outputs=[session_hash_state, output_folder_textbox, session_hash_textbox, input_folder_textbox, s3_bulk_textract_input_subfolder, s3_bulk_textract_output_subfolder, s3_bulk_textract_logs_subfolder, local_bulk_textract_logs_subfolder]) 
+        app.load(get_connection_params, inputs=[output_folder_textbox, input_folder_textbox, session_output_folder_textbox, s3_whole_document_textract_input_subfolder, s3_whole_document_textract_output_subfolder, s3_whole_document_textract_logs_subfolder, local_whole_document_textract_logs_subfolder], outputs=[session_hash_state, output_folder_textbox, session_hash_textbox, input_folder_textbox, s3_whole_document_textract_input_subfolder, s3_whole_document_textract_output_subfolder, s3_whole_document_textract_logs_subfolder, local_whole_document_textract_logs_subfolder]) 
      
 
     # If relevant environment variable is set, load in the Textract job details
