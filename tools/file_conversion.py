@@ -620,12 +620,12 @@ def prepare_image_or_pdf(
 
         elif file_extension in ['.csv']:
             if '_review_file' in file_path_without_ext:
-                review_file_csv = read_file(file_path)
+                review_file_csv = read_file(file_path)                
                 all_annotations_object = convert_review_df_to_annotation_json(review_file_csv, image_file_paths, page_sizes)
                 json_from_csv = True
                 #print("Converted CSV review file to image annotation object")
             elif '_ocr_output' in file_path_without_ext:
-                all_line_level_ocr_results_df = read_file(file_path)
+                all_line_level_ocr_results_df = read_file(file_path)                
                 json_from_csv = False
 
         # NEW IF STATEMENT
@@ -987,7 +987,7 @@ def divide_coordinates_by_page_sizes(
         if "image_width" in df_abs.columns and "mediabox_width" in df_abs.columns:
              # Check if image_width mostly missing - use .isna().all() or check percentage
              if df_abs["image_width"].isna().all():
-                 print("Falling back to mediabox dimensions as image_width is entirely missing.")
+                 #print("Falling back to mediabox dimensions as image_width is entirely missing.")
                  df_abs["image_width"] = df_abs["image_width"].fillna(df_abs["mediabox_width"])
                  df_abs["image_height"] = df_abs["image_height"].fillna(df_abs["mediabox_height"])
              else:
@@ -1469,7 +1469,6 @@ def convert_annotation_json_to_review_df(
         id_col_exists_in_review = 'id' in review_file_df.columns and not review_file_df['id'].isnull().all() and not (review_file_df['id'] == '').all()
         id_col_exists_in_redaction = 'id' in redaction_decision_output.columns and not redaction_decision_output['id'].isnull().all() and not (redaction_decision_output['id'] == '').all()
 
-
         if id_col_exists_in_review and id_col_exists_in_redaction:
             #print("Attempting to join data based on 'id' column.")
             try:
@@ -1530,7 +1529,7 @@ def convert_annotation_json_to_review_df(
 
         # Only attempt proximity match if text wasn't added by ID join and proximity is requested
         if not text_added_successfully and do_proximity_match:
-             print("Attempting proximity match to add text data.")
+             #print("Attempting proximity match to add text data.")
 
              # Ensure 'page' columns are numeric before coordinate division and proximity match
              # (Assuming divide_coordinates_by_page_sizes and do_proximity_match_all_pages_for_text need this)
@@ -1559,7 +1558,7 @@ def convert_annotation_json_to_review_df(
                     # Assuming do_proximity_match_all_pages_for_text adds/updates the 'text' column
                     if 'text' in review_file_df.columns:
                          text_added_successfully = True
-                    print("Proximity match completed.")
+                    #print("Proximity match completed.")
                 except Exception as e:
                     print(f"Error during proximity match: {e}. Text data may not be added.")
 
@@ -1611,7 +1610,13 @@ def convert_annotation_json_to_review_df(
               print(f"Warning: Could not sort DataFrame due to type error in sort columns: {e}")
               # Proceed without sorting
 
-    review_file_df = review_file_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"])
+    base_cols = ["xmin", "xmax", "ymin", "ymax", "text", "id", "label"]
+
+    for col in base_cols:
+        if col not in review_file_df.columns:
+            review_file_df[col] = pd.NA
+
+    review_file_df = review_file_df.dropna(subset=base_cols, how="all")
 
     return review_file_df
 
@@ -1721,7 +1726,7 @@ def fill_missing_ids(df: pd.DataFrame, column_name: str = 'id', length: int = 12
     # --- Ensure Column Exists ---
     original_dtype = None
     if column_name not in df.columns:
-        print(f"Column '{column_name}' not found. Adding it to the DataFrame.")
+        #print(f"Column '{column_name}' not found. Adding it to the DataFrame.")
         # Initialize with None (which Pandas often treats as NaN but allows object dtype)
         df[column_name] = None
         # Set original_dtype to object so it likely becomes string later
@@ -1757,7 +1762,7 @@ def fill_missing_ids(df: pd.DataFrame, column_name: str = 'id', length: int = 12
         # print(f"No missing or empty values found requiring IDs in column '{column_name}'.")
         return df
 
-    print(f"Found {num_needed} rows requiring a unique ID in column '{column_name}'.")
+    #print(f"Found {num_needed} rows requiring a unique ID in column '{column_name}'.")
 
     # --- Get Existing IDs to Ensure Uniqueness ---
     # Consider only rows that are *not* missing/empty
@@ -1809,7 +1814,8 @@ def fill_missing_ids(df: pd.DataFrame, column_name: str = 'id', length: int = 12
     # Use the previously identified index to assign the new IDs correctly
     # Assigning string IDs might change the column's dtype to 'object'
     if not pd.api.types.is_object_dtype(original_dtype) and not pd.api.types.is_string_dtype(original_dtype):
-         warnings.warn(f"Column '{column_name}' dtype might change from '{original_dtype}' to 'object' due to string ID assignment.", UserWarning)
+         df['id'] = df['id'].astype(str, errors="ignore")
+         #warnings.warn(f"Column '{column_name}' dtype might change from '{original_dtype}' to 'object' due to string ID assignment.", UserWarning)
 
     df.loc[rows_to_fill_index, column_name] = new_ids_list
     print(f"Successfully assigned {len(new_ids_list)} new unique IDs to column '{column_name}'.")
@@ -1842,7 +1848,13 @@ def convert_review_df_to_annotation_json(
     Returns:
         List of dictionaries suitable for Gradio Annotation output, one dict per image/page.
     """
-    review_file_df = review_file_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"])
+    base_cols = ["xmin", "xmax", "ymin", "ymax", "text", "id", "label"]
+
+    for col in base_cols:
+        if col not in review_file_df.columns:
+            review_file_df[col] = pd.NA
+
+    review_file_df = review_file_df.dropna(subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"], how='all')
 
     if not page_sizes:
         raise ValueError("page_sizes argument is required and cannot be empty.")
@@ -1863,6 +1875,8 @@ def convert_review_df_to_annotation_json(
 
     except Exception as e:
         raise ValueError(f"Error processing page_sizes: {e}") from e
+
+
 
 
     # Handle empty input DataFrame gracefully

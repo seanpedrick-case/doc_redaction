@@ -279,4 +279,7 @@ LOAD_PREVIOUS_TEXTRACT_JOBS_S3 = get_or_create_env_var('LOAD_PREVIOUS_TEXTRACT_J
 
 TEXTRACT_JOBS_S3_LOC = get_or_create_env_var('TEXTRACT_JOBS_S3_LOC', 'output') # Subfolder in the DOCUMENT_REDACTION_BUCKET where the Textract jobs are stored
 
+TEXTRACT_JOBS_S3_INPUT_LOC = get_or_create_env_var('TEXTRACT_JOBS_S3_INPUT_LOC', 'input') # Subfolder in the DOCUMENT_REDACTION_BUCKET where the Textract jobs are stored
+
+
 TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var('TEXTRACT_JOBS_LOCAL_LOC', 'output') # Local subfolder where the Textract jobs are stored

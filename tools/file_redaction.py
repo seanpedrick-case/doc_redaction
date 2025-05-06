@@ -923,6 +923,22 @@ def convert_pikepdf_annotations_to_result_annotation_box(page:Page, annot:dict, 
     
     return img_annotation_box, rect
 
+def set_cropbox_safely(page, original_cropbox):
+    """
+    Sets the cropbox of a page, ensuring it's not larger than the mediabox.
+    If the original cropbox is larger, the mediabox is used instead.
+
+    Args:
+        page: The PyMuPdf page object.
+        original_cropbox: The fitz.Rect representing the desired cropbox.
+    """
+    mediabox = page.mediabox
+    if original_cropbox.width > mediabox.width or original_cropbox.height > mediabox.height:
+        print("Warning: Requested cropbox is larger than the mediabox. Using mediabox instead.")
+        page.set_cropbox(mediabox)
+    else:
+        page.set_cropbox(original_cropbox)
+
 def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None, custom_colours:bool=False, redact_whole_page:bool=False, convert_pikepdf_to_pymupdf_coords:bool=True, original_cropbox:List[Rect]=[], page_sizes_df:pd.DataFrame=pd.DataFrame()):
 
     rect_height = page.rect.height
@@ -979,9 +995,6 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
 
     for annot in page_annotations:
             
-        
-        
-
         # Check if an Image recogniser result, or a Gradio annotation object
         if (isinstance(annot, CustomImageRecognizerResult)) | isinstance(annot, dict):
 
@@ -1053,7 +1066,9 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
     }
 
     page.apply_redactions(images=0, graphics=0)
-    page.set_cropbox(original_cropbox)  # Set CropBox to original size
+    set_cropbox_safely(page, original_cropbox)
+    #page.set_cropbox(original_cropbox)
+      # Set CropBox to original size
     page.clean_contents()
 
     return page, out_annotation_boxes
@@ -1546,8 +1561,6 @@ def redact_image_pdf(file_path:str,
                         print(f"Error drawing rectangle: {e}")
 
                 page_image_annotations = {"image": file_path, "boxes": all_image_annotations_boxes}
-
-                print("page_image_annotations at box drawing:", page_image_annotations)
 
                 redacted_image = image.copy()
                 #redacted_image.save("test_out_image.png")

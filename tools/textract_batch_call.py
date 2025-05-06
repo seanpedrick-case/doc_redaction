@@ -5,13 +5,16 @@ import pandas as pd
 import json
 import logging
 import datetime
+import gradio as gr
+from gradio import FileData
 from typing import List
 from io import StringIO
 from urllib.parse import urlparse
 from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError, TokenRetrievalError
-
-from tools.config import TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, OUTPUT_FOLDER, AWS_REGION, DOCUMENT_REDACTION_BUCKET, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC
-#from tools.aws_textract import json_to_ocrresult
+from tools.config import TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, OUTPUT_FOLDER, AWS_REGION, DOCUMENT_REDACTION_BUCKET, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, TEXTRACT_JOBS_S3_INPUT_LOC, RUN_AWS_FUNCTIONS, INPUT_FOLDER
+from tools.aws_functions import download_file_from_s3
+from tools.file_conversion import get_input_file_names
+from tools.helper_functions import get_file_name_without_type
 
 def analyse_document_with_textract_api(
     local_pdf_path: str,
@@ -209,7 +212,8 @@ def return_job_status(job_id:str,
     logging.info(f"Polling attempt {attempts}/{max_polling_attempts}. Job status: {job_status}")
 
     if job_status == 'IN_PROGRESS':
-        time.sleep(poll_interval_seconds)
+        pass
+        #time.sleep(poll_interval_seconds)
     elif job_status == 'SUCCEEDED':
         logging.info("Textract job succeeded.")
     elif job_status in ['FAILED', 'PARTIAL_SUCCESS']:
@@ -236,6 +240,8 @@ def download_textract_job_files(s3_client:str,
     '''
     Download and combine selected job files from the AWS Textract service.
     '''
+
+    #print("s3_output_key_prefix at download:", s3_output_key_prefix)
 
     list_response = s3_client.list_objects_v2(
         Bucket=s3_bucket_name,
@@ -322,7 +328,67 @@ def check_for_provided_job_id(job_id:str):
         raise Exception("Please provide a job ID.")    
     return
 
-def poll_bulk_textract_analysis_progress_and_download(
+def load_pdf_job_file_from_s3(
+    load_s3_jobs_input_loc,
+    pdf_filename,
+    local_output_dir,
+    s3_bucket_name,
+    RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS):    
+
+    try:
+        print("load_s3_jobs_input_loc:", load_s3_jobs_input_loc)
+        pdf_file_location = ''
+        doc_file_name_no_extension_textbox = ''
+
+        s3_input_key_prefix = os.path.join(load_s3_jobs_input_loc, pdf_filename).replace("\\", "/")
+        s3_input_key_prefix = s3_input_key_prefix + ".pdf"
+        print("s3_input_key_prefix:", s3_input_key_prefix)
+
+        local_input_file_path = os.path.join(local_output_dir, pdf_filename)
+        local_input_file_path = local_input_file_path + ".pdf"
+
+        print("input to s3 download:", s3_bucket_name, s3_input_key_prefix, local_input_file_path)
+
+        download_file_from_s3(s3_bucket_name, s3_input_key_prefix, local_input_file_path, RUN_AWS_FUNCTIONS= RUN_AWS_FUNCTIONS)
+        
+        pdf_file_location = [local_input_file_path]
+        doc_file_name_no_extension_textbox = get_file_name_without_type(pdf_filename)
+    except Exception as e:
+        print("Could not download PDF job file from S3 due to:", e)        
+
+    return pdf_file_location, doc_file_name_no_extension_textbox
+
+def replace_existing_pdf_input_for_whole_document_outputs(    
+    load_s3_jobs_input_loc:str,
+    pdf_filename:str,
+    local_output_dir:str,
+    s3_bucket_name:str,
+    in_doc_files:FileData=[],
+    input_folder:str=INPUT_FOLDER,
+    RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
+    progress = gr.Progress(track_tqdm=True)):
+
+    progress(0.1, "Loading PDF from s3")
+
+    if in_doc_files:
+        doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count = get_input_file_names(in_doc_files)
+
+        if pdf_filename == doc_file_name_no_extension_textbox:
+            print("Existing loaded PDF file has same name as file from S3")
+            doc_file_name_no_extension_textbox = pdf_filename
+            downloaded_pdf_file_location = in_doc_files
+        else:
+            downloaded_pdf_file_location, doc_file_name_no_extension_textbox = load_pdf_job_file_from_s3(load_s3_jobs_input_loc, pdf_filename, local_output_dir, s3_bucket_name, RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS)
+
+            doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count = get_input_file_names(downloaded_pdf_file_location)
+    else:               
+        downloaded_pdf_file_location, doc_file_name_no_extension_textbox = load_pdf_job_file_from_s3(load_s3_jobs_input_loc, pdf_filename, local_output_dir, s3_bucket_name, RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS)
+
+        doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count = get_input_file_names(downloaded_pdf_file_location)
+
+    return downloaded_pdf_file_location, doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count
+
+def poll_whole_document_textract_analysis_progress_and_download(
     job_id:str,
     job_type_dropdown:str,
     s3_output_prefix: str,
@@ -333,13 +399,16 @@ def poll_bulk_textract_analysis_progress_and_download(
     load_s3_jobs_loc:str=TEXTRACT_JOBS_S3_LOC,
     load_local_jobs_loc:str=TEXTRACT_JOBS_LOCAL_LOC,    
     aws_region: str = AWS_REGION, # Optional: specify region if not default
-    load_jobs_from_s3:str = LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
+    load_jobs_from_s3:str = LOAD_PREVIOUS_TEXTRACT_JOBS_S3,    
     poll_interval_seconds: int = 1,
-    max_polling_attempts: int = 1 # ~10 minutes total wait time):
+    max_polling_attempts: int = 1, # ~10 minutes total wait time):
+    progress = gr.Progress(track_tqdm=True)
     ):
     '''
     Poll AWS for the status of a Textract API job. Return status, and if finished, combine and download results into a locally-stored json file for further processing by the app.
     '''
+
+    progress(0.1, "Querying AWS Textract for status of document analysis job")
 
     if job_id:
         # Initialize boto3 clients
@@ -365,7 +434,7 @@ def poll_bulk_textract_analysis_progress_and_download(
             print(f"Failed to update job details dataframe: {e}")
             #raise
 
-        while job_status == 'IN_PROGRESS' and attempts < max_polling_attempts:
+        while job_status == 'IN_PROGRESS' and attempts <= max_polling_attempts:
             attempts += 1
             try:
                 if job_type_dropdown=="document_analysis":
@@ -394,7 +463,9 @@ def poll_bulk_textract_analysis_progress_and_download(
         downloaded_file_path = None
         if job_status == 'SUCCEEDED':
             #raise TimeoutError(f"Textract job {job_id} did not complete successfully within the polling limit.")
-            # 3b - Replace PDF file name if it exists in the job dataframe        
+            # 3b - Replace PDF file name if it exists in the job dataframe   
+
+            progress(0.5, "Document analysis task outputs found. Downloading from S3")                 
 
             # If job_df is not empty
             if not job_df.empty:
@@ -410,13 +481,11 @@ def poll_bulk_textract_analysis_progress_and_download(
                     else:
                         pdf_filename = "unknown_file"
 
-
             # --- 4. Download Output JSON from S3 ---
             # Textract typically creates output under s3_output_prefix/job_id/
             # There might be multiple JSON files if pagination occurred during writing.
             # Usually, for smaller docs, there's one file, often named '1'.
-            # For robust handling, list objects and find the JSON(s).
-
+            # For robust handling, list objects and find the JSON(s).    
 
             s3_output_key_prefix = os.path.join(s3_output_prefix, job_id).replace("\\", "/") + "/"
             logging.info(f"Searching for output files in s3://{s3_bucket_name}/{s3_output_key_prefix}")
@@ -436,8 +505,10 @@ def poll_bulk_textract_analysis_progress_and_download(
 
     else:
         raise Exception("No Job ID provided.")        
+    
+    output_pdf_filename = get_file_name_without_type(pdf_filename)
 
-    return downloaded_file_path, job_status, job_df
+    return downloaded_file_path, job_status, job_df, output_pdf_filename
 
 def load_in_textract_job_details(load_s3_jobs:str=LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
                                      load_s3_jobs_loc:str=TEXTRACT_JOBS_S3_LOC,
