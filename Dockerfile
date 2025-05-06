@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm AS builder
 
 # Install system dependencies. Need to specify -y for poppler to get it to install
 RUN apt-get update \
@@ -27,7 +27,7 @@ COPY lambda_entrypoint.py .
 COPY entrypoint.sh .
 
 # Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
+FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm
 
 # Define a build argument with a default value
 ARG APP_MODE=gradio
@@ -52,18 +52,14 @@ RUN apt-get update \
 RUN useradd -m -u 1000 user
 
 # Create required directories
-RUN mkdir -p /home/user/app/output \
-    && mkdir -p /home/user/app/input \
-    && mkdir -p /home/user/app/tld \
-    && mkdir -p /home/user/app/logs \
-    && mkdir -p /home/user/app/config \
+RUN mkdir -p /home/user/app/{output,input,tld,logs,usage,feedback,config} \
     && chown -R user:user /home/user/app
 
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 
-# Download NLTK data packages
-RUN python -m nltk.downloader punkt stopwords punkt_tab
+# Download NLTK data packages - now no longer necessary
+# RUN python -m nltk.downloader --quiet punkt stopwords punkt_tab
 
 # Entrypoint helps to switch between Gradio and Lambda mode
 COPY entrypoint.sh /entrypoint.sh
@@ -73,10 +69,11 @@ RUN chmod +x /entrypoint.sh
 # Switch to the "user" user
 USER user
 
+ENV APP_HOME=/home/user
+
 # Set environmental variables
-ENV HOME=/home/user \
-    PATH=/home/user/.local/bin:$PATH \
-    PYTHONPATH=/home/user/app \
+ENV PATH=$APP_HOME/.local/bin:$PATH \
+    PYTHONPATH=$APP_HOME/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     GRADIO_ALLOW_FLAGGING=never \
@@ -84,15 +81,17 @@ ENV HOME=/home/user \
     GRADIO_SERVER_NAME=0.0.0.0 \
     GRADIO_SERVER_PORT=7860 \
     GRADIO_ANALYTICS_ENABLED=False \
-    GRADIO_THEME=huggingface \
-    TLDEXTRACT_CACHE=$HOME/app/tld/.tld_set_snapshot \
+    TLDEXTRACT_CACHE=$APP_HOME/app/tld/.tld_set_snapshot \
     SYSTEM=spaces
 
 # Set the working directory to the user's home directory
-WORKDIR $HOME/app
+WORKDIR $APP_HOME/app
 
 # Copy the app code to the container
-COPY --chown=user . $HOME/app
+COPY --chown=user . $APP_HOME/app
+
+# Ensure permissions are really user:user again after copying
+RUN chown -R user:user $APP_HOME/app && chmod -R u+rwX $APP_HOME/app
 
 ENTRYPOINT [ "/entrypoint.sh" ]
 

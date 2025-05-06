@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doc_redaction"
+version = "0.6.3"
+description = "Redact PDF/image-based documents, or CSV/XLSX files using a Gradio-based GUI interface"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "pdfminer.six==20240706",
+    "pdf2image==1.17.0",
+    "pymupdf==1.25.3",
+    "opencv-python==4.10.0.84",
+    "presidio_analyzer==2.2.358",
+    "presidio_anonymizer==2.2.358",
+    "presidio-image-redactor==0.0.56",
+    "pikepdf==9.5.2",
+    "pandas==2.2.3",
+    "scikit-learn==1.6.1",
+    "spacy==3.8.4",
+    # Direct URL dependency for spacy model
+    "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
+    "gradio==5.27.1",
+    "boto3==1.38.4",
+    "pyarrow==19.0.1",
+    "openpyxl==3.1.5",
+    "Faker==36.1.1",
+    "python-levenshtein==0.26.1",
+    "spaczz==0.6.1",
+    # Direct URL dependency for gradio_image_annotator wheel
+    "gradio_image_annotation @ https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.2/gradio_image_annotation-0.3.2-py3-none-any.whl",
+    "rapidfuzz==3.12.1",
+    "python-dotenv==1.0.1",
+    "numpy==1.26.4",
+    "awslambdaric==3.0.1"
+]
+
+[project.urls]
+Homepage = "https://seanpedrick-case.github.io/doc_redaction/README.html"
+repository = "https://github.com/seanpedrick-case/doc_redaction"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+# Configuration for Ruff linter:
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I"]
+
+# Configuration for a Black formatter:
+[tool.black]
+line-length = 88
+target-version = ['py310']

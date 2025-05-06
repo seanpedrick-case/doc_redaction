@@ -1,8 +1,8 @@
 import gradio as gr
 from typing import List, Iterable, Dict, Union, Any, Optional, Iterator, Tuple
-from tqdm import tqdm
+#from tqdm import tqdm
 
-from presidio_analyzer import DictAnalyzerResult, RecognizerResult #, AnalyzerEngine
+from presidio_analyzer import DictAnalyzerResult, RecognizerResult
 from presidio_analyzer.nlp_engine import NlpArtifacts
 
 def recognizer_result_from_dict(data: Dict) -> RecognizerResult:
