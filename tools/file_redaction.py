@@ -406,7 +406,7 @@ def choose_and_run_redactor(file_paths:List[str],
     progress(0.5, desc="Extracting text and redacting document")
 
     all_pages_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "boundingBox", "text", "start","end","score", "id"])
-    all_line_level_ocr_results_df = pd.DataFrame()
+    all_line_level_ocr_results_df = pd.DataFrame(columns=["page", "text",	"left", "top", "width", "height"])
 
     # Run through file loop, redact each file at a time
     for file in file_paths_loop:
@@ -1198,7 +1198,7 @@ def redact_image_pdf(file_path:str,
                      current_loop_page:int=0,
                      page_break_return:bool=False,
                      annotations_all_pages:List=[],
-                     all_line_level_ocr_results_df:pd.DataFrame = pd.DataFrame(),
+                     all_line_level_ocr_results_df:pd.DataFrame = pd.DataFrame(columns=["page", "text",	"left", "top", "width", "height"]),
                      all_pages_decision_process_table:pd.DataFrame = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "boundingBox", "text", "start","end","score", "id"]),
                      pymupdf_doc:Document = [],
                      pii_identification_method:str="Local",
@@ -1891,8 +1891,8 @@ def redact_text_pdf(
     current_loop_page: int = 0,  # Current page being processed in the loop
     page_break_return: bool = False,  # Flag to indicate if a page break should be returned
     annotations_all_pages: List[dict] = [],  # List of annotations across all pages
-    all_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(),  # DataFrame for OCR results
-    all_pages_decision_process_table:pd.DataFrame = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax",	"text", "id"]),  # DataFrame for decision process table
+    all_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(columns=["page", "text",	"left", "top", "width", "height"]),  # DataFrame for OCR results
+    all_pages_decision_process_table:pd.DataFrame = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "text", "id"]),  # DataFrame for decision process table
     pymupdf_doc: List = [],  # List of PyMuPDF documents
     pii_identification_method: str = "Local",
     comprehend_query_number:int = 0,
@@ -2008,8 +2008,8 @@ def redact_text_pdf(
                 
                 characters = []
                 pikepdf_redaction_annotations_on_page = []
-                page_decision_process_table = pd.DataFrame()    
-                page_text_ocr_outputs = pd.DataFrame()  
+                page_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "text", "id"])    
+                page_text_ocr_outputs = pd.DataFrame(columns=["page", "text", "left", "top", "width", "height"])  
 
                 for n, text_container in enumerate(page_layout):                    
                     characters = []
@@ -2142,7 +2142,12 @@ def redact_text_pdf(
         
     # Write all page outputs
     all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list)
+
+    #print("all_line_level_ocr_results_df_list:", all_line_level_ocr_results_df_list)
+
     all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_df_list)
+
+    #print("all_line_level_ocr_results_df after concat:", all_line_level_ocr_results_df)
     
     # Convert decision table to relative coordinates
     all_pages_decision_process_table = divide_coordinates_by_page_sizes(all_pages_decision_process_table, page_sizes_df, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax")
@@ -2154,8 +2159,11 @@ def redact_text_pdf(
     # Convert decision table to relative coordinates
     all_line_level_ocr_results_df = divide_coordinates_by_page_sizes(all_line_level_ocr_results_df, page_sizes_df, xmin="left", xmax="width", ymin="top", ymax="height")
 
+    #print("all_line_level_ocr_results_df:", all_line_level_ocr_results_df)
+
     # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
-    all_line_level_ocr_results_df['top'] = all_line_level_ocr_results_df['top'].astype(float)
-    all_line_level_ocr_results_df['top'] = 1 - all_line_level_ocr_results_df['top']
+    if not all_line_level_ocr_results_df.empty:
+        all_line_level_ocr_results_df['top'] = all_line_level_ocr_results_df['top'].astype(float)
+        all_line_level_ocr_results_df['top'] = 1 - all_line_level_ocr_results_df['top']
                     
     return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
