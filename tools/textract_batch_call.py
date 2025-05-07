@@ -166,7 +166,7 @@ def analyse_document_with_textract_api(
             'file_name': pdf_filename,
             'job_type': job_type,
             'signature_extraction':analyse_signatures,
-            's3_location': job_location_full,
+            #'s3_location': job_location_full,
             'job_date_time': datetime.datetime.now()
         }])
 
@@ -449,19 +449,19 @@ def poll_whole_document_textract_analysis_progress_and_download(
                 else:
                     error = f"Unknown job type, cannot poll job"
                     print(error)
-                    #logging.error(f"Invalid JobId: {job_id}. This might happen if the job expired (older than {DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS} days) or never existed.")
-                    raise
+                    logging.error(f"Invalid JobId: {job_id}. This might happen if the job expired (older than {DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS} days) or never existed.")
+                    raise Exception(error_message)
 
             except textract_client.exceptions.InvalidJobIdException:
                 error_message = f"Invalid JobId: {job_id}. This might happen if the job expired (older than {DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS} days) or never existed."
                 print(error_message)
                 logging.error(error_message)
-                raise
+                raise Exception(error_message)
             except Exception as e:
                 error_message = f"Error while polling Textract status for job {job_id}: {e}"
                 print(error_message)
                 logging.error(error_message)
-                raise
+                raise Exception(error_message)
 
         downloaded_file_path = None
         if job_status == 'SUCCEEDED':
@@ -522,7 +522,7 @@ def load_in_textract_job_details(load_s3_jobs:str=LOAD_PREVIOUS_TEXTRACT_JOBS_S3
     '''
     Load in a dataframe of jobs previous submitted to the Textract API service.
     '''
-    job_df = pd.DataFrame(columns=['job_id','file_name','job_type','signature_extraction','s3_location','job_date_time'])
+    job_df = pd.DataFrame(columns=['job_id','file_name','job_type','signature_extraction','job_date_time'])
 
     # Initialize boto3 clients
     session = boto3.Session(region_name=aws_region)
@@ -556,7 +556,12 @@ def load_in_textract_job_details(load_s3_jobs:str=LOAD_PREVIOUS_TEXTRACT_JOBS_S3
             job_df["job_date_time"] = pd.to_datetime(job_df["job_date_time"], errors='coerce')
             # Keep only jobs that have been completed in the last 'DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS' days
             cutoff_time = pd.Timestamp.now() - pd.Timedelta(days=DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS)
-            job_df = job_df.loc[job_df["job_date_time"] >= cutoff_time,:]
+            job_df = job_df.loc[job_df["job_date_time"] > cutoff_time,:]
+
+        try:
+            job_df = job_df[['job_id','file_name','job_type','signature_extraction','job_date_time']]
+        except Exception as e:
+            print("Could not find one or more columns in Textract whole document list dataframe:", e)
 
     return job_df
 

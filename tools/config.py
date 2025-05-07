@@ -59,6 +59,11 @@ def add_folder_to_path(folder_path: str):
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
 
+
+###
+# LOAD CONFIG FROM ENV FILE
+###
+
 ensure_folder_exists("config/")
 
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
@@ -70,15 +75,12 @@ if APP_CONFIG_PATH:
         load_dotenv(APP_CONFIG_PATH)
     else: print("App config file not found at location:", APP_CONFIG_PATH)
 
-# Report logging to console?
-LOGGING = get_or_create_env_var('LOGGING', 'False')
 
-if LOGGING == 'True':
-    # Configure logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 
 ###
-# AWS CONFIG
+# AWS OPTIONS
 ###
 
 # If you have an aws_config env file in the config folder, you can load in AWS keys this way, e.g. 'env/aws_config.env'
@@ -108,27 +110,27 @@ if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
 
 DOCUMENT_REDACTION_BUCKET = get_or_create_env_var('DOCUMENT_REDACTION_BUCKET', '')
 
-
-
 # Custom headers e.g. if routing traffic through Cloudfront
 # Retrieving or setting CUSTOM_HEADER
 CUSTOM_HEADER = get_or_create_env_var('CUSTOM_HEADER', '')
-#if CUSTOM_HEADER: print(f'CUSTOM_HEADER found')
 
 # Retrieving or setting CUSTOM_HEADER_VALUE
 CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', '')
-#if CUSTOM_HEADER_VALUE: print(f'CUSTOM_HEADER_VALUE found')
+
+
+
 
 ###
-# Images config
+# Image options
 ###
 IMAGES_DPI = get_or_create_env_var('IMAGES_DPI', '300.0')
 LOAD_TRUNCATED_IMAGES = get_or_create_env_var('LOAD_TRUNCATED_IMAGES', 'True')
 MAX_IMAGE_PIXELS = get_or_create_env_var('MAX_IMAGE_PIXELS', '') # Changed to None if blank in file_conversion.py
 
 ###
-# File I/O config
+# File I/O options
 ###
+
 SESSION_OUTPUT_FOLDER = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'False') # i.e. do you want your input and output folders saved within a subfolder based on session hash value within output/input folders 
 
 OUTPUT_FOLDER = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/') # 'output/'
@@ -146,8 +148,9 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
         if OUTPUT_FOLDER == "TEMP": OUTPUT_FOLDER = temp_dir + "/"
         if INPUT_FOLDER == "TEMP": INPUT_FOLDER = temp_dir + "/"
 
+
 ###
-# LOGS
+# LOGGING OPTIONS
 ###
 
 # By default, logs are put into a subfolder of today's date and the host name of the instance running the app. This is to avoid at all possible the possibility of log files from one instance overwriting the logs of another instance on S3. If running the app on one system always, or just locally, it is not necessary to make the log folders so specific.
@@ -194,8 +197,18 @@ DYNAMODB_FEEDBACK_LOG_HEADERS = get_or_create_env_var('DYNAMODB_FEEDBACK_LOG_HEA
 USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('USAGE_LOG_DYNAMODB_TABLE_NAME', 'redaction_usage')
 DYNAMODB_USAGE_LOG_HEADERS = get_or_create_env_var('DYNAMODB_USAGE_LOG_HEADERS', '')
 
+# Report logging to console?
+LOGGING = get_or_create_env_var('LOGGING', 'False')
+
+if LOGGING == 'True':
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+
+
 ###
-# REDACTION 
+# REDACTION OPTIONS
 ###
 
 # Create Tesseract and Poppler folders if you have installed them locally
@@ -211,13 +224,16 @@ PAGE_BREAK_VALUE = get_or_create_env_var('PAGE_BREAK_VALUE', '99999')
 
 MAX_TIME_VALUE = get_or_create_env_var('MAX_TIME_VALUE', '999999')
 
-CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "")
+CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "") # only "grey" is currently supported as a custom box colour
 
 REDACTION_LANGUAGE = get_or_create_env_var("REDACTION_LANGUAGE", "en") # Currently only English is supported by the app
 
 RETURN_PDF_END_OF_REDACTION = get_or_create_env_var("RETURN_PDF_END_OF_REDACTION", "True") # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
 
-COMPRESS_REDACTED_PDF = get_or_create_env_var("COMPRESS_REDACTED_PDF", "True") # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
+COMPRESS_REDACTED_PDF = get_or_create_env_var("COMPRESS_REDACTED_PDF","False") # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
+
+
+
 
 ###
 # APP RUN OPTIONS
@@ -253,6 +269,9 @@ S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_a
 if ALLOW_LIST_PATH: OUTPUT_ALLOW_LIST_PATH = ALLOW_LIST_PATH
 else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
+
+
+
 ###
 # COST CODE OPTIONS
 ###
@@ -275,6 +294,9 @@ ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If y
 
 if ENFORCE_COST_CODES == 'True': GET_COST_CODES = 'True'
 
+
+
+
 ###
 # WHOLE DOCUMENT API OPTIONS
 ###
@@ -295,4 +317,4 @@ TEXTRACT_JOBS_S3_INPUT_LOC = get_or_create_env_var('TEXTRACT_JOBS_S3_INPUT_LOC',
 
 TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var('TEXTRACT_JOBS_LOCAL_LOC', 'output') # Local subfolder where the Textract jobs are stored
 
-DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = get_or_create_env_var('DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS', '30') # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.
+DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = get_or_create_env_var('DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS', '7') # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.

@@ -236,6 +236,11 @@ def choose_and_run_redactor(file_paths:List[str],
 
         combined_out_message = re.sub(r'^\n+', '', combined_out_message).strip()
 
+        end_message = "\n\nPlease review and modify the suggested redaction outputs on the 'Review redactions' tab of the app (you can find this under the introduction text at the top of the page)."
+
+        if not end_message in combined_out_message:
+            combined_out_message = combined_out_message + end_message
+
         # Only send across review file if redaction has been done
         if pii_identification_method != no_redaction_option:
 
@@ -533,11 +538,13 @@ def choose_and_run_redactor(file_paths:List[str],
             if latest_file_completed != len(file_paths_list):
                 print("Completed file number:", str(latest_file_completed), "there are more files to do")                    
 
-            progress(0.9, "Saving redacted PDF file")
+            
             
             # Save redacted file
             if pii_identification_method != no_redaction_option:
                 if RETURN_PDF_END_OF_REDACTION == True:
+                    progress(0.9, "Saving redacted file")
+
                     if is_pdf(file_path) == False:
                         out_redacted_pdf_file_path = output_folder + pdf_file_name_without_ext + "_redacted.png"
                         # pymupdf_doc is an image list in this case
@@ -567,11 +574,10 @@ def choose_and_run_redactor(file_paths:List[str],
 
             # Convert the gradio annotation boxes to relative coordinates
             # Convert annotations_all_pages to a consistent relative coordinate format output
+            progress(0.93, "Creating review file output")
             page_sizes = page_sizes_df.to_dict(orient="records")
             all_image_annotations_df = convert_annotation_data_to_dataframe(annotations_all_pages)
-
             all_image_annotations_df = divide_coordinates_by_page_sizes(all_image_annotations_df, page_sizes_df, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax")
-
             annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(all_image_annotations_df, page_sizes)
             annotations_all_pages_divide = remove_duplicate_images_with_blank_boxes(annotations_all_pages_divide)
 
@@ -937,7 +943,7 @@ def set_cropbox_safely(page, original_cropbox):
     """
     mediabox = page.mediabox
     if original_cropbox.width > mediabox.width or original_cropbox.height > mediabox.height:
-        print("Warning: Requested cropbox is larger than the mediabox. Using mediabox instead.")
+        #print("Warning: Requested cropbox is larger than the mediabox. Using mediabox instead.")
         page.set_cropbox(mediabox)
     else:
         page.set_cropbox(original_cropbox)
