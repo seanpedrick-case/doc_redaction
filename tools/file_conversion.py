@@ -27,7 +27,7 @@ IMAGE_NUM_REGEX = re.compile(r'_(\d+)\.png$')
 
 pd.set_option('future.no_silent_downcasting', True)
 
-from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, IMAGES_DPI, LOAD_TRUNCATED_IMAGES, MAX_IMAGE_PIXELS, CUSTOM_BOX_COLOUR
+from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, IMAGES_DPI, LOAD_TRUNCATED_IMAGES, MAX_IMAGE_PIXELS, CUSTOM_BOX_COLOUR, COMPRESS_REDACTED_PDF
 from tools.helper_functions import get_file_name_without_type, tesseract_ocr_option, text_ocr_option, textract_option, read_file
 # from tools.aws_textract import load_and_convert_textract_json
 
@@ -35,6 +35,7 @@ image_dpi = float(IMAGES_DPI)
 if not MAX_IMAGE_PIXELS: Image.MAX_IMAGE_PIXELS = None
 else: Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
+COMPRESS_REDACTED_PDF = COMPRESS_REDACTED_PDF.lower() == "true"
 
 def is_pdf_or_image(filename):
     """
@@ -840,6 +841,15 @@ def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], 
     print(out_message)
 
     return out_message, out_file_paths
+
+def save_pdf_with_or_without_compression(pymupdf_doc:object, out_redacted_pdf_file_path, COMPRESS_REDACTED_PDF:bool=COMPRESS_REDACTED_PDF):
+    '''
+    Save a pymupdf document with basic cleaning or with full compression options. Can be useful for low memory systems to do minimal cleaning to avoid crashing with large PDFs.
+    '''
+    if COMPRESS_REDACTED_PDF == True:
+        pymupdf_doc.save(out_redacted_pdf_file_path, garbage=4, deflate=True, clean=True)
+    else:
+        pymupdf_doc.save(out_redacted_pdf_file_path, garbage=1, clean=True)
 
 def join_values_within_threshold(df1:pd.DataFrame, df2:pd.DataFrame):
     # Threshold for matching

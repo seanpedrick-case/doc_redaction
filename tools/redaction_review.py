@@ -13,8 +13,8 @@ from pymupdf import Document, Rect
 import pymupdf
 from PIL import ImageDraw, Image
 
-from tools.config import OUTPUT_FOLDER, CUSTOM_BOX_COLOUR, MAX_IMAGE_PIXELS, INPUT_FOLDER
-from tools.file_conversion import is_pdf, convert_annotation_json_to_review_df, convert_review_df_to_annotation_json, process_single_page_for_image_conversion, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, divide_coordinates_by_page_sizes
+from tools.config import OUTPUT_FOLDER, CUSTOM_BOX_COLOUR, MAX_IMAGE_PIXELS, INPUT_FOLDER, COMPRESS_REDACTED_PDF
+from tools.file_conversion import is_pdf, convert_annotation_json_to_review_df, convert_review_df_to_annotation_json, process_single_page_for_image_conversion, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, divide_coordinates_by_page_sizes, save_pdf_with_or_without_compression
 from tools.helper_functions import get_file_name_without_type,  detect_file_type
 from tools.file_redaction import redact_page_with_pymupdf
 
@@ -731,9 +731,10 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                      output_folder:str = OUTPUT_FOLDER,
                      save_pdf:bool=True,
                      page_sizes:List[dict]=[],
+                     COMPRESS_REDACTED_PDF:bool=COMPRESS_REDACTED_PDF,
                      progress=gr.Progress(track_tqdm=True)):
     '''
-    Apply modified redactions to a pymupdf and export review files
+    Apply modified redactions to a pymupdf and export review files.
     '''
 
     output_files = []
@@ -849,7 +850,7 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
             #try:
             if pdf_doc:
                 out_pdf_file_path = output_folder + file_name_without_ext + "_redacted.pdf"
-                pdf_doc.save(out_pdf_file_path, garbage=4, deflate=True, clean=True)
+                save_pdf_with_or_without_compression(pdf_doc, out_pdf_file_path, COMPRESS_REDACTED_PDF)
                 output_files.append(out_pdf_file_path)
 
             else:
