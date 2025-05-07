@@ -19,9 +19,9 @@ import gradio as gr
 from gradio import Progress
 from collections import defaultdict  # For efficient grouping
 
-from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER
+from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER, RETURN_PDF_END_OF_REDACTION
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction, merge_text_bounding_boxes, recreate_page_line_level_ocr_results_with_page
-from tools.file_conversion import convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords, is_pdf, is_pdf_or_image, prepare_image_or_pdf, divide_coordinates_by_page_sizes, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, divide_coordinates_by_page_sizes, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, fill_missing_box_ids, load_and_convert_ocr_results_with_words_json
+from tools.file_conversion import convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords, is_pdf, is_pdf_or_image, prepare_image_or_pdf, divide_coordinates_by_page_sizes, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, divide_coordinates_by_page_sizes, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, fill_missing_box_ids, load_and_convert_ocr_results_with_words_json, save_pdf_with_or_without_compression
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer
 from tools.helper_functions import get_file_name_without_type, clean_unicode_text, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, no_redaction_option
 from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult, load_and_convert_textract_json
@@ -30,6 +30,8 @@ ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
 if not MAX_IMAGE_PIXELS: Image.MAX_IMAGE_PIXELS = None
 else: Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 image_dpi = float(IMAGES_DPI)
+
+RETURN_PDF_END_OF_REDACTION = RETURN_PDF_END_OF_REDACTION.lower() == "true"
 
 def bounding_boxes_overlap(box1, box2):
     """Check if two bounding boxes overlap."""
@@ -104,6 +106,7 @@ def choose_and_run_redactor(file_paths:List[str],
  all_page_line_level_ocr_results = [],
  all_page_line_level_ocr_results_with_words = [],
  prepare_images:bool=True,
+ RETURN_PDF_END_OF_REDACTION:bool=RETURN_PDF_END_OF_REDACTION,
  progress=gr.Progress(track_tqdm=True)):
     '''
     This function orchestrates the redaction process based on the specified method and parameters. It takes the following inputs:
@@ -155,6 +158,7 @@ def choose_and_run_redactor(file_paths:List[str],
     - all_page_line_level_ocr_results (list, optional): All line level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words (list, optional): All word level text on the page with bounding boxes.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
+    - RETURN_PDF_END_OF_REDACTION (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
     The function returns a redacted document along with processing logs.
@@ -231,6 +235,11 @@ def choose_and_run_redactor(file_paths:List[str],
             combined_out_message = combined_out_message + '\n' + out_message
 
         combined_out_message = re.sub(r'^\n+', '', combined_out_message).strip()
+
+        end_message = "\n\nPlease review and modify the suggested redaction outputs on the 'Review redactions' tab of the app (you can find this under the introduction text at the top of the page)."
+
+        if not end_message in combined_out_message:
+            combined_out_message = combined_out_message + end_message
 
         # Only send across review file if redaction has been done
         if pii_identification_method != no_redaction_option:
@@ -529,26 +538,27 @@ def choose_and_run_redactor(file_paths:List[str],
             if latest_file_completed != len(file_paths_list):
                 print("Completed file number:", str(latest_file_completed), "there are more files to do")                    
 
-            progress(0.9, "Saving redacted PDF file")
+            
             
             # Save redacted file
             if pii_identification_method != no_redaction_option:
-                if is_pdf(file_path) == False:
-                    out_redacted_pdf_file_path = output_folder + pdf_file_name_without_ext + "_redacted.png"
-                    # pymupdf_doc is an image list in this case
-                    if isinstance(pymupdf_doc[-1], str):
-                        img = Image.open(pymupdf_doc[-1])
-                    # Otherwise could be an image object
-                    else:
-                        img = pymupdf_doc[-1]
-                    img.save(out_redacted_pdf_file_path, "PNG" ,resolution=image_dpi)
-                    #            
-                else:
-                    out_redacted_pdf_file_path = output_folder + pdf_file_name_without_ext + "_redacted.pdf"
-                    print("Saving redacted PDF file:", out_redacted_pdf_file_path)
-                    pymupdf_doc.save(out_redacted_pdf_file_path, garbage=4, deflate=True, clean=True)
+                if RETURN_PDF_END_OF_REDACTION == True:
+                    progress(0.9, "Saving redacted file")
 
-                out_file_paths.append(out_redacted_pdf_file_path)
+                    if is_pdf(file_path) == False:
+                        out_redacted_pdf_file_path = output_folder + pdf_file_name_without_ext + "_redacted.png"
+                        # pymupdf_doc is an image list in this case
+                        if isinstance(pymupdf_doc[-1], str):
+                            img = Image.open(pymupdf_doc[-1])
+                        # Otherwise could be an image object
+                        else:
+                            img = pymupdf_doc[-1]
+                        img.save(out_redacted_pdf_file_path, "PNG" ,resolution=image_dpi)       
+                    else:
+                        out_redacted_pdf_file_path = output_folder + pdf_file_name_without_ext + "_redacted.pdf"
+                        print("Saving redacted PDF file:", out_redacted_pdf_file_path)
+                        save_pdf_with_or_without_compression(pymupdf_doc, out_redacted_pdf_file_path)
+                    out_file_paths.append(out_redacted_pdf_file_path)
 
             if not all_line_level_ocr_results_df.empty:
                 all_line_level_ocr_results_df = all_line_level_ocr_results_df[["page", "text", "left", "top", "width", "height"]]
@@ -564,11 +574,10 @@ def choose_and_run_redactor(file_paths:List[str],
 
             # Convert the gradio annotation boxes to relative coordinates
             # Convert annotations_all_pages to a consistent relative coordinate format output
+            progress(0.93, "Creating review file output")
             page_sizes = page_sizes_df.to_dict(orient="records")
             all_image_annotations_df = convert_annotation_data_to_dataframe(annotations_all_pages)
-
             all_image_annotations_df = divide_coordinates_by_page_sizes(all_image_annotations_df, page_sizes_df, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax")
-
             annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(all_image_annotations_df, page_sizes)
             annotations_all_pages_divide = remove_duplicate_images_with_blank_boxes(annotations_all_pages_divide)
 
@@ -934,7 +943,7 @@ def set_cropbox_safely(page, original_cropbox):
     """
     mediabox = page.mediabox
     if original_cropbox.width > mediabox.width or original_cropbox.height > mediabox.height:
-        print("Warning: Requested cropbox is larger than the mediabox. Using mediabox instead.")
+        #print("Warning: Requested cropbox is larger than the mediabox. Using mediabox instead.")
         page.set_cropbox(mediabox)
     else:
         page.set_cropbox(original_cropbox)
