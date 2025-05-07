@@ -146,6 +146,10 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
         if OUTPUT_FOLDER == "TEMP": OUTPUT_FOLDER = temp_dir + "/"
         if INPUT_FOLDER == "TEMP": INPUT_FOLDER = temp_dir + "/"
 
+###
+# LOGS
+###
+
 # By default, logs are put into a subfolder of today's date and the host name of the instance running the app. This is to avoid at all possible the possibility of log files from one instance overwriting the logs of another instance on S3. If running the app on one system always, or just locally, it is not necessary to make the log folders so specific.
 # Another way to address this issue would be to write logs to another type of storage, e.g. database such as dynamodb. I may look into this in future.
 
@@ -211,8 +215,12 @@ CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "")
 
 REDACTION_LANGUAGE = get_or_create_env_var("REDACTION_LANGUAGE", "en") # Currently only English is supported by the app
 
+RETURN_PDF_END_OF_REDACTION = get_or_create_env_var("RETURN_PDF_END_OF_REDACTION", "True") # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
+
+COMPRESS_REDACTED_PDF = get_or_create_env_var("COMPRESS_REDACTED_PDF", "True") # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
+
 ###
-# APP RUN CONFIG
+# APP RUN OPTIONS
 ###
 
 TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tld/.tld_set_snapshot')
@@ -245,7 +253,9 @@ S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_a
 if ALLOW_LIST_PATH: OUTPUT_ALLOW_LIST_PATH = ALLOW_LIST_PATH
 else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
-### COST CODE OPTIONS
+###
+# COST CODE OPTIONS
+###
 
 SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'False')
 
@@ -265,7 +275,9 @@ ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If y
 
 if ENFORCE_COST_CODES == 'True': GET_COST_CODES = 'True'
 
-### WHOLE DOCUMENT API OPTIONS
+###
+# WHOLE DOCUMENT API OPTIONS
+###
 
 SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = get_or_create_env_var('SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS', 'False') # This feature not currently implemented
 
@@ -281,5 +293,6 @@ TEXTRACT_JOBS_S3_LOC = get_or_create_env_var('TEXTRACT_JOBS_S3_LOC', 'output') #
 
 TEXTRACT_JOBS_S3_INPUT_LOC = get_or_create_env_var('TEXTRACT_JOBS_S3_INPUT_LOC', 'input') # Subfolder in the DOCUMENT_REDACTION_BUCKET where the Textract jobs are stored
 
-
 TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var('TEXTRACT_JOBS_LOCAL_LOC', 'output') # Local subfolder where the Textract jobs are stored
+
+DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = get_or_create_env_var('DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS', '30') # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.
