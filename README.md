@@ -22,9 +22,6 @@ NOTE: The app is not 100% accurate, and it will miss some personal information. 
 
 # USER GUIDE
 
-## Chat with this user guide
-You can now [speak with a chat bot about this user guide](https://huggingface.co/spaces/seanpedrickcase/Light-PDF-Web-QA-Chatbot) (beta!)
-
 ## Table of contents
 
 - [Example data files](#example-data-files)
