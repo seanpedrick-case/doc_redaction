@@ -8,7 +8,7 @@ import copy
 
 from tqdm import tqdm
 from PIL import Image, ImageChops, ImageFile, ImageDraw
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import pandas as pd
 
 from pdfminer.high_level import extract_pages
@@ -932,21 +932,69 @@ def convert_pikepdf_annotations_to_result_annotation_box(page:Page, annot:dict, 
     
     return img_annotation_box, rect
 
-def set_cropbox_safely(page, original_cropbox):
+# def set_cropbox_safely(page, original_cropbox):
+#     """
+#     Sets the cropbox of a page, ensuring it's not larger than the mediabox.
+#     If the original cropbox is larger, the mediabox is used instead.
+
+#     Args:
+#         page: The PyMuPdf page object.
+#         original_cropbox: The fitz.Rect representing the desired cropbox.
+#     """
+#     mediabox = page.mediabox
+#     if original_cropbox.width > mediabox.width or original_cropbox.height > mediabox.height:
+#         #print("Warning: Requested cropbox is larger than the mediabox. Using mediabox instead.")
+#         page.set_cropbox(mediabox)
+#     else:
+#         page.set_cropbox(original_cropbox)
+
+
+def set_cropbox_safely(page: Page, original_cropbox: Optional[Rect]):
     """
-    Sets the cropbox of a page, ensuring it's not larger than the mediabox.
-    If the original cropbox is larger, the mediabox is used instead.
+    Sets the cropbox of a PyMuPDF page safely and defensively.
+
+    If the 'original_cropbox' is valid (i.e., a fitz.Rect instance, not None, not empty,
+    not infinite, and fully contained within the page's mediabox), it is set as the cropbox.
+
+    Otherwise, the page's mediabox is used, and a warning is printed to explain why.
 
     Args:
-        page: The PyMuPdf page object.
-        original_cropbox: The fitz.Rect representing the desired cropbox.
+        page: The PyMuPDF page object.
+        original_cropbox: The Rect representing the desired cropbox.
     """
     mediabox = page.mediabox
-    if original_cropbox.width > mediabox.width or original_cropbox.height > mediabox.height:
-        #print("Warning: Requested cropbox is larger than the mediabox. Using mediabox instead.")
+    reason_for_defaulting = ""
+
+    # Check for None
+    if original_cropbox is None:
+        reason_for_defaulting = "the original cropbox is None."
+    # Check for incorrect type
+    elif not isinstance(original_cropbox, Rect):
+        reason_for_defaulting = f"the original cropbox is not a fitz.Rect instance (got {type(original_cropbox)})."
+    else:
+        # Normalise the cropbox (ensures x0 < x1 and y0 < y1)
+        original_cropbox.normalize()
+
+        # Check for empty or infinite or out-of-bounds
+        if original_cropbox.is_empty:
+            reason_for_defaulting = f"the provided original cropbox {original_cropbox} is empty."
+        elif original_cropbox.is_infinite:
+            reason_for_defaulting = f"the provided original cropbox {original_cropbox} is infinite."
+        elif not mediabox.contains(original_cropbox):
+            reason_for_defaulting = (
+                f"the provided original cropbox {original_cropbox} is not fully contained "
+                f"within the page's mediabox {mediabox}."
+            )
+
+    if reason_for_defaulting:
+        print(
+            f"Warning (Page {page.number}): Cannot use original cropbox because {reason_for_defaulting} "
+            f"Defaulting to the page's mediabox as the cropbox."
+        )
         page.set_cropbox(mediabox)
     else:
         page.set_cropbox(original_cropbox)
+
 
 def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None, custom_colours:bool=False, redact_whole_page:bool=False, convert_pikepdf_to_pymupdf_coords:bool=True, original_cropbox:List[Rect]=[], page_sizes_df:pd.DataFrame=pd.DataFrame()):
 

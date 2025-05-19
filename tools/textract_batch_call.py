@@ -338,18 +338,14 @@ def load_pdf_job_file_from_s3(
     RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS):    
 
     try:
-        print("load_s3_jobs_input_loc:", load_s3_jobs_input_loc)
         pdf_file_location = ''
         doc_file_name_no_extension_textbox = ''
 
         s3_input_key_prefix = os.path.join(load_s3_jobs_input_loc, pdf_filename).replace("\\", "/")
         s3_input_key_prefix = s3_input_key_prefix + ".pdf"
-        print("s3_input_key_prefix:", s3_input_key_prefix)
-
+        
         local_input_file_path = os.path.join(local_output_dir, pdf_filename)
         local_input_file_path = local_input_file_path + ".pdf"
-
-        print("input to s3 download:", s3_bucket_name, s3_input_key_prefix, local_input_file_path)
 
         download_file_from_s3(s3_bucket_name, s3_input_key_prefix, local_input_file_path, RUN_AWS_FUNCTIONS= RUN_AWS_FUNCTIONS)
         
