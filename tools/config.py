@@ -212,8 +212,8 @@ if LOGGING == 'True':
 ###
 
 # Create Tesseract and Poppler folders if you have installed them locally
-TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "") # e.g. tesseract/
-POPPLER_FOLDER = get_or_create_env_var('POPPLER_FOLDER', "") # e.g. poppler/poppler-24.02.0/Library/bin/
+TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "") #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
+POPPLER_FOLDER = get_or_create_env_var('POPPLER_FOLDER', "") # If installing on Windows,install Poppler from here https://github.com/oschwartz10612/poppler-windows. This variable needs to point to the poppler bin folder e.g. poppler/poppler-24.02.0/Library/bin/
 
 if TESSERACT_FOLDER: add_folder_to_path(TESSERACT_FOLDER)
 if POPPLER_FOLDER: add_folder_to_path(POPPLER_FOLDER)

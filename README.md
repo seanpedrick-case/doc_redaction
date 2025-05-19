@@ -10,7 +10,7 @@ license: agpl-3.0
 ---
 # Document redaction
 
-version: 0.6.5
+version: 0.6.6
 
 Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a walkthrough on how to use the app. Below is a very brief overview.
     
@@ -21,9 +21,6 @@ After redaction, review suggested redactions on the 'Review redactions' tab. The
 NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.
 
 # USER GUIDE
-
-## Chat with this user guide
-You can now [speak with a chat bot about this user guide](https://huggingface.co/spaces/seanpedrickcase/Light-PDF-Web-QA-Chatbot) (beta!)
 
 ## Table of contents
 
