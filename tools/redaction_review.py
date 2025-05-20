@@ -12,6 +12,7 @@ from gradio_image_annotation.image_annotator import AnnotatedImageData
 from pymupdf import Document, Rect
 import pymupdf
 from PIL import ImageDraw, Image
+from datetime import datetime, timezone, timedelta
 
 from tools.config import OUTPUT_FOLDER, CUSTOM_BOX_COLOUR, MAX_IMAGE_PIXELS, INPUT_FOLDER, COMPRESS_REDACTED_PDF
 from tools.file_conversion import is_pdf, convert_annotation_json_to_review_df, convert_review_df_to_annotation_json, process_single_page_for_image_conversion, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, divide_coordinates_by_page_sizes, save_pdf_with_or_without_compression
@@ -1264,160 +1265,97 @@ def convert_pymupdf_coords_to_adobe(x1: float, y1: float, x2: float, y2: float, 
     
     return x1, adobe_y1, x2, adobe_y2
 
-def create_xfdf(review_file_df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:List[str], document_cropboxes:List=[], page_sizes:List[dict]=[]):
+def create_xfdf(review_file_df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:List[str]=[], document_cropboxes:List=[], page_sizes:List[dict]=[]):
     '''
     Create an xfdf file from a review csv file and a pdf
     '''
-    pages_are_images = True
+    xfdf_root = Element('xfdf', xmlns="http://ns.adobe.com/xfdf/", **{'xml:space':"preserve"})
+    annots = SubElement(xfdf_root, 'annots')
 
-    # Create root element
-    xfdf = Element('xfdf', xmlns="http://ns.adobe.com/xfdf/", xml_space="preserve")
-    
-    # Add header
-    header = SubElement(xfdf, 'header')
-    header.set('pdf-filepath', pdf_path)
-    
-    # Add annots
-    annots = SubElement(xfdf, 'annots')
-
-    # Check if page size object exists, and if current coordinates are in relative format or image coordinates format.
-    if page_sizes: 
-        
+    if page_sizes:
         page_sizes_df = pd.DataFrame(page_sizes)
-
-        # If there are no image coordinates, then convert coordinates to pymupdf coordinates prior to export
-        pages_are_images = False
-
-        if "mediabox_width" not in review_file_df.columns:            
-                review_file_df = review_file_df.merge(page_sizes_df, how="left", on = "page")
-        
-        # If all coordinates are less or equal to one, this is a relative page scaling - change back to image coordinates
-        if review_file_df["xmin"].max() <= 1 and review_file_df["xmax"].max() <= 1 and review_file_df["ymin"].max() <= 1 and review_file_df["ymax"].max() <= 1:
-            review_file_df["xmin"] = review_file_df["xmin"] * review_file_df["mediabox_width"]
-            review_file_df["xmax"] = review_file_df["xmax"] * review_file_df["mediabox_width"]
-            review_file_df["ymin"] = review_file_df["ymin"] * review_file_df["mediabox_height"]
-            review_file_df["ymax"] = review_file_df["ymax"] * review_file_df["mediabox_height"]
-
-        # If all nulls, then can do image coordinate conversion
-        if len(page_sizes_df.loc[page_sizes_df["mediabox_width"].isnull(),"mediabox_width"]) == len(page_sizes_df["mediabox_width"]):
-
-            pages_are_images = True
-
+        if not page_sizes_df.empty and "mediabox_width" not in review_file_df.columns:
+            review_file_df = review_file_df.merge(page_sizes_df, how="left", on="page")
+        if "xmin" in review_file_df.columns and review_file_df["xmin"].max() <= 1:
+            if "mediabox_width" in review_file_df.columns and "mediabox_height" in review_file_df.columns:
+                review_file_df["xmin"] = review_file_df["xmin"] * review_file_df["mediabox_width"]
+                review_file_df["xmax"] = review_file_df["xmax"] * review_file_df["mediabox_width"]
+                review_file_df["ymin"] = review_file_df["ymin"] * review_file_df["mediabox_height"]
+                review_file_df["ymax"] = review_file_df["ymax"] * review_file_df["mediabox_height"]
+        elif "image_width" in review_file_df.columns and not page_sizes_df.empty :
             review_file_df = multiply_coordinates_by_page_sizes(review_file_df, page_sizes_df, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax")
 
-            # if "image_width" not in review_file_df.columns:            
-            #         review_file_df = review_file_df.merge(page_sizes_df, how="left", on = "page")
-            
-            # # If all coordinates are less or equal to one, this is a relative page scaling - change back to image coordinates
-            # if review_file_df["xmin"].max() <= 1 and review_file_df["xmax"].max() <= 1 and review_file_df["ymin"].max() <= 1 and review_file_df["ymax"].max() <= 1:
-            #     review_file_df["xmin"] = review_file_df["xmin"] * review_file_df["image_width"]
-            #     review_file_df["xmax"] = review_file_df["xmax"] * review_file_df["image_width"]
-            #     review_file_df["ymin"] = review_file_df["ymin"] * review_file_df["image_height"]
-            #     review_file_df["ymax"] = review_file_df["ymax"] * review_file_df["image_height"]
-
-                
-    
-    # Go through each row of the review_file_df, create an entry in the output Adobe xfdf file.
     for _, row in review_file_df.iterrows():
-        page_num_reported = row["page"]
-        page_python_format = int(row["page"])-1
-
+        page_num_reported = int(row["page"])
+        page_python_format = page_num_reported - 1
         pymupdf_page = pymupdf_doc.load_page(page_python_format)
 
-        # Load cropbox sizes. Set cropbox to the original cropbox sizes from when the document was loaded into the app.
-        if document_cropboxes:
-
-            # Extract numbers safely using regex
+        if document_cropboxes and page_python_format < len(document_cropboxes):
             match = re.findall(r"[-+]?\d*\.\d+|\d+", document_cropboxes[page_python_format])
-
             if match and len(match) == 4:
-                rect_values = list(map(float, match))  # Convert extracted strings to floats
+                rect_values = list(map(float, match))
                 pymupdf_page.set_cropbox(Rect(*rect_values))
-            else:
-                raise ValueError(f"Invalid cropbox format: {document_cropboxes[page_python_format]}")
-        else:
-            print("Document cropboxes not found.")
-        
-        pdf_page_height = pymupdf_page.mediabox.height
-        pdf_page_width = pymupdf_page.mediabox.width     
 
-        # Create redaction annotation
+        pdf_page_height = pymupdf_page.mediabox.height
         redact_annot = SubElement(annots, 'redact')
-        
-        # Generate unique ID
+        redact_annot.set('opacity', "0.500000")
+        redact_annot.set('interior-color', "#000000")
+
+        now = datetime.now(timezone(timedelta(hours=1))) # Consider making tz configurable or UTC
+        date_str = now.strftime("D:%Y%m%d%H%M%S") + now.strftime("%z")[:3] + "'" + now.strftime("%z")[3:] + "'"
+        redact_annot.set('date', date_str)
+
         annot_id = str(uuid.uuid4())
         redact_annot.set('name', annot_id)
-        
-        # Set page number (subtract 1 as PDF pages are 0-based)
-        redact_annot.set('page', str(int(row['page']) - 1))
-        
-        # # Convert coordinates
-        # if pages_are_images == True:
-        #     x1, y1, x2, y2 = convert_image_coords_to_adobe(
-        #         pdf_page_width,
-        #         pdf_page_height,
-        #         image_page_width,
-        #         image_page_height,
-        #         row['xmin'],
-        #         row['ymin'],
-        #         row['xmax'],
-        #         row['ymax']
-        #     )
-        # else:
-        x1, y1, x2, y2 = convert_pymupdf_coords_to_adobe(row['xmin'],
-            row['ymin'],
-            row['xmax'],
-            row['ymax'], pdf_page_height)
-
-        if CUSTOM_BOX_COLOUR == "grey":
-            colour_str = "0.5,0.5,0.5"        
-        else:
-            colour_str = row['color'].strip('()').replace(' ', '')
-        
-        # Set coordinates
-        redact_annot.set('rect', f"{x1:.2f},{y1:.2f},{x2:.2f},{y2:.2f}")
-        
-        # Set redaction properties
-        redact_annot.set('title', row['label'])  # The type of redaction (e.g., "PERSON")
-        redact_annot.set('contents', row['text'])  # The redacted text
-        redact_annot.set('subject', row['label'])  # The redacted text
+        redact_annot.set('page', str(page_python_format))
         redact_annot.set('mimetype', "Form")
-        
-        # Set appearance properties
-        redact_annot.set('border-color', colour_str)  # Black border
-        redact_annot.set('repeat', 'false')
-        redact_annot.set('interior-color', colour_str)
-        #redact_annot.set('fill-color', colour_str)
-        #redact_annot.set('outline-color', colour_str)
-        #redact_annot.set('overlay-color', colour_str)
-        #redact_annot.set('overlay-text', row['label'])
-        redact_annot.set('opacity', "0.5")
 
-        # Add appearance dictionary
-        # appearanceDict = SubElement(redact_annot, 'appearancedict')
-        
-        # # Normal appearance
-        # normal = SubElement(appearanceDict, 'normal')
-        # #normal.set('appearance', 'redact')
-                
-        # # Color settings for the mark (before applying redaction)
-        # markAppearance = SubElement(redact_annot, 'markappearance')
-        # markAppearance.set('stroke-color', colour_str)  # Red outline
-        # markAppearance.set('fill-color', colour_str)    # Light red fill
-        # markAppearance.set('opacity', '0.5')          # 50% opacity
-        
-        # # Final redaction appearance (after applying)
-        # redactAppearance = SubElement(redact_annot, 'redactAppearance')
-        # redactAppearance.set('fillColor', colour_str)  # Black fill
-        # redactAppearance.set('fontName', 'Helvetica')
-        # redactAppearance.set('fontSize', '12')
-        # redactAppearance.set('textAlignment', 'left')
-        # redactAppearance.set('textColor', colour_str)  # White text
-    
-    # Convert to pretty XML string
-    xml_str = minidom.parseString(tostring(xfdf)).toprettyxml(indent="  ")
-    
-    return xml_str
+        x1_pdf, y1_pdf, x2_pdf, y2_pdf = row['xmin'], row['ymin'], row['xmax'], row['ymax']
+        adobe_x1, adobe_y1, adobe_x2, adobe_y2 = convert_pymupdf_coords_to_adobe(
+            x1_pdf, y1_pdf, x2_pdf, y2_pdf, pdf_page_height
+        )
+        redact_annot.set('rect', f"{adobe_x1:.6f},{adobe_y1:.6f},{adobe_x2:.6f},{adobe_y2:.6f}")
+
+        redact_annot.set('subject', str(row['label'])) # Changed from row['text'] to row['label']
+        redact_annot.set('title', str(row.get('label', 'Unknown'))) # Fallback for title
+
+        contents_richtext = SubElement(redact_annot, 'contents-richtext')
+        body_attrs = {
+            'xmlns': "http://www.w3.org/1999/xhtml",
+            '{http://www.xfa.org/schema/xfa-data/1.0/}APIVersion': "Acrobat:25.1.0",
+            '{http://www.xfa.org/schema/xfa-data/1.0/}spec': "2.0.2"
+        }
+        body = SubElement(contents_richtext, 'body', attrib=body_attrs)
+        p_element = SubElement(body, 'p', dir="ltr")
+        span_attrs = {
+            'dir': "ltr",
+            'style': "font-size:10.0pt;text-align:left;color:#000000;font-weight:normal;font-style:normal"
+        }
+        span_element = SubElement(p_element, 'span', attrib=span_attrs)
+        span_element.text = str(row['text']).strip() # Added .strip()
+
+        pdf_ops_for_black_fill_and_outline = [
+            "1 w",                             # 1. Set line width to 1 point for the stroke
+            "0 g",                             # 2. Set NON-STROKING (fill) color to black
+            "0 G",                             # 3. Set STROKING (outline) color to black
+            "1 0 0 1 0 0 cm",                  # 4. CTM (using absolute page coordinates)
+            f"{adobe_x1:.2f} {adobe_y1:.2f} m",  # 5. Path definition: move to start
+            f"{adobe_x2:.2f} {adobe_y1:.2f} l",  # line
+            f"{adobe_x2:.2f} {adobe_y2:.2f} l",  # line
+            f"{adobe_x1:.2f} {adobe_y2:.2f} l",  # line
+            "h",                               # 6. Close the path (creates the last line back to start)
+            "B"                                # 7. Fill AND Stroke the path using non-zero winding rule
+        ]
+        data_content_string = "\n".join(pdf_ops_for_black_fill_and_outline) + "\n"
+        data_element = SubElement(redact_annot, 'data')
+        data_element.set('MODE', "filtered")
+        data_element.set('encoding', "ascii")
+        data_element.set('length', str(len(data_content_string.encode('ascii'))))
+        data_element.text = data_content_string
+
+    rough_string = tostring(xfdf_root, encoding='unicode', method='xml')
+    reparsed = minidom.parseString(rough_string)
+    return reparsed.toxml() #.toprettyxml(indent="  ")
 
 def convert_df_to_xfdf(input_files:List[str], pdf_doc:Document, image_paths:List[str], output_folder:str = OUTPUT_FOLDER, document_cropboxes:List=[], page_sizes:List[dict]=[]):
     '''
@@ -1448,14 +1386,16 @@ def convert_df_to_xfdf(input_files:List[str], pdf_doc:Document, image_paths:List
         if file_path_end == "pdf":
             pdf_name = os.path.basename(file_path)
 
-        if file_path_end == "csv":
+        if file_path_end == "csv" and "review_file" in file_path_name:
             # If no pdf name, just get the name of the file path
             if not pdf_name:
                 pdf_name = file_path_name
             # Read CSV file
             review_file_df = pd.read_csv(file_path)
 
-            review_file_df.fillna('', inplace=True)  # Replace NaN in review file with an empty string
+            # Replace NaN in review file with an empty string
+            if 'text' in review_file_df.columns:  review_file_df['text'] = review_file_df['text'].fillna('')  
+            if 'label' in review_file_df.columns: review_file_df['label'] = review_file_df['label'].fillna('')
 
             xfdf_content = create_xfdf(review_file_df, pdf_name, pdf_doc, image_paths, document_cropboxes, page_sizes)
 
