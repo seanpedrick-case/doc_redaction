@@ -204,7 +204,7 @@ if LOGGING == 'True':
     # Configure logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
+LOG_FILE_NAME = get_or_create_env_var('LOG_FILE_NAME', 'log.csv')
 
 
 ###
@@ -217,6 +217,80 @@ POPPLER_FOLDER = get_or_create_env_var('POPPLER_FOLDER', "") # If installing on 
 
 if TESSERACT_FOLDER: add_folder_to_path(TESSERACT_FOLDER)
 if POPPLER_FOLDER: add_folder_to_path(POPPLER_FOLDER)
+
+# List of models to use for text extraction and PII detection
+# Text extraction models
+SELECTABLE_TEXT_EXTRACT_OPTION = get_or_create_env_var('SELECTABLE_TEXT_EXTRACT_OPTION', "Local model - selectable text")
+TESSERACT_TEXT_EXTRACT_OPTION = get_or_create_env_var('TESSERACT_TEXT_EXTRACT_OPTION', "Local OCR model - PDFs without selectable text")
+TEXTRACT_TEXT_EXTRACT_OPTION = get_or_create_env_var('TEXTRACT_TEXT_EXTRACT_OPTION', "AWS Textract service - all PDF types")
+
+# PII detection models
+NO_REDACTION_PII_OPTION = get_or_create_env_var('NO_REDACTION_PII_OPTION', "Only extract text (no redaction)")
+LOCAL_PII_OPTION = get_or_create_env_var('LOCAL_PII_OPTION', "Local")
+AWS_PII_OPTION  = get_or_create_env_var('AWS_PII_OPTION', "AWS Comprehend")
+
+SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = get_or_create_env_var('SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS', 'True')
+SHOW_AWS_TEXT_EXTRACTION_OPTIONS = get_or_create_env_var('SHOW_AWS_TEXT_EXTRACTION_OPTIONS', 'True')
+
+# Show at least local options if everything mistakenly removed
+if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS != "True" and SHOW_AWS_TEXT_EXTRACTION_OPTIONS != "True":
+    SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = "True"
+
+local_model_options = []
+aws_model_options = []
+text_extraction_models = []
+
+if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS == 'True':
+    local_model_options.append(SELECTABLE_TEXT_EXTRACT_OPTION)
+    local_model_options.append(TESSERACT_TEXT_EXTRACT_OPTION)
+
+if SHOW_AWS_TEXT_EXTRACTION_OPTIONS == 'True':
+    aws_model_options.append(TEXTRACT_TEXT_EXTRACT_OPTION)
+
+TEXT_EXTRACTION_MODELS = local_model_options + aws_model_options
+
+SHOW_LOCAL_PII_DETECTION_OPTIONS = get_or_create_env_var('SHOW_LOCAL_PII_DETECTION_OPTIONS', 'True')
+SHOW_AWS_PII_DETECTION_OPTIONS = get_or_create_env_var('SHOW_AWS_PII_DETECTION_OPTIONS', 'True')
+
+if SHOW_LOCAL_PII_DETECTION_OPTIONS != "True" and SHOW_AWS_PII_DETECTION_OPTIONS != "True":
+    SHOW_LOCAL_PII_DETECTION_OPTIONS = "True"
+
+local_model_options = [NO_REDACTION_PII_OPTION]
+aws_model_options = []
+pii_detection_models = []
+
+if SHOW_LOCAL_PII_DETECTION_OPTIONS == 'True':
+    local_model_options.append(LOCAL_PII_OPTION)
+
+if SHOW_AWS_PII_DETECTION_OPTIONS == 'True':
+    aws_model_options.append(AWS_PII_OPTION)
+
+PII_DETECTION_MODELS = local_model_options + aws_model_options
+
+if SHOW_AWS_TEXT_EXTRACTION_OPTIONS == "True":
+    DEFAULT_TEXT_EXTRACTION_MODEL = get_or_create_env_var('DEFAULT_TEXT_EXTRACTION_MODEL', TEXTRACT_TEXT_EXTRACT_OPTION)
+else:
+    DEFAULT_TEXT_EXTRACTION_MODEL = get_or_create_env_var('DEFAULT_TEXT_EXTRACTION_MODEL', SELECTABLE_TEXT_EXTRACT_OPTION)
+
+if SHOW_AWS_PII_DETECTION_OPTIONS == "True":
+    DEFAULT_PII_DETECTION_MODEL = get_or_create_env_var('DEFAULT_PII_DETECTION_MODEL', AWS_PII_OPTION)
+else:
+    DEFAULT_PII_DETECTION_MODEL = get_or_create_env_var('DEFAULT_PII_DETECTION_MODEL', LOCAL_PII_OPTION)
+
+# Create list of PII detection models for tabular redaction
+TABULAR_PII_DETECTION_MODELS = PII_DETECTION_MODELS.copy()
+if NO_REDACTION_PII_OPTION in TABULAR_PII_DETECTION_MODELS:
+    TABULAR_PII_DETECTION_MODELS.remove(NO_REDACTION_PII_OPTION)
+
+# Entities for redaction
+CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var('CHOSEN_COMPREHEND_ENTITIES', "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD', 'IP_ADDRESS','MAC_ADDRESS', 'LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER', 'INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER']")
+
+FULL_COMPREHEND_ENTITY_LIST = get_or_create_env_var('FULL_COMPREHEND_ENTITY_LIST', "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE','SSN','DATE_TIME','PASSPORT_NUMBER','DRIVER_ID','URL','AGE','USERNAME','PASSWORD','AWS_ACCESS_KEY','AWS_SECRET_KEY','IP_ADDRESS','MAC_ADDRESS','ALL','LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER','CA_SOCIAL_INSURANCE_NUMBER','US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER','UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER','IN_PERMANENT_ACCOUNT_NUMBER','IN_NREGA','INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER','CA_HEALTH_NUMBER','IN_AADHAAR','IN_VOTER_NUMBER', 'CUSTOM_FUZZY']")
+
+# Entities for local PII redaction option
+CHOSEN_REDACT_ENTITIES = get_or_create_env_var('CHOSEN_REDACT_ENTITIES', "['TITLES', 'PERSON', 'PHONE_NUMBER', 'EMAIL_ADDRESS', 'STREETNAME', 'UKPOSTCODE', 'CUSTOM']")
+
+FULL_ENTITY_LIST = get_or_create_env_var('FULL_ENTITY_LIST', "['TITLES', 'PERSON', 'PHONE_NUMBER', 'EMAIL_ADDRESS', 'STREETNAME', 'UKPOSTCODE', 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS', 'CUSTOM', 'CUSTOM_FUZZY']")
 
 
 # Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).
@@ -231,9 +305,6 @@ REDACTION_LANGUAGE = get_or_create_env_var("REDACTION_LANGUAGE", "en") # Current
 RETURN_PDF_END_OF_REDACTION = get_or_create_env_var("RETURN_PDF_END_OF_REDACTION", "True") # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
 
 COMPRESS_REDACTED_PDF = get_or_create_env_var("COMPRESS_REDACTED_PDF","False") # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
-
-
-
 
 ###
 # APP RUN OPTIONS
@@ -269,7 +340,7 @@ S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_a
 if ALLOW_LIST_PATH: OUTPUT_ALLOW_LIST_PATH = ALLOW_LIST_PATH
 else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
-
+FILE_INPUT_HEIGHT = get_or_create_env_var('FILE_INPUT_HEIGHT', '200')
 
 
 ###

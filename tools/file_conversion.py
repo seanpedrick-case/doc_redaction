@@ -1,5 +1,4 @@
 from pdf2image import convert_from_path, pdfinfo_from_path
-
 from PIL import Image, ImageFile
 import os
 import re
@@ -14,7 +13,7 @@ import zipfile
 from collections import defaultdict
 from tqdm import tqdm
 from gradio import Progress
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pdf2image import convert_from_path
 from PIL import Image
@@ -23,13 +22,13 @@ import random
 import string
 import warnings # To warn about potential type changes
 
+from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, IMAGES_DPI, LOAD_TRUNCATED_IMAGES, MAX_IMAGE_PIXELS, CUSTOM_BOX_COLOUR, COMPRESS_REDACTED_PDF, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION
+from tools.helper_functions import get_file_name_without_type, read_file
+# from tools.aws_textract import load_and_convert_textract_json
+
 IMAGE_NUM_REGEX = re.compile(r'_(\d+)\.png$')
 
 pd.set_option('future.no_silent_downcasting', True)
-
-from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, IMAGES_DPI, LOAD_TRUNCATED_IMAGES, MAX_IMAGE_PIXELS, CUSTOM_BOX_COLOUR, COMPRESS_REDACTED_PDF
-from tools.helper_functions import get_file_name_without_type, tesseract_ocr_option, text_ocr_option, textract_option, read_file
-# from tools.aws_textract import load_and_convert_textract_json
 
 image_dpi = float(IMAGES_DPI)
 if not MAX_IMAGE_PIXELS: Image.MAX_IMAGE_PIXELS = None
@@ -596,8 +595,8 @@ def prepare_image_or_pdf(
             
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
             # Check if the file is an image type and the user selected text ocr option
-            if file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == text_ocr_option:
-                in_redact_method = tesseract_ocr_option
+            if file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == SELECTABLE_TEXT_EXTRACT_OPTION:
+                in_redact_method = TESSERACT_TEXT_EXTRACT_OPTION
 
             # Convert image to a pymupdf document
             pymupdf_doc = pymupdf.open()  # Create a new empty document
@@ -765,13 +764,13 @@ def prepare_image_or_pdf(
 
         # Must be something else, return with error message
         else:
-            if in_redact_method == tesseract_ocr_option or in_redact_method == textract_option:
+            if in_redact_method == TESSERACT_TEXT_EXTRACT_OPTION or in_redact_method == TEXTRACT_TEXT_EXTRACT_OPTION:
                 if is_pdf_or_image(file_path) == False:
                     out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
                     print(out_message)
                     raise Exception(out_message)
 
-            elif in_redact_method == text_ocr_option:
+            elif in_redact_method == SELECTABLE_TEXT_EXTRACT_OPTION:
                 if is_pdf(file_path) == False:
                     out_message = "Please upload a PDF file for text analysis."
                     print(out_message)

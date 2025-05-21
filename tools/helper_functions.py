@@ -9,16 +9,7 @@ import unicodedata
 from typing import List
 from math import ceil
 from gradio_image_annotation import image_annotator
-from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC
-
-# Names for options labels
-text_ocr_option = "Local model - selectable text"
-tesseract_ocr_option = "Local OCR model - PDFs without selectable text"
-textract_option = "AWS Textract service - all PDF types"
-
-no_redaction_option = "Only extract text (no redaction)"
-local_pii_detector = "Local"
-aws_pii_detector  = "AWS Comprehend"
+from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, SELECTABLE_TEXT_EXTRACT_OPTION, TESSERACT_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, AWS_PII_OPTION
 
 def reset_state_vars():
     return [], pd.DataFrame(), pd.DataFrame(), 0, "", image_annotator(
@@ -438,9 +429,9 @@ def calculate_aws_costs(number_of_pages:str,
                         comprehend_unit_cost:float=0.0001,
                         comprehend_size_unit_average:float=250,
                         average_characters_per_page:float=2000,
-                        textract_option:str=textract_option,
-                        no_redaction_option:str=no_redaction_option,
-                        aws_pii_detector:str=aws_pii_detector):
+                        TEXTRACT_TEXT_EXTRACT_OPTION:str=TEXTRACT_TEXT_EXTRACT_OPTION,
+                        NO_REDACTION_PII_OPTION:str=NO_REDACTION_PII_OPTION,
+                        AWS_PII_OPTION:str=AWS_PII_OPTION):
     '''
     Calculate the approximate cost of submitting a document to AWS Textract and/or AWS Comprehend, assuming that Textract outputs do not already exist in the output folder.
 
@@ -457,9 +448,9 @@ def calculate_aws_costs(number_of_pages:str,
     - comprehend_unit_cost (float, optional): Cost per 'unit' (300 character minimum) for identifying PII in text with AWS Comprehend.
     - comprehend_size_unit_average (float, optional): Average size of a 'unit' of text passed to AWS Comprehend by the app through the batching process
     - average_characters_per_page (float, optional): Average number of characters on an A4 page.
-    - textract_option (str, optional): String label for the text_extract_method_radio button for AWS Textract.
-    - no_redaction_option (str, optional): String label for pii_identification_method_drop for no redaction.
-    - aws_pii_detector (str, optional): String label for pii_identification_method_drop for AWS Comprehend.
+    - TEXTRACT_TEXT_EXTRACT_OPTION (str, optional): String label for the text_extract_method_radio button for AWS Textract.
+    - NO_REDACTION_PII_OPTION (str, optional): String label for pii_identification_method_drop for no redaction.
+    - AWS_PII_OPTION (str, optional): String label for pii_identification_method_drop for AWS Comprehend.
     '''
     text_extraction_cost = 0
     pii_identification_cost = 0
@@ -467,14 +458,14 @@ def calculate_aws_costs(number_of_pages:str,
     number_of_pages = int(number_of_pages)
     
     if textract_output_found_checkbox != True:
-        if text_extract_method_radio == textract_option:
+        if text_extract_method_radio == TEXTRACT_TEXT_EXTRACT_OPTION:
             text_extraction_cost = number_of_pages * textract_page_cost
 
             if "Extract signatures" in handwrite_signature_checkbox:
                 text_extraction_cost += (textract_signature_cost * number_of_pages)
 
-    if pii_identification_method != no_redaction_option:
-        if pii_identification_method == aws_pii_detector:
+    if pii_identification_method != NO_REDACTION_PII_OPTION:
+        if pii_identification_method == AWS_PII_OPTION:
             comprehend_page_cost = ceil(average_characters_per_page / comprehend_size_unit_average) * comprehend_unit_cost
             pii_identification_cost = comprehend_page_cost * number_of_pages
 
@@ -497,11 +488,11 @@ def calculate_time_taken(number_of_pages:str,
                         local_text_extraction_page_time:float=0.3,
                         local_pii_redaction_page_time:float=0.5,                        
                         local_ocr_extraction_page_time:float=1.5,
-                        textract_option:str=textract_option,
-                        text_ocr_option:str=text_ocr_option,
-                        local_ocr_option:str=tesseract_ocr_option,
-                        no_redaction_option:str=no_redaction_option,
-                        aws_pii_detector:str=aws_pii_detector):
+                        TEXTRACT_TEXT_EXTRACT_OPTION:str=TEXTRACT_TEXT_EXTRACT_OPTION,
+                        SELECTABLE_TEXT_EXTRACT_OPTION:str=SELECTABLE_TEXT_EXTRACT_OPTION,
+                        local_ocr_option:str=TESSERACT_TEXT_EXTRACT_OPTION,
+                        NO_REDACTION_PII_OPTION:str=NO_REDACTION_PII_OPTION,
+                        AWS_PII_OPTION:str=AWS_PII_OPTION):
     '''
     Calculate the approximate time to redact a document.
 
@@ -516,11 +507,11 @@ def calculate_time_taken(number_of_pages:str,
     - local_text_redaction_page_time (float, optional): Approximate time to extract text on a page with the local text redaction option.
     - local_pii_redaction_page_time (float, optional): Approximate time to redact text on a page with the local text redaction option.
     - local_ocr_extraction_page_time (float, optional): Approximate time to extract text from a page with the local OCR redaction option.
-    - textract_option (str, optional): String label for the text_extract_method_radio button for AWS Textract.
-    - text_ocr_option (str, optional): String label for text_extract_method_radio for text extraction.
+    - TEXTRACT_TEXT_EXTRACT_OPTION (str, optional): String label for the text_extract_method_radio button for AWS Textract.
+    - SELECTABLE_TEXT_EXTRACT_OPTION (str, optional): String label for text_extract_method_radio for text extraction.
     - local_ocr_option (str, optional): String label for text_extract_method_radio for local OCR.
-    - no_redaction_option (str, optional): String label for pii_identification_method_drop for no redaction.    
-    - aws_pii_detector (str, optional): String label for pii_identification_method_drop for AWS Comprehend.
+    - NO_REDACTION_PII_OPTION (str, optional): String label for pii_identification_method_drop for no redaction.    
+    - AWS_PII_OPTION (str, optional): String label for pii_identification_method_drop for AWS Comprehend.
     '''
     calculated_time_taken = 0
     page_conversion_time_taken = 0
@@ -530,22 +521,22 @@ def calculate_time_taken(number_of_pages:str,
     number_of_pages = int(number_of_pages)
 
     # Page preparation/conversion to image time
-    if (text_extract_method_radio != text_ocr_option) and (textract_output_found_checkbox != True):
+    if (text_extract_method_radio != SELECTABLE_TEXT_EXTRACT_OPTION) and (textract_output_found_checkbox != True):
         page_conversion_time_taken = number_of_pages * convert_page_time
 
     # Page text extraction time
-    if text_extract_method_radio == textract_option:
+    if text_extract_method_radio == TEXTRACT_TEXT_EXTRACT_OPTION:
         if textract_output_found_checkbox != True:
             page_extraction_time_taken = number_of_pages * textract_page_time
     elif text_extract_method_radio == local_ocr_option:
         if local_ocr_output_found_checkbox != True:
             page_extraction_time_taken = number_of_pages * local_ocr_extraction_page_time
-    elif text_extract_method_radio == text_ocr_option:
+    elif text_extract_method_radio == SELECTABLE_TEXT_EXTRACT_OPTION:
         page_conversion_time_taken = number_of_pages * local_text_extraction_page_time
 
     # Page redaction time
-    if pii_identification_method != no_redaction_option:
-        if pii_identification_method == aws_pii_detector:
+    if pii_identification_method != NO_REDACTION_PII_OPTION:
+        if pii_identification_method == AWS_PII_OPTION:
             page_redaction_time_taken = number_of_pages * comprehend_page_time
         else:
             page_redaction_time_taken = number_of_pages * local_pii_redaction_page_time

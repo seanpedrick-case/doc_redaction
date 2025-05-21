@@ -14,8 +14,8 @@ import pymupdf
 from PIL import ImageDraw, Image
 from datetime import datetime, timezone, timedelta
 
-from tools.config import OUTPUT_FOLDER, CUSTOM_BOX_COLOUR, MAX_IMAGE_PIXELS, INPUT_FOLDER, COMPRESS_REDACTED_PDF
-from tools.file_conversion import is_pdf, convert_annotation_json_to_review_df, convert_review_df_to_annotation_json, process_single_page_for_image_conversion, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, divide_coordinates_by_page_sizes, save_pdf_with_or_without_compression
+from tools.config import OUTPUT_FOLDER, MAX_IMAGE_PIXELS, INPUT_FOLDER, COMPRESS_REDACTED_PDF
+from tools.file_conversion import is_pdf, convert_annotation_json_to_review_df, convert_review_df_to_annotation_json, process_single_page_for_image_conversion, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, remove_duplicate_images_with_blank_boxes, fill_missing_ids, divide_coordinates_by_page_sizes, save_pdf_with_or_without_compression
 from tools.helper_functions import get_file_name_without_type,  detect_file_type
 from tools.file_redaction import redact_page_with_pymupdf
 
@@ -1040,7 +1040,7 @@ def reset_dropdowns(df:pd.DataFrame):
 
     return recogniser_entities_drop, text_entities_drop, page_entities_drop
     
-def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
+def df_select_callback_dataframe_row(df: pd.DataFrame, evt: gr.SelectData):
 
         row_value_page = evt.row_value[0] # This is the page number value
         row_value_label = evt.row_value[1] # This is the label number value
@@ -1049,7 +1049,7 @@ def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
 
         row_value_df = pd.DataFrame(data={"page":[row_value_page], "label":[row_value_label], "text":[row_value_text], "id":[row_value_id]})
 
-        return row_value_df
+        return row_value_df, row_value_text
 
 def df_select_callback_textract_api(df: pd.DataFrame, evt: gr.SelectData):
 
@@ -1078,6 +1078,16 @@ def df_select_callback_ocr(df: pd.DataFrame, evt: gr.SelectData):
         row_value_df = pd.DataFrame(data={"page":[row_value_page], "text":[row_value_text]})
 
         return row_value_page, row_value_df
+
+def get_all_rows_with_same_text(df: pd.DataFrame, text: str):
+    '''
+    Get all rows with the same text as the selected row
+    '''
+    if text:
+        # Get all rows with the same text as the selected row
+        return df[df["text"] == text]
+    else:
+        return pd.DataFrame(columns=["page", "label", "text", "id"])
 
 def update_selected_review_df_row_colour(
     redaction_row_selection: pd.DataFrame,
