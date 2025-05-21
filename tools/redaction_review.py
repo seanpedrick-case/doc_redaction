@@ -1040,7 +1040,7 @@ def reset_dropdowns(df:pd.DataFrame):
 
     return recogniser_entities_drop, text_entities_drop, page_entities_drop
     
-def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
+def df_select_callback_dataframe_row(df: pd.DataFrame, evt: gr.SelectData):
 
         row_value_page = evt.row_value[0] # This is the page number value
         row_value_label = evt.row_value[1] # This is the label number value
@@ -1049,7 +1049,7 @@ def df_select_callback(df: pd.DataFrame, evt: gr.SelectData):
 
         row_value_df = pd.DataFrame(data={"page":[row_value_page], "label":[row_value_label], "text":[row_value_text], "id":[row_value_id]})
 
-        return row_value_df
+        return row_value_df, row_value_text
 
 def df_select_callback_textract_api(df: pd.DataFrame, evt: gr.SelectData):
 
@@ -1078,6 +1078,16 @@ def df_select_callback_ocr(df: pd.DataFrame, evt: gr.SelectData):
         row_value_df = pd.DataFrame(data={"page":[row_value_page], "text":[row_value_text]})
 
         return row_value_page, row_value_df
+
+def get_all_rows_with_same_text(df: pd.DataFrame, text: str):
+    '''
+    Get all rows with the same text as the selected row
+    '''
+    if text:
+        # Get all rows with the same text as the selected row
+        return df[df["text"] == text]
+    else:
+        return pd.DataFrame(columns=["page", "label", "text", "id"])
 
 def update_selected_review_df_row_colour(
     redaction_row_selection: pd.DataFrame,
