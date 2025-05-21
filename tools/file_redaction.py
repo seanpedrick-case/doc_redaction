@@ -19,11 +19,11 @@ import gradio as gr
 from gradio import Progress
 from collections import defaultdict  # For efficient grouping
 
-from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER, RETURN_PDF_END_OF_REDACTION
-from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction, merge_text_bounding_boxes, recreate_page_line_level_ocr_results_with_page
-from tools.file_conversion import convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, convert_pymupdf_to_image_coords, is_pdf, is_pdf_or_image, prepare_image_or_pdf, divide_coordinates_by_page_sizes, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, divide_coordinates_by_page_sizes, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, fill_missing_box_ids, load_and_convert_ocr_results_with_words_json, save_pdf_with_or_without_compression
+from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER, RETURN_PDF_END_OF_REDACTION, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, LOCAL_PII_OPTION, AWS_PII_OPTION, NO_REDACTION_PII_OPTION
+from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction,  recreate_page_line_level_ocr_results_with_page
+from tools.file_conversion import convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, is_pdf, is_pdf_or_image, prepare_image_or_pdf, divide_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, divide_coordinates_by_page_sizes, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, fill_missing_box_ids, load_and_convert_ocr_results_with_words_json, save_pdf_with_or_without_compression
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer
-from tools.helper_functions import get_file_name_without_type, clean_unicode_text, tesseract_ocr_option, text_ocr_option, textract_option, local_pii_detector, aws_pii_detector, no_redaction_option
+from tools.helper_functions import get_file_name_without_type, clean_unicode_text
 from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult, load_and_convert_textract_json
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
@@ -242,7 +242,7 @@ def choose_and_run_redactor(file_paths:List[str],
             combined_out_message = combined_out_message + end_message
 
         # Only send across review file if redaction has been done
-        if pii_identification_method != no_redaction_option:
+        if pii_identification_method != NO_REDACTION_PII_OPTION:
 
             if len(review_out_file_paths) == 1: 
                 #review_file_path = [x for x in out_file_paths if "review_file" in x]
@@ -262,12 +262,12 @@ def choose_and_run_redactor(file_paths:List[str],
     # Prepare documents and images as required if they don't already exist
     prepare_images_flag = None  # Determines whether to call prepare_image_or_pdf   
     
-    if textract_output_found and text_extraction_method == textract_option:
+    if textract_output_found and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         print("Existing Textract outputs found, not preparing images or documents.")
         prepare_images_flag = False
         #return  # No need to call `prepare_image_or_pdf`, exit early
     
-    elif text_extraction_method == text_ocr_option:
+    elif text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
         print("Running text extraction analysis, not preparing images.")
         prepare_images_flag = False
 
@@ -316,7 +316,7 @@ def choose_and_run_redactor(file_paths:List[str],
             combined_out_message = combined_out_message + "\n" + out_message
 
         # Only send across review file if redaction has been done
-        if pii_identification_method != no_redaction_option:
+        if pii_identification_method != NO_REDACTION_PII_OPTION:
             # If only pdf currently in review outputs, add on the latest review file
             if len(review_out_file_paths) == 1: 
                 #review_file_path = [x for x in out_file_paths if "review_file" in x]
@@ -361,7 +361,7 @@ def choose_and_run_redactor(file_paths:List[str],
     
 
     # Try to connect to AWS services directly only if RUN_AWS_FUNCTIONS environmental variable is 1, otherwise an environment variable or direct textbox input is needed.
-    if pii_identification_method == aws_pii_detector:
+    if pii_identification_method == AWS_PII_OPTION:
         if aws_access_key_textbox and aws_secret_key_textbox:
             print("Connecting to Comprehend using AWS access key and secret keys from user input.")
             comprehend_client = boto3.client('comprehend', 
@@ -384,7 +384,7 @@ def choose_and_run_redactor(file_paths:List[str],
         comprehend_client = ""
         
     # Try to connect to AWS Textract Client if using that text extraction method
-    if text_extraction_method == textract_option:   
+    if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:   
         if aws_access_key_textbox and aws_secret_key_textbox:
             print("Connecting to Textract using AWS access key and secret keys from user input.")
             textract_client = boto3.client('textract', 
@@ -429,10 +429,10 @@ def choose_and_run_redactor(file_paths:List[str],
             pdf_file_name_with_ext = os.path.basename(file_path)
 
             is_a_pdf = is_pdf(file_path) == True
-            if is_a_pdf == False and text_extraction_method == text_ocr_option:
+            if is_a_pdf == False and text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
                 # If user has not submitted a pdf, assume it's an image
                 print("File is not a PDF, assuming that image analysis needs to be used.")
-                text_extraction_method = tesseract_ocr_option
+                text_extraction_method = TESSERACT_TEXT_EXTRACT_OPTION
         else:
             out_message = "No file selected"
             print(out_message)
@@ -443,7 +443,7 @@ def choose_and_run_redactor(file_paths:List[str],
         review_file_path = orig_pdf_file_path + '_review_file.csv'
 
         # Remove any existing review_file paths from the review file outputs
-        if text_extraction_method == tesseract_ocr_option or text_extraction_method == textract_option:
+        if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
 
             #Analyse and redact image-based pdf or image
             if is_pdf_or_image(file_path) == False:
@@ -490,7 +490,7 @@ def choose_and_run_redactor(file_paths:List[str],
                 all_textract_request_metadata.extend(new_textract_request_metadata)
                 
 
-        elif text_extraction_method == text_ocr_option:
+        elif text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
             
             if is_pdf(file_path) == False:
                 out_message = "Please upload a PDF file for text analysis. If you have an image, select 'Image analysis'."
@@ -541,7 +541,7 @@ def choose_and_run_redactor(file_paths:List[str],
             
             
             # Save redacted file
-            if pii_identification_method != no_redaction_option:
+            if pii_identification_method != NO_REDACTION_PII_OPTION:
                 if RETURN_PDF_END_OF_REDACTION == True:
                     progress(0.9, "Saving redacted file")
 
@@ -589,7 +589,7 @@ def choose_and_run_redactor(file_paths:List[str],
                         
             review_file_state.to_csv(review_file_path, index=None)
             
-            if pii_identification_method != no_redaction_option:
+            if pii_identification_method != NO_REDACTION_PII_OPTION:
                 out_file_paths.append(review_file_path)
 
             # Make a combined message for the file                
@@ -1249,7 +1249,7 @@ def redact_image_pdf(file_path:str,
                      allow_list:List[str]=None,
                      page_min:int=0,
                      page_max:int=999,
-                     text_extraction_method:str=tesseract_ocr_option,
+                     text_extraction_method:str=TESSERACT_TEXT_EXTRACT_OPTION,
                      handwrite_signature_checkbox:List[str]=["Extract handwriting", "Extract signatures"],
                      textract_request_metadata:list=[],
                      current_loop_page:int=0,
@@ -1287,7 +1287,7 @@ def redact_image_pdf(file_path:str,
     - allow_list (List[str], optional): A list of entity types to allow in the PDF. Defaults to None.
     - page_min (int, optional): The minimum page number to start redaction from. Defaults to 0.
     - page_max (int, optional): The maximum page number to end redaction at. Defaults to 999.
-    - text_extraction_method (str, optional): The type of analysis to perform on the PDF. Defaults to tesseract_ocr_option.
+    - text_extraction_method (str, optional): The type of analysis to perform on the PDF. Defaults to TESSERACT_TEXT_EXTRACT_OPTION.
     - handwrite_signature_checkbox (List[str], optional): A list of options for redacting handwriting and signatures. Defaults to ["Extract handwriting", "Extract signatures"].
     - textract_request_metadata (list, optional): Metadata related to the redaction request. Defaults to an empty string.
     - page_break_return (bool, optional): Indicates if the function should return after a page break. Defaults to False.
@@ -1336,7 +1336,7 @@ def redact_image_pdf(file_path:str,
         print(out_message)
         raise Exception(out_message)
     
-    if text_extraction_method == textract_option and textract_client == "":
+    if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION and textract_client == "":
         out_message_warning = "Connection to AWS Textract service unsuccessful. Redaction will only continue if local AWS Textract results can be found."
         print(out_message_warning)
         #raise Exception(out_message)   
@@ -1353,7 +1353,7 @@ def redact_image_pdf(file_path:str,
     print("Page range:", str(page_min + 1), "to", str(page_max))
     
     # If running Textract, check if file already exists. If it does, load in existing data
-    if text_extraction_method == textract_option:                
+    if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:                
         textract_json_file_path = output_folder + file_name + "_textract.json"
         textract_data, is_missing, log_files_output_paths = load_and_convert_textract_json(textract_json_file_path, log_files_output_paths, page_sizes_df)
         original_textract_data = textract_data.copy()
@@ -1361,7 +1361,7 @@ def redact_image_pdf(file_path:str,
         print("Successfully loaded in Textract analysis results from file")
 
     # If running local OCR option, check if file already exists. If it does, load in existing data
-    if text_extraction_method == tesseract_ocr_option:                
+    if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:                
         all_page_line_level_ocr_results_with_words_json_file_path = output_folder + file_name + "_ocr_results_with_words.json"
         all_page_line_level_ocr_results_with_words, is_missing, log_files_output_paths = load_and_convert_ocr_results_with_words_json(all_page_line_level_ocr_results_with_words_json_file_path, log_files_output_paths, page_sizes_df)
         original_all_page_line_level_ocr_results_with_words = all_page_line_level_ocr_results_with_words.copy()
@@ -1428,7 +1428,7 @@ def redact_image_pdf(file_path:str,
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
 
             # If using Tesseract
-            if text_extraction_method == tesseract_ocr_option:
+            if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
 
                 if all_page_line_level_ocr_results_with_words:
                     # Find the first dict where 'page' matches
@@ -1452,7 +1452,7 @@ def redact_image_pdf(file_path:str,
                     all_page_line_level_ocr_results_with_words.append(page_line_level_ocr_results_with_words)
     
             # Check if page exists in existing textract data. If not, send to service to analyse
-            if text_extraction_method == textract_option:
+            if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
                 text_blocks = []
 
                 if not textract_data:
@@ -1527,7 +1527,7 @@ def redact_image_pdf(file_path:str,
 
             all_line_level_ocr_results_df_list.append(line_level_ocr_results_df)
 
-            if pii_identification_method != no_redaction_option:
+            if pii_identification_method != NO_REDACTION_PII_OPTION:
                 # Step 2: Analyse text and identify PII
                 if chosen_redact_entities or chosen_redact_comprehend_entities:
 
@@ -1667,7 +1667,7 @@ def redact_image_pdf(file_path:str,
                     annotations_all_pages.append(page_image_annotations)
 
 
-                if text_extraction_method == textract_option:
+                if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
                     if original_textract_data != textract_data:
                         # Write the updated existing textract data back to the JSON file
                         with open(textract_json_file_path, 'w') as json_file:
@@ -1676,7 +1676,7 @@ def redact_image_pdf(file_path:str,
                     if textract_json_file_path not in log_files_output_paths:
                         log_files_output_paths.append(textract_json_file_path)
 
-                if text_extraction_method == tesseract_ocr_option:
+                if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
                     if original_all_page_line_level_ocr_results_with_words != all_page_line_level_ocr_results_with_words:
                         # Write the updated existing textract data back to the JSON file
                         with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
@@ -1715,7 +1715,7 @@ def redact_image_pdf(file_path:str,
             progress.close(_tqdm=progress_bar)
             tqdm._instances.clear()
 
-            if text_extraction_method == textract_option:
+            if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
                 # Write the updated existing textract data back to the JSON file
                 if original_textract_data != textract_data:
                     with open(textract_json_file_path, 'w') as json_file:
@@ -1724,7 +1724,7 @@ def redact_image_pdf(file_path:str,
                 if textract_json_file_path not in log_files_output_paths:
                     log_files_output_paths.append(textract_json_file_path)
 
-            if text_extraction_method == tesseract_ocr_option:
+            if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
                 if original_all_page_line_level_ocr_results_with_words != all_page_line_level_ocr_results_with_words:
                     # Write the updated existing textract data back to the JSON file
                     with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
@@ -1739,7 +1739,7 @@ def redact_image_pdf(file_path:str,
 
             return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words
                
-    if text_extraction_method == textract_option:
+    if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Write the updated existing textract data back to the JSON file
         
         if original_textract_data != textract_data:
@@ -1749,7 +1749,7 @@ def redact_image_pdf(file_path:str,
         if textract_json_file_path not in log_files_output_paths:
             log_files_output_paths.append(textract_json_file_path)
 
-    if text_extraction_method == tesseract_ocr_option:
+    if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
         if original_all_page_line_level_ocr_results_with_words != all_page_line_level_ocr_results_with_words:
             # Write the updated existing textract data back to the JSON file
             with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
@@ -2095,7 +2095,7 @@ def redact_text_pdf(
                     all_page_line_text_extraction_characters.extend(line_characters)
 
                 ### REDACTION
-                if pii_identification_method != no_redaction_option:
+                if pii_identification_method != NO_REDACTION_PII_OPTION:
 
                     if chosen_redact_entities or chosen_redact_comprehend_entities:
                         page_redaction_bounding_boxes = run_page_text_redaction(

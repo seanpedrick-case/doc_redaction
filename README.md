@@ -10,7 +10,7 @@ license: agpl-3.0
 ---
 # Document redaction
 
-version: 0.6.7
+version: 0.6.8
 
 Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a walkthrough on how to use the app. Below is a very brief overview.
     
@@ -223,13 +223,13 @@ On the 'Review redactions' tab you have a visual interface that allows you to in
 
 ### Uploading documents for review
 
-The top area has a file upload area where you can upload original, unredacted PDFs, alongside the '..._review_file.csv' that is produced by the redaction process. Once you have uploaded these two files, click the 'Review PDF...' button to load in the files for review. This will allow you to visualise and modify the suggested redactions using the interface below.
+The top area has a file upload area where you can upload original, unredacted PDFs, alongside the '..._review_file.csv' that is produced by the redaction process. Once you have uploaded these two files, click the '**Review redactions based on original PDF...**' button to load in the files for review. This will allow you to visualise and modify the suggested redactions using the interface below.
 
 Optionally, you can also upload one of the '..._ocr_output.csv' files here that comes out of a redaction task, so that you can navigate the extracted text from the document.
 
 ![Search extracted text](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
 
-You can upload the three review files in the box (unredacted document, '..._review_file.csv' and '..._ocr_output.csv' file) before clicking 'Review PDF...', as in the image below:
+You can upload the three review files in the box (unredacted document, '..._review_file.csv' and '..._ocr_output.csv' file) before clicking '**Review redactions based on original PDF...**', as in the image below:
 
 ![Upload three files for review](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/upload_three_files.PNG)
 
@@ -293,7 +293,7 @@ The table shows a list of all the suggested redactions in the document alongside
 
 ![Search suggested redaction area](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/list_find_labels.PNG)
 
-If you click on one of the rows in this table, you will be taken to the page of the redaction. Clicking on a redaction row on the same page *should* change the colour of redaction box to blue to help you locate it in the document viewer (just in app, not in redaction output PDFs).
+If you click on one of the rows in this table, you will be taken to the page of the redaction. Clicking on a redaction row on the same page will change the colour of redaction box to blue to help you locate it in the document viewer (just when using the app, not in redacted output PDFs).
 
 ![Search suggested redaction area](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/review_row_highlight.PNG)
 
@@ -303,12 +303,13 @@ To filter the 'Search suggested redactions' table you can:
 1. Click on one of the dropdowns (Redaction category, Page, Text), and select an option, or
 2. Write text in the 'Filter' box just above the table. Click the blue box to apply the filter to the table.
 
-Once you have filtered the table, you have a few options underneath on what you can do with the filtered rows:
+Once you have filtered the table, or selected a row from the table, you have a few options underneath on what you can do with the filtered rows:
 
-- Click the 'Exclude specific row from redactions' button to remove only the redaction from the last row you clicked on from the document. 
-- Click the 'Exclude all items in table from redactions' button to remove all redactions visible in the table from the document. **Important:** ensure that you have clicked the blue tick icon next to the search box before doing this, or you will remove all redactions from the document. If you do end up doing this, click the 'Undo last element removal' button below to restore the redactions.
+- Click the **Exclude all redactions in table** button to remove all redactions visible in the table from the document. **Important:** ensure that you have clicked the blue tick icon next to the search box before doing this, or you will remove all redactions from the document. If you do end up doing this, click the 'Undo last element removal' button below to restore the redactions.
+- Click the **Exclude specific redaction row** button to remove only the redaction from the last row you clicked on from the document. The currently selected row is visible below.
+- Click the **Exclude all redactions with the same text as selected row** button to remove all redactions from the document that are exactly the same as the selected row text.
 
-**NOTE**: After excluding redactions using either of the above options, click the 'Reset filters' button below to ensure that the dropdowns and table return to seeing all remaining redactions in the document.
+**NOTE**: After excluding redactions using any of the above options, click the 'Reset filters' button below to ensure that the dropdowns and table return to seeing all remaining redactions in the document.
 
 If you made a mistake, click the 'Undo last element removal' button to restore the Search suggested redactions table to its previous state (can only undo the last action).
 
