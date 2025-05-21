@@ -6,20 +6,16 @@ import time
 import boto3
 import botocore
 import pandas as pd
-from openpyxl import Workbook, load_workbook
-
+from openpyxl import Workbook
 from faker import Faker
 from gradio import Progress
 from typing import List, Dict, Any
-
+from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
 from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine, DictAnalyzerResult, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
-from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
-
 from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, OUTPUT_FOLDER
 from tools.helper_functions import get_file_name_without_type, read_file, detect_file_type
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_word_list_recogniser, CustomWordFuzzyRecognizer, custom_entities
-from tools.custom_image_analyser_engine import do_aws_comprehend_call
 # Use custom version of analyze_dict to be able to track progress
 from tools.presidio_analyzer_custom import analyze_dict
 
@@ -28,7 +24,7 @@ fake = Faker("en_UK")
 def fake_first_name(x):
     return fake.first_name()
 
-def initial_clean(text):
+def initial_clean(text:str) -> str:
     #### Some of my cleaning functions
     html_pattern_regex = r'<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});|\xa0|&nbsp;'
     html_start_pattern_end_dots_regex = r'<(.*?)\.\.'
@@ -49,7 +45,7 @@ def initial_clean(text):
     
     return text
 
-def process_recognizer_result(result, recognizer_result, data_row, dictionary_key, df_dict, keys_to_keep):
+def process_recognizer_result(result:RecognizerResult, recognizer_result:RecognizerResult, data_row:int, dictionary_key:int, df_dict:Dict[str, List[Any]], keys_to_keep:List[str]) -> List[str]:
         output = []
 
         if hasattr(result, 'value'):
@@ -115,7 +111,7 @@ def generate_decision_process_output(analyzer_results: List[DictAnalyzerResult],
 
     return decision_process_output_str
 
-def anon_consistent_names(df):
+def anon_consistent_names(df:pd.DataFrame) -> pd.DataFrame:
     # ## Pick out common names and replace them with the same person value
     df_dict = df.to_dict(orient="list")
 
@@ -553,7 +549,19 @@ def anon_wrapper_func(
 
     return out_file_paths, out_message, key_string, log_files_output_paths
        
-def anonymise_script(df:pd.DataFrame, anon_strat:str, language:str, chosen_redact_entities:List[str], in_allow_list:List[str]=[], in_deny_list:List[str]=[], max_fuzzy_spelling_mistakes_num:int=0, pii_identification_method:str="Local", chosen_redact_comprehend_entities:List[str]=[], comprehend_query_number:int=0, comprehend_client:botocore.client.BaseClient="", custom_entities=custom_entities, progress=Progress(track_tqdm=False)):
+def anonymise_script(df:pd.DataFrame,
+                     anon_strat:str,
+                     language:str,
+                     chosen_redact_entities:List[str],
+                     in_allow_list:List[str]=[],
+                     in_deny_list:List[str]=[],
+                     max_fuzzy_spelling_mistakes_num:int=0,
+                     pii_identification_method:str="Local",
+                     chosen_redact_comprehend_entities:List[str]=[],
+                     comprehend_query_number:int=0,
+                     comprehend_client:botocore.client.BaseClient="",
+                     custom_entities:List[str]=custom_entities,
+                     progress:Progress=Progress(track_tqdm=False)):
     '''
     Conduct anonymisation of a dataframe using Presidio and/or AWS Comprehend if chosen.
     '''
