@@ -64,20 +64,18 @@ def add_folder_to_path(folder_path: str):
 # LOAD CONFIG FROM ENV FILE
 ###
 
-ensure_folder_exists("config/")
+CONFIG_FOLDER = get_or_create_env_var('CONFIG_FOLDER', 'config/')
+
+ensure_folder_exists(CONFIG_FOLDER)
 
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
-APP_CONFIG_PATH = get_or_create_env_var('APP_CONFIG_PATH', 'config/app_config.env') # e.g. config/app_config.env
+APP_CONFIG_PATH = get_or_create_env_var('APP_CONFIG_PATH', CONFIG_FOLDER + 'app_config.env') # e.g. config/app_config.env
 
 if APP_CONFIG_PATH:
     if os.path.exists(APP_CONFIG_PATH):
         print(f"Loading app variables from config file {APP_CONFIG_PATH}")
         load_dotenv(APP_CONFIG_PATH)
     else: print("App config file not found at location:", APP_CONFIG_PATH)
-
-
-
-
 
 ###
 # AWS OPTIONS
@@ -316,7 +314,7 @@ COMPRESS_REDACTED_PDF = get_or_create_env_var("COMPRESS_REDACTED_PDF","False") #
 # APP RUN OPTIONS
 ###
 
-TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tld/.tld_set_snapshot')
+TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tld/.tld_set_snapshot/')
 try:
     extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
 except:

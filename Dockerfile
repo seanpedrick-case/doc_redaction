@@ -71,7 +71,7 @@ USER user
 
 ENV APP_HOME=/home/user
 
-# Set environmental variables
+# Set environment variables
 ENV PATH=$APP_HOME/.local/bin:$PATH \
     PYTHONPATH=$APP_HOME/app \
     PYTHONUNBUFFERED=1 \
@@ -81,9 +81,9 @@ ENV PATH=$APP_HOME/.local/bin:$PATH \
     GRADIO_SERVER_NAME=0.0.0.0 \
     GRADIO_SERVER_PORT=7860 \
     GRADIO_ANALYTICS_ENABLED=False \
-    GRADIO_TEMP_DIR=$APP_HOME/app/tmp \
-    TLDEXTRACT_CACHE=$APP_HOME/app/tld/.tld_set_snapshot \
-    MPLCONFIGDIR=$APP_HOME/app/.matplotlib_cache \
+    GRADIO_TEMP_DIR=$APP_HOME/app/tmp/ \
+    TLDEXTRACT_CACHE=$APP_HOME/app/tld/.tld_set_snapshot/ \
+    MPLCONFIGDIR=$APP_HOME/app/.matplotlib_cache/ \
     SYSTEM=spaces
 
 # Set the working directory to the user's home directory
