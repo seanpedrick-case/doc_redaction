@@ -52,7 +52,7 @@ RUN apt-get update \
 RUN useradd -m -u 1000 user
 
 # Create required directories
-RUN mkdir -p /home/user/app/{output,input,tld,logs,usage,feedback,config} \
+RUN mkdir -p /home/user/app/{output, input, tld, logs, usage, feedback, config, tmp, .matplotlib_cache} \
     && chown -R user:user /home/user/app
 
 # Copy installed packages from builder stage
@@ -81,7 +81,9 @@ ENV PATH=$APP_HOME/.local/bin:$PATH \
     GRADIO_SERVER_NAME=0.0.0.0 \
     GRADIO_SERVER_PORT=7860 \
     GRADIO_ANALYTICS_ENABLED=False \
+    GRADIO_TEMP_DIR=$APP_HOME/app/tmp \
     TLDEXTRACT_CACHE=$APP_HOME/app/tld/.tld_set_snapshot \
+    MPLCONFIGDIR=$APP_HOME/app/.matplotlib_cache \
     SYSTEM=spaces
 
 # Set the working directory to the user's home directory
