@@ -61,7 +61,8 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     FEEDBACK_LOGS_FOLDER=$APP_HOME/app/feedback/ \
     ACCESS_LOGS_FOLDER=$APP_HOME/app/logs/ \
     USAGE_LOGS_FOLDER=$APP_HOME/app/usage/ \
-    CONFIG_FOLDER=$APP_HOME/app/config/
+    CONFIG_FOLDER=$APP_HOME/app/config/ \
+    XDG_CACHE_HOME=/tmp/xdg_cache/user_1000
 
 # Create required directories
 RUN mkdir -p $APP_HOME/app/{output, input, logs, usage, feedback, config} \
@@ -73,6 +74,7 @@ RUN mkdir -p /var/tmp && chown user:user /var/tmp && chmod 1777 /var/tmp
 RUN mkdir -p /tmp/matplotlib_cache && chown user:user /tmp/matplotlib_cache && chmod 1777 /tmp/matplotlib_cache
 RUN mkdir -p /tmp/tld && chown user:user /tmp/tld && chmod 1777 /tmp/tld
 RUN mkdir -p /tmp/gradio_tmp && chown user:user /tmp/gradio_tmp && chmod 1777 /tmp/gradio_tmp
+RUN mkdir -p $XDG_CACHE_HOME && chown user:user $XDG_CACHE_HOME && chmod 700 $XDG_CACHE_HOME # chmod 700 makes it rwx for the user only, which is appropriate for a cache dir.
 
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
