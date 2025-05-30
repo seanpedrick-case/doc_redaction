@@ -81,6 +81,9 @@ COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Ensure permissions are really user:user again after copying
+RUN chown -R user:user $APP_HOME/app && chmod -R u+rwX $APP_HOME/app
+
 # Switch to the "user" user
 USER user
 
@@ -114,9 +117,6 @@ WORKDIR $APP_HOME/app
 
 # Copy the app code to the container
 COPY --chown=user . $APP_HOME/app
-
-# Ensure permissions are really user:user again after copying
-RUN chown -R user:user $APP_HOME/app && chmod -R u+rwX $APP_HOME/app
 
 ENTRYPOINT [ "/entrypoint.sh" ]
 
