@@ -147,8 +147,8 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
         if INPUT_FOLDER == "TEMP": INPUT_FOLDER = temp_dir + "/"
 
 
-GRADIO_TEMP_DIR = get_or_create_env_var('GRADIO_TEMP_DIR', 'tmp/') # Default Gradio temp folder
-MPLCONFIGDIR = get_or_create_env_var('MPLCONFIGDIR', '.matplotlib_cache/') # Matplotlib cache folder
+GRADIO_TEMP_DIR = get_or_create_env_var('GRADIO_TEMP_DIR', 'tmp/gradio_tmp/') # Default Gradio temp folder
+MPLCONFIGDIR = get_or_create_env_var('MPLCONFIGDIR', 'tmp/matplotlib_cache/') # Matplotlib cache folder
 
 ensure_folder_exists(GRADIO_TEMP_DIR)
 ensure_folder_exists(MPLCONFIGDIR)
@@ -314,7 +314,7 @@ COMPRESS_REDACTED_PDF = get_or_create_env_var("COMPRESS_REDACTED_PDF","False") #
 # APP RUN OPTIONS
 ###
 
-TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tld/.tld_set_snapshot/')
+TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tmp/tld/')
 try:
     extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
 except:

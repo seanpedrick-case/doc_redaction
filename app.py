@@ -377,7 +377,7 @@ with app:
                 with gr.Accordion("Search all extracted text", open=True):                    
                     all_line_level_ocr_results_df = gr.Dataframe(value=pd.DataFrame(), headers=["page", "text"], col_count=(2, 'fixed'), row_count = (0, "dynamic"),  label="All OCR results", visible=True, type="pandas", wrap=True, show_fullscreen_button=True, show_search='filter', show_label=False, show_copy_button=True, max_height=400)
                     reset_all_ocr_results_btn = gr.Button(value="Reset OCR output table filter")
-                    selected_ocr_dataframe_row = gr.Dataframe(pd.DataFrame(data={"page":[], "text":[]}), col_count=2, type="pandas", visible=True, headers=["page", "text"], wrap=True)
+                    selected_ocr_dataframe_row = gr.Dataframe(pd.DataFrame(data={"page":[], "text":[]}), col_count=2, type="pandas", visible=False, headers=["page", "text"], wrap=True)
         
         with gr.Accordion("Convert review files loaded above to Adobe format, or convert from Adobe format to review file", open = False):
             convert_review_file_to_adobe_btn = gr.Button("Convert review file to Adobe comment format", variant="primary")
