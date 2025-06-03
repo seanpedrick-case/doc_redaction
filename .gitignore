@@ -23,3 +23,7 @@ cdk/*
 cdk/config/*
 web/*
 tld/*
+tmp/*
+cdk.out/*
+cdk.json
+cdk.context.json
