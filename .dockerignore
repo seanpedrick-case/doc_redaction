@@ -19,7 +19,6 @@ logs/*
 config/*
 user_guide/*
 cdk/config/*
-web/*
 tld/*
 tmp/*
 cdk.out/*
