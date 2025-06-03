@@ -18,7 +18,6 @@ build_deps/*
 logs/*
 config/*
 user_guide/*
-cdk/*
 cdk/config/*
 web/*
 tld/*
