@@ -4,6 +4,7 @@
 *.jpg
 *.png
 *.ipynb
+*.pyc
 examples/*
 processing/*
 input/*
@@ -19,9 +20,9 @@ logs/*
 config/*
 doc_redaction_amplify_app/*
 user_guide/*
-cdk/*
 cdk/config/*
-web/*
+cdk/cdk.out/*
+cdk/archive/*
 tld/*
 tmp/*
 cdk.out/*
