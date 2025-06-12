@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.7.31">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>User guide – Document Redaction App</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../">
+<script src="../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/popper.min.js"></script>
+<script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-e1a5c8363afafaef2c763b6775fbf3ca.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../site_libs/bootstrap/bootstrap-dfb324f25d9b1687192fa8be62ac8f9c.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+<link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../index.html">
+    <span class="navbar-title">Document Redaction App</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../index.html"> 
+<span class="menu-text">Home</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="../src/user_guide.html" aria-current="page"> 
+<span class="menu-text">User guide</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/faq.html"> 
+<span class="menu-text">User FAQ</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/installation_guide.html"> 
+<span class="menu-text">App installation guide (with CDK)</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/app_settings.html"> 
+<span class="menu-text">App settings management guide</span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#table-of-contents" id="toc-table-of-contents" class="nav-link active" data-scroll-target="#table-of-contents">Table of contents</a></li>
+  <li><a href="#example-data-files" id="toc-example-data-files" class="nav-link" data-scroll-target="#example-data-files">Example data files</a></li>
+  <li><a href="#basic-redaction" id="toc-basic-redaction" class="nav-link" data-scroll-target="#basic-redaction">Basic redaction</a>
+  <ul class="collapse">
+  <li><a href="#upload-files-to-the-app" id="toc-upload-files-to-the-app" class="nav-link" data-scroll-target="#upload-files-to-the-app">Upload files to the app</a></li>
+  <li><a href="#text-extraction" id="toc-text-extraction" class="nav-link" data-scroll-target="#text-extraction">Text extraction</a></li>
+  <li><a href="#optional---select-signature-extraction" id="toc-optional---select-signature-extraction" class="nav-link" data-scroll-target="#optional---select-signature-extraction">Optional - select signature extraction</a></li>
+  <li><a href="#pii-redaction-method" id="toc-pii-redaction-method" class="nav-link" data-scroll-target="#pii-redaction-method">PII redaction method</a></li>
+  <li><a href="#optional---costs-and-time-estimation" id="toc-optional---costs-and-time-estimation" class="nav-link" data-scroll-target="#optional---costs-and-time-estimation">Optional - costs and time estimation</a></li>
+  <li><a href="#optional---cost-code-selection" id="toc-optional---cost-code-selection" class="nav-link" data-scroll-target="#optional---cost-code-selection">Optional - cost code selection</a></li>
+  <li><a href="#optional---submit-whole-documents-to-textract-api" id="toc-optional---submit-whole-documents-to-textract-api" class="nav-link" data-scroll-target="#optional---submit-whole-documents-to-textract-api">Optional - Submit whole documents to Textract API</a></li>
+  <li><a href="#redact-the-document" id="toc-redact-the-document" class="nav-link" data-scroll-target="#redact-the-document">Redact the document</a></li>
+  <li><a href="#redaction-outputs" id="toc-redaction-outputs" class="nav-link" data-scroll-target="#redaction-outputs">Redaction outputs</a></li>
+  <li><a href="#aws-textract-outputs" id="toc-aws-textract-outputs" class="nav-link" data-scroll-target="#aws-textract-outputs">Additional AWS Textract / local OCR outputs</a></li>
+  <li><a href="#downloading-output-files-from-previous-redaction-tasks" id="toc-downloading-output-files-from-previous-redaction-tasks" class="nav-link" data-scroll-target="#downloading-output-files-from-previous-redaction-tasks">Downloading output files from previous redaction tasks</a></li>
+  <li><a href="#basic-redaction-summary" id="toc-basic-redaction-summary" class="nav-link" data-scroll-target="#basic-redaction-summary">Basic redaction summary</a></li>
+  </ul></li>
+  <li><a href="#customising-redaction-options" id="toc-customising-redaction-options" class="nav-link" data-scroll-target="#customising-redaction-options">Customising redaction options</a>
+  <ul class="collapse">
+  <li><a href="#custom-allow-deny-and-page-redaction-lists" id="toc-custom-allow-deny-and-page-redaction-lists" class="nav-link" data-scroll-target="#custom-allow-deny-and-page-redaction-lists">Custom allow, deny, and page redaction lists</a></li>
+  <li><a href="#redacting-additional-types-of-personal-information" id="toc-redacting-additional-types-of-personal-information" class="nav-link" data-scroll-target="#redacting-additional-types-of-personal-information">Redacting additional types of personal information</a></li>
+  </ul></li>
+  <li><a href="#redacting-only-specific-pages" id="toc-redacting-only-specific-pages" class="nav-link" data-scroll-target="#redacting-only-specific-pages">Redacting only specific pages</a></li>
+  <li><a href="#handwriting-and-signature-redaction" id="toc-handwriting-and-signature-redaction" class="nav-link" data-scroll-target="#handwriting-and-signature-redaction">Handwriting and signature redaction</a></li>
+  <li><a href="#reviewing-and-modifying-suggested-redactions" id="toc-reviewing-and-modifying-suggested-redactions" class="nav-link" data-scroll-target="#reviewing-and-modifying-suggested-redactions">Reviewing and modifying suggested redactions</a>
+  <ul class="collapse">
+  <li><a href="#uploading-documents-for-review" id="toc-uploading-documents-for-review" class="nav-link" data-scroll-target="#uploading-documents-for-review">Uploading documents for review</a></li>
+  <li><a href="#page-navigation" id="toc-page-navigation" class="nav-link" data-scroll-target="#page-navigation">Page navigation</a></li>
+  <li><a href="#the-document-viewer-pane" id="toc-the-document-viewer-pane" class="nav-link" data-scroll-target="#the-document-viewer-pane">The document viewer pane</a></li>
+  <li><a href="#apply-redactions-to-pdf-and-save-changes-on-current-page" id="toc-apply-redactions-to-pdf-and-save-changes-on-current-page" class="nav-link" data-scroll-target="#apply-redactions-to-pdf-and-save-changes-on-current-page">Apply redactions to PDF and Save changes on current page</a></li>
+  <li><a href="#selecting-and-removing-redaction-boxes-using-the-search-suggested-redactions-table" id="toc-selecting-and-removing-redaction-boxes-using-the-search-suggested-redactions-table" class="nav-link" data-scroll-target="#selecting-and-removing-redaction-boxes-using-the-search-suggested-redactions-table">Selecting and removing redaction boxes using the ‘Search suggested redactions’ table</a></li>
+  <li><a href="#navigating-through-the-document-using-the-search-all-extracted-text" id="toc-navigating-through-the-document-using-the-search-all-extracted-text" class="nav-link" data-scroll-target="#navigating-through-the-document-using-the-search-all-extracted-text">Navigating through the document using the ‘Search all extracted text’</a></li>
+  </ul></li>
+  <li><a href="#redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text" id="toc-redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text" class="nav-link" data-scroll-target="#redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting tabular data files (XLSX/CSV) or copy and pasted text</a>
+  <ul class="collapse">
+  <li><a href="#tabular-data-files-xlsxcsv" id="toc-tabular-data-files-xlsxcsv" class="nav-link" data-scroll-target="#tabular-data-files-xlsxcsv">Tabular data files (XLSX/CSV)</a></li>
+  <li><a href="#choosing-output-anonymisation-format" id="toc-choosing-output-anonymisation-format" class="nav-link" data-scroll-target="#choosing-output-anonymisation-format">Choosing output anonymisation format</a></li>
+  <li><a href="#redacting-copy-and-pasted-text" id="toc-redacting-copy-and-pasted-text" class="nav-link" data-scroll-target="#redacting-copy-and-pasted-text">Redacting copy and pasted text</a></li>
+  <li><a href="#redaction-log-outputs" id="toc-redaction-log-outputs" class="nav-link" data-scroll-target="#redaction-log-outputs">Redaction log outputs</a></li>
+  </ul></li>
+  <li><a href="#advanced-user-guide" id="toc-advanced-user-guide" class="nav-link" data-scroll-target="#advanced-user-guide">Advanced user guide</a>
+  <ul class="collapse">
+  <li><a href="#table-of-contents-1" id="toc-table-of-contents-1" class="nav-link" data-scroll-target="#table-of-contents-1">Table of contents</a></li>
+  <li><a href="#merging-redaction-review-files" id="toc-merging-redaction-review-files" class="nav-link" data-scroll-target="#merging-redaction-review-files">Merging redaction review files</a></li>
+  <li><a href="#identifying-and-redacting-duplicate-pages" id="toc-identifying-and-redacting-duplicate-pages" class="nav-link" data-scroll-target="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a></li>
+  <li><a href="#fuzzy-search-and-redaction" id="toc-fuzzy-search-and-redaction" class="nav-link" data-scroll-target="#fuzzy-search-and-redaction">Fuzzy search and redaction</a></li>
+  <li><a href="#export-to-and-import-from-adobe" id="toc-export-to-and-import-from-adobe" class="nav-link" data-scroll-target="#export-to-and-import-from-adobe">Export to and import from Adobe</a>
+  <ul class="collapse">
+  <li><a href="#exporting-to-adobe-acrobat" id="toc-exporting-to-adobe-acrobat" class="nav-link" data-scroll-target="#exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</a></li>
+  <li><a href="#importing-from-adobe-acrobat" id="toc-importing-from-adobe-acrobat" class="nav-link" data-scroll-target="#importing-from-adobe-acrobat">Importing from Adobe Acrobat</a></li>
+  </ul></li>
+  <li><a href="#using-the-aws-textract-document-api" id="toc-using-the-aws-textract-document-api" class="nav-link" data-scroll-target="#using-the-aws-textract-document-api">Using the AWS Textract document API</a>
+  <ul class="collapse">
+  <li><a href="#starting-a-new-textract-api-job" id="toc-starting-a-new-textract-api-job" class="nav-link" data-scroll-target="#starting-a-new-textract-api-job">Starting a new Textract API job</a></li>
+  <li><a href="#textract-api-job-outputs" id="toc-textract-api-job-outputs" class="nav-link" data-scroll-target="#textract-api-job-outputs">Textract API job outputs</a></li>
+  </ul></li>
+  <li><a href="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment" id="toc-using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment" class="nav-link" data-scroll-target="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</a>
+  <ul class="collapse">
+  <li><a href="#direct-access-by-passing-aws-access-keys-through-app" id="toc-direct-access-by-passing-aws-access-keys-through-app" class="nav-link" data-scroll-target="#direct-access-by-passing-aws-access-keys-through-app">Direct access by passing AWS access keys through app</a></li>
+  <li><a href="#picking-up-aws-access-keys-through-an-.env-file" id="toc-picking-up-aws-access-keys-through-an-.env-file" class="nav-link" data-scroll-target="#picking-up-aws-access-keys-through-an-.env-file">Picking up AWS access keys through an .env file</a></li>
+  </ul></li>
+  <li><a href="#modifying-existing-redaction-review-files" id="toc-modifying-existing-redaction-review-files" class="nav-link" data-scroll-target="#modifying-existing-redaction-review-files">Modifying existing redaction review files</a></li>
+  </ul></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">User guide</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="table-of-contents" class="level2">
+<h2 class="anchored" data-anchor-id="table-of-contents">Table of contents</h2>
+<ul>
+<li><a href="#example-data-files">Example data files</a></li>
+<li><a href="#basic-redaction">Basic redaction</a></li>
+<li><a href="#customising-redaction-options">Customising redaction options</a>
+<ul>
+<li><a href="#custom-allow-deny-and-page-redaction-lists">Custom allow, deny, and page redaction lists</a>
+<ul>
+<li><a href="#allow-list-example">Allow list example</a></li>
+<li><a href="#deny-list-example">Deny list example</a></li>
+<li><a href="#full-page-redaction-list-example">Full page redaction list example</a></li>
+</ul></li>
+<li><a href="#redacting-additional-types-of-personal-information">Redacting additional types of personal information</a></li>
+<li><a href="#redacting-only-specific-pages">Redacting only specific pages</a></li>
+<li><a href="#handwriting-and-signature-redaction">Handwriting and signature redaction</a></li>
+</ul></li>
+<li><a href="#reviewing-and-modifying-suggested-redactions">Reviewing and modifying suggested redactions</a></li>
+<li><a href="#redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting tabular data files (CSV/XLSX) or copy and pasted text</a></li>
+</ul>
+<p>See the <a href="#advanced-user-guide">advanced user guide here</a>: - <a href="#merging-redaction-review-files">Merging redaction review files</a> - <a href="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a> - <a href="#fuzzy-search-and-redaction">Fuzzy search and redaction</a> - <a href="#export-to-and-import-from-adobe">Export redactions to and import from Adobe Acrobat</a> - <a href="#exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</a> - <a href="#importing-from-adobe-acrobat">Importing from Adobe Acrobat</a> - <a href="#using-the-aws-textract-document-api">Using the AWS Textract document API</a> - <a href="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</a> - <a href="#modifying-existing-redaction-review-files">Modifying existing redaction review files</a></p>
+</section>
+<section id="example-data-files" class="level2">
+<h2 class="anchored" data-anchor-id="example-data-files">Example data files</h2>
+<p>Please try these example files to follow along with this guide: - <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf">Example of files sent to a professor before applying</a> - <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_complaint_letter.jpg">Example complaint letter (jpg)</a> - <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership Agreement Toolkit (for signatures and more advanced usage)</a> - <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv">Dummy case note data</a></p>
+</section>
+<section id="basic-redaction" class="level2">
+<h2 class="anchored" data-anchor-id="basic-redaction">Basic redaction</h2>
+<p>The document redaction app can detect personally-identifiable information (PII) in documents. Documents can be redacted directly, or suggested redactions can be reviewed and modified using a grapical user interface. Basic document redaction can be performed quickly using the default options.</p>
+<p>Download the example PDFs above to your computer. Open up the redaction app with the link provided by email.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/file_upload_highlight.PNG" class="img-fluid figure-img"></p>
+<figcaption>Upload files</figcaption>
+</figure>
+</div>
+<section id="upload-files-to-the-app" class="level3">
+<h3 class="anchored" data-anchor-id="upload-files-to-the-app">Upload files to the app</h3>
+<p>The ‘Redact PDFs/images tab’ currently accepts PDFs and image files (JPG, PNG) for redaction. Click on the ‘Drop files here or Click to Upload’ area of the screen, and select one of the three different <a href="#example-data-files">example files</a> (they should all be stored in the same folder if you want them to be redacted at the same time).</p>
+</section>
+<section id="text-extraction" class="level3">
+<h3 class="anchored" data-anchor-id="text-extraction">Text extraction</h3>
+<p>First, select one of the three text extraction options: - <strong>‘Local model - selectable text’</strong> - This will read text directly from PDFs that have selectable text to redact (using PikePDF). This is fine for most PDFs, but will find nothing if the PDF does not have selectable text, and it is not good for handwriting or signatures. If it encounters an image file, it will send it onto the second option below. - <strong>‘Local OCR model - PDFs without selectable text’</strong> - This option will use a simple Optical Character Recognition (OCR) model (Tesseract) to pull out text from a PDF/image that it ‘sees’. This can handle most typed text in PDFs/images without selectable text, but struggles with handwriting/signatures. If you are interested in the latter, then you should use the third option if available. - <strong>‘AWS Textract service - all PDF types’</strong> - Only available for instances of the app running on AWS. AWS Textract is a service that performs OCR on documents within their secure service. This is a more advanced version of OCR compared to the local option, and carries a (relatively small) cost. Textract excels in complex documents based on images, or documents that contain a lot of handwriting and signatures.</p>
+</section>
+<section id="optional---select-signature-extraction" class="level3">
+<h3 class="anchored" data-anchor-id="optional---select-signature-extraction">Optional - select signature extraction</h3>
+<p>If you chose the AWS Textract service above, you can choose if you want handwriting and/or signatures redacted by default. Choosing signatures here will have a cost implication, as identifying signatures will cost ~£2.66 ($3.50) per 1,000 pages vs ~£1.14 ($1.50) per 1,000 pages without signature detection.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_handwriting_signatures.PNG" class="img-fluid figure-img"></p>
+<figcaption>AWS Textract handwriting and signature options</figcaption>
+</figure>
+</div>
+</section>
+<section id="pii-redaction-method" class="level3">
+<h3 class="anchored" data-anchor-id="pii-redaction-method">PII redaction method</h3>
+<p>If you are running with the AWS service enabled, here you will also have a choice for PII redaction method: - <strong>‘Only extract text - (no redaction)’</strong> - If you are only interested in getting the text out of the document for further processing (e.g.&nbsp;to find duplicate pages, or to review text on the Review redactions page) - <strong>‘Local’</strong> - This uses the spacy package to rapidly detect PII in extracted text. This method is often sufficient if you are just interested in redacting specific terms defined in a custom list. - <strong>‘AWS Comprehend’</strong> - This method calls an AWS service to provide more accurate identification of PII in extracted text.</p>
+</section>
+<section id="optional---costs-and-time-estimation" class="level3">
+<h3 class="anchored" data-anchor-id="optional---costs-and-time-estimation">Optional - costs and time estimation</h3>
+<p>If the option is enabled (by your system admin, in the config file), you will see a cost and time estimate for the redaction process. ‘Existing Textract output file found’ will be checked automatically if previous Textract text extraction files exist in the output folder, or have been <a href="#aws-textract-outputs">previously uploaded by the user</a> (saving time and money for redaction).</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/costs_and_time.PNG" class="img-fluid figure-img"></p>
+<figcaption>Cost and time estimation</figcaption>
+</figure>
+</div>
+</section>
+<section id="optional---cost-code-selection" class="level3">
+<h3 class="anchored" data-anchor-id="optional---cost-code-selection">Optional - cost code selection</h3>
+<p>If the option is enabled (by your system admin, in the config file), you may be prompted to select a cost code before continuing with the redaction task.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/cost_code_selection.PNG" class="img-fluid figure-img"></p>
+<figcaption>Cost code selection</figcaption>
+</figure>
+</div>
+<p>The relevant cost code can be found either by: 1. Using the search bar above the data table to find relevant cost codes, then clicking on the relevant row, or 2. typing it directly into the dropdown to the right, where it should filter as you type.</p>
+</section>
+<section id="optional---submit-whole-documents-to-textract-api" class="level3">
+<h3 class="anchored" data-anchor-id="optional---submit-whole-documents-to-textract-api">Optional - Submit whole documents to Textract API</h3>
+<p>If this option is enabled (by your system admin, in the config file), you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the ‘Redact document’ process described here). This feature is described in more detail in the <a href="#using-the-aws-textract-document-api">advanced user guide</a>.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_document_api.PNG" class="img-fluid figure-img"></p>
+<figcaption>Textract document API</figcaption>
+</figure>
+</div>
+</section>
+<section id="redact-the-document" class="level3">
+<h3 class="anchored" data-anchor-id="redact-the-document">Redact the document</h3>
+<p>Click ‘Redact document’. After loading in the document, the app should be able to process about 30 pages per minute (depending on redaction methods chose above). When ready, you should see a message saying that processing is complete, with output files appearing in the bottom right.</p>
+</section>
+<section id="redaction-outputs" class="level3">
+<h3 class="anchored" data-anchor-id="redaction-outputs">Redaction outputs</h3>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/redaction_outputs.PNG" class="img-fluid figure-img"></p>
+<figcaption>Redaction outputs</figcaption>
+</figure>
+</div>
+<ul>
+<li><strong>‘…redacted.pdf’</strong> files contain the original pdf with suggested redacted text deleted and replaced by a black box on top of the document.</li>
+<li><strong>‘…ocr_results.csv’</strong> files contain the line-by-line text outputs from the entire document. This file can be useful for later searching through for any terms of interest in the document (e.g.&nbsp;using Excel or a similar program).</li>
+<li><strong>‘…review_file.csv’</strong> files are the review files that contain details and locations of all of the suggested redactions in the document. This file is key to the <a href="#reviewing-and-modifying-suggested-redactions">review process</a>, and should be downloaded to use later for this.</li>
+</ul>
+</section>
+<section id="aws-textract-outputs" class="level3">
+<h3 class="anchored" data-anchor-id="aws-textract-outputs">Additional AWS Textract / local OCR outputs</h3>
+<p>If you have used the AWS Textract option for extracting text, you may also see a ’…_textract.json’ file. This file contains all the relevant extracted text information that comes from the AWS Textract service. You can keep this file and upload it at a later date alongside your input document, which will enable you to skip calling AWS Textract every single time you want to do a redaction task, as follows:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/document_upload_with_textract.PNG" class="img-fluid figure-img"></p>
+<figcaption>Document upload alongside Textract</figcaption>
+</figure>
+</div>
+<p>Similarly, if you have used the ‘Local OCR method’ to extract text, you may see a ’…_ocr_results_with_words.json’ file. This file works in the same way as the AWS Textract .json results described above, and can be uploaded alongside an input document to save time on text extraction in future in the same way.</p>
+</section>
+<section id="downloading-output-files-from-previous-redaction-tasks" class="level3">
+<h3 class="anchored" data-anchor-id="downloading-output-files-from-previous-redaction-tasks">Downloading output files from previous redaction tasks</h3>
+<p>If you are logged in via AWS Cognito and you lose your app page for some reason (e.g.&nbsp;from a crash, reloading), it is possible recover your previous output files, provided the server has not been shut down since you redacted the document. Go to ‘Redaction settings’, then scroll to the bottom to see ‘View all output files from this session’.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/view_all_output_files.PNG" class="img-fluid figure-img"></p>
+<figcaption>View all output files</figcaption>
+</figure>
+</div>
+</section>
+<section id="basic-redaction-summary" class="level3">
+<h3 class="anchored" data-anchor-id="basic-redaction-summary">Basic redaction summary</h3>
+<p>We have covered redacting documents with the default redaction options. The ‘…redacted.pdf’ file output may be enough for your purposes. But it is very likely that you will need to customise your redaction options, which we will cover below.</p>
+</section>
+</section>
+<section id="customising-redaction-options" class="level2">
+<h2 class="anchored" data-anchor-id="customising-redaction-options">Customising redaction options</h2>
+<p>On the ‘Redaction settings’ page, there are a number of options that you can tweak to better match your use case and needs.</p>
+<section id="custom-allow-deny-and-page-redaction-lists" class="level3">
+<h3 class="anchored" data-anchor-id="custom-allow-deny-and-page-redaction-lists">Custom allow, deny, and page redaction lists</h3>
+<p>The app allows you to specify terms that should never be redacted (an allow list), terms that should always be redacted (a deny list), and also to provide a list of page numbers for pages that should be fully redacted.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/allow_deny_full_page_list.PNG" class="img-fluid figure-img"></p>
+<figcaption>Custom allow, deny, and page redaction lists</figcaption>
+</figure>
+</div>
+<section id="allow-list-example" class="level4">
+<h4 class="anchored" data-anchor-id="allow-list-example">Allow list example</h4>
+<p>It may be the case that specific terms that are frequently redacted are not interesting to</p>
+<p>In the redacted outputs of the ‘Example of files sent to a professor before applying’ PDF, you can see that it is frequently redacting references to Dr Hyde’s lab in the main body of the text. Let’s say that references to Dr Hyde were not considered personal information in this context. You can exclude this term from redaction (and others) by providing an ‘allow list’ file. This is simply a csv that contains the case sensitive terms to exclude in the first column, in our example, ‘Hyde’ and ‘Muller glia’. The example file is provided <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/allow_list.csv">here</a>.</p>
+<p>To import this to use with your redaction tasks, go to the ‘Redaction settings’ tab, click on the ‘Import allow list file’ button halfway down, and select the csv file you have created. It should be loaded for next time you hit the redact button. Go back to the first tab and do this.</p>
+</section>
+<section id="deny-list-example" class="level4">
+<h4 class="anchored" data-anchor-id="deny-list-example">Deny list example</h4>
+<p>Say you wanted to remove specific terms from a document. In this app you can do this by providing a custom deny list as a csv. Like for the allow list described above, this should be a one-column csv without a column header. The app will suggest each individual term in the list with exact spelling as whole words. So it won’t select text from within words. To enable this feature, the ‘CUSTOM’ tag needs to be chosen as a redaction entity <a href="#redacting-additional-types-of-personal-information">(the process for adding/removing entity types to redact is described below)</a>.</p>
+<p>Here is an example using the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership Agreement Toolkit file</a>. This is an <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_custom_deny_list.csv">example of a custom deny list file</a>. ‘Sister’, ‘Sister City’ ‘Sister Cities’, ‘Friendship City’ have been listed as specific terms to redact. You can see the outputs of this redaction process on the review page:</p>
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/deny_list_partnership_example.PNG" class="img-fluid" alt="Deny list redaction Partnership file">.</p>
+<p>You can see that the app has highlighted all instances of these terms on the page shown. You can then consider each of these terms for modification or removal on the review page <a href="#reviewing-and-modifying-suggested-redactions">explained here</a>.</p>
+</section>
+<section id="full-page-redaction-list-example" class="level4">
+<h4 class="anchored" data-anchor-id="full-page-redaction-list-example">Full page redaction list example</h4>
+<p>There may be full pages in a document that you want to redact. The app also provides the capability of redacting pages completely based on a list of input page numbers in a csv. The format of the input file is the same as that for the allow and deny lists described above - a one-column csv without a column header. An <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_some_pages.csv">example of this is here</a>. You can see an example of the redacted page on the review page:</p>
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/whole_page_partnership_example.PNG" class="img-fluid" alt="Whole page partnership redaction">.</p>
+<p>Using the above approaches to allow, deny, and full page redaction lists will give you an output <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/Partnership-Agreement-Toolkit_0_0_redacted.pdf">like this</a>.</p>
+</section>
+<section id="adding-to-the-loaded-allow-deny-and-whole-page-lists-in-app" class="level4">
+<h4 class="anchored" data-anchor-id="adding-to-the-loaded-allow-deny-and-whole-page-lists-in-app">Adding to the loaded allow, deny, and whole page lists in-app</h4>
+<p>If you open the accordion below the allow list options called ‘Manually modify custom allow…’, you should be able to see a few tables with options to add new rows:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/manually_modify.PNG" class="img-fluid figure-img"></p>
+<figcaption>Manually modify allow or deny list</figcaption>
+</figure>
+</div>
+<p>If the table is empty, you can add a new entry, you can add a new row by clicking on the ‘+’ item below each table header. If there is existing data, you may need to click on the three dots to the right and select ‘Add row below’. Type the item you wish to keep/remove in the cell, and then (important) press enter to add this new item to the allow/deny/whole page list. Your output tables should look something like below.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/manually_modify_filled.PNG" class="img-fluid figure-img"></p>
+<figcaption>Manually modify allow or deny list filled</figcaption>
+</figure>
+</div>
+</section>
+</section>
+<section id="redacting-additional-types-of-personal-information" class="level3">
+<h3 class="anchored" data-anchor-id="redacting-additional-types-of-personal-information">Redacting additional types of personal information</h3>
+<p>You may want to redact additional types of information beyond the defaults, or you may not be interested in default suggested entity types. There are dates in the example complaint letter. Say we wanted to redact those dates also?</p>
+<p>Under the ‘Redaction settings’ tab, go to ‘Entities to redact (click close to down arrow for full list)’. Different dropdowns are provided according to whether you are using the Local service to redact PII, or the AWS Comprehend service. Click within the empty box close to the dropdown arrow and you should see a list of possible ‘entities’ to redact. Select ‘DATE_TIME’ and it should appear in the main list. To remove items, click on the ‘x’ next to their name.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/additional_entities/additional_entities_select.PNG" class="img-fluid figure-img"></p>
+<figcaption>Redacting additional types of information dropdown</figcaption>
+</figure>
+</div>
+<p>Now, go back to the main screen and click ‘Redact Document’ again. You should now get a redacted version of ‘Example complaint letter’ that has the dates and times removed.</p>
+<p>If you want to redact different files, I suggest you refresh your browser page to start a new session and unload all previous data.</p>
+</section>
+</section>
+<section id="redacting-only-specific-pages" class="level2">
+<h2 class="anchored" data-anchor-id="redacting-only-specific-pages">Redacting only specific pages</h2>
+<p>Say also we are only interested in redacting page 1 of the loaded documents. On the Redaction settings tab, select ‘Lowest page to redact’ as 1, and ‘Highest page to redact’ also as 1. When you next redact your documents, only the first page will be modified.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/select_pages.PNG" class="img-fluid figure-img"></p>
+<figcaption>Selecting specific pages to redact</figcaption>
+</figure>
+</div>
+</section>
+<section id="handwriting-and-signature-redaction" class="level2">
+<h2 class="anchored" data-anchor-id="handwriting-and-signature-redaction">Handwriting and signature redaction</h2>
+<p>The file <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership Agreement Toolkit (for signatures and more advanced usage)</a> is provided as an example document to test AWS Textract + redaction with a document that has signatures in. If you have access to AWS Textract in the app, try removing all entity types from redaction on the Redaction settings and clicking the big X to the right of ‘Entities to redact’.</p>
+<p>To ensure that handwriting and signatures are enabled (enabled by default), on the front screen go the ‘AWS Textract signature detection’ to enable/disable the following options :</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/textract_handwriting_signatures.PNG" class="img-fluid figure-img"></p>
+<figcaption>Handwriting and signatures</figcaption>
+</figure>
+</div>
+<p>The outputs should show handwriting/signatures redacted (see pages 5 - 7), which you can inspect and modify on the ‘Review redactions’ tab.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/refs/heads/main/review_redactions/Signatures%20and%20handwriting%20found.PNG" class="img-fluid figure-img"></p>
+<figcaption>Handwriting and signatures redacted example</figcaption>
+</figure>
+</div>
+</section>
+<section id="reviewing-and-modifying-suggested-redactions" class="level2">
+<h2 class="anchored" data-anchor-id="reviewing-and-modifying-suggested-redactions">Reviewing and modifying suggested redactions</h2>
+<p>Sometimes the app will suggest redactions that are incorrect, or will miss personal information entirely. The app allows you to review and modify suggested redactions to compensate for this. You can do this on the ‘Review redactions’ tab.</p>
+<p>We will go through ways to review suggested redactions with an example.On the first tab ‘PDFs/images’ upload the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf">‘Example of files sent to a professor before applying.pdf’</a> file. Let’s stick with the ‘Local model - selectable text’ option, and click ‘Redact document’. Once the outputs are created, go to the ‘Review redactions’ tab.</p>
+<p>On the ‘Review redactions’ tab you have a visual interface that allows you to inspect and modify redactions suggested by the app. There are quite a few options to look at, so we’ll go from top to bottom.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/review_redactions.PNG" class="img-fluid figure-img"></p>
+<figcaption>Review redactions</figcaption>
+</figure>
+</div>
+<section id="uploading-documents-for-review" class="level3">
+<h3 class="anchored" data-anchor-id="uploading-documents-for-review">Uploading documents for review</h3>
+<p>The top area has a file upload area where you can upload original, unredacted PDFs, alongside the ’…_review_file.csv’ that is produced by the redaction process. Once you have uploaded these two files, click the ‘<strong>Review redactions based on original PDF…</strong>’ button to load in the files for review. This will allow you to visualise and modify the suggested redactions using the interface below.</p>
+<p>Optionally, you can also upload one of the ’…_ocr_output.csv’ files here that comes out of a redaction task, so that you can navigate the extracted text from the document.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG" class="img-fluid figure-img"></p>
+<figcaption>Search extracted text</figcaption>
+</figure>
+</div>
+<p>You can upload the three review files in the box (unredacted document, ’…_review_file.csv’ and ’…_ocr_output.csv’ file) before clicking ‘<strong>Review redactions based on original PDF…</strong>’, as in the image below:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/upload_three_files.PNG" class="img-fluid figure-img"></p>
+<figcaption>Upload three files for review</figcaption>
+</figure>
+</div>
+<p><strong>NOTE:</strong> ensure you upload the <strong><em>unredacted</em></strong> document here and not the redacted version, otherwise you will be checking over a document that already has redaction boxes applied!</p>
+</section>
+<section id="page-navigation" class="level3">
+<h3 class="anchored" data-anchor-id="page-navigation">Page navigation</h3>
+<p>You can change the page viewed either by clicking ‘Previous page’ or ‘Next page’, or by typing a specific page number in the ‘Current page’ box and pressing Enter on your keyboard. Each time you switch page, it will save redactions you have made on the page you are moving from, so you will not lose changes you have made.</p>
+<p>You can also navigate to different pages by clicking on rows in the tables under ‘Search suggested redactions’ to the right, or ‘search all extracted text’ (if enabled) beneath that.</p>
+</section>
+<section id="the-document-viewer-pane" class="level3">
+<h3 class="anchored" data-anchor-id="the-document-viewer-pane">The document viewer pane</h3>
+<p>On the selected page, each redaction is highlighted with a box next to its suggested redaction label (e.g.&nbsp;person, email).</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/document_viewer_pane.PNG" class="img-fluid figure-img"></p>
+<figcaption>Document view pane</figcaption>
+</figure>
+</div>
+<p>There are a number of different options to add and modify redaction boxes and page on the document viewer pane. To zoom in and out of the page, use your mouse wheel. To move around the page while zoomed, you need to be in modify mode. Scroll to the bottom of the document viewer to see the relevant controls. You should see a box icon, a hand icon, and two arrows pointing counter-clockwise and clockwise.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/change_review_mode.PNG" class="img-fluid figure-img"></p>
+<figcaption>Change redaction mode</figcaption>
+</figure>
+</div>
+<p>Click on the hand icon to go into modify mode. When you click and hold on the document viewer, This will allow you to move around the page when zoomed in. To rotate the page, you can click on either of the round arrow buttons to turn in that direction.</p>
+<p><strong>NOTE:</strong> When you switch page, the viewer will stay in your selected orientation, so if it looks strange, just rotate the page again and hopefully it will look correct!</p>
+<section id="modify-existing-redactions-hand-icon" class="level4">
+<h4 class="anchored" data-anchor-id="modify-existing-redactions-hand-icon">Modify existing redactions (hand icon)</h4>
+<p>After clicking on the hand icon, the interface allows you to modify existing redaction boxes. When in this mode, you can click and hold on an existing box to move it.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/modify_existing_redaction_box.PNG" class="img-fluid figure-img"></p>
+<figcaption>Modify existing redaction box</figcaption>
+</figure>
+</div>
+<p>Click on one of the small boxes at the edges to change the size of the box. To delete a box, click on it to highlight it, then press delete on your keyboard. Alternatively, double click on a box and click ‘Remove’ on the box that appears.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/existing_redaction_box_remove.PNG" class="img-fluid figure-img"></p>
+<figcaption>Remove existing redaction box</figcaption>
+</figure>
+</div>
+</section>
+<section id="add-new-redaction-boxes-box-icon" class="level4">
+<h4 class="anchored" data-anchor-id="add-new-redaction-boxes-box-icon">Add new redaction boxes (box icon)</h4>
+<p>To change to ‘add redaction boxes’ mode, scroll to the bottom of the page. Click on the box icon, and your cursor will change into a crosshair. Now you can add new redaction boxes where you wish. A popup will appear when you create a new box so you can select a label and colour for the new box.</p>
+</section>
+<section id="locking-in-new-redaction-box-format" class="level4">
+<h4 class="anchored" data-anchor-id="locking-in-new-redaction-box-format">‘Locking in’ new redaction box format</h4>
+<p>It is possible to lock in a chosen format for new redaction boxes so that you don’t have the popup appearing each time. When you make a new box, select the options for your ‘locked’ format, and then click on the lock icon on the left side of the popup, which should turn blue.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/new_redaction_box_lock_mode.PNG" class="img-fluid figure-img"></p>
+<figcaption>Lock redaction box format</figcaption>
+</figure>
+</div>
+<p>You can now add new redaction boxes without a popup appearing. If you want to change or ‘unlock’ the your chosen box format, you can click on the new icon that has appeared at the bottom of the document viewer pane that looks a little like a gift tag. You can then change the defaults, or click on the lock icon again to ‘unlock’ the new box format - then popups will appear again each time you create a new box.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/change_review_mode_with_lock.PNG" class="img-fluid figure-img"></p>
+<figcaption>Change or unlock redaction box format</figcaption>
+</figure>
+</div>
+</section>
+</section>
+<section id="apply-redactions-to-pdf-and-save-changes-on-current-page" class="level3">
+<h3 class="anchored" data-anchor-id="apply-redactions-to-pdf-and-save-changes-on-current-page">Apply redactions to PDF and Save changes on current page</h3>
+<p>Once you have reviewed all the redactions in your document and you are happy with the outputs, you can click ‘Apply revised redactions to PDF’ to create a new ’_redacted.pdf’ output alongside a new ’_review_file.csv’ output.</p>
+<p>If you are working on a page and haven’t saved for a while, you can click ‘Save changes on current page to file’ to ensure that they are saved to an updated ‘review_file.csv’ output.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/review_mod_outputs.PNG" class="img-fluid figure-img"></p>
+<figcaption>Review modified outputs</figcaption>
+</figure>
+</div>
+</section>
+<section id="selecting-and-removing-redaction-boxes-using-the-search-suggested-redactions-table" class="level3">
+<h3 class="anchored" data-anchor-id="selecting-and-removing-redaction-boxes-using-the-search-suggested-redactions-table">Selecting and removing redaction boxes using the ‘Search suggested redactions’ table</h3>
+<p>The table shows a list of all the suggested redactions in the document alongside the page, label, and text (if available).</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/list_find_labels.PNG" class="img-fluid figure-img"></p>
+<figcaption>Search suggested redaction area</figcaption>
+</figure>
+</div>
+<p>If you click on one of the rows in this table, you will be taken to the page of the redaction. Clicking on a redaction row on the same page will change the colour of redaction box to blue to help you locate it in the document viewer (just when using the app, not in redacted output PDFs).</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/review_row_highlight.PNG" class="img-fluid figure-img"></p>
+<figcaption>Search suggested redaction area</figcaption>
+</figure>
+</div>
+<p>You can choose a specific entity type to see which pages the entity is present on. If you want to go to the page specified in the table, you can click on a cell in the table and the review page will be changed to that page.</p>
+<p>To filter the ‘Search suggested redactions’ table you can: 1. Click on one of the dropdowns (Redaction category, Page, Text), and select an option, or 2. Write text in the ‘Filter’ box just above the table. Click the blue box to apply the filter to the table.</p>
+<p>Once you have filtered the table, or selected a row from the table, you have a few options underneath on what you can do with the filtered rows:</p>
+<ul>
+<li>Click the <strong>Exclude all redactions in table</strong> button to remove all redactions visible in the table from the document. <strong>Important:</strong> ensure that you have clicked the blue tick icon next to the search box before doing this, or you will remove all redactions from the document. If you do end up doing this, click the ‘Undo last element removal’ button below to restore the redactions.</li>
+<li>Click the <strong>Exclude specific redaction row</strong> button to remove only the redaction from the last row you clicked on from the document. The currently selected row is visible below.</li>
+<li>Click the <strong>Exclude all redactions with the same text as selected row</strong> button to remove all redactions from the document that are exactly the same as the selected row text.</li>
+</ul>
+<p><strong>NOTE</strong>: After excluding redactions using any of the above options, click the ‘Reset filters’ button below to ensure that the dropdowns and table return to seeing all remaining redactions in the document.</p>
+<p>If you made a mistake, click the ‘Undo last element removal’ button to restore the Search suggested redactions table to its previous state (can only undo the last action).</p>
+</section>
+<section id="navigating-through-the-document-using-the-search-all-extracted-text" class="level3">
+<h3 class="anchored" data-anchor-id="navigating-through-the-document-using-the-search-all-extracted-text">Navigating through the document using the ‘Search all extracted text’</h3>
+<p>The ‘search all extracted text’ table will contain text if you have just redacted a document, or if you have uploaded a ’…_ocr_output.csv’ file alongside a document file and review file on the Review redactions tab as <a href="#uploading-documents-for-review">described above</a>.</p>
+<p>You can navigate through the document using this table. When you click on a row, the Document viewer pane to the left will change to the selected page.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/select_extracted_text.PNG" class="img-fluid figure-img"></p>
+<figcaption>Search suggested redaction area</figcaption>
+</figure>
+</div>
+<p>You can search through the extracted text by using the search bar just above the table, which should filter as you type. To apply the filter and ‘cut’ the table, click on the blue tick inside the box next to your search term. To return the table to its original content, click the button below the table ‘Reset OCR output table filter’.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG" class="img-fluid figure-img"></p>
+<figcaption>Search suggested redaction area</figcaption>
+</figure>
+</div>
+</section>
+</section>
+<section id="redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text" class="level2">
+<h2 class="anchored" data-anchor-id="redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting tabular data files (XLSX/CSV) or copy and pasted text</h2>
+<section id="tabular-data-files-xlsxcsv" class="level3">
+<h3 class="anchored" data-anchor-id="tabular-data-files-xlsxcsv">Tabular data files (XLSX/CSV)</h3>
+<p>The app can be used to redact tabular data files such as xlsx or csv files. For this to work properly, your data file needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.</p>
+<p>To demonstrate this, we can use <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv">the example csv file ‘combined_case_notes.csv’</a>, which is a small dataset of dummy social care case notes. Go to the ‘Open text or Excel/csv files’ tab. Drop the file into the upload area. After the file is loaded, you should see the suggested columns for redaction in the box underneath. You can select and deselect columns to redact as you wish from this list.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/file_upload_csv_columns.PNG" class="img-fluid figure-img"></p>
+<figcaption>csv upload</figcaption>
+</figure>
+</div>
+<p>If you were instead to upload an xlsx file, you would see also a list of all the sheets in the xlsx file that can be redacted. The ‘Select columns’ area underneath will suggest a list of all columns in the file across all sheets.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/file_upload_xlsx_columns.PNG" class="img-fluid figure-img"></p>
+<figcaption>xlsx upload</figcaption>
+</figure>
+</div>
+<p>Once you have chosen your input file and sheets/columns to redact, you can choose the redaction method. ‘Local’ will use the same local model as used for documents on the first tab. ‘AWS Comprehend’ will give better results, at a slight cost.</p>
+<p>When you click Redact text/data files, you will see the progress of the redaction task by file and sheet, and you will receive a csv output with the redacted data.</p>
+</section>
+<section id="choosing-output-anonymisation-format" class="level3">
+<h3 class="anchored" data-anchor-id="choosing-output-anonymisation-format">Choosing output anonymisation format</h3>
+<p>You can also choose the anonymisation format of your output results. Open the tab ‘Anonymisation output format’ to see the options. By default, any detected PII will be replaced with the word ‘REDACTED’ in the cell. You can choose one of the following options as the form of replacement for the redacted text: - replace with ‘REDACTED’: Replaced by the word ‘REDACTED’ (default) - replace with <entity_name>: Replaced by e.g.&nbsp;‘PERSON’ for people, ‘EMAIL_ADDRESS’ for emails etc. - redact completely: Text is removed completely and replaced by nothing. - hash: Replaced by a unique long ID code that is consistent with entity text. I.e. a particular name will always have the same ID code. - mask: Replace with stars ’*’.</entity_name></p>
+</section>
+<section id="redacting-copy-and-pasted-text" class="level3">
+<h3 class="anchored" data-anchor-id="redacting-copy-and-pasted-text">Redacting copy and pasted text</h3>
+<p>You can also write open text into an input box and redact that using the same methods as described above. To do this, write or paste text into the ‘Enter open text’ box that appears when you open the ‘Redact open text’ tab. Then select a redaction method, and an anonymisation output format as described above. The redacted text will be printed in the output textbox, and will also be saved to a simple csv file in the output file box.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/text_anonymisation_outputs.PNG" class="img-fluid figure-img"></p>
+<figcaption>Text analysis output</figcaption>
+</figure>
+</div>
+</section>
+<section id="redaction-log-outputs" class="level3">
+<h3 class="anchored" data-anchor-id="redaction-log-outputs">Redaction log outputs</h3>
+<p>A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the Redaction settings page under ‘Log file outputs’.</p>
+</section>
+</section>
+<section id="advanced-user-guide" class="level1">
+<h1>Advanced user guide</h1>
+<p>This advanced user guide will go over some of the features recently added to the app, including: modifying and merging redaction review files, identifying and redacting duplicate pages across multiple PDFs, ‘fuzzy’ search and redact, and exporting redactions to Adobe Acrobat.</p>
+<section id="table-of-contents-1" class="level2">
+<h2 class="anchored" data-anchor-id="table-of-contents-1">Table of contents</h2>
+<ul>
+<li><a href="#merging-redaction-review-files">Merging redaction review files</a></li>
+<li><a href="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a></li>
+<li><a href="#fuzzy-search-and-redaction">Fuzzy search and redaction</a></li>
+<li><a href="#export-to-and-import-from-adobe">Export redactions to and import from Adobe Acrobat</a>
+<ul>
+<li><a href="#exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</a></li>
+<li><a href="#importing-from-adobe-acrobat">Importing from Adobe Acrobat</a></li>
+</ul></li>
+<li><a href="#using-the-aws-textract-document-api">Using the AWS Textract document API</a></li>
+<li><a href="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</a></li>
+<li><a href="#modifying-existing-redaction-review-files">Modifying existing redaction review files</a></li>
+</ul>
+</section>
+<section id="merging-redaction-review-files" class="level2">
+<h2 class="anchored" data-anchor-id="merging-redaction-review-files">Merging redaction review files</h2>
+<p>Say you have run multiple redaction tasks on the same document, and you want to merge all of these redactions together. You could do this in your spreadsheet editor, but this could be fiddly especially if dealing with multiple review files or large numbers of redactions. The app has a feature to combine multiple review files together to create a ‘merged’ review file.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merge_review_files_interface.PNG" class="img-fluid figure-img"></p>
+<figcaption>Merging review files in the user interface</figcaption>
+</figure>
+</div>
+<p>You can find this option at the bottom of the ‘Redaction Settings’ tab. Upload multiple review files here to get a single output ‘merged’ review_file. In the examples file, merging the ‘review_file_custom.csv’ and ‘review_file_local.csv’ files give you an output containing redaction boxes from both. This combined review file can then be uploaded into the review tab following the usual procedure.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merged_review_file_outputs_csv.PNG" class="img-fluid figure-img"></p>
+<figcaption>Merging review files outputs in spreadsheet</figcaption>
+</figure>
+</div>
+</section>
+<section id="identifying-and-redacting-duplicate-pages" class="level2">
+<h2 class="anchored" data-anchor-id="identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</h2>
+<p>The files for this section are stored <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/">here</a>.</p>
+<p>Some redaction tasks involve removing duplicate pages of text that may exist across multiple documents. This feature calculates the similarity of text in all pages of input PDFs, calculates a similarity score, and then flags pages above a certain similarity score (90%) for removal by creating a ‘whole page’ redaction list file for each input PDF.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_output_interface.PNG" class="img-fluid figure-img"></p>
+<figcaption>Example duplicate page outputs</figcaption>
+</figure>
+</div>
+<p>The similarity calculation is based on using the ‘ocr_outputs.csv’ file that is output every time that you perform a redaction task. From the file folder, upload the four ‘ocr_output.csv’ files provided in the example folder into the file area. Click ‘Identify duplicate pages’ and you will see a number of files returned. In case you want to see the original PDFs, they are available <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/input_pdfs/">here</a>.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_input_interface.PNG" class="img-fluid figure-img"></p>
+<figcaption>Identify duplicate pages interface</figcaption>
+</figure>
+</div>
+<p>First, there is a ‘combined_ocr_result…’ file that just merges together all the text from the input files. ‘page_similarity_results.csv’ shows a breakdown of the pages from each file that are most similar to each other above the threshold (90% similarity). You can compare the text in the two columns ‘Page_1_Text’ and ‘Page_2_Text’.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/page_similarity_example.PNG" class="img-fluid figure-img"></p>
+<figcaption>Page similarity file example</figcaption>
+</figure>
+</div>
+<p>The remaining output files are suffixed with ’_whole_page.csv’. These are the same files that can be used to redact whole pages as described in the <a href="#full-page-redaction-list-example">‘Full page redaction list example’ section</a>. For each PDF involved in the duplicate detection process, you can upload the relevant ’_whole_page.csv’ file into the relevant area, then do a new redaction task for the PDF file without any entity types selected. This way, only the suggested whole pages will be suggested for redaction and nothing else.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/output_file_2_whole_page_outputs.PNG" class="img-fluid figure-img"></p>
+<figcaption>Example duplicate page redaction list</figcaption>
+</figure>
+</div>
+<p>If you want to combine the results from this redaction process with previous redaction tasks for the same PDF, you could merge review file outputs following the steps described in <a href="#merging-existing-redaction-review-files">Merging existing redaction review files</a> above.</p>
+</section>
+<section id="fuzzy-search-and-redaction" class="level2">
+<h2 class="anchored" data-anchor-id="fuzzy-search-and-redaction">Fuzzy search and redaction</h2>
+<p>The files for this section are stored <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/">here</a>.</p>
+<p>Sometimes you may be searching for terns that are slightly mispelled throughout a document, for example names. The document redaction app gives the option for searching for long phrases that may contain spelling mistakes, a method called ‘fuzzy matching’.</p>
+<p>To do this, go to the Redaction Settings, and the ‘Select entity types to redact’ area. In the box below relevant to your chosen redaction method (local or AWS Comprehend), select ‘CUSTOM_FUZZY’ from the list. Next, we can select the maximum number of spelling mistakes allowed in the search (up to nine). Here, you can either type in a number or use the small arrows to the right of the box. Change this option to 3. This will allow for a maximum of three ‘changes’ in text needed to match to the desired search terms.</p>
+<p>The other option we can leave as is (should fuzzy search match on entire phrases in deny list) - this option would allow you to fuzzy search on each individual word in the search phrase (apart from stop words).</p>
+<p>Next, we can upload a deny list on the same page to do the fuzzy search. A relevant deny list file can be found <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv">here</a> - you can upload it following <a href="#deny-list-example">these steps</a>. You will notice that the suggested deny list has spelling mistakes compared to phrases found in the example document.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/fuzzy_search/img/fuzzy_deny_list_example.PNG" class="img-fluid figure-img"></p>
+<figcaption>Deny list example with spelling mistakes</figcaption>
+</figure>
+</div>
+<p>Upload the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership-Agreement-Toolkit file</a> into the ‘Redact document’ area on the first tab. Now, press the ‘Redact document’ button.</p>
+<p>Using these deny list with spelling mistakes, the app fuzzy match these terms to the correct text in the document. After redaction is complete, go to the Review Redactions tab to check the first tabs. You should see that the phrases in the deny list have been successfully matched.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/fuzzy_search/img/fuzzy_search_review.PNG" class="img-fluid figure-img"></p>
+<figcaption>Fuzzy match review outputs</figcaption>
+</figure>
+</div>
+</section>
+<section id="export-to-and-import-from-adobe" class="level2">
+<h2 class="anchored" data-anchor-id="export-to-and-import-from-adobe">Export to and import from Adobe</h2>
+<p>Files for this section are stored <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/export_to_adobe/">here</a>.</p>
+<section id="exporting-to-adobe-acrobat" class="level3">
+<h3 class="anchored" data-anchor-id="exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</h3>
+<p>The Document Redaction app has a feature to export suggested redactions to Adobe, and likewise to import Adobe comment files into the app. The file format used is the .xfdf Adobe comment file format - <a href="https://helpx.adobe.com/uk/acrobat/using/importing-exporting-comments.html">you can find more information about how to use these files here</a>.</p>
+<p>To convert suggested redactions to Adobe format, you need to have the original PDF and a review file csv in the input box at the top of the Review redactions page.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/export_to_adobe/img/adobe_export_input_area.PNG" class="img-fluid figure-img"></p>
+<figcaption>Input area for files for Adobe export</figcaption>
+</figure>
+</div>
+<p>Then, you can find the export to Adobe option at the bottom of the Review redactions tab. Adobe comment files will be output here.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/export_to_adobe/img/export_to_adobe_interface.PNG" class="img-fluid figure-img"></p>
+<figcaption>Adobe export/import options</figcaption>
+</figure>
+</div>
+<p>Once the input files are ready, you can click on the ‘Convert review file to Adobe comment format’. You should see a file appear in the output box with a ‘.xfdf’ file type. To use this in Adobe, after download to your computer, you should be able to double click on it, and a pop-up box will appear asking you to find the PDF file associated with it. Find the original PDF file used for your redaction task. The file should be opened up in Adobe Acrobat with the suggested redactions.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/export_to_adobe/img/adobe_redact_example.PNG" class="img-fluid figure-img"></p>
+<figcaption>Suggested redactions in Adobe Acrobat</figcaption>
+</figure>
+</div>
+</section>
+<section id="importing-from-adobe-acrobat" class="level3">
+<h3 class="anchored" data-anchor-id="importing-from-adobe-acrobat">Importing from Adobe Acrobat</h3>
+<p>The app also allows you to import .xfdf files from Adobe Acrobat. To do this, go to the same Adobe import/export area as described above at the bottom of the Review Redactions tab. In this box, you need to upload a .xfdf Adobe comment file, along with the relevant original PDF for redaction.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/export_to_adobe/img/import_from_adobe_interface.PNG" class="img-fluid figure-img"></p>
+<figcaption>Adobe import interface</figcaption>
+</figure>
+</div>
+<p>When you click the ‘convert .xfdf comment file to review_file.csv’ button, the app should take you up to the top of the screen where the new review file has been created and can be downloaded.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/export_to_adobe/img/import_from_adobe_interface_outputs.PNG" class="img-fluid figure-img"></p>
+<figcaption>Outputs from Adobe import</figcaption>
+</figure>
+</div>
+</section>
+</section>
+<section id="using-the-aws-textract-document-api" class="level2">
+<h2 class="anchored" data-anchor-id="using-the-aws-textract-document-api">Using the AWS Textract document API</h2>
+<p>This option can be enabled by your system admin, in the config file (‘SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS’ environment variable, and subsequent variables). Using this, you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the ‘Redact document’ process described here).</p>
+<section id="starting-a-new-textract-api-job" class="level3">
+<h3 class="anchored" data-anchor-id="starting-a-new-textract-api-job">Starting a new Textract API job</h3>
+<p>To use this feature, first upload a document file in the file input box <a href="#upload-files-to-the-app">in the usual way</a> on the first tab of the app. Under AWS Textract signature detection you can select whether or not you would like to analyse signatures or not (with a <a href="#optional---select-signature-extraction">cost implication</a>).</p>
+<p>Then, open the section under the heading ‘Submit whole document to AWS Textract API…’.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_document_api.PNG" class="img-fluid figure-img"></p>
+<figcaption>Textract document API menu</figcaption>
+</figure>
+</div>
+<p>Click ‘Analyse document with AWS Textract API call’. After a few seconds, the job should be submitted to the AWS Textract service. The box ‘Job ID to check status’ should now have an ID filled in. If it is not already filled with previous jobs (up to seven days old), the table should have a row added with details of the new API job.</p>
+<p>Click the button underneath, ‘Check status of Textract job and download’, to see progress on the job. Processing will continue in the background until the job is ready, so it is worth periodically clicking this button to see if the outputs are ready. In testing, and as a rough estimate, it seems like this process takes about five seconds per page. However, this has not been tested with very large documents. Once ready, the ’_textract.json’ output should appear below.</p>
+</section>
+<section id="textract-api-job-outputs" class="level3">
+<h3 class="anchored" data-anchor-id="textract-api-job-outputs">Textract API job outputs</h3>
+<p>The ’_textract.json’ output can be used to speed up further redaction tasks as <a href="#optional---costs-and-time-estimation">described previously</a>, the ‘Existing Textract output file found’ flag should now be ticked.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/textract_api/textract_api_initial_outputs.PNG" class="img-fluid figure-img"></p>
+<figcaption>Textract document API initial ouputs</figcaption>
+</figure>
+</div>
+<p>You can now easily get the ’…_ocr_output.csv’ redaction output based on this ’_textract.json’ (described in <a href="#redaction-outputs">Redaction outputs</a>) by clicking on the button ‘Convert Textract job outputs to OCR results’. You can now use this file e.g.&nbsp;for <a href="#identifying-and-redacting-duplicate-pages">identifying duplicate pages</a>, or for redaction review.</p>
+</section>
+</section>
+<section id="using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment" class="level2">
+<h2 class="anchored" data-anchor-id="using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</h2>
+<p>AWS Textract and Comprehend give much better results for text extraction and document redaction than the local model options in the app. The most secure way to access them in the Redaction app is to run the app in a secure AWS environment with relevant permissions. Alternatively, you could run the app on your own system while logged in to AWS SSO with relevant permissions.</p>
+<p>However, it is possible to access these services directly via API from outside an AWS environment by creating IAM users and access keys with relevant permissions to access AWS Textract and Comprehend services. Please check with your IT and data security teams that this approach is acceptable for your data before trying the following approaches.</p>
+<p>To do the following, in your AWS environment you will need to create a new user with permissions for “textract:AnalyzeDocument”, “textract:DetectDocumentText”, and “comprehend:DetectPiiEntities”. Under security credentials, create new access keys - note down the access key and secret key.</p>
+<section id="direct-access-by-passing-aws-access-keys-through-app" class="level3">
+<h3 class="anchored" data-anchor-id="direct-access-by-passing-aws-access-keys-through-app">Direct access by passing AWS access keys through app</h3>
+<p>The Redaction Settings tab now has boxes for entering the AWS access key and secret key. If you paste the relevant keys into these boxes before performing redaction, you should be able to use these services in the app.</p>
+</section>
+<section id="picking-up-aws-access-keys-through-an-.env-file" class="level3">
+<h3 class="anchored" data-anchor-id="picking-up-aws-access-keys-through-an-.env-file">Picking up AWS access keys through an .env file</h3>
+<p>The app also has the capability of picking up AWS access key details through a .env file located in a ‘/config/aws_config.env’ file (default), or alternative .env file location specified by the environment variable AWS_CONFIG_PATH. The env file should look like the following with just two lines:</p>
+<p>AWS_ACCESS_KEY= your-access-key AWS_SECRET_KEY= your-secret-key</p>
+<p>The app should then pick up these keys when trying to access the AWS Textract and Comprehend services during redaction.</p>
+<p>Again, a lot can potentially go wrong with AWS solutions that are insecure, so before trying the above please consult with your AWS and data security teams.</p>
+</section>
+</section>
+<section id="modifying-existing-redaction-review-files" class="level2">
+<h2 class="anchored" data-anchor-id="modifying-existing-redaction-review-files">Modifying existing redaction review files</h2>
+<p>You can find the folder containing the files discussed in this section <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/">here</a>.</p>
+<p>As well as serving as inputs to the document redaction app’s review function, the ‘review_file.csv’ output can be modified outside of the app, and also merged with others from multiple redaction attempts on the same file. This gives you the flexibility to change redaction details outside of the app.</p>
+<p>If you open up a ‘review_file’ csv output using a spreadsheet software program such as Microsoft Excel you can easily modify redaction properties. Open the file ‘<a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/Partnership-Agreement-Toolkit_0_0.pdf_review_file_local.csv">Partnership-Agreement-Toolkit_0_0_redacted.pdf_review_file_local.csv</a>’, and you should see a spreadshet with just four suggested redactions (see below). The following instructions are for using Excel.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/review_file_before.PNG" class="img-fluid figure-img"></p>
+<figcaption>Review file before</figcaption>
+</figure>
+</div>
+<p>The first thing we can do is remove the first row - ‘et’ is suggested as a person, but is obviously not a genuine instance of personal information. Right click on the row number and select delete on this menu. Next, let’s imagine that what the app identified as a ‘phone number’ was in fact another type of number and so we wanted to change the label. Simply click on the relevant label cells, let’s change it to ‘SECURITY_NUMBER’. You could also use ‘Find &amp; Select’ -&gt; ‘Replace’ from the top ribbon menu if you wanted to change a number of labels simultaneously.</p>
+<p>How about we wanted to change the colour of the ‘email address’ entry on the redaction review tab of the redaction app? The colours in a review file are based on an RGB scale with three numbers ranging from 0-255. <a href="https://rgbcolorpicker.com">You can find suitable colours here</a>. Using this scale, if I wanted my review box to be pure blue, I can change the cell value to (0,0,255).</p>
+<p>Imagine that a redaction box was slightly too small, and I didn’t want to use the in-app options to change the size. In the review file csv, we can modify e.g.&nbsp;the ymin and ymax values for any box to increase the extent of the redaction box. For the ‘email address’ entry, let’s decrease ymin by 5, and increase ymax by 5.</p>
+<p>I have saved an output file following the above steps as ‘<a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/outputs/Partnership-Agreement-Toolkit_0_0.pdf_review_file_local_mod.csv">Partnership-Agreement-Toolkit_0_0_redacted.pdf_review_file_local_mod.csv</a>’ in the same folder that the original was found. Let’s upload this file to the app along with the original pdf to see how the redactions look now.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/partnership_redactions_after.PNG" class="img-fluid figure-img"></p>
+<figcaption>Review file after modification</figcaption>
+</figure>
+</div>
+<p>We can see from the above that we have successfully removed a redaction box, changed labels, colours, and redaction box sizes.</p>
+
+
+</section>
+</section>
+
+<a onclick="window.scrollTo(0, 0); return false;" role="button" id="quarto-back-to-top"><i class="bi bi-arrow-up"></i> Back to top</a></main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+        const codeEl = trigger.previousElementSibling.cloneNode(true);
+        for (const childEl of codeEl.children) {
+          if (isCodeAnnotation(childEl)) {
+            childEl.remove();
+          }
+        }
+        return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

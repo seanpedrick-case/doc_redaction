@@ -1,0 +1,28 @@
+project:
+  type: website
+  output-dir: docs # Common for GitHub Pages
+  render:
+    - "*.qmd"
+
+website:
+  title: "Document Redaction App"
+  page-navigation: true # Often enabled for floating TOC to highlight current section
+  back-to-top-navigation: true
+  search: true
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - href: src/user_guide.qmd
+        text: User guide
+      - href: src/faq.qmd
+        text: User FAQ
+      - href: src/installation_guide.qmd
+        text: App installation guide (with CDK)
+      - href: src/app_settings.qmd
+        text: App settings management guide
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css

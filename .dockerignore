@@ -27,3 +27,4 @@ cdk/cdk.out/*
 cdk/archive/*
 cdk.json
 cdk.context.json
+.quarto/*
