@@ -5,12 +5,12 @@ colorFrom: blue
 colorTo: yellow
 sdk: docker
 app_file: app.py
-pinned: false
+pinned: true
 license: agpl-3.0
 ---
 # Document redaction
 
-version: 0.6.8
+version: 0.7.0
 
 Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a walkthrough on how to use the app. Below is a very brief overview.
     
