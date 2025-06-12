@@ -1,2 +1,5 @@
-aws-cdk-lib==2.195.0
-nodejs
+aws-cdk-lib==2.200.2
+boto3==1.38.35
+pandas==2.2.3
+nodejs==0.1.1
+python-dotenv==1.0.1

@@ -4,6 +4,7 @@
 *.jpg
 *.png
 *.ipynb
+*.pyc
 examples/*
 processing/*
 input/*
@@ -21,6 +22,8 @@ user_guide/*
 cdk/config/*
 tld/*
 tmp/*
-cdk.out/*
+cdk/config/*
+cdk/cdk.out/*
+cdk/archive/*
 cdk.json
 cdk.context.json

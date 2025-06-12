@@ -1,123 +1,173 @@
 import boto3
 from botocore.exceptions import ClientError
 import json
+import os
+import pandas as pd
+import ipaddress
 from constructs import Construct
-from typing import List, Tuple, Optional
-#from aws_cdk import core
+from dotenv import set_key
+from typing import List, Tuple, Optional, Dict, Any
 from aws_cdk import (
+    App,
     CfnTag,
     aws_ec2 as ec2,
     aws_wafv2 as wafv2,
     aws_elasticloadbalancingv2 as elb,
+    aws_elasticloadbalancingv2_actions as elb_act,
     aws_certificatemanager as acm, # You might need this if you were looking up a cert, but not strictly for ARN
     aws_cognito as cognito,
-    Stack,
-    CfnOutput
+    aws_iam as iam,
+    CfnOutput,
+    Tags
 )
 
 
-from cdk_config import AWS_REGION, PUBLIC_SUBNETS_TO_USE, PRIVATE_SUBNETS_TO_USE, PUBLIC_SUBNET_CIDR_BLOCKS, PRIVATE_SUBNET_CIDR_BLOCKS, PUBLIC_SUBNET_AVAILABILITY_ZONES, PRIVATE_SUBNET_AVAILABILITY_ZONES, POLICY_FILE_LOCATIONS, CDK_PREFIX, VPC_NAME, ACM_CERTIFICATE_ARN
 
-if PUBLIC_SUBNETS_TO_USE: PUBLIC_SUBNETS_TO_USE = eval(PUBLIC_SUBNETS_TO_USE)
-if PUBLIC_SUBNET_CIDR_BLOCKS: PUBLIC_SUBNET_CIDR_BLOCKS = eval(PUBLIC_SUBNET_CIDR_BLOCKS)
-if PUBLIC_SUBNET_AVAILABILITY_ZONES: PUBLIC_SUBNET_AVAILABILITY_ZONES = eval(PUBLIC_SUBNET_AVAILABILITY_ZONES)
+from cdk_config import PUBLIC_SUBNETS_TO_USE, PRIVATE_SUBNETS_TO_USE, PUBLIC_SUBNET_CIDR_BLOCKS, PRIVATE_SUBNET_CIDR_BLOCKS, PUBLIC_SUBNET_AVAILABILITY_ZONES, PRIVATE_SUBNET_AVAILABILITY_ZONES, POLICY_FILE_LOCATIONS, NAT_GATEWAY_EIP_NAME, S3_LOG_CONFIG_BUCKET_NAME, S3_OUTPUT_BUCKET_NAME, ACCESS_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, AWS_REGION
 
-if PRIVATE_SUBNETS_TO_USE: PRIVATE_SUBNETS_TO_USE = eval(PRIVATE_SUBNETS_TO_USE)
-if PRIVATE_SUBNET_CIDR_BLOCKS: PRIVATE_SUBNET_CIDR_BLOCKS = eval(PRIVATE_SUBNET_CIDR_BLOCKS)
-if PRIVATE_SUBNET_AVAILABILITY_ZONES: PRIVATE_SUBNET_AVAILABILITY_ZONES = eval(PRIVATE_SUBNET_AVAILABILITY_ZONES)
+# --- Function to load context from file ---
+def load_context_from_file(app: App, file_path: str):
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            context_data = json.load(f)
+            for key, value in context_data.items():
+                app.node.set_context(key, value)
+            print(f"Loaded context from {file_path}")
+    else:
+        print(f"Context file not found: {file_path}")
 
-if POLICY_FILE_LOCATIONS: POLICY_FILE_LOCATIONS = eval(POLICY_FILE_LOCATIONS)
+# --- Helper to parse environment variables into lists ---
+def _get_env_list(env_var_name: str) -> List[str]:
+    """Parses a comma-separated environment variable into a list of strings."""
+    value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
+    if not value:
+        return []
+    # Split by comma and filter out any empty strings that might result from extra commas
+    return [s.strip() for s in value.split(',') if s.strip()]
+
+# 1. Try to load CIDR/AZs from environment variables
+if PUBLIC_SUBNETS_TO_USE: PUBLIC_SUBNETS_TO_USE = _get_env_list(PUBLIC_SUBNETS_TO_USE)
+if PRIVATE_SUBNETS_TO_USE: PRIVATE_SUBNETS_TO_USE = _get_env_list(PRIVATE_SUBNETS_TO_USE)
+
+if PUBLIC_SUBNET_CIDR_BLOCKS: PUBLIC_SUBNET_CIDR_BLOCKS = _get_env_list("PUBLIC_SUBNET_CIDR_BLOCKS")
+if PUBLIC_SUBNET_AVAILABILITY_ZONES: PUBLIC_SUBNET_AVAILABILITY_ZONES = _get_env_list("PUBLIC_SUBNET_AVAILABILITY_ZONES")
+if PRIVATE_SUBNET_CIDR_BLOCKS: PRIVATE_SUBNET_CIDR_BLOCKS = _get_env_list("PRIVATE_SUBNET_CIDR_BLOCKS")
+if PRIVATE_SUBNET_AVAILABILITY_ZONES: PRIVATE_SUBNET_AVAILABILITY_ZONES = _get_env_list("PRIVATE_SUBNET_AVAILABILITY_ZONES")
+
+if POLICY_FILE_LOCATIONS: POLICY_FILE_LOCATIONS = _get_env_list(POLICY_FILE_LOCATIONS)
 
 def check_for_existing_role(role_name:str):    
     try:
         iam = boto3.client('iam')
-        iam.get_role(RoleName=role_name)
+        #iam.get_role(RoleName=role_name)
         
         response = iam.get_role(RoleName=role_name)
-        role = response['Role']
-        
+        role = response['Role']['Arn']
 
-        return True, role
+        print("Response Role:", role)      
+
+        return True, role, ""
     except iam.exceptions.NoSuchEntityException:
         return False, "", ""
     except Exception as e:
         raise Exception("Getting information on IAM role failed due to:", e)
 
 import json
-from aws_cdk import aws_iam as iam # Import the CDK IAM module
-from constructs import Construct # Import if your policies need scope/context
+from typing import List, Dict, Any, Union, Optional
+from aws_cdk import (
+    aws_iam as iam,
+)
+from constructs import Construct
 
-# Assuming POLICY_FILE_LOCATIONS is defined elsewhere
+# Assume POLICY_FILE_LOCATIONS is defined globally or passed as a default
+# For example:
+# POLICY_FILE_LOCATIONS = ["./policies/my_read_policy.json", "./policies/my_write_policy.json"]
 
-def add_custom_policies(
-    # You need the scope (usually the stack) to create CDK constructs
-    scope: Construct,
-    role: iam.IRole, # Type hint for the CDK Role object
-    POLICY_FILE_LOCATIONS=POLICY_FILE_LOCATIONS
-    # POLICY_FILE_ARNS=POLICY_FILE_ARNS # Add if needed later
-) -> iam.IRole: # Return the modified CDK Role object
+
+def add_statement_to_policy(role: iam.IRole, policy_document: Dict[str, Any]):
     """
-    Loads custom policies from JSON files and attaches them to a CDK Role.
+    Adds individual policy statements from a parsed policy document to a CDK Role.
 
     Args:
-        scope: The scope in which to define nested constructs (if any, though
-               not strictly needed for PolicyStatement itself, required if
-               you needed to create Policy resources).
         role: The CDK Role construct to attach policies to.
-        POLICY_FILE_LOCATIONS: List of file paths to JSON policy documents.
+        policy_document: A Python dictionary representing an IAM policy document.
+    """
+    # Ensure the loaded JSON is a valid policy document structure
+    if 'Statement' not in policy_document or not isinstance(policy_document['Statement'], list):
+        print(f"Warning: Policy document does not contain a 'Statement' list. Skipping.")
+        return # Do not return role, just log and exit
+
+    for statement_dict in policy_document['Statement']:
+        try:
+            # Create a CDK PolicyStatement from the dictionary
+            cdk_policy_statement = iam.PolicyStatement.from_json(statement_dict)
+
+            # Add the policy statement to the role
+            role.add_to_policy(cdk_policy_statement)
+            print(f"  - Added statement: {statement_dict.get('Sid', 'No Sid')}")
+        except Exception as e:
+            print(f"Warning: Could not process policy statement: {statement_dict}. Error: {e}")
+
+def add_custom_policies(
+    scope: Construct, # Not strictly used here, but good practice if you expand to ManagedPolicies
+    role: iam.IRole,
+    policy_file_locations: Optional[List[str]] = None,
+    custom_policy_text: Optional[str] = None
+) -> iam.IRole:
+    """
+    Loads custom policies from JSON files or a string and attaches them to a CDK Role.
+
+    Args:
+        scope: The scope in which to define constructs (if needed, e.g., for iam.ManagedPolicy).
+        role: The CDK Role construct to attach policies to.
+        policy_file_locations: List of file paths to JSON policy documents.
+        custom_policy_text: A JSON string representing a policy document.
 
     Returns:
         The modified CDK Role construct.
     """
+    if policy_file_locations is None:
+        policy_file_locations = []
 
-    if POLICY_FILE_LOCATIONS:
-        for i, path in enumerate(POLICY_FILE_LOCATIONS):
+    current_source = "unknown source" # For error messages
+
+    try:
+        if policy_file_locations:
+            print(f"Attempting to add policies from files to role {role.node.id}...")
+            for path in policy_file_locations:
+                current_source = f"file: {path}"
+                try:
+                    with open(path, 'r') as f:
+                        policy_document = json.load(f)
+                    print(f"Processing policy from {current_source}...")
+                    add_statement_to_policy(role, policy_document)
+                except FileNotFoundError:
+                    print(f"Warning: Policy file not found at {path}. Skipping.")
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Invalid JSON in policy file {path}: {e}. Skipping.")
+                except Exception as e:
+                    print(f"An unexpected error occurred processing policy from {path}: {e}. Skipping.")
+
+        if custom_policy_text:
+            current_source = "custom policy text string"
+            print(f"Attempting to add policy from custom text to role {role.node.id}...")
             try:
-                # Load custom policies from JSON files
-                with open(path) as f:
-                    policy_document = json.load(f)
-
-                # Ensure the loaded JSON is a valid policy document structure
-                if 'Statement' not in policy_document or not isinstance(policy_document['Statement'], list):
-                     print(f"Warning: Policy file {path} does not appear to be a valid policy document. Skipping.")
-                     continue # Skip this file
-
-                # PolicyStatement.from_json takes a *single statement* dictionary,
-                # not the whole policy document dictionary.
-                # You need to loop through the 'Statement' list if the JSON file
-                # contains a full policy document.
-                for statement_dict in policy_document['Statement']:
-                    # Create a CDK PolicyStatement from the dictionary
-                    cdk_policy_statement = iam.PolicyStatement.from_json(statement_dict)
-
-                    # Add the policy statement to the role
-                    # Use add_to_policy method of the CDK Role object
-                    role.add_to_policy(cdk_policy_statement)
-
-                print(f"Successfully added policies from {path} to role {role.node.id}")
-
-            except FileNotFoundError:
-                print(f"Warning: Policy file not found at {path}. Skipping.")
-            except json.JSONDecodeError:
-                print(f"Warning: Invalid JSON in policy file {path}. Skipping.")
+                # *** FIX: Parse the JSON string into a Python dictionary ***
+                policy_document = json.loads(custom_policy_text)
+                print(f"Processing policy from {current_source}...")
+                add_statement_to_policy(role, policy_document)
+            except json.JSONDecodeError as e:
+                print(f"Warning: Invalid JSON in custom_policy_text: {e}. Skipping.")
             except Exception as e:
-                print(f"An unexpected error occurred processing policy file {path}: {e}")
-                # Decide if you want to re-raise for critical errors
-                # raise e
+                print(f"An unexpected error occurred processing policy from custom_policy_text: {e}. Skipping.")
 
-    # If you had a list of managed policy ARNs to attach:
-    # if POLICY_FILE_ARNS:
-    #     for arn in POLICY_FILE_ARNS:
-    #         try:
-    #             managed_policy = iam.ManagedPolicy.from_managed_policy_arn(scope, f"CustomManagedPolicy{i}", arn) # Unique logical ID
-    #             role.add_managed_policy(managed_policy)
-    #             print(f"Attached managed policy {arn} to role {role.node.id}")
-    #         except Exception as e:
-    #             print(f"Warning: Could not attach managed policy {arn}: {e}")
+        # You might want a final success message, but individual processing messages are also good.
+        print(f"Finished processing custom policies for role {role.node.id}.")
 
+    except Exception as e:
+        print(f"An unhandled error occurred during policy addition for {current_source}: {e}")
 
-    return role # Return the modified role object
-
+    return role
 
 # Import the S3 Bucket class if you intend to return a CDK object later
 # from aws_cdk import aws_s3 as s3
@@ -176,7 +226,7 @@ def check_s3_bucket_exists(bucket_name: str): # Return type hint depends on what
 # # You don't necessarily need to store the name in context if using from_bucket_name
 
 # Delete an S3 bucket
-def delete_s3_bucket(bucket_name):
+def delete_s3_bucket(bucket_name:str):
     s3 = boto3.client('s3')
     
     try:
@@ -193,7 +243,7 @@ def delete_s3_bucket(bucket_name):
         return {'Status': 'FAILED', 'Reason': str(e)}
 
 # Function to get subnet ID from subnet name
-def get_subnet_id(vpc, ec2_client, subnet_name):
+def get_subnet_id(vpc:str, ec2_client:str, subnet_name:str):
     response = ec2_client.describe_subnets(Filters=[{'Name': 'vpc-id', 'Values': [vpc.vpc_id]}])
 
     for subnet in response['Subnets']:
@@ -230,11 +280,6 @@ def check_ecr_repo_exists(repo_name: str) -> tuple[bool, dict]:
         print(f"An unexpected error occurred: {e}")
         return False, {}
     
-
-
-# You might eventually want to return a CDK object for use in your stack
-# from aws_cdk import aws_codebuild as codebuild
-
 def check_codebuild_project_exists(project_name: str): # Adjust return type hint as needed
     """
     Checks if a CodeBuild project with the given name exists.
@@ -258,7 +303,7 @@ def check_codebuild_project_exists(project_name: str): # Adjust return type hint
         if response['projects']:
             # If the project is found in the 'projects' list
             print(f"CodeBuild project '{project_name}' found.")
-            return True, response['projects'][0]  # Return True and the project details dict
+            return True, response['projects'][0]['arn']  # Return True and the project details dict
         elif response['projectsNotFound'] and project_name in response['projectsNotFound']:
              # If the project name is explicitly in the 'projectsNotFound' list
              print(f"CodeBuild project '{project_name}' not found.")
@@ -283,12 +328,6 @@ def check_codebuild_project_exists(project_name: str): # Adjust return type hint
         print(f"An unexpected non-ClientError occurred checking CodeBuild project '{project_name}': {e}")
         # Decide how to handle other errors
         raise # Re-raise the original exception
-
-# Example usage in your check_resources.py:
-# exists, project_details = check_codebuild_project_exists(codebuild_project_name)
-# context_data[f"exists:{codebuild_project_name}"] = exists
-# if exists:
-#     context_data[f"arn:{codebuild_project_name}"] = project_details['arn'] # Get ARN from the details dict
 
 def get_vpc_id_by_name(vpc_name: str) -> Optional[str]:
     """
@@ -335,74 +374,195 @@ def get_vpc_id_by_name(vpc_name: str) -> Optional[str]:
         print(f"An unexpected error occurred finding VPC '{vpc_name}': {e}")
         raise
 
-def check_and_set_context():
-    prefix = CDK_PREFIX
-    context_data = {}
-
-    # --- Find the VPC ID first ---
-    vpc_id = get_vpc_id_by_name(VPC_NAME)
-    if not vpc_id:
-        # If the VPC doesn't exist, you might not be able to check/create subnets.
-        # Decide how to handle this: raise an error, set a flag, etc.
-        raise RuntimeError(f"Required VPC '{VPC_NAME}' not found. Cannot proceed with subnet checks.")
-
-    context_data["vpc_id"] = vpc_id # Store VPC ID in context
-
-    # --- Check for Subnets ---
-    checked_public_subnets = {}
-    if PUBLIC_SUBNETS_TO_USE:
-        for subnet_name in PUBLIC_SUBNETS_TO_USE:
-            exists, subnet_id = check_subnet_exists_by_name(vpc_id, subnet_name)
-            checked_public_subnets[subnet_name] = {"exists": exists, "id": subnet_id}
-    context_data["checked_public_subnets"] = checked_public_subnets
-
-    checked_private_subnets = {}
-    if PRIVATE_SUBNETS_TO_USE:
-        for subnet_name in PRIVATE_SUBNETS_TO_USE:
-            exists, subnet_id = check_subnet_exists_by_name(vpc_id, subnet_name)
-            checked_private_subnets[subnet_name] = {"exists": exists, "id": subnet_id}
-    context_data["checked_private_subnets"] = checked_private_subnets
-
-def check_subnet_exists_by_name(vpc_id: str, subnet_name: str) -> Tuple[bool, Optional[str]]:
+# --- Helper to fetch all existing subnets in a VPC once ---
+def _get_existing_subnets_in_vpc(vpc_id: str) -> Dict[str, Any]:
     """
-    Checks if a subnet with the given name exists within a specific VPC.
+    Fetches all subnets in a given VPC.
+    Returns a dictionary with 'by_name' (map of name to subnet data),
+    'by_id' (map of id to subnet data), and 'cidr_networks' (list of ipaddress.IPv4Network).
+    """
+    ec2_client = boto3.client('ec2')
+    existing_subnets_data = {
+        "by_name": {},  # {subnet_name: {'id': 'subnet-id', 'cidr': 'x.x.x.x/x'}}
+        "by_id": {},    # {subnet_id: {'name': 'subnet-name', 'cidr': 'x.x.x.x/x'}}
+        "cidr_networks": [] # List of ipaddress.IPv4Network objects
+    }
+    try:
+        response = ec2_client.describe_subnets(Filters=[{'Name': 'vpc-id', 'Values': [vpc_id]}])
+        for s in response.get('Subnets', []):
+            subnet_id = s['SubnetId']
+            cidr_block = s.get('CidrBlock')
+            # Extract 'Name' tag, which is crucial for lookup by name
+            name_tag = next((tag['Value'] for tag in s.get('Tags', []) if tag['Key'] == 'Name'), None)
+
+            subnet_info = {'id': subnet_id, 'cidr': cidr_block, 'name': name_tag}
+
+            if name_tag:
+                existing_subnets_data["by_name"][name_tag] = subnet_info
+            existing_subnets_data["by_id"][subnet_id] = subnet_info
+
+            if cidr_block:
+                try:
+                    existing_subnets_data["cidr_networks"].append(ipaddress.ip_network(cidr_block, strict=False))
+                except ValueError:
+                    print(f"Warning: Existing subnet {subnet_id} has an invalid CIDR: {cidr_block}. Skipping for overlap check.")
+
+        print(f"Fetched {len(response.get('Subnets', []))} existing subnets from VPC '{vpc_id}'.")
+    except Exception as e:
+        print(f"Error describing existing subnets in VPC '{vpc_id}': {e}. Cannot perform full validation.")
+        raise # Re-raise if this essential step fails
+
+    return existing_subnets_data
+
+# --- Modified validate_subnet_creation_parameters to take pre-fetched data ---
+def validate_subnet_creation_parameters(
+    vpc_id: str,
+    proposed_subnets_data: List[Dict[str, str]], # e.g., [{'name': 'my-public-subnet', 'cidr': '10.0.0.0/24', 'az': 'us-east-1a'}]
+    existing_aws_subnets_data: Dict[str, Any] # Pre-fetched data from _get_existing_subnets_in_vpc
+) -> None:
+    """
+    Validates proposed subnet names and CIDR blocks against existing AWS subnets
+    in the specified VPC and against each other.
+    This function uses pre-fetched AWS subnet data.
 
     Args:
-        vpc_id: The ID of the VPC to check within.
+        vpc_id: The ID of the VPC (for logging/error messages).
+        proposed_subnets_data: A list of dictionaries, where each dict represents
+                               a proposed subnet with 'name', 'cidr', and 'az'.
+        existing_aws_subnets_data: Dictionary containing existing AWS subnet data
+                                   (e.g., from _get_existing_subnets_in_vpc).
+
+    Raises:
+        ValueError: If any proposed subnet name or CIDR block
+                    conflicts with existing AWS resources or other proposed resources.
+    """
+    if not proposed_subnets_data:
+        print("No proposed subnet data provided for validation. Skipping.")
+        return
+
+    print(f"--- Starting pre-synth validation for VPC '{vpc_id}' with proposed subnets ---")
+
+    print("Existing subnet data:", pd.DataFrame(existing_aws_subnets_data['by_name']))
+
+    existing_aws_subnet_names = set(existing_aws_subnets_data["by_name"].keys())
+    existing_aws_cidr_networks = existing_aws_subnets_data["cidr_networks"]
+
+    # Sets to track names and list to track networks for internal batch consistency
+    proposed_names_seen: set[str] = set()
+    proposed_cidr_networks_seen: List[ipaddress.IPv4Network] = []
+
+    for i, proposed_subnet in enumerate(proposed_subnets_data):
+        subnet_name = proposed_subnet.get('name')
+        cidr_block_str = proposed_subnet.get('cidr')
+        availability_zone = proposed_subnet.get('az')
+
+        if not all([subnet_name, cidr_block_str, availability_zone]):
+            raise ValueError(f"Proposed subnet at index {i} is incomplete. Requires 'name', 'cidr', and 'az'.")
+
+        # 1. Check for duplicate names within the proposed batch
+        if subnet_name in proposed_names_seen:
+            raise ValueError(f"Proposed subnet name '{subnet_name}' is duplicated within the input list.")
+        proposed_names_seen.add(subnet_name)
+
+        # 2. Check for duplicate names against existing AWS subnets
+        if subnet_name in existing_aws_subnet_names:
+            print(f"Proposed subnet name '{subnet_name}' already exists in VPC '{vpc_id}'.")
+
+        # Parse proposed CIDR
+        try:
+            proposed_net = ipaddress.ip_network(cidr_block_str, strict=False)
+        except ValueError as e:
+            raise ValueError(f"Invalid CIDR format '{cidr_block_str}' for proposed subnet '{subnet_name}': {e}")
+
+        # 3. Check for overlapping CIDRs within the proposed batch
+        for existing_proposed_net in proposed_cidr_networks_seen:
+            if proposed_net.overlaps(existing_proposed_net):
+                raise ValueError(
+                    f"Proposed CIDR '{cidr_block_str}' for subnet '{subnet_name}' "
+                    f"overlaps with another proposed CIDR '{str(existing_proposed_net)}' "
+                    f"within the same batch."
+                )
+
+        # 4. Check for overlapping CIDRs against existing AWS subnets
+        for existing_aws_net in existing_aws_cidr_networks:
+            if proposed_net.overlaps(existing_aws_net):
+                raise ValueError(
+                    f"Proposed CIDR '{cidr_block_str}' for subnet '{subnet_name}' "
+                    f"overlaps with an existing AWS subnet CIDR '{str(existing_aws_net)}' "
+                    f"in VPC '{vpc_id}'."
+                )
+
+        # If all checks pass for this subnet, add its network to the list for subsequent checks
+        proposed_cidr_networks_seen.append(proposed_net)
+        print(f"Validation successful for proposed subnet '{subnet_name}' with CIDR '{cidr_block_str}'.")
+
+    print(f"--- All proposed subnets passed pre-synth validation checks for VPC '{vpc_id}'. ---")
+
+# --- Modified check_subnet_exists_by_name (Uses pre-fetched data) ---
+def check_subnet_exists_by_name(
+    subnet_name: str,
+    existing_aws_subnets_data: Dict[str, Any]
+) -> Tuple[bool, Optional[str]]:
+    """
+    Checks if a subnet with the given name exists within the pre-fetched data.
+
+    Args:
         subnet_name: The 'Name' tag value of the subnet to check.
+        existing_aws_subnets_data: Dictionary containing existing AWS subnet data
+                                   (e.g., from _get_existing_subnets_in_vpc).
 
     Returns:
         A tuple:
         - The first element is True if the subnet exists, False otherwise.
         - The second element is the Subnet ID if found, None otherwise.
     """
-    ec2_client = boto3.client('ec2')
-    try:
-        response = ec2_client.describe_subnets(
-            Filters=[
-                {'Name': 'vpc-id', 'Values': [vpc_id]},
-                {'Name': 'tag:Name', 'Values': [subnet_name]} # Filter by the 'Name' tag
-            ]
-        )
-        if response and response['Subnets']:
-            # Found a subnet with the given name in the VPC
-            print(f"Subnet '{subnet_name}' found in VPC '{vpc_id}' with ID: {response['Subnets'][0]['SubnetId']}")
-            return True, response['Subnets'][0]['SubnetId']
-        else:
-            # No subnet found with that name and VPC ID
-            print(f"Subnet '{subnet_name}' not found in VPC '{vpc_id}'.")
-            return False, None
-    except Exception as e:
-        print(f"An unexpected error occurred checking for subnet '{subnet_name}' in VPC '{vpc_id}': {e}")
-        # Decide how to handle other errors - raising might be safer
-        raise # Re-raise the original exception
+    subnet_info = existing_aws_subnets_data["by_name"].get(subnet_name)
+    if subnet_info:
+        print(f"Subnet '{subnet_name}' found with ID: {subnet_info['id']}")
+        return True, subnet_info['id']
+    else:
+        print(f"Subnet '{subnet_name}' not found.")
+        return False, None
 
+def create_nat_gateway(
+    scope: Construct,
+    public_subnet_for_nat: ec2.ISubnet, # Expects a proper ISubnet
+    nat_gateway_name: str,
+    nat_gateway_id_context_key: str
+) -> str:
+    """
+    Creates a single NAT Gateway in the specified public subnet.
+    It does not handle lookup from context; the calling stack should do that.
+    Returns the CloudFormation Ref of the NAT Gateway ID.
+    """
+    print(f"Defining a new NAT Gateway '{nat_gateway_name}' in subnet '{public_subnet_for_nat.subnet_id}'.")
 
-# You might also need these types if managing route tables explicitly
-# from aws_cdk.aws_ec2 import IRouteTable, CfnRouteTable, CfnSubnetRouteTableAssociation
+    # Create an Elastic IP for the NAT Gateway
+    eip = ec2.CfnEIP(scope, NAT_GATEWAY_EIP_NAME,
+        tags=[CfnTag(key="Name", value=NAT_GATEWAY_EIP_NAME)]
+    )
 
-# Assuming these are not directly used in this function, but defined elsewhere if needed
-# PUBLIC_SUBNET_CIDR_BLOCKS, PRIVATE_SUBNET_CIDR_BLOCKS, etc.
+    # Create the NAT Gateway
+    nat_gateway_logical_id = nat_gateway_name.replace('-', '') + "NatGateway"
+    nat_gateway = ec2.CfnNatGateway(scope, nat_gateway_logical_id,
+        subnet_id=public_subnet_for_nat.subnet_id,  # Associate with the public subnet
+        allocation_id=eip.attr_allocation_id,       # Associate with the EIP
+        tags=[CfnTag(key="Name", value=nat_gateway_name)]
+    )
+    # The NAT GW depends on the EIP. The dependency on the subnet is implicit via subnet_id.
+    nat_gateway.add_dependency(eip)
+
+    # *** CRUCIAL: Use CfnOutput to export the ID after deployment ***
+    # This is how you will get the ID to put into cdk.context.json
+    CfnOutput(scope, "SingleNatGatewayIdOutput",
+        value=nat_gateway.ref,
+        description=f"Physical ID of the Single NAT Gateway. Add this to cdk.context.json under the key '{nat_gateway_id_context_key}'.",
+        export_name=f"{scope.stack_name}-NatGatewayId" # Make export name unique
+    )
+
+    print(f"CDK: Defined new NAT Gateway '{nat_gateway.ref}'. Its physical ID will be available in the stack outputs after deployment.")
+    # Return the tokenised reference for use within this synthesis
+    return nat_gateway.ref
 
 def create_subnets(
     scope: Construct,
@@ -411,83 +571,73 @@ def create_subnets(
     subnet_names: List[str],
     cidr_blocks: List[str],
     availability_zones: List[str],
-    is_public: bool
-) -> List[ec2.ISubnet]: # Return only the list of created subnets (ISubnet objects)
+    is_public: bool,
+    internet_gateway_id: Optional[str] = None,
+    single_nat_gateway_id: Optional[str] = None
+) -> Tuple[List[ec2.CfnSubnet], List[ec2.CfnRouteTable]]:
     """
-    Creates a list of subnets within a VPC.
-
-    Args:
-        scope: The scope in which to define the constructs (typically the stack).
-        vpc: The VPC construct (created or looked up).
-        prefix: A prefix for resource names.
-        subnet_names: A list of names for the subnets to create.
-        cidr_blocks: A list of CIDR blocks for the subnets. Must match subnet_names length.
-        availability_zones: A list of Availability Zones for the subnets. Must match subnet_names length.
-        is_public: Boolean indicating if the subnets should be public (map public IP).
-
-    Returns:
-        A list of the created ISubnet objects.
+    Creates subnets using L2 constructs but returns the underlying L1 Cfn objects
+    for backward compatibility.
     """
+    # --- Validations remain the same ---
     if not (len(subnet_names) == len(cidr_blocks) == len(availability_zones) > 0):
         raise ValueError("Subnet names, CIDR blocks, and Availability Zones lists must be non-empty and match in length.")
+    if is_public and not internet_gateway_id:
+        raise ValueError("internet_gateway_id must be provided for public subnets.")
+    if not is_public and not single_nat_gateway_id:
+        raise ValueError("single_nat_gateway_id must be provided for private subnets when using a single NAT Gateway.")
 
-    created_subnets: List[ec2.ISubnet] = []
+    # --- We will populate these lists with the L1 objects to return ---
+    created_subnets: List[ec2.CfnSubnet] = []
+    created_route_tables: List[ec2.CfnRouteTable] = []
+
     subnet_type_tag = "public" if is_public else "private"
 
     for i, subnet_name in enumerate(subnet_names):
-        # Generate a unique logical ID for the subnet within the stack.
-        # Using the subnet name and index helps ensure uniqueness even if names repeat across calls.
-        logical_id = f"{prefix}{subnet_type_tag.capitalize()}Subnet{i+1}Created"
+        logical_id = f"{prefix}{subnet_type_tag.capitalize()}Subnet{i+1}"
 
+        # 1. Create the L2 Subnet (this is the easy part)
         subnet = ec2.Subnet(
             scope,
             logical_id,
-            vpc_id=vpc.vpc_id, # Link to the VPC ID
+            vpc_id=vpc.vpc_id,
             cidr_block=cidr_blocks[i],
             availability_zone=availability_zones[i],
-            map_public_ip_on_launch=is_public#,
-             # Add tags, including the 'Name' tag used for lookups
-            #tags=[
-            #    CfnTag(key="Name", value=subnet_name),
-            #    CfnTag(key="Type", value=subnet_type_tag) # Optional: helpful for organization/selection
-            #]
+            map_public_ip_on_launch=is_public
         )
+        Tags.of(subnet).add("Name", subnet_name)
+        Tags.of(subnet).add("Type", subnet_type_tag)
+        
+        if is_public:
+            # The subnet's route_table is automatically created by the L2 Subnet construct
+            try:
+                subnet.add_route(
+                    "DefaultInternetRoute", # A logical ID for the CfnRoute resource
+                    router_id=internet_gateway_id,
+                    router_type=ec2.RouterType.GATEWAY,
+                    # destination_cidr_block="0.0.0.0/0" is the default for this method
+                )
+            except Exception as e:
+                print("Could not create IGW route for public subnet due to:", e)
+            print(f"CDK: Defined public L2 subnet '{subnet_name}' and added IGW route.")
+        else:
+            try:
+                # Using .add_route() for private subnets as well for consistency
+                subnet.add_route(
+                    "DefaultNatRoute", # A logical ID for the CfnRoute resource
+                    router_id=single_nat_gateway_id,
+                    router_type=ec2.RouterType.NAT_GATEWAY,
+                )
+            except Exception as e:
+                print("Could not create NAT gateway route for public subnet due to:", e)
+            print(f"CDK: Defined private L2 subnet '{subnet_name}' and added NAT GW route.")
+
+        route_table = subnet.route_table
+        
         created_subnets.append(subnet)
-        print(f"Defined {subnet_type_tag} subnet '{subnet_name}' ({cidr_blocks[i]}) in {availability_zones[i]}.")
+        created_route_tables.append(route_table)
 
-
-    # --- Route Table Management for Private Subnets (If using Scenario 1) ---
-    # If is_public is False and you are managing private subnet route tables explicitly,
-    # you would create them and their associations here.
-    # You would also need to return the list of created route table objects.
-
-    created_private_route_tables = []
-
-    # Example (Conceptual, assuming is_public is False):
-    if not is_public:
-        created_private_route_tables: List[ec2.IRouteTable] = []
-        for i, created_subnet in enumerate(created_subnets):
-             logical_id = f"{prefix}PrivateRouteTable{i+1}Created"
-             route_table = ec2.CfnRouteTable(
-                 scope,
-                 logical_id,
-                 vpc_id=vpc.vpc_id,
-                 tags=[CfnTag(key="Name", value=f"{prefix}-private-rt-{i+1}-created")]
-             )
-             created_private_route_tables.append(route_table)
-
-             logical_id_assoc = f"{prefix}PrivateRTAssoc{i+1}Created"
-             ec2.CfnSubnetRouteTableAssociation(
-                 scope,
-                 logical_id_assoc,
-                 subnet_id=created_subnet.subnet_id,
-                 route_table_id=route_table.ref
-             )
-             print(f"Created route table and association for private subnet {created_subnet.subnet_id}")
-        # If managing route tables here, you would return:
-        return created_subnets, created_private_route_tables
-    #     # Or adjust your stack to receive the route tables from this function.
-    return created_subnets, []
+    return created_subnets, created_route_tables
                 
 def ingress_rule_exists(security_group:str, peer:str, port:str):
     for rule in security_group.connections.security_groups:
@@ -519,8 +669,6 @@ def check_for_existing_user_pool(user_pool_name:str):
     else:
         return False, "", ""
     
-import boto3
-
 def check_for_existing_user_pool_client(user_pool_id: str, user_pool_client_name: str):
     """
     Checks if a Cognito User Pool Client with the given name exists in the specified User Pool.
@@ -535,7 +683,8 @@ def check_for_existing_user_pool_client(user_pool_id: str, user_pool_client_name
         - False, "", {} otherwise.
     """
     cognito_client = boto3.client("cognito-idp")
-    next_token = None
+    next_token = 'string'
+
 
     while True:
         try:
@@ -547,6 +696,13 @@ def check_for_existing_user_pool_client(user_pool_id: str, user_pool_client_name
         except cognito_client.exceptions.ResourceNotFoundException:
             print(f"Error: User pool with ID '{user_pool_id}' not found.")
             return False, "", {}
+        
+        except cognito_client.exceptions.InvalidParameterException:
+            print(f"Error: No app clients for '{user_pool_id}' found.")
+            return False, "", {}
+        
+        except Exception as e:
+            print("Could not check User Pool clients due to:", e)
 
         for client in response.get('UserPoolClients', []):
             if client.get('ClientName') == user_pool_client_name:
@@ -741,10 +897,7 @@ def check_cloudfront_distribution_exists(distribution_name: str, region_name: st
         print(f"An unexpected error occurred: {e}")
         return False, None
 
-import aws_cdk.aws_wafv2 as wafv2
-from aws_cdk import CfnOutput # Assuming you might want to export the WebACL ARN
-
-def create_web_acl_with_common_rules(scope, web_acl_name: str):
+def create_web_acl_with_common_rules(scope:Construct, web_acl_name: str, waf_scope:str="CLOUDFRONT"):
     '''
     Use CDK to create a web ACL based on an AWS common rule set with overrides.
     This function now expects a 'scope' argument, typically 'self' from your stack,
@@ -759,37 +912,39 @@ def create_web_acl_with_common_rules(scope, web_acl_name: str):
         "AWSManagedRulesAmazonIpReputationList"
     ]
 
-    for i, aws_rule_name in enumerate(aws_ruleset_names):
-        # Initialize variables for conditional properties
-        current_rule_action_overrides = None
-        current_override_action = None
-        current_priority = i + 1 # Default priority
+    # Use a separate counter to assign unique priorities sequentially
+    priority_counter = 1
 
-        # Determine conditional values BEFORE constructing the RuleProperty
+    for aws_rule_name in aws_ruleset_names:
+        current_rule_action_overrides = None
+        
+        # All managed rule groups need an override_action.
+        # 'none' means use the managed rule group's default action.
+        current_override_action = wafv2.CfnWebACL.OverrideActionProperty(none={})
+
+        current_priority = priority_counter
+        priority_counter += 1
+
         if aws_rule_name == "AWSManagedRulesCommonRuleSet":
             current_rule_action_overrides = [
                 wafv2.CfnWebACL.RuleActionOverrideProperty(
                     name="SizeRestrictions_BODY",
-                    # Allow means this specific rule within the managed group won't block
                     action_to_use=wafv2.CfnWebACL.RuleActionProperty(
                         allow={}
                     )
                 )
             ]
-            # For the entire managed rule group, 'none' means apply the AWS recommended action
-            # unless a specific rule within it is overridden by rule_action_overrides.
-            current_override_action = wafv2.CfnWebACL.OverrideActionProperty(none={})
-            current_priority = 2 # Set specific priority for this rule set
+            # No need to set current_override_action here, it's already set above.
+            # If you wanted this specific rule to have a *fixed* priority, you'd handle it differently
+            # For now, it will get priority 1 from the counter.
 
-        # Construct the RuleProperty using the determined values
         rule_property = wafv2.CfnWebACL.RuleProperty(
             name=aws_rule_name,
-            priority=current_priority, # Use the dynamic priority
+            priority=current_priority,
             statement=wafv2.CfnWebACL.StatementProperty(
                 managed_rule_group_statement=wafv2.CfnWebACL.ManagedRuleGroupStatementProperty(
                     vendor_name="AWS",
                     name=aws_rule_name,
-                    # Pass the dynamically determined overrides here
                     rule_action_overrides=current_rule_action_overrides
                 )
             ),
@@ -798,22 +953,20 @@ def create_web_acl_with_common_rules(scope, web_acl_name: str):
                 metric_name=aws_rule_name,
                 sampled_requests_enabled=True
             ),
-            # Pass the dynamically determined override_action for the *entire rule group*
-            override_action=current_override_action
+            override_action=current_override_action # THIS IS THE CRUCIAL PART FOR ALL MANAGED RULES
         )
 
         rules.append(rule_property)
 
     # Add the rate limit rule
-    # Ensure its priority is unique and typically after managed rules
-    rate_limit_priority = max([rule.priority for rule in rules]) + 1 if rules else 1
+    rate_limit_priority = priority_counter # Use the next available priority
     rules.append(wafv2.CfnWebACL.RuleProperty(
         name="RateLimitRule",
         priority=rate_limit_priority,
         statement=wafv2.CfnWebACL.StatementProperty(
             rate_based_statement=wafv2.CfnWebACL.RateBasedStatementProperty(
-                limit=1000, # Max requests per 5-minute period
-                aggregate_key_type="IP" # Aggregate by client IP address
+                limit=1000,
+                aggregate_key_type="IP"
             )
         ),
         visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
@@ -822,32 +975,28 @@ def create_web_acl_with_common_rules(scope, web_acl_name: str):
             sampled_requests_enabled=True
         ),
         action=wafv2.CfnWebACL.RuleActionProperty(
-            block={} # Block requests exceeding the limit
+            block={}
         )
     ))
 
-    # Create the WAF web ACL
     web_acl = wafv2.CfnWebACL(
-        scope, # Pass the scope (e.g., 'self' from your stack)
+        scope,
         "WebACL",
         name=web_acl_name,
-        # Default action applied if no rule matches
         default_action=wafv2.CfnWebACL.DefaultActionProperty(allow={}),
-        scope="CLOUDFRONT", # Essential for CloudFront distributions
+        scope=waf_scope,
         visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
             cloud_watch_metrics_enabled=True,
-            metric_name="webACL", # Metric name for the entire WebACL
+            metric_name="webACL",
             sampled_requests_enabled=True
         ),
-        rules=rules # The list of rules we just constructed
+        rules=rules
     )
 
-    # Optional: Output the WebACL ARN if you need to reference it elsewhere
-    # CfnOutput(scope, "WebACLArn", value=web_acl.attr_arn)
+    CfnOutput(scope, "WebACLArn", value=web_acl.attr_arn)
 
     return web_acl
     
-
 def check_web_acl_exists(web_acl_name: str, scope: str, region_name: str = None) -> tuple[bool, dict]:
     """
     Checks if a Web ACL with the given name and scope exists.
@@ -900,8 +1049,6 @@ def check_web_acl_exists(web_acl_name: str, scope: str, region_name: str = None)
         print(f"An unexpected error occurred: {e}")
         return False, {}
     
-
-
 def add_alb_https_listener_with_cert(
     scope: Construct,
     logical_id: str, # A unique ID for this listener construct
@@ -917,6 +1064,7 @@ def add_alb_https_listener_with_cert(
     cognito_user_pool_domain: Optional[str] = None, # E.g., "my-app-domain" for "my-app-domain.auth.region.amazoncognito.com"
     cognito_auth_scope: Optional[str] = "openid profile email", # Default recommended scope
     cognito_auth_on_unauthenticated_request: elb.UnauthenticatedAction = elb.UnauthenticatedAction.AUTHENTICATE,
+    stickiness_cookie_duration=None
     # --- End Cognito Parameters ---
 ) -> Optional[elb.ApplicationListener]:
     """
@@ -954,23 +1102,23 @@ def add_alb_https_listener_with_cert(
 
         # Determine the default action based on whether Cognito auth is enabled
         default_action = None
-        if enable_cognito_auth:
+        if enable_cognito_auth == True:
             if not all([cognito_user_pool, cognito_user_pool_client, cognito_user_pool_domain]):
                 raise ValueError(
                     "Cognito User Pool, Client, and Domain must be provided if enable_cognito_auth is True."
                 )
             print(f"Enabling Cognito authentication with User Pool: {cognito_user_pool.user_pool_id}")
 
-            default_action = elb.ListenerAction.authenticate_cognito(
+            default_action = elb_act.AuthenticateCognitoAction(
+                next=elb.ListenerAction.forward([default_target_group]), # After successful auth, forward to TG
                 user_pool=cognito_user_pool,
                 user_pool_client=cognito_user_pool_client,
-                user_pool_domain=cognito_user_pool_domain,
-                next=elb.ListenerAction.forward([default_target_group]), # After successful auth, forward to TG
+                user_pool_domain=cognito_user_pool_domain,                
                 scope=cognito_auth_scope,
-                on_unauthenticated_request=cognito_auth_on_unauthenticated_request,
+                on_unauthenticated_request=cognito_auth_on_unauthenticated_request,                
+                session_timeout=stickiness_cookie_duration
                 # Additional options you might want to configure:
-                # session_cookie_name="AWSELBCookies",
-                # session_timeout=Duration.hours(1)
+                # session_cookie_name="AWSELBCookies"
             )
         else:
             default_action = elb.ListenerAction.forward([default_target_group])
@@ -989,3 +1137,157 @@ def add_alb_https_listener_with_cert(
         print("ACM_CERTIFICATE_ARN is not provided. Skipping HTTPS listener creation.")
 
     return https_listener
+
+
+def ensure_folder_exists(output_folder:str):
+    """Checks if the specified folder exists, creates it if not."""   
+
+    if not os.path.exists(output_folder):
+        # Create the folder if it doesn't exist
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"Created the {output_folder} folder.")
+    else:
+        print(f"The {output_folder} folder already exists.")
+
+def create_basic_config_env(out_dir:str="config", S3_LOG_CONFIG_BUCKET_NAME=S3_LOG_CONFIG_BUCKET_NAME, S3_OUTPUT_BUCKET_NAME=S3_OUTPUT_BUCKET_NAME, ACCESS_LOG_DYNAMODB_TABLE_NAME=ACCESS_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME=FEEDBACK_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME=USAGE_LOG_DYNAMODB_TABLE_NAME):
+    '''
+    Create a basic config.env file for the user to use with their newly deployed redaction app.
+    '''
+    variables = {
+    'COGNITO_AUTH':'1',
+    'RUN_AWS_FUNCTIONS':'1',
+    'DISPLAY_FILE_NAMES_IN_LOGS':'False',
+    'SESSION_OUTPUT_FOLDER':'True',
+    'SAVE_LOGS_TO_DYNAMODB':'True',
+    'SHOW_COSTS':'True',
+    'SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS':'True',
+    'LOAD_PREVIOUS_TEXTRACT_JOBS_S3':'True',
+    'DOCUMENT_REDACTION_BUCKET':S3_LOG_CONFIG_BUCKET_NAME,
+    'TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET':S3_OUTPUT_BUCKET_NAME,
+    'ACCESS_LOG_DYNAMODB_TABLE_NAME':ACCESS_LOG_DYNAMODB_TABLE_NAME,    
+    'FEEDBACK_LOG_DYNAMODB_TABLE_NAME':FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
+    'USAGE_LOG_DYNAMODB_TABLE_NAME':USAGE_LOG_DYNAMODB_TABLE_NAME,    
+    'DISPLAY_FILE_NAMES_IN_LOGS':'False'
+    }
+
+    # Write variables to .env file
+    ensure_folder_exists(out_dir + "/")
+    env_file_path = os.path.abspath(os.path.join(out_dir, 'config.env'))
+
+    # It's good practice to ensure the file exists before calling set_key repeatedly.
+    # set_key will create it, but for a loop, it might be cleaner to ensure it's empty/exists once.
+    if not os.path.exists(env_file_path):
+        with open(env_file_path, 'w') as f:
+            pass # Create empty file
+
+    for key, value in variables.items():
+        set_key(env_file_path, key, str(value), quote_mode="never")
+
+    return variables
+
+def start_codebuild_build(PROJECT_NAME:str, AWS_REGION:str = AWS_REGION):
+    '''
+    Start an existing Codebuild project build
+    '''
+
+    # --- Initialize CodeBuild client ---
+    client = boto3.client('codebuild', region_name=AWS_REGION)
+
+    try:
+        print(f"Attempting to start build for project: {PROJECT_NAME}")
+
+        response = client.start_build(
+            projectName=PROJECT_NAME
+        )
+
+        build_id = response['build']['id']
+        print(f"Successfully started build with ID: {build_id}")
+        print(f"Build ARN: {response['build']['arn']}")
+        print(f"Build URL (approximate - construct based on region and ID):")
+        print(f"https://{AWS_REGION}.console.aws.amazon.com/codesuite/codebuild/projects/{PROJECT_NAME}/build/{build_id.split(':')[-1]}/detail")
+
+        # You can inspect the full response if needed
+        # print("\nFull response:")
+        # import json
+        # print(json.dumps(response, indent=2))
+
+    except client.exceptions.ResourceNotFoundException:
+        print(f"Error: Project '{PROJECT_NAME}' not found in region '{AWS_REGION}'.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str, RUN_AWS_FUNCTIONS:str = "1"):
+    """
+    Uploads a file from local machine to Amazon S3.
+
+    Args:
+    - local_file_path: Local file path(s) of the file(s) to upload.
+    - s3_key: Key (path) to the file in the S3 bucket.
+    - s3_bucket: Name of the S3 bucket.
+
+    Returns:
+    - Message as variable/printed to console
+    """
+    final_out_message = []
+    final_out_message_str = ""
+
+    if RUN_AWS_FUNCTIONS == "1":
+        try:
+            if s3_bucket and local_file_paths:
+
+                s3_client = boto3.client('s3', region_name=AWS_REGION)
+
+                if isinstance(local_file_paths, str):
+                    local_file_paths = [local_file_paths]
+
+                for file in local_file_paths:
+                    if s3_client:
+                        #print(s3_client)
+                        try:
+                            # Get file name off file path
+                            file_name = os.path.basename(file)
+
+                            s3_key_full = s3_key + file_name
+                            print("S3 key: ", s3_key_full)
+
+                            s3_client.upload_file(file, s3_bucket, s3_key_full)
+                            out_message = "File " + file_name + " uploaded successfully!"
+                            print(out_message)
+                        
+                        except Exception as e:
+                            out_message = f"Error uploading file(s): {e}"
+                            print(out_message)
+
+                        final_out_message.append(out_message)
+                        final_out_message_str = '\n'.join(final_out_message)
+
+                    else: final_out_message_str = "Could not connect to AWS."
+            else: final_out_message_str = "At least one essential variable is empty, could not upload to S3"
+        except Exception as e:
+            final_out_message_str = "Could not upload files to S3 due to: " + str(e)
+            print(final_out_message_str)
+    else:
+        final_out_message_str = "App not set to run AWS functions"
+
+    return final_out_message_str
+
+# Initialize ECS client
+def start_ecs_task(cluster_name, service_name):
+    ecs_client = boto3.client('ecs')
+    
+    try:
+        # Update the service to set the desired count to 1
+        response = ecs_client.update_service(
+            cluster=cluster_name,
+            service=service_name,
+            desiredCount=1
+        )
+        return {
+            "statusCode": 200,
+            "body": f"Service {service_name} in cluster {cluster_name} has been updated to 1 task."
+        }
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": f"Error updating service: {str(e)}"
+        }
