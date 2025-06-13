@@ -29,4 +29,4 @@ jobs:
 
           # Force push the current branch (main) to the remote's main branch
           # --force-with-lease is safer than -f as it prevents overwriting others' work
-          git push hf main --force-with-lease
+          git push hf main --force
