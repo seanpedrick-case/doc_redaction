@@ -10,11 +10,23 @@ jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository (shallow clone)
+        uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 1 # Only fetch the latest commit
           lfs: true
-      - name: Push to hub
+
+      - name: Push to Hugging Face Hub (Force Push)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push https://seanpedrickcase:$HF_TOKEN@huggingface.co/spaces/seanpedrickcase/document_redaction main
+        run: |
+          # Configure Git to avoid requiring a separate pull for force pushes
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          # Add the Hugging Face remote if it's not already there (safe to run every time)
+          git remote add hf https://seanpedrickcase:${HF_TOKEN}@huggingface.co/spaces/seanpedrickcase/document_redaction || true
+
+          # Force push the current branch (main) to the remote's main branch
+          # --force-with-lease is safer than -f as it prevents overwriting others' work
+          git push hf main --force-with-lease
