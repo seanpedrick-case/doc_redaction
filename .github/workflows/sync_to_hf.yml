@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repository (shallow clone)
         uses: actions/checkout@v3
         with:
-          fetch-depth: 1 # Only fetch the latest commit
+          fetch-depth: 0 # Fetch all commits
           lfs: true
 
       - name: Push to Hugging Face Hub (Force Push)
