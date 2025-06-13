@@ -1040,9 +1040,12 @@ def reset_dropdowns(df:pd.DataFrame):
 
     return recogniser_entities_drop, text_entities_drop, page_entities_drop
     
+def increase_bottom_page_count_based_on_top(page_number:int):
+    return int(page_number)
+
 def df_select_callback_dataframe_row(df: pd.DataFrame, evt: gr.SelectData):
 
-        row_value_page = evt.row_value[0] # This is the page number value
+        row_value_page = int(evt.row_value[0]) # This is the page number value
         row_value_label = evt.row_value[1] # This is the label number value
         row_value_text = evt.row_value[2] # This is the text number value
         row_value_id = evt.row_value[3] # This is the text number value
@@ -1072,7 +1075,7 @@ def df_select_callback_cost(df: pd.DataFrame, evt: gr.SelectData):
 
 def df_select_callback_ocr(df: pd.DataFrame, evt: gr.SelectData):
 
-        row_value_page = evt.row_value[0] # This is the page_number value
+        row_value_page = int(evt.row_value[0]) # This is the page_number value
         row_value_text = evt.row_value[1] # This is the text contents
 
         row_value_df = pd.DataFrame(data={"page":[row_value_page], "text":[row_value_text]})

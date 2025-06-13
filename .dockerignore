@@ -4,6 +4,7 @@
 *.jpg
 *.png
 *.ipynb
+*.pyc
 examples/*
 processing/*
 input/*
@@ -18,6 +19,12 @@ build_deps/*
 logs/*
 config/*
 user_guide/*
-cdk/*
 cdk/config/*
-web/*
+tld/*
+tmp/*
+cdk/config/*
+cdk/cdk.out/*
+cdk/archive/*
+cdk.json
+cdk.context.json
+.quarto/*

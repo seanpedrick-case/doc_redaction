@@ -1,26 +1,11 @@
 ---
-title: Document redaction
-emoji: 📝
-colorFrom: blue
-colorTo: yellow
-sdk: docker
-app_file: app.py
-pinned: true
-license: agpl-3.0
+title: "User guide"
+format:
+  html:
+    toc: true # Enable the table of contents
+    toc-depth: 3 # Include headings up to level 2 (##)
+    toc-title: "On this page" # Optional: Title for your TOC
 ---
-# Document redaction
-
-version: 0.7.0
-
-Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a walkthrough on how to use the app. Below is a very brief overview.
-    
-To identify text in documents, the 'local' text/OCR image analysis uses spacy/tesseract, and works ok for documents with typed text. If available, choose 'AWS Textract service' to redact more complex elements e.g. signatures or handwriting. Then, choose a method for PII identification. 'Local' is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
-
-After redaction, review suggested redactions on the 'Review redactions' tab. The original pdf can be uploaded here alongside a '...redaction_file.csv' to continue a previous redaction/review task. See the 'Redaction settings' tab to choose which pages to redact, the type of information to redact (e.g. people, places), or custom terms to always include/ exclude from redaction.
-
-NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.
-
-# USER GUIDE
 
 ## Table of contents
 
@@ -88,7 +73,7 @@ If you are running with the AWS service enabled, here you will also have a choic
 - **'AWS Comprehend'** - This method calls an AWS service to provide more accurate identification of PII in extracted text.
 
 ### Optional - costs and time estimation
-If the option is enabled (by your system admin, in the config file), you will see a cost and time estimate for the redaction process. 'Existing Textract output file found' will be checked automatically if previous Textract text extraction files exist in the output folder, or have been [previously uploaded by the user](#aws-textract-outputs) (saving time and money for redaction). 
+If the option is enabled (by your system admin, in the config file), you will see a cost and time estimate for the redaction process. 'Existing Textract output file found' will be checked automatically if previous Textract text extraction files exist in the output folder, or have been [previously uploaded by the user](#aws-textract-outputs) (saving time and money for redaction).
 
 ![Cost and time estimation](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/costs_and_time.PNG)
 
@@ -116,7 +101,7 @@ Click 'Redact document'. After loading in the document, the app should be able t
 - **'...ocr_results.csv'** files contain the line-by-line text outputs from the entire document. This file can be useful for later searching through for any terms of interest in the document (e.g. using Excel or a similar program).
 - **'...review_file.csv'** files are the review files that contain details and locations of all of the suggested redactions in the document. This file is key to the [review process](#reviewing-and-modifying-suggested-redactions), and should be downloaded to use later for this.
 
-### Additional AWS Textract / local OCR outputs
+### Additional AWS Textract / local OCR outputs {#aws-textract-outputs}
 
 If you have used the AWS Textract option for extracting text, you may also see a '..._textract.json' file. This file contains all the relevant extracted text information that comes from the AWS Textract service. You can keep this file and upload it at a later date alongside your input document, which will enable you to skip calling AWS Textract every single time you want to do a redaction task, as follows:
 
@@ -359,7 +344,7 @@ You can also write open text into an input box and redact that using the same me
 ### Redaction log outputs
 A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the Redaction settings page under 'Log file outputs'.
 
-# ADVANCED USER GUIDE
+# Advanced user guide
 
 This advanced user guide will go over some of the features recently added to the app, including: modifying and merging redaction review files, identifying and redacting duplicate pages across multiple PDFs, 'fuzzy' search and redact, and exporting redactions to Adobe Acrobat.
 

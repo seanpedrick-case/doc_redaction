@@ -51,27 +51,59 @@ RUN apt-get update \
 # Set up a new user named "user" with user ID 1000
 RUN useradd -m -u 1000 user
 
+ENV APP_HOME=/home/user
+
+ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
+    TLDEXTRACT_CACHE=/tmp/tld/ \
+    MPLCONFIGDIR=/tmp/matplotlib_cache/ \
+    GRADIO_OUTPUT_FOLDER=$APP_HOME/app/output/ \
+    GRADIO_INPUT_FOLDER=$APP_HOME/app/input/ \
+    FEEDBACK_LOGS_FOLDER=$APP_HOME/app/feedback/ \
+    ACCESS_LOGS_FOLDER=$APP_HOME/app/logs/ \
+    USAGE_LOGS_FOLDER=$APP_HOME/app/usage/ \
+    CONFIG_FOLDER=$APP_HOME/app/config/ \
+    XDG_CACHE_HOME=/tmp/xdg_cache/user_1000
+
 # Create required directories
-RUN mkdir -p /home/user/app/{output,input,tld,logs,usage,feedback,config} \
-    && chown -R user:user /home/user/app
+RUN mkdir -p $APP_HOME/app/{output, input, logs, usage, feedback, config} \
+    && chown -R user:user $APP_HOME/app
+
+# For system /tmp and /var/tmp - make them world-writable with sticky bit, owned by user
+RUN mkdir -p /tmp && chown user:user /tmp && chmod 1777 /tmp
+RUN mkdir -p /var/tmp && chown user:user /var/tmp && chmod 1777 /var/tmp
+RUN mkdir -p /tmp/matplotlib_cache && chown user:user /tmp/matplotlib_cache && chmod 1777 /tmp/matplotlib_cache
+RUN mkdir -p /tmp/tld && chown user:user /tmp/tld && chmod 1777 /tmp/tld
+RUN mkdir -p /tmp/gradio_tmp && chown user:user /tmp/gradio_tmp && chmod 1777 /tmp/gradio_tmp
+RUN mkdir -p $XDG_CACHE_HOME && chown user:user $XDG_CACHE_HOME && chmod 700 $XDG_CACHE_HOME # chmod 700 makes it rwx for the user only, which is appropriate for a cache dir.
 
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 
-# Download NLTK data packages - now no longer necessary
-# RUN python -m nltk.downloader --quiet punkt stopwords punkt_tab
-
 # Entrypoint helps to switch between Gradio and Lambda mode
 COPY entrypoint.sh /entrypoint.sh
-
 RUN chmod +x /entrypoint.sh
+
+# Ensure permissions are really user:user again after copying
+RUN chown -R user:user $APP_HOME/app && chmod -R u+rwX $APP_HOME/app
 
 # Switch to the "user" user
 USER user
 
-ENV APP_HOME=/home/user
+# --- ADD VOLUME DIRECTIVES ---
+# If using Fargate, These paths MUST EXACTLY MATCH containerPath in your Fargate task definition mountPoints
+VOLUME ["/tmp/matplotlib_cache"]
+VOLUME ["/tmp/gradio_tmp"]
+VOLUME ["/tmp/tld"]
+VOLUME ["/home/user/app/output"]
+VOLUME ["/home/user/app/input"]
+VOLUME ["/home/user/app/logs"]
+VOLUME ["/home/user/app/usage"]
+VOLUME ["/home/user/app/feedback"]
+VOLUME ["/home/user/app/config"]
+VOLUME ["/tmp"]
+VOLUME ["/var/tmp"]
 
-# Set environmental variables
+# Set environment variables
 ENV PATH=$APP_HOME/.local/bin:$PATH \
     PYTHONPATH=$APP_HOME/app \
     PYTHONUNBUFFERED=1 \
@@ -80,18 +112,13 @@ ENV PATH=$APP_HOME/.local/bin:$PATH \
     GRADIO_NUM_PORTS=1 \
     GRADIO_SERVER_NAME=0.0.0.0 \
     GRADIO_SERVER_PORT=7860 \
-    GRADIO_ANALYTICS_ENABLED=False \
-    TLDEXTRACT_CACHE=$APP_HOME/app/tld/.tld_set_snapshot \
-    SYSTEM=spaces
+    GRADIO_ANALYTICS_ENABLED=False
 
 # Set the working directory to the user's home directory
 WORKDIR $APP_HOME/app
 
 # Copy the app code to the container
 COPY --chown=user . $APP_HOME/app
-
-# Ensure permissions are really user:user again after copying
-RUN chown -R user:user $APP_HOME/app && chmod -R u+rwX $APP_HOME/app
 
 ENTRYPOINT [ "/entrypoint.sh" ]
 

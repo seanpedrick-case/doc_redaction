@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.7.31">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>User and AWS instance management guide – Document Redaction App</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../">
+<script src="../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/popper.min.js"></script>
+<script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-e1a5c8363afafaef2c763b6775fbf3ca.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../site_libs/bootstrap/bootstrap-dfb324f25d9b1687192fa8be62ac8f9c.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+<link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../index.html">
+    <span class="navbar-title">Document Redaction App</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../index.html"> 
+<span class="menu-text">Home</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/user_guide.html"> 
+<span class="menu-text">User guide</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/faq.html"> 
+<span class="menu-text">User FAQ</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/installation_guide.html"> 
+<span class="menu-text">App installation guide (with CDK)</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/app_settings.html"> 
+<span class="menu-text">App settings management guide</span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#user-management-guide" id="toc-user-management-guide" class="nav-link active" data-scroll-target="#user-management-guide">User management guide</a>
+  <ul class="collapse">
+  <li><a href="#managing-users-in-aws-cognito-user-pools" id="toc-managing-users-in-aws-cognito-user-pools" class="nav-link" data-scroll-target="#managing-users-in-aws-cognito-user-pools">Managing Users in AWS Cognito User Pools</a>
+  <ul class="collapse">
+  <li><a href="#accessing-your-user-pool" id="toc-accessing-your-user-pool" class="nav-link" data-scroll-target="#accessing-your-user-pool">Accessing Your User Pool</a></li>
+  <li><a href="#creating-users" id="toc-creating-users" class="nav-link" data-scroll-target="#creating-users">Creating Users</a></li>
+  <li><a href="#information-to-give-to-users-to-sign-up" id="toc-information-to-give-to-users-to-sign-up" class="nav-link" data-scroll-target="#information-to-give-to-users-to-sign-up">Information to Give to Users to Sign Up</a></li>
+  <li><a href="#resetting-user-access-password-reset" id="toc-resetting-user-access-password-reset" class="nav-link" data-scroll-target="#resetting-user-access-password-reset">Resetting User Access (Password Reset)</a></li>
+  <li><a href="#two-factor-authentication-2fa-with-apps-only" id="toc-two-factor-authentication-2fa-with-apps-only" class="nav-link" data-scroll-target="#two-factor-authentication-2fa-with-apps-only">Two-Factor Authentication (2FA) with Apps Only</a></li>
+  <li><a href="#other-useful-information-for-administrators" id="toc-other-useful-information-for-administrators" class="nav-link" data-scroll-target="#other-useful-information-for-administrators">Other Useful Information for Administrators</a></li>
+  </ul></li>
+  </ul></li>
+  <li><a href="#guide-to-running-app-instances-on-aws" id="toc-guide-to-running-app-instances-on-aws" class="nav-link" data-scroll-target="#guide-to-running-app-instances-on-aws">Guide to running app instances on AWS</a>
+  <ul class="collapse">
+  <li><a href="#basic-service-task-management-in-aws-ecs-console" id="toc-basic-service-task-management-in-aws-ecs-console" class="nav-link" data-scroll-target="#basic-service-task-management-in-aws-ecs-console">Basic Service Task Management in AWS ECS Console</a>
+  <ul class="collapse">
+  <li><a href="#accessing-your-ecs-cluster-and-services" id="toc-accessing-your-ecs-cluster-and-services" class="nav-link" data-scroll-target="#accessing-your-ecs-cluster-and-services">Accessing Your ECS Cluster and Services</a></li>
+  <li><a href="#understanding-services-and-tasks" id="toc-understanding-services-and-tasks" class="nav-link" data-scroll-target="#understanding-services-and-tasks">Understanding Services and Tasks</a></li>
+  <li><a href="#setting-the-number-of-running-tasks-to-0-turning-everything-off" id="toc-setting-the-number-of-running-tasks-to-0-turning-everything-off" class="nav-link" data-scroll-target="#setting-the-number-of-running-tasks-to-0-turning-everything-off">Setting the Number of Running Tasks to 0 (Turning Everything Off)</a></li>
+  <li><a href="#turning-the-desired-number-of-tasks-on" id="toc-turning-the-desired-number-of-tasks-on" class="nav-link" data-scroll-target="#turning-the-desired-number-of-tasks-on">Turning the Desired Number of Tasks On</a></li>
+  <li><a href="#forcing-redeployment" id="toc-forcing-redeployment" class="nav-link" data-scroll-target="#forcing-redeployment">Forcing Redeployment</a></li>
+  <li><a href="#other-useful-information-for-administrators-1" id="toc-other-useful-information-for-administrators-1" class="nav-link" data-scroll-target="#other-useful-information-for-administrators-1">Other Useful Information for Administrators</a></li>
+  </ul></li>
+  </ul></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">User and AWS instance management guide</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<p>This guide gives an overview of how to manage users of the redaction app, and how to start, stop, and manage instances of the app running on AWS Cloud.</p>
+<section id="user-management-guide" class="level1">
+<h1>User management guide</h1>
+<p>This guide provides an overview for administrators to manage users within an AWS Cognito User Pool, specifically for an application utilising phone-app-based Two-Factor Authentication (2FA).</p>
+<section id="managing-users-in-aws-cognito-user-pools" class="level2">
+<h2 class="anchored" data-anchor-id="managing-users-in-aws-cognito-user-pools">Managing Users in AWS Cognito User Pools</h2>
+<p>AWS Cognito User Pools provide a secure and scalable user directory for your applications. This guide focuses on common administrative tasks within the AWS Management Console.</p>
+<section id="accessing-your-user-pool" class="level3">
+<h3 class="anchored" data-anchor-id="accessing-your-user-pool">Accessing Your User Pool</h3>
+<ol type="1">
+<li>Log in to the AWS Management Console.</li>
+<li>Navigate to <strong>Cognito</strong> (you can use the search bar).</li>
+<li>In the left navigation pane, select <strong>User Pools</strong>.</li>
+<li>Click on the name of the user pool associated with your redaction app.</li>
+</ol>
+</section>
+<section id="creating-users" class="level3">
+<h3 class="anchored" data-anchor-id="creating-users">Creating Users</h3>
+<p>Creating a new user in Cognito involves setting their initial credentials and attributes.</p>
+<ol type="1">
+<li>From your User Pool’s dashboard, click on the <strong>Users</strong> tab.</li>
+<li>Click the <strong>Create user</strong> button.</li>
+<li><strong>Username:</strong> Enter a unique username for the user. This is what they will use to log in.</li>
+<li><strong>Temporary password:</strong>
+<ul>
+<li>Select <strong>Generate a password</strong> to have Cognito create a strong, temporary password.</li>
+<li>Alternatively, you can choose <strong>Set a password</strong> and enter one manually. If you do this, ensure it meets the password policy configured for your user pool.</li>
+<li><strong>Important:</strong> Cognito will typically require users to change this temporary password upon their first login.</li>
+</ul></li>
+<li><strong>Email:</strong> Enter the user’s email address. This is crucial for communication and potentially for password recovery if configured.</li>
+<li><strong>Phone number (optional):</strong> The phone number is not needed for login or user management in this app, you can leave this blank.</li>
+<li><strong>Mark email as verified/Mark phone number as verified:</strong> For new users, you can choose to automatically verify their email and/or phone number. If unchecked, the user might need to verify these themselves during the signup process (depending on your User Pool’s verification settings).</li>
+<li><strong>Groups (optional):</strong> If you have defined groups in your user pool, you can add the user to relevant groups here. Groups are useful for managing permissions and access control within your application.</li>
+<li>Click <strong>Create user</strong>.</li>
+</ol>
+</section>
+<section id="information-to-give-to-users-to-sign-up" class="level3">
+<h3 class="anchored" data-anchor-id="information-to-give-to-users-to-sign-up">Information to Give to Users to Sign Up</h3>
+<p>Once a user is created, they’ll need specific information to access the application.</p>
+<ul>
+<li><strong>Application URL:</strong> The web address of your redaction app’s login page.</li>
+<li><strong>Username:</strong> The username you created for them in Cognito.</li>
+<li><strong>Temporary Password:</strong> The temporary password you generated or set.</li>
+<li><strong>Instructions for First Login:</strong>
+<ul>
+<li>“Upon your first login, you will be prompted to change your temporary password to a new, secure password.”</li>
+<li>“You will also need to set up Two-Factor Authentication using a phone authenticator app (e.g., Google Authenticator, Authy).”</li>
+</ul></li>
+</ul>
+</section>
+<section id="resetting-user-access-password-reset" class="level3">
+<h3 class="anchored" data-anchor-id="resetting-user-access-password-reset">Resetting User Access (Password Reset)</h3>
+<p>If a user forgets their password or needs their access reset, you can do this in the console.</p>
+<ol type="1">
+<li>From your User Pool’s dashboard, click on the <strong>Users</strong> tab.</li>
+<li>Locate the user you wish to reset. You can use the search bar.</li>
+<li>Click on the user’s username.</li>
+<li>On the user details page, click the <strong>Reset password</strong> button.</li>
+<li>Cognito will generate a new temporary password and mark the user to change it on next login.</li>
+<li><strong>Important:</strong> You will need to communicate this new temporary password to the user securely.</li>
+</ol>
+</section>
+<section id="two-factor-authentication-2fa-with-apps-only" class="level3">
+<h3 class="anchored" data-anchor-id="two-factor-authentication-2fa-with-apps-only">Two-Factor Authentication (2FA) with Apps Only</h3>
+<p>Your application uses phone app-based 2FA. This section covers what administrators need to know.</p>
+<section id="how-it-works-for-the-user" class="level4">
+<h4 class="anchored" data-anchor-id="how-it-works-for-the-user">How it Works for the User</h4>
+<p>When a user logs in for the first time or when 2FA is enabled for their account, they will be prompted to set up 2FA. This typically involves:</p>
+<ol type="1">
+<li><strong>Scanning a QR Code:</strong> The application will display a QR code.</li>
+<li><strong>Using an Authenticator App:</strong> The user opens their authenticator app (e.g., Google Authenticator, Authy, Microsoft Authenticator) and scans the QR code.</li>
+<li><strong>Entering a Code:</strong> The authenticator app will generate a time-based one-time password (TOTP). The user enters this code into the application to verify the setup.</li>
+</ol>
+</section>
+<section id="administrators-role-in-2fa" class="level4">
+<h4 class="anchored" data-anchor-id="administrators-role-in-2fa">Administrator’s Role in 2FA</h4>
+<p>As an administrator, you generally don’t directly “set up” the user’s 2FA device in the console. The user performs this self-enrollment process within the application. However, you can manage the 2FA status of a user:</p>
+<ol type="1">
+<li><strong>Enabling/Disabling 2FA for a User:</strong>
+<ul>
+<li>From your User Pool’s dashboard, click on the <strong>Users</strong> tab.</li>
+<li>Click on the user’s username.</li>
+<li>Under the “Multi-factor authentication (MFA)” section, you’ll see the current MFA status.</li>
+<li>If 2FA is not enabled, you might have the option to “Enable MFA” for the user. If your user pool requires 2FA, it might be automatically enabled upon signup.</li>
+<li>You can also <strong>Disable MFA</strong> for a user if necessary. This will remove their registered 2FA device and they will no longer be prompted for a 2FA code during login until they re-enroll.</li>
+</ul></li>
+<li><strong>Removing a User’s 2FA Device:</strong> If a user loses their phone or needs to re-configure 2FA, you can remove their existing MFA device.
+<ul>
+<li>On the user’s details page, under the “Multi-factor authentication (MFA)” section, you will see a list of registered MFA devices (if any).</li>
+<li>Select the device and click <strong>Remove</strong>.</li>
+<li>The next time the user logs in, they will be prompted to set up 2FA again.</li>
+</ul></li>
+</ol>
+</section>
+</section>
+<section id="other-useful-information-for-administrators" class="level3">
+<h3 class="anchored" data-anchor-id="other-useful-information-for-administrators">Other Useful Information for Administrators</h3>
+<ul>
+<li><strong>User Status:</strong> In the “Users” tab, you’ll see the status of each user (e.g., <code>CONFIRMED</code>, <code>UNCONFIRMED</code>, <code>FORCE_CHANGE_PASSWORD</code>, <code>ARCHIVED</code>, <code>COMPROMISED</code>).
+<ul>
+<li><code>CONFIRMED</code>: User has confirmed their account and set their password.</li>
+<li><code>UNCONFIRMED</code>: User has been created but hasn’t confirmed their account (e.g., through email verification) or changed their temporary password.</li>
+<li><code>FORCE_CHANGE_PASSWORD</code>: User must change their password on next login.</li>
+</ul></li>
+<li><strong>Searching and Filtering Users:</strong> The “Users” tab provides search and filtering options to quickly find specific users or groups of users.</li>
+<li><strong>User Attributes:</strong> You can view and sometimes edit user attributes (like email, phone number, custom attributes) on the user’s detail page.</li>
+<li><strong>Groups:</strong>
+<ul>
+<li>You can create and manage groups under the <strong>Groups</strong> tab of your User Pool.</li>
+<li>Groups are useful for organising users and applying different permissions or configurations through AWS Identity and Access Management (IAM) roles.</li>
+</ul></li>
+<li><strong>User Pool Settings:</strong>
+<ul>
+<li>Explore the various settings under the <strong>User Pool Properties</strong> tab (e.g., Policies, MFA and verifications, Message customisations).</li>
+<li><strong>Policies:</strong> Define password complexity requirements.</li>
+<li><strong>MFA and verifications:</strong> Configure whether MFA is optional, required, or disabled, and the types of MFA allowed (SMS, TOTP). Ensure “Authenticator apps” is enabled for your setup.</li>
+<li><strong>Message customisations:</strong> Customise the email and SMS messages sent by Cognito (e.g., for verification codes, password resets).</li>
+</ul></li>
+<li><strong>Monitoring and Logging:</strong>
+<ul>
+<li>Integrate your Cognito User Pool with AWS CloudWatch to monitor user activities and potential issues.</li>
+<li>Enable CloudTrail logging for Cognito to track API calls and administrative actions.</li>
+</ul></li>
+<li><strong>Security Best Practices:</strong>
+<ul>
+<li>Always use strong, unique passwords for your AWS console login.</li>
+<li>Enable MFA for your AWS console login.</li>
+<li>Regularly review user access and permissions.</li>
+<li>Educate users on strong password practices and the importance of 2FA.</li>
+</ul></li>
+</ul>
+<p>By understanding these features and following best practices, administrators can effectively manage users within their AWS Cognito User Pool, ensuring secure and smooth operation of their redaction application.</p>
+</section>
+</section>
+</section>
+<section id="guide-to-running-app-instances-on-aws" class="level1">
+<h1>Guide to running app instances on AWS</h1>
+<p>This guide provides basic instructions for administrators to manage service tasks within AWS Elastic Container Service (ECS) using the AWS Management Console, focusing on scaling services on and off and forcing redeployments.</p>
+<section id="basic-service-task-management-in-aws-ecs-console" class="level2">
+<h2 class="anchored" data-anchor-id="basic-service-task-management-in-aws-ecs-console">Basic Service Task Management in AWS ECS Console</h2>
+<p>AWS Elastic Container Service (ECS) allows you to run, stop, and manage Docker containers on a cluster. This guide focuses on managing your ECS <em>services</em>, which maintain a desired number of tasks (container instances).</p>
+<section id="accessing-your-ecs-cluster-and-services" class="level3">
+<h3 class="anchored" data-anchor-id="accessing-your-ecs-cluster-and-services">Accessing Your ECS Cluster and Services</h3>
+<ol type="1">
+<li>Log in to the AWS Management Console.</li>
+<li>Navigate to <strong>ECS (Elastic Container Service)</strong> (you can use the search bar).</li>
+<li>In the left navigation pane, select <strong>Clusters</strong>.</li>
+<li>Click on the name of the ECS cluster where your redaction app’s service is running.</li>
+</ol>
+</section>
+<section id="understanding-services-and-tasks" class="level3">
+<h3 class="anchored" data-anchor-id="understanding-services-and-tasks">Understanding Services and Tasks</h3>
+<p>Before we dive into management, let’s clarify key concepts:</p>
+<ul>
+<li><strong>Task Definition:</strong> A blueprint for your application. It specifies the Docker image, CPU, memory, environment variables, port mappings, and other configurations for your containers.</li>
+<li><strong>Task:</strong> An actual running instance of a task definition. It’s an individual container or a set of tightly coupled containers running together.</li>
+<li><strong>Service:</strong> A mechanism that allows you to run and maintain a specified number of identical tasks simultaneously in an ECS cluster. The service ensures that if a task fails or stops, it’s replaced. It also handles load balancing and scaling.</li>
+</ul>
+</section>
+<section id="setting-the-number-of-running-tasks-to-0-turning-everything-off" class="level3">
+<h3 class="anchored" data-anchor-id="setting-the-number-of-running-tasks-to-0-turning-everything-off">Setting the Number of Running Tasks to 0 (Turning Everything Off)</h3>
+<p>Setting the desired number of tasks to 0 for a service effectively “turns off” your application by stopping all its running containers.</p>
+<ol type="1">
+<li>From your Cluster’s dashboard, click on the <strong>Services</strong> tab.</li>
+<li>Locate the service associated with your redaction app (e.g., <code>redaction-app-service</code>).</li>
+<li>Select the service by checking the box next to its name.</li>
+<li>Click the <strong>Update</strong> button.</li>
+<li>On the “Configure service” page, find the <strong>Number of tasks</strong> field.</li>
+<li>Change the value in this field to <code>0</code>.</li>
+<li>Scroll to the bottom and click <strong>Update service</strong>.</li>
+</ol>
+<p><strong>What happens next:</strong></p>
+<ul>
+<li>ECS will begin terminating all running tasks associated with that service.</li>
+<li>The “Running tasks” count for your service will gradually decrease to 0.</li>
+<li>Your application will become inaccessible as its containers are stopped.</li>
+</ul>
+<p><strong>Important Considerations:</strong></p>
+<ul>
+<li><strong>Cost Savings:</strong> Setting tasks to 0 can save costs by stopping the consumption of compute resources (CPU, memory) for your containers.</li>
+<li><strong>Associated Resources:</strong> This action <em>only</em> stops the ECS tasks. It does not stop underlying EC2 instances (if using EC2 launch type), associated databases, load balancers, or other AWS resources. You’ll need to manage those separately if you want to completely shut down your environment.</li>
+<li><strong>Container Images:</strong> Your Docker images will still reside in Amazon ECR (or wherever you store them).</li>
+<li><strong>Downtime:</strong> This action will cause immediate downtime for your application.</li>
+</ul>
+</section>
+<section id="turning-the-desired-number-of-tasks-on" class="level3">
+<h3 class="anchored" data-anchor-id="turning-the-desired-number-of-tasks-on">Turning the Desired Number of Tasks On</h3>
+<p>To bring your application back online, you’ll set the desired number of tasks to your operational value (usually 1 or more).</p>
+<ol type="1">
+<li>From your Cluster’s dashboard, click on the <strong>Services</strong> tab.</li>
+<li>Locate the service associated with your redaction app.</li>
+<li>Select the service by checking the box next to its name.</li>
+<li>Click the <strong>Update</strong> button.</li>
+<li>On the “Configure service” page, find the <strong>Number of tasks</strong> field.</li>
+<li>Change the value in this field to your desired number of running tasks (e.g., <code>1</code>, <code>2</code>, etc.).</li>
+<li>Scroll to the bottom and click <strong>Update service</strong>.</li>
+</ol>
+<p><strong>What happens next:</strong></p>
+<ul>
+<li>ECS will begin launching new tasks based on your service’s configuration and task definition.</li>
+<li>The “Running tasks” count will increase until it reaches your desired number.</li>
+<li>Once tasks are running and healthy (according to your health checks), your application should become accessible again.</li>
+</ul>
+<p><strong>Important Considerations:</strong></p>
+<ul>
+<li><strong>Startup Time:</strong> Allow some time for tasks to pull images, start containers, and pass health checks before your application is fully available.</li>
+<li><strong>Resource Availability:</strong> Ensure your ECS cluster has sufficient available resources (EC2 instances or Fargate capacity) to launch the desired number of tasks.</li>
+</ul>
+</section>
+<section id="forcing-redeployment" class="level3">
+<h3 class="anchored" data-anchor-id="forcing-redeployment">Forcing Redeployment</h3>
+<p>Forcing a redeployment is useful when you’ve updated your task definition (e.g., pushed a new Docker image, changed environment variables) but the service hasn’t automatically picked up the new version. It’s also useful for “restarting” a service.</p>
+<ol type="1">
+<li>From your Cluster’s dashboard, click on the <strong>Services</strong> tab.</li>
+<li>Locate the service you want to redeploy.</li>
+<li>Select the service by checking the box next to its name.</li>
+<li>Click the <strong>Update</strong> button.</li>
+<li>On the “Configure service” page, scroll down to the <strong>Deployment options</strong> section.</li>
+<li>Check the box next to <strong>Force new deployment</strong>.</li>
+<li>Scroll to the bottom and click <strong>Update service</strong>.</li>
+</ol>
+<p><strong>What happens next:</strong></p>
+<ul>
+<li>ECS will initiate a new deployment for your service.</li>
+<li>It will launch new tasks using the <em>latest active task definition revision</em> associated with your service.</li>
+<li>Existing tasks will be drained and terminated according to your service’s deployment configuration (e.g., <code>minimum healthy percent</code>, <code>maximum percent</code>).</li>
+<li>This process effectively replaces all running tasks with fresh instances.</li>
+</ul>
+<p><strong>Important Considerations:</strong></p>
+<ul>
+<li><strong>Latest Task Definition:</strong> Ensure you have activated the correct and latest task definition revision before forcing a new deployment if your intention is to deploy new code. You can update the task definition used by a service via the “Update” service flow.</li>
+<li><strong>Downtime (minimal if configured correctly):</strong> If your service has a properly configured load balancer and healthy deployment settings (e.g., blue/green or rolling updates), forced redeployments should result in minimal to no downtime. ECS will bring up new tasks before shutting down old ones.</li>
+<li><strong>Troubleshooting:</strong> If a deployment gets stuck or tasks fail to start, check the “Events” tab of your service for error messages. Also, check the CloudWatch logs for your tasks.</li>
+</ul>
+</section>
+<section id="other-useful-information-for-administrators-1" class="level3">
+<h3 class="anchored" data-anchor-id="other-useful-information-for-administrators-1">Other Useful Information for Administrators</h3>
+<ul>
+<li><strong>Service Events:</strong> On your service’s detail page, click the <strong>Events</strong> tab. This provides a chronological log of actions taken by the ECS service, such as task launches, stops, and scaling events. This is invaluable for troubleshooting.</li>
+<li><strong>Tasks Tab:</strong> On your service’s detail page, click the <strong>Tasks</strong> tab to see a list of all individual tasks running (or recently stopped) for that service. You can click on individual tasks to view their details, including logs, network configuration, and CPU/memory utilisation.</li>
+<li><strong>Logs:</strong> For each task, you can often find a link to its CloudWatch Logs under the “Logs” section of the task details. This is critical for debugging application errors.</li>
+<li><strong>Metrics:</strong> The <strong>Metrics</strong> tab on your service provides graphs for CPU utilisation, memory utilisation, and the number of running tasks, helping you monitor your service’s performance.</li>
+<li><strong>Deployment Configuration:</strong> When updating a service, review the <strong>Deployment options</strong> section. This allows you to control how new deployments are rolled out (e.g., minimum healthy percent, maximum percent). Proper configuration here ensures minimal impact during updates.</li>
+<li><strong>Auto Scaling (beyond basic management):</strong> For dynamic scaling based on demand, explore <strong>Service Auto Scaling</strong>. This allows ECS to automatically adjust the desired number of tasks up or down based on metrics like CPU utilisation or request count.</li>
+<li><strong>Task Definitions:</strong> Before updating a service, you might need to create a new revision of your task definition if you’re deploying new code or configuration changes to your containers. You can find Task Definitions in the left navigation pane under ECS.</li>
+</ul>
+<p>By mastering these basic service management operations in the AWS Console, administrators can effectively control the lifecycle of their ECS-based applications.</p>
+
+
+</section>
+</section>
+</section>
+
+<a onclick="window.scrollTo(0, 0); return false;" role="button" id="quarto-back-to-top"><i class="bi bi-arrow-up"></i> Back to top</a></main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+        const codeEl = trigger.previousElementSibling.cloneNode(true);
+        for (const childEl of codeEl.children) {
+          if (isCodeAnnotation(childEl)) {
+            childEl.remove();
+          }
+        }
+        return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
