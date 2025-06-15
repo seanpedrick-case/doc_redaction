@@ -385,24 +385,22 @@ def convert_pymupdf_to_image_coords(pymupdf_page:Page, x1:float, y1:float, x2:fl
 
     return x1_image, y1_image, x2_image, y2_image
 
-def redact_whole_pymupdf_page(rect_height:float, rect_width:float, image:Image, page:Page, custom_colours, border:float = 5, image_dimensions:dict={}):
+def redact_whole_pymupdf_page(rect_height:float, rect_width:float, page:Page, custom_colours:bool, border:float = 5):
     # Small border to page that remains white
     border = 5
     # Define the coordinates for the Rect
     whole_page_x1, whole_page_y1 = 0 + border, 0 + border  # Bottom-left corner
     whole_page_x2, whole_page_y2 = rect_width - border, rect_height - border  # Top-right corner
 
-    # whole_page_image_x1, whole_page_image_y1, whole_page_image_x2, whole_page_image_y2 = convert_pymupdf_to_image_coords(page, whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2, image, image_dimensions=image_dimensions)
-
     # Create new image annotation element based on whole page coordinates
     whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
 
     # Write whole page annotation to annotation boxes
     whole_page_img_annotation_box = {}
-    whole_page_img_annotation_box["xmin"] = whole_page_x1 #whole_page_image_x1
-    whole_page_img_annotation_box["ymin"] = whole_page_y1 #whole_page_image_y1
-    whole_page_img_annotation_box["xmax"] = whole_page_x2 #whole_page_image_x2
-    whole_page_img_annotation_box["ymax"] =  whole_page_y2 #whole_page_image_y2
+    whole_page_img_annotation_box["xmin"] = whole_page_x1
+    whole_page_img_annotation_box["ymin"] = whole_page_y1
+    whole_page_img_annotation_box["xmax"] = whole_page_x2
+    whole_page_img_annotation_box["ymax"] =  whole_page_y2
     whole_page_img_annotation_box["color"] = (0,0,0)
     whole_page_img_annotation_box["label"] = "Whole page"
 

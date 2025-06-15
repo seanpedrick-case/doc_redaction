@@ -7,12 +7,12 @@ from tools.helper_functions import put_columns_in_df, get_connection_params, rev
 from tools.aws_functions import download_file_from_s3, upload_log_file_to_s3
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
-from tools.redaction_review import apply_redactions_to_review_df_and_files, update_all_page_annotation_object_based_on_previous_page, decrease_page, increase_page, update_annotator_object_and_filter_df, update_entities_df_recogniser_entities, update_entities_df_page, update_entities_df_text, df_select_callback_dataframe_row, convert_df_to_xfdf, convert_xfdf_to_dataframe, reset_dropdowns, exclude_selected_items_from_redaction, undo_last_removal, update_selected_review_df_row_colour, update_all_entity_df_dropdowns, df_select_callback_cost, update_other_annotator_number_from_current, update_annotator_page_from_review_df, df_select_callback_ocr, df_select_callback_textract_api, get_all_rows_with_same_text
+from tools.redaction_review import apply_redactions_to_review_df_and_files, update_all_page_annotation_object_based_on_previous_page, decrease_page, increase_page, update_annotator_object_and_filter_df, update_entities_df_recogniser_entities, update_entities_df_page, update_entities_df_text, df_select_callback_dataframe_row, convert_df_to_xfdf, convert_xfdf_to_dataframe, reset_dropdowns, exclude_selected_items_from_redaction, undo_last_removal, update_selected_review_df_row_colour, update_all_entity_df_dropdowns, df_select_callback_cost, update_other_annotator_number_from_current, update_annotator_page_from_review_df, df_select_callback_ocr, df_select_callback_textract_api, get_all_rows_with_same_text, increase_bottom_page_count_based_on_top
 from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.custom_csvlogger import CSVLogger_custom
-from tools.find_duplicate_pages import identify_similar_pages
+from tools.find_duplicate_pages import run_analysis, show_page_previews
 from tools.textract_batch_call import analyse_document_with_textract_api, poll_whole_document_textract_analysis_progress_and_download, load_in_textract_job_details, check_for_provided_job_id, check_textract_outputs_exist, replace_existing_pdf_input_for_whole_document_outputs
 
 # Suppress downcasting warnings
@@ -186,6 +186,7 @@ with app:
     # Duplicate page detection
     in_duplicate_pages_text = gr.Textbox(label="in_duplicate_pages_text", visible=False)
     duplicate_pages_df = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="duplicate_pages_df", visible=False, type="pandas", wrap=True)
+    full_data_state = gr.State() # Full data for deduplication process
 
     # Tracking variables for current page (not visible)
     current_loop_page_number = gr.Number(value=0,precision=0, interactive=False, label = "Last redacted page in document", visible=False)
@@ -376,7 +377,8 @@ with app:
 
                 with gr.Accordion("Search all extracted text", open=True):                    
                     all_line_level_ocr_results_df = gr.Dataframe(value=pd.DataFrame(), headers=["page", "text"], col_count=(2, 'fixed'), row_count = (0, "dynamic"),  label="All OCR results", visible=True, type="pandas", wrap=True, show_fullscreen_button=True, show_search='filter', show_label=False, show_copy_button=True, max_height=400)
-                    reset_all_ocr_results_btn = gr.Button(value="Reset OCR output table filter")      
+                    reset_all_ocr_results_btn = gr.Button(value="Reset OCR output table filter")
+                    selected_ocr_dataframe_row = gr.Dataframe(pd.DataFrame(data={"page":[], "text":[]}), col_count=2, type="pandas", visible=False, headers=["page", "text"], wrap=True)
         
         with gr.Accordion("Convert review files loaded above to Adobe format, or convert from Adobe format to review file", open = False):
             convert_review_file_to_adobe_btn = gr.Button("Convert review file to Adobe comment format", variant="primary")
@@ -387,13 +389,47 @@ with app:
     # IDENTIFY DUPLICATE PAGES TAB
     ###
     with gr.Tab(label="Identify duplicate pages"):
-        with gr.Accordion("Identify duplicate pages to redact", open = True):            
-            in_duplicate_pages = gr.File(label="Upload multiple 'ocr_output.csv' data files from redaction jobs here to compare", file_count="multiple", height=FILE_INPUT_HEIGHT, file_types=['.csv'])
+        with gr.Accordion("Step 1: Configure and Run Analysis", open = True):
+            in_duplicate_pages = gr.File(
+                label="Upload multiple 'ocr_output.csv' files to compare",
+                file_count="multiple", height=FILE_INPUT_HEIGHT, file_types=['.csv']
+            )
+            
+            gr.Markdown("#### Matching Parameters")
             with gr.Row():
-                duplicate_threshold_value = gr.Number(value=0.9, label="Minimum similarity to be considered a duplicate (maximum = 1)", scale =1)
-                find_duplicate_pages_btn = gr.Button(value="Identify duplicate pages", variant="primary", scale = 4)                
+                duplicate_threshold_input = gr.Number(value=0.95, label="Similarity Threshold", info="Score (0-1) to consider pages a match.")
+                min_word_count_input = gr.Number(value=10, label="Min Word Count", info="Pages with fewer words are ignored.")
 
-            duplicate_pages_out = gr.File(label="Duplicate pages analysis output", file_count="multiple", height=FILE_INPUT_HEIGHT, file_types=['.csv'])
+            gr.Markdown("#### Matching Strategy")
+            greedy_match_input = gr.Checkbox(
+                label="Enable 'Greedy' Consecutive Matching",
+                value=False,
+                info="If checked, finds the longest possible sequence of matching pages starting from any single match. Overrides the slider below."
+            )
+            min_consecutive_pages_input = gr.Slider(
+                minimum=1, maximum=20, value=1, step=1,
+                label="Minimum Consecutive Pages (for non-greedy mode)",
+                info="If Greedy Matching is off, use this to find sequences of a fixed minimum length."
+            )
+
+            find_duplicate_pages_btn = gr.Button(value="Identify Duplicate Pages", variant="primary")
+        
+        with gr.Accordion("Step 2: Review Results", open=True):
+            gr.Markdown("### Analysis Summary\nClick on a row below to see the full page text.")
+            results_df_preview = gr.DataFrame(label="Similarity Results", interactive=True)
+            
+            gr.Markdown("### Full Text Preview")
+            with gr.Row():
+                page1_text_preview = gr.DataFrame(label="Match Source (Document 1)")
+                page2_text_preview = gr.DataFrame(label="Match Duplicate (Document 2)")
+
+            gr.Markdown("### Downloadable Files")
+            duplicate_pages_out = gr.File(
+                label="Download analysis summary and redaction lists (.csv)",
+                file_count="multiple", height=FILE_INPUT_HEIGHT
+            )
+
+            # Here, it would be good to call the redact_whole_pymupdf_page(rect_height:float, rect_width:float, page:Page, custom_colours:bool, border:float = 5) function, where each call creates a single image annotation box. page_sizes_df could be used here potentially to create size inputs. Maybe a bool could be added to exclude the actual pymupdf page box redaction, so that Page can be put in as a placeholder. The function convert annotation df to review df could then, concat to the existing review df, to update the existing review df with new full page redactions.
 
     ###
     # TEXT / TABULAR DATA TAB
@@ -621,7 +657,8 @@ with app:
     # Clicking on a cell in the recogniser entity dataframe will take you to that page, and also highlight the target redaction box in blue
     recogniser_entity_dataframe.select(df_select_callback_dataframe_row, inputs=[recogniser_entity_dataframe], outputs=[selected_entity_dataframe_row, selected_entity_dataframe_row_text]).\
         success(update_selected_review_df_row_colour, inputs=[selected_entity_dataframe_row, review_file_state, selected_entity_id, selected_entity_colour], outputs=[review_file_state, selected_entity_id, selected_entity_colour]).\
-        success(update_annotator_page_from_review_df, inputs=[review_file_state, images_pdf_state, page_sizes, all_image_annotations_state, annotator, selected_entity_dataframe_row, input_folder_textbox, doc_full_file_name_textbox], outputs=[annotator, all_image_annotations_state, annotate_current_page, page_sizes, review_file_state, annotate_previous_page])
+        success(update_annotator_page_from_review_df, inputs=[review_file_state, images_pdf_state, page_sizes, all_image_annotations_state, annotator, selected_entity_dataframe_row, input_folder_textbox, doc_full_file_name_textbox], outputs=[annotator, all_image_annotations_state, annotate_current_page, page_sizes, review_file_state, annotate_previous_page]).\
+        success(increase_bottom_page_count_based_on_top, inputs=[annotate_current_page], outputs=[annotate_current_page_bottom])
    
     reset_dropdowns_btn.click(reset_dropdowns, inputs=[recogniser_entity_dataframe_base], outputs=[recogniser_entity_dropdown, text_entity_dropdown, page_entity_dropdown]).\
         success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_state, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_sizes, all_image_annotations_state])
@@ -653,7 +690,10 @@ with app:
         success(apply_redactions_to_review_df_and_files, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_state, output_folder_textbox, do_not_save_pdf_state, page_sizes], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output, review_file_state])
         
     # Review OCR text button
-    all_line_level_ocr_results_df.select(df_select_callback_ocr, inputs=[all_line_level_ocr_results_df], outputs=[annotate_current_page, selected_entity_dataframe_row])
+    all_line_level_ocr_results_df.select(df_select_callback_ocr, inputs=[all_line_level_ocr_results_df], outputs=[annotate_current_page, selected_ocr_dataframe_row]).\
+        success(update_annotator_page_from_review_df, inputs=[review_file_state, images_pdf_state, page_sizes, all_image_annotations_state, annotator, selected_ocr_dataframe_row, input_folder_textbox, doc_full_file_name_textbox], outputs=[annotator, all_image_annotations_state, annotate_current_page, page_sizes, review_file_state, annotate_previous_page]).\
+        success(increase_bottom_page_count_based_on_top, inputs=[annotate_current_page], outputs=[annotate_current_page_bottom])
+
     reset_all_ocr_results_btn.click(reset_ocr_base_dataframe, inputs=[all_line_level_ocr_results_df_base], outputs=[all_line_level_ocr_results_df])
     
     # Convert review file to xfdf Adobe format
@@ -684,7 +724,27 @@ with app:
     ###
     # IDENTIFY DUPLICATE PAGES
     ###
-    find_duplicate_pages_btn.click(fn=identify_similar_pages, inputs=[in_duplicate_pages, duplicate_threshold_value, output_folder_textbox], outputs=[duplicate_pages_df, duplicate_pages_out])
+    find_duplicate_pages_btn.click(
+        fn=run_analysis,
+        inputs=[
+            in_duplicate_pages,
+            duplicate_threshold_input,
+            min_word_count_input,
+            min_consecutive_pages_input,
+            greedy_match_input
+        ],
+        outputs=[
+            results_df_preview,
+            duplicate_pages_out,
+            full_data_state
+        ]
+    )
+
+    results_df_preview.select(
+        fn=show_page_previews,
+        inputs=[full_data_state, results_df_preview],
+        outputs=[page1_text_preview, page2_text_preview]
+    )
 
     ###
     # SETTINGS PAGE INPUT / OUTPUT
