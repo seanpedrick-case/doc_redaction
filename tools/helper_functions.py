@@ -146,6 +146,14 @@ def ensure_output_folder_exists(output_folder:str):
     else:
         print(f"The {output_folder} folder already exists.")
 
+def _get_env_list(env_var_name: str) -> List[str]:
+    """Parses a comma-separated environment variable into a list of strings."""
+    value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
+    if not value:
+        return []
+    # Split by comma and filter out any empty strings that might result from extra commas
+    return [s.strip() for s in value.split(',') if s.strip()]
+
 def custom_regex_load(in_file:List[str], file_type:str = "allow_list"):
     '''
     When file is loaded, update the column dropdown choices and write to relevant data states.

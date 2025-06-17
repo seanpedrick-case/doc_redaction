@@ -180,7 +180,7 @@ def update_annotator_page_from_review_df(
 ) -> Tuple[object, List[dict], int, List[dict], pd.DataFrame, int]: # Correcting return types based on usage
     '''
     Update the visible annotation object and related objects with the latest review file information,
-    optimizing by processing only the current page's data.
+    optimising by processing only the current page's data.
     '''
     # Assume current_image_annotations_state is List[dict] and current_page_annotator is dict
     out_image_annotations_state: List[dict] = list(current_image_annotations_state) # Make a copy to avoid modifying input in place
@@ -220,7 +220,6 @@ def update_annotator_page_from_review_df(
         else:
             print("Warning: Page sizes DataFrame became empty after processing.")
 
-    # --- OPTIMIZATION: Process only the current page's data from review_df ---
     if not review_df.empty:
         # Filter review_df for the current page
         # Ensure 'page' column in review_df is comparable to page_num_reported
@@ -1081,6 +1080,15 @@ def df_select_callback_ocr(df: pd.DataFrame, evt: gr.SelectData):
         row_value_df = pd.DataFrame(data={"page":[row_value_page], "text":[row_value_text]})
 
         return row_value_page, row_value_df
+
+# When a user selects a row in the duplicate results table
+def store_duplicate_selection(evt: gr.SelectData):
+    if not evt.empty:
+        selected_index = evt.index[0]
+    else:
+        selected_index = None
+        
+    return selected_index
 
 def get_all_rows_with_same_text(df: pd.DataFrame, text: str):
     '''

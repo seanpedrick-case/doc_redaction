@@ -4,13 +4,12 @@ import re
 from tools.helper_functions import OUTPUT_FOLDER
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import random
-import string
 from typing import List, Tuple
 import gradio as gr
 from gradio import Progress
 from pathlib import Path
-
+from pymupdf import Document
+from tools.file_conversion import redact_whole_pymupdf_page, convert_annotation_data_to_dataframe
 import en_core_web_lg
 nlp = en_core_web_lg.load()
 
@@ -84,31 +83,11 @@ def process_data(df:pd.DataFrame, column:str):
     def _clean_text(raw_text):
         # Remove HTML tags
         clean = re.sub(r'<.*?>', '', raw_text)
-        # clean = re.sub(r'&nbsp;', ' ', clean)
-        # clean = re.sub(r'\r\n', ' ', clean)
-        # clean = re.sub(r'&lt;', ' ', clean)
-        # clean = re.sub(r'&gt;', ' ', clean)
-        # clean = re.sub(r'<strong>', ' ', clean)
-        # clean = re.sub(r'</strong>', ' ', clean)
-
-        # Replace non-breaking space \xa0 with a space
-        # clean = clean.replace(u'\xa0', u' ')
-        # Remove extra whitespace
         clean = ' '.join(clean.split())
-
-        # # Tokenize the text
-        # words = word_tokenize(clean.lower())
-
-        # # Remove punctuation and numbers
-        # words = [word for word in words if word.isalpha()]
-
-        # # Remove stopwords
-        # words = [word for word in words if word not in stop_words]
-
         # Join the cleaned words back into a string
         return clean
 
-    # Function to apply lemmatization and remove stopwords
+    # Function to apply lemmatisation and remove stopwords
     def _apply_lemmatization(text):
         doc = nlp(text)
         # Keep only alphabetic tokens and remove stopwords
@@ -121,7 +100,7 @@ def process_data(df:pd.DataFrame, column:str):
     
     return df
 
-def map_metadata_single_page(similarity_df, metadata_source_df):
+def map_metadata_single_page(similarity_df:pd.DataFrame, metadata_source_df:pd.DataFrame, preview_length:int=200):
     """Helper to map metadata for single page results."""
     metadata_df = metadata_source_df[['file', 'page', 'text']]
     results_df = similarity_df.merge(metadata_df, left_on='Page1_Index', right_index=True)\
@@ -131,12 +110,11 @@ def map_metadata_single_page(similarity_df, metadata_source_df):
     results_df["Similarity_Score"] = results_df["Similarity_Score"].round(3)
     final_df = results_df[['Page1_File', 'Page1_Page', 'Page2_File', 'Page2_Page', 'Similarity_Score', 'Page1_Text', 'Page2_Text']]
     final_df = final_df.sort_values(["Page1_File", "Page1_Page", "Page2_File", "Page2_Page"])
-    final_df['Page1_Text'] = final_df['Page1_Text'].str[:200]
-    final_df['Page2_Text'] = final_df['Page2_Text'].str[:200]
+    final_df['Page1_Text'] = final_df['Page1_Text'].str[:preview_length]
+    final_df['Page2_Text'] = final_df['Page2_Text'].str[:preview_length]
     return final_df
 
-
-def map_metadata_subdocument(subdocument_df, metadata_source_df):
+def map_metadata_subdocument(subdocument_df:pd.DataFrame, metadata_source_df:pd.DataFrame, preview_length:int=200):
     """Helper to map metadata for subdocument results."""
     metadata_df = metadata_source_df[['file', 'page', 'text']]
     
@@ -160,9 +138,68 @@ def map_metadata_subdocument(subdocument_df, metadata_source_df):
 
     final_df = subdocument_df[cols]
     final_df = final_df.sort_values(['Page1_File', 'Page1_Start_Page', 'Page2_File', 'Page2_Start_Page'])
-    final_df['Page1_Text'] = final_df['Page1_Text'].str[:200]
-    final_df['Page2_Text'] = final_df['Page2_Text'].str[:200]
+    final_df['Page1_Text'] = final_df['Page1_Text'].str[:preview_length]
+    final_df['Page2_Text'] = final_df['Page2_Text'].str[:preview_length]
+
     return final_df
+
+def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str) -> list:
+    """
+    Saves the main results DataFrame and generates per-file redaction lists.
+    This function is extracted to be reusable.
+
+    Args:
+        final_df (pd.DataFrame): The DataFrame containing the final match results.
+        output_folder (str): The folder to save the output files.
+
+    Returns:
+        list: A list of paths to all generated files.
+    """
+    output_paths = []
+    output_folder_path = Path(output_folder)
+    output_folder_path.mkdir(exist_ok=True)
+
+    if final_df.empty:
+        print("No matches to save.")
+        return []
+
+    # 1. Save the main results DataFrame
+    similarity_file_output_path = output_folder_path / 'page_similarity_results.csv'
+    final_df.to_csv(similarity_file_output_path, index=False)
+
+    output_paths.append(str(similarity_file_output_path))
+    print(f"Main results saved to {similarity_file_output_path}")
+
+    # 2. Save per-file redaction lists
+    # Use 'Page2_File' as the source of duplicate content
+    grouping_col = 'Page2_File'
+    if grouping_col not in final_df.columns:
+        print("Warning: 'Page2_File' column not found. Cannot generate redaction lists.")
+        return output_paths
+
+    for redact_file, group in final_df.groupby(grouping_col):
+        output_file_name_stem = Path(redact_file).stem
+        output_file_path = output_folder_path / f"{output_file_name_stem}_pages_to_redact.csv"
+        
+        all_pages_to_redact = set()
+        is_subdocument_match = 'Page2_Start_Page' in group.columns
+
+        if is_subdocument_match:
+            for _, row in group.iterrows():
+                pages_in_range = range(int(row['Page2_Start_Page']), int(row['Page2_End_Page']) + 1)
+                all_pages_to_redact.update(pages_in_range)
+        else:
+            pages = group['Page2_Page'].unique()
+            all_pages_to_redact.update(pages)
+        
+        if all_pages_to_redact:
+            redaction_df = pd.DataFrame(sorted(list(all_pages_to_redact)), columns=['Page_to_Redact'])
+            redaction_df.to_csv(output_file_path, header=False, index=False)
+
+            output_paths.append(str(output_file_path))
+            print(f"Redaction list for {redact_file} saved to {output_file_path}")
+            
+    return output_paths
 
 def identify_similar_pages(
     df_combined: pd.DataFrame,
@@ -179,8 +216,7 @@ def identify_similar_pages(
     2. Fixed-Length Subdocument: If greedy_match=False and min_consecutive_pages > 1.
     3. Greedy Consecutive Match: If greedy_match=True.
     """
-    # ... (Initial setup: progress, data loading/processing, word count filter) ...
-    # This part remains the same as before.
+
     output_paths = []
     progress(0.1, desc="Processing and filtering text")
     df = process_data(df_combined, 'text')
@@ -215,11 +251,8 @@ def identify_similar_pages(
 
     progress(0.6, desc="Aggregating results based on matching strategy")
     
-    # --- NEW: Logic to select matching strategy ---
-
     if greedy_match:
-        # --- STRATEGY 3: Greedy Consecutive Matching ---
-        print("Finding matches using GREEDY consecutive strategy.")
+        print("Finding matches using greedy consecutive strategy.")
         
         # A set of pairs for fast lookups of (page1_idx, page2_idx)
         valid_pairs_set = set(zip(base_similarity_df['Page1_Index'], base_similarity_df['Page2_Index']))
@@ -308,53 +341,7 @@ def identify_similar_pages(
     
     progress(0.8, desc="Saving output files")
     
-    # If no matches were found, final_df could be empty.
-    if final_df.empty:
-        print("No matches found, no output files to save.")
-        return final_df, [], df_combined
-
-    # --- 1. Save the main results DataFrame ---
-    # This file contains the detailed summary of all matches found.
-    similarity_file_output_path = Path(output_folder) / 'page_similarity_results.csv'
-    final_df.to_csv(similarity_file_output_path, index=False)
-    output_paths.append(str(similarity_file_output_path))
-    print(f"Main results saved to {similarity_file_output_path}")
-
-    # --- 2. Save per-file redaction lists ---
-    # These files contain a simple list of page numbers to redact for each document
-    # that contains duplicate content.
-    
-    # We group by the file containing the duplicates ('Page2_File')
-    for redact_file, group in final_df.groupby('Page2_File'):
-        output_file_name_stem = Path(redact_file).stem
-        output_file_path = Path(output_folder) / f"{output_file_name_stem}_pages_to_redact.csv"
-        
-        all_pages_to_redact = set()
-        
-        # Check if the results are for single pages or subdocuments
-        is_subdocument_match = 'Page2_Start_Page' in group.columns
-
-        if is_subdocument_match:
-            # For subdocument matches, create a range of pages for each match
-            for _, row in group.iterrows():
-                # Generate all page numbers from the start to the end of the match
-                pages_in_range = range(int(row['Page2_Start_Page']), int(row['Page2_End_Page']) + 1)
-                all_pages_to_redact.update(pages_in_range)
-        else:
-            # For single-page matches, just add the page number
-            pages = group['Page2_Page'].unique()
-            all_pages_to_redact.update(pages)
-        
-        if all_pages_to_redact:
-            # Create a DataFrame from the sorted list of pages to redact
-            redaction_df = pd.DataFrame(sorted(list(all_pages_to_redact)), columns=['Page_to_Redact'])
-            redaction_df.to_csv(output_file_path, header=False, index=False)
-            output_paths.append(str(output_file_path))
-            print(f"Redaction list for {redact_file} saved to {output_file_path}")
-
-    # Note: The 'combined ocr output' csv was part of the original data loading function,
-    # not the analysis function itself. If you need that, it should be saved within
-    # your `combine_ocr_output_text` function.
+    output_paths = save_results_and_redaction_lists(final_df, output_folder)
 
     return final_df, output_paths, df_combined
 
@@ -362,7 +349,53 @@ def identify_similar_pages(
 # GRADIO HELPER FUNCTIONS
 # ==============================================================================
 
-def run_analysis(files, threshold, min_words, min_consecutive, greedy_match, progress=gr.Progress(track_tqdm=True)):
+# full_data:pd.DataFrame, 
+def handle_selection_and_preview(evt: gr.SelectData, results_df:pd.DataFrame, full_duplicate_data_by_file: dict):
+    """
+    This single function handles a user selecting a row. It:
+    1. Determines the selected row index.
+    2. Calls the show_page_previews function to get the text data.
+    3. Returns all the necessary outputs for the UI.
+    """
+    # If the user deselects, the event might be None.
+    if not evt:
+        return None, None, None # Clear state and both preview panes
+
+    # 1. Get the selected index
+    selected_index = evt.index[0]
+
+    # 2. Get the preview data
+    page1_data, page2_data = show_page_previews(full_duplicate_data_by_file, results_df, evt)
+
+    # 3. Return all three outputs in the correct order
+    return selected_index, page1_data, page2_data
+
+def exclude_match(results_df:pd.DataFrame, selected_index:int, output_folder="./output/"):
+    """
+    Removes a selected row from the results DataFrame, regenerates output files,
+    and clears the text preview panes.
+    """
+    if selected_index is None:
+        gr.Warning("No match selected. Please click on a row in the table first.")
+        # Return the original dataframe and update=False for the files
+        return results_df, gr.update(), None, None
+    
+    if results_df.empty:
+        gr.Warning("No duplicate page results found, nothing to exclude.")
+        return results_df, gr.update(), None, None
+
+    # Drop the selected row
+    updated_df = results_df.drop(selected_index).reset_index(drop=True)
+    
+    # Recalculate all output files using the helper function
+    new_output_paths = save_results_and_redaction_lists(updated_df, output_folder)
+        
+    gr.Info(f"Match at row {selected_index} excluded. Output files have been updated.")
+    
+    # Return the updated dataframe, the new file list, and clear the preview panes
+    return updated_df, new_output_paths, None, None
+
+def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:int, min_consecutive:int, greedy_match:bool, preview_length:int=500, progress=gr.Progress(track_tqdm=True)):
     """
     Wrapper function updated to include the 'greedy_match' boolean.
     """
@@ -383,85 +416,182 @@ def run_analysis(files, threshold, min_words, min_consecutive, greedy_match, pro
         similarity_threshold=threshold,
         min_word_count=min_words,
         min_consecutive_pages=int(min_consecutive),
-        greedy_match=greedy_match, # Pass the new boolean
+        greedy_match=greedy_match,
         progress=progress
     )
-    
-    return results_df, output_paths, full_df
 
-def show_page_previews(full_data, results_df, evt: gr.SelectData):
+    # Clip text to first 200 characters
+    full_df['text'] = full_df['text'].str[:preview_length]
+
+    # Preprocess full_data (without preview text) for fast access (run once)
+    full_data_by_file = {
+    file: df.sort_values('page').set_index('page')
+    for file, df in full_df.drop(["text_clean"],axis=1).groupby('file')
+    }
+
+    if results_df.empty:
+        gr.Info(f"No duplicate pages found, no results returned.")
+    
+    return results_df, output_paths, full_data_by_file # full_df, 
+
+def show_page_previews(full_data_by_file: dict, results_df: pd.DataFrame, evt: gr.SelectData, preview_length:int=500):
     """
+    Optimized version using pre-partitioned and indexed full_data.
     Triggered when a user selects a row in the results DataFrame.
-    It uses the stored 'full_data' to find and display the complete text.
     """
-    if full_data is None or results_df is None:
-        return None, None # Return empty dataframes if no analysis has been run
+    if not full_data_by_file or results_df is None or not evt:
+        return None, None
 
-    selected_row = results_df.iloc[evt.index[0]]
-    
-    # Determine if it's a single page or a multi-page (subdocument) match
+    selected_row = results_df.iloc[evt.index[0], :]
+
     is_subdocument_match = 'Page1_Start_Page' in selected_row
 
     if is_subdocument_match:
-        # --- Handle Subdocument Match ---
         file1, start1, end1 = selected_row['Page1_File'], selected_row['Page1_Start_Page'], selected_row['Page1_End_Page']
         file2, start2, end2 = selected_row['Page2_File'], selected_row['Page2_Start_Page'], selected_row['Page2_End_Page']
 
-        page1_data = full_data[
-            (full_data['file'] == file1) &
-            (full_data['page'].between(start1, end1))
-        ].sort_values('page')[['page', 'text']]
-        
-        page2_data = full_data[
-            (full_data['file'] == file2) &
-            (full_data['page'].between(start2, end2))
-        ].sort_values('page')[['page', 'text']]
-        
+        page1_data = full_data_by_file[file1].loc[start1:end1, ['text']].reset_index()
+        page2_data = full_data_by_file[file2].loc[start2:end2, ['text']].reset_index()
+
     else:
-        # --- Handle Single Page Match ---
         file1, page1 = selected_row['Page1_File'], selected_row['Page1_Page']
         file2, page2 = selected_row['Page2_File'], selected_row['Page2_Page']
 
-        page1_data = full_data[
-            (full_data['file'] == file1) & (full_data['page'] == page1)
-        ][['page', 'text']]
+        page1_data = full_data_by_file[file1].loc[[page1], ['text']].reset_index()
+        page2_data = full_data_by_file[file2].loc[[page2], ['text']].reset_index()
 
-        page2_data = full_data[
-            (full_data['file'] == file2) & (full_data['page'] == page2)
-        ][['page', 'text']]
+    page1_data['text'] = page1_data['text'].str[:preview_length]
+    page2_data['text'] = page2_data['text'].str[:preview_length]
 
-    return page1_data, page2_data
+    return page1_data[['page', 'text']], page2_data[['page', 'text']]
 
+def apply_whole_page_redactions_from_list(duplicate_page_numbers_df:pd.DataFrame, doc_file_name_with_extension_textbox:str, review_file_state:pd.DataFrame, duplicate_output_paths:list[str], pymupdf_doc:object, page_sizes:list[dict], all_existing_annotations:list[dict]):
+    '''
+    Take a list of suggested whole pages to redact and apply it to review file data currently available from an existing PDF under review
+    '''
+    # Create a copy of annotations to avoid modifying the original
+    all_annotations = all_existing_annotations.copy()
 
-# Perturb text
-# Apply the perturbation function with a 10% error probability
-def perturb_text_with_errors(series:pd.Series):
+    if not pymupdf_doc:     
+        print("Warning: No document file currently under review. Please upload a document on the 'Review redactions' tab to apply whole page redactions.")
+        raise Warning("No document file currently under review. Please upload a document on the 'Review redactions' tab to apply whole page redactions.")
+        return review_file_state, all_annotations
 
-    def _perturb_text(text, error_probability=0.1):
-        words = text.split()  # Split text into words
-        perturbed_words = []
+    # Initialize list of pages to redact
+    list_whole_pages_to_redact = []
+    
+    # Get list of pages to redact from either dataframe or file
+    if not duplicate_page_numbers_df.empty:
+        list_whole_pages_to_redact = duplicate_page_numbers_df.iloc[:, 0].tolist()
+    elif duplicate_output_paths:
+        expected_duplicate_pages_to_redact_name = f"{doc_file_name_with_extension_textbox}"
+        whole_pages_list = pd.DataFrame()  # Initialize empty DataFrame
         
-        for word in words:
-            if random.random() < error_probability:  # Add a random error
-                perturbation_type = random.choice(['char_error', 'extra_space', 'extra_punctuation'])
+        for output_file in duplicate_output_paths:
+            # Note: output_file.name might not be available if output_file is just a string path
+            # If it's a Path object or similar, .name is fine. Otherwise, parse from string.
+            file_name_from_path = output_file.split('/')[-1] if isinstance(output_file, str) else output_file.name
+            if expected_duplicate_pages_to_redact_name in file_name_from_path:
+                whole_pages_list = pd.read_csv(output_file, header=None) # Use output_file directly if it's a path
+                break
+        
+        if not whole_pages_list.empty:
+            list_whole_pages_to_redact = whole_pages_list.iloc[:, 0].tolist()
+    
+    # Convert to set to remove duplicates, then back to list
+    list_whole_pages_to_redact = list(set(list_whole_pages_to_redact))
+    
+    if not list_whole_pages_to_redact:
+        # Assuming gr is defined (e.g., gradio)
+        print("No relevant list of whole pages to redact found, returning inputs.")
+        raise Warning("Warning: No relevant list of whole pages to redact found, returning inputs.")
+        return review_file_state, all_existing_annotations
+    
+    new_annotations = []
+
+    # Process each page for redaction
+    for page in list_whole_pages_to_redact:
+        try:
+            page_index = int(page) - 1
+            if page_index < 0 or page_index >= len(pymupdf_doc):
+                print(f"Page {page} is out of bounds for a document with {len(pymupdf_doc)} pages, skipping.")
+                continue
                 
-                if perturbation_type == 'char_error':  # Introduce a character error
-                    idx = random.randint(0, len(word) - 1)
-                    char = random.choice(string.ascii_lowercase)  # Add a random letter
-                    word = word[:idx] + char + word[idx:]
-                
-                elif perturbation_type == 'extra_space':  # Add extra space around a word
-                    word = ' ' + word + ' '
-                
-                elif perturbation_type == 'extra_punctuation':  # Add punctuation to the word
-                    punctuation = random.choice(string.punctuation)
-                    idx = random.randint(0, len(word))  # Insert punctuation randomly
-                    word = word[:idx] + punctuation + word[idx:]
+            pymupdf_page = pymupdf_doc[page_index]
+
+            # Find the matching page size dictionary
+            page_size = next((size for size in page_sizes if size["page"] == int(page)), None)
             
-            perturbed_words.append(word)
-        
-        return ' '.join(perturbed_words)
+            if not page_size:
+                print(f"Page {page} not found in page_sizes object, skipping.")
+                continue
 
-    series = series.apply(lambda x: _perturb_text(x, error_probability=0.1))
+            rect_height = page_size["cropbox_height"]
+            rect_width = page_size["cropbox_width"]
+            image = page_size["image_path"] # This `image` likely represents the page identifier
 
-    return series
+            # Create the whole page redaction box
+            annotation_box = redact_whole_pymupdf_page(rect_height, rect_width, pymupdf_page, border=0.005, redact_pdf=False)
+            
+            # Find existing annotation for this image/page
+            current_page_existing_boxes_group = next((annot_group for annot_group in all_annotations if annot_group["image"] == image), None)
+
+            new_annotation_group = {
+                    "image": image,
+                    "boxes": [annotation_box]
+                }
+
+            if current_page_existing_boxes_group:
+                # Check if we already have a whole page redaction for this page
+                if not any(box.get("label", "Whole page") for box in current_page_existing_boxes_group["boxes"]):
+                    current_page_existing_boxes_group["boxes"].append(annotation_box)
+
+                else:
+                    # Optional: Print a message if a whole-page redaction already exists for this page
+                    print(f"Whole page redaction for page {page} already exists in annotations, skipping addition.")
+                    pass
+            else:
+                # Create new annotation entry
+                                
+                all_annotations.append(new_annotation_group)
+
+            new_annotations.append(new_annotation_group)
+                
+        except Exception as e:
+            print(f"Error processing page {page}: {str(e)}")
+            continue
+
+    # Convert annotations to dataframe and combine with existing review file
+    whole_page_review_file = convert_annotation_data_to_dataframe(new_annotations)
+    
+    # Ensure all required columns are present in both DataFrames before concat
+    # This is a common point of error if DFs have different schemas
+    expected_cols = ['image', 'page', 'label', 'color', 'xmin', 'ymin', 'xmax', 'ymax', 'text', 'id']
+    
+    for col in expected_cols:
+        if col not in review_file_state.columns:
+            review_file_state[col] = None # Or an appropriate default value
+        if col not in whole_page_review_file.columns:
+            whole_page_review_file[col] = None
+
+    review_file_out = pd.concat([review_file_state, whole_page_review_file], ignore_index=True)
+    review_file_out = review_file_out.sort_values(by=["page", "ymin", "xmin"])
+
+    # --- Remove duplicate entries from the final DataFrame ---
+    dedup_subset_cols = ['page', 'label', 'text', 'id']
+    
+    # Ensure these columns exist before trying to use them as subset for drop_duplicates
+    if all(col in review_file_out.columns for col in dedup_subset_cols):
+        review_file_out = review_file_out.drop_duplicates(
+            subset=dedup_subset_cols,
+            keep='first' # Keep the first occurrence of a duplicate redaction
+        )
+    else:
+        print(f"Warning: Not all columns required for de-duplication ({dedup_subset_cols}) are present in review_file_out. Skipping specific de-duplication.")
+        # You might want a fallback or to inspect what's missing
+
+    review_file_out.to_csv(OUTPUT_FOLDER + "review_file_out_after_whole_page.csv")
+
+    gr.Info("Successfully created whole page redactions. Go to the 'Review redactions' tab to see them.")
+
+    return review_file_out, all_annotations

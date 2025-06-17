@@ -14,7 +14,7 @@ version: 0.7.0
 
 Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a walkthrough on how to use the app. Below is a very brief overview.
     
-To identify text in documents, the 'local' text/OCR image analysis uses spacy/tesseract, and works ok for documents with typed text. If available, choose 'AWS Textract service' to redact more complex elements e.g. signatures or handwriting. Then, choose a method for PII identification. 'Local' is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
+To identify text in documents, the 'local' text/OCR image analysis uses spacy/tesseract, and works quite well for documents with typed text. If available, choose 'AWS Textract service' to redact more complex elements e.g. signatures or handwriting. Then, choose a method for PII identification. 'Local' is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
 
 After redaction, review suggested redactions on the 'Review redactions' tab. The original pdf can be uploaded here alongside a '...redaction_file.csv' to continue a previous redaction/review task. See the 'Redaction settings' tab to choose which pages to redact, the type of information to redact (e.g. people, places), or custom terms to always include/ exclude from redaction.
 
@@ -180,6 +180,8 @@ If you open the accordion below the allow list options called 'Manually modify c
 If the table is empty, you can add a new entry, you can add a new row by clicking on the '+' item below each table header. If there is existing data, you may need to click on the three dots to the right and select 'Add row below'. Type the item you wish to keep/remove in the cell, and then (important) press enter to add this new item to the allow/deny/whole page list. Your output tables should look something like below.
 
 ![Manually modify allow or deny list filled](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/manually_modify_filled.PNG)
+
+**Note:** As of version 0.7.0 you can now apply your whole page redaction list directly to the document file currently under review by clicking the 'Apply whole page redaction list to document currently under review' button that appears here.
 
 ### Redacting additional types of personal information
 
@@ -390,21 +392,49 @@ You can find this option at the bottom of the 'Redaction Settings' tab. Upload m
 
 The files for this section are stored [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/).
 
-Some redaction tasks involve removing duplicate pages of text that may exist across multiple documents. This feature calculates the similarity of text in all pages of input PDFs, calculates a similarity score, and then flags pages above a certain similarity score (90%) for removal by creating a 'whole page' redaction list file for each input PDF.
+Some redaction tasks involve removing duplicate pages of text that may exist across multiple documents. This feature helps you find and remove duplicate content that may exist in single or multiple documents.  It can identify everything from single identical pages to multi-page sections (subdocuments). The process involves three main steps: configuring the analysis, reviewing the results in the interactive interface, and then using the generated files to perform the redactions.
 
-![Example duplicate page outputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_output_interface.PNG)
+![Example duplicate page inputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_input_interface_new.PNG)
 
-The similarity calculation is based on using the 'ocr_outputs.csv' file that is output every time that you perform a redaction task. From the file folder, upload the four 'ocr_output.csv' files provided in the example folder into the file area. Click 'Identify duplicate pages' and you will see a number of files returned. In case you want to see the original PDFs, they are available [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/input_pdfs/).
+**Step 1: Upload and Configure the Analysis**
+First, navigate to the "Identify duplicate pages" tab. Upload all the ocr_output.csv files you wish to compare into the file area. These files are generated every time you run a redaction task and contain the text for each page of a document.
 
-![Identify duplicate pages interface](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_input_interface.PNG)
+For our example, you can upload the four 'ocr_output.csv' files provided in the example folder into the file area. Click 'Identify duplicate pages' and you will see a number of files returned. In case you want to see the original PDFs, they are available [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/input_pdfs/).
 
-First, there is a 'combined_ocr_result...' file that just merges together all the text from the input files. 'page_similarity_results.csv' shows a breakdown of the pages from each file that are most similar to each other above the threshold (90% similarity). You can compare the text in the two columns 'Page_1_Text' and 'Page_2_Text'.
+The default options will search for matching subdocuments of any length. Before running the analysis, you can configure these matching parameters to tell the tool what you're looking for:
+
+![Duplicate matching parameters](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_matching_parameters.PNG)
+
+*Matching Parameters*
+- **Similarity Threshold:** A score from 0 to 1. Pages or sequences of pages with a calculated text similarity above this value will be considered a match. The default of 0.9 (90%) is a good starting point for finding near-identical pages.
+- **Min Word Count:** Pages with fewer words than this value will be completely ignored during the comparison. This is extremely useful for filtering out blank pages, title pages, or boilerplate pages that might otherwise create noise in the results. The default is 10.
+- **Choosing a Matching Strategy:** You have three main options to find duplicate content.
+    - *'Subdocument' matching (default):* Use this to find the longest possible sequence of matching pages. The tool will find an initial match and then automatically expand it forward page-by-page until the consecutive match breaks. This is the best method for identifying complete copied chapters or sections of unknown length. This is enabled by default by ticking the "Enable 'subdocument' matching" box. This setting overrides the described below.
+    - *Minimum length subdocument matching:* Use this to find sequences of consecutively matching pages with a minimum page lenght. For example, setting the slider to 3 will only return sections that are at least 3 pages long. How to enable: Untick the "Enable 'subdocument' matching" box and set the "Minimum consecutive pages" slider to a value greater than 1.
+    - *Single Page Matching:* Use this to find all individual page pairs that are similar to each other. Leave the "Enable 'subdocument' matching" box unchecked and keep the "Minimum consecutive pages" slider at 1.
+
+Once your parameters are set, click the "Identify duplicate pages/subdocuments" button.
+
+**Step 2: Review Results in the Interface**
+After the analysis is complete, the results will be displayed directly in the interface.
+
+*Analysis Summary:* A table will appear showing a summary of all the matches found. The columns will change depending on the matching strategy you chose. For subdocument matches, it will show the start and end pages of the matched sequence.
+
+*Interactive Preview:* This is the most important part of the review process. Click on any row in the summary table. The full text of the matching page(s) will appear side-by-side in the "Full Text Preview" section below, allowing you to instantly verify the accuracy of the match.
+
+![Duplicate review interface](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_output_review_overview.PNG)
+
+**Step 3: Download and Use the Output Files**
+The analysis also generates a set of downloadable files for your records and for performing redactions.
+
+
+- page_similarity_results.csv: This is a detailed report of the analysis you just ran. It shows a breakdown of the pages from each file that are most similar to each other above the similarity threshold. You can compare the text in the two columns 'Page_1_Text' and 'Page_2_Text'. For single-page matches, it will list each pair of matching pages. For subdocument matches, it will list the start and end pages of each matched sequence, along with the total length of the match.
 
 ![Page similarity file example](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/page_similarity_example.PNG)
 
-The remaining output files are suffixed with '_whole_page.csv'. These are the same files that can be used to redact whole pages as described in the ['Full page redaction list example' section](#full-page-redaction-list-example). For each PDF involved in the duplicate detection process, you can upload the relevant '_whole_page.csv' file into the relevant area, then do a new redaction task for the PDF file without any entity types selected. This way, only the suggested whole pages will be suggested for redaction and nothing else.
+- [Original_Filename]_pages_to_redact.csv: For each input document that was found to contain duplicate content, a separate redaction list is created. This is a simple, one-column CSV file containing a list of all page numbers that should be removed. To use these files, you can either upload the original document (i.e. the PDF) on the 'Review redactions' tab, and then click on the 'Apply relevant duplicate page output to document currently under review' button. You should see the whole pages suggested for redaction on the 'Review redactions' tab. Alternatively, you can reupload the file into the whole page redaction section as described in the ['Full page redaction list example' section](#full-page-redaction-list-example).
 
-![Example duplicate page redaction list](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/output_file_2_whole_page_outputs.PNG)
+![Example duplicate page redaction list](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_output_interface_new.PNG)
 
 If you want to combine the results from this redaction process with previous redaction tasks for the same PDF, you could merge review file outputs following the steps described in [Merging existing redaction review files](#merging-existing-redaction-review-files) above.
 
@@ -504,6 +534,8 @@ The app should then pick up these keys when trying to access the AWS Textract an
 Again, a lot can potentially go wrong with AWS solutions that are insecure, so before trying the above please consult with your AWS and data security teams.
 
 ## Modifying existing redaction review files
+
+*Note:* As of version 0.7.0 you can now modify redaction review files directly in the app on the 'Review redactions' tab. Open the accordion 'View and edit review data' under the file input area. You can edit review file data cells here - press Enter to apply changes. You should see the effect on the current page if you click the 'Save changes on current page to file' button to the right.
 
 You can find the folder containing the files discussed in this section [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/).
 
