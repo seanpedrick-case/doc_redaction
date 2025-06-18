@@ -385,28 +385,32 @@ def convert_pymupdf_to_image_coords(pymupdf_page:Page, x1:float, y1:float, x2:fl
 
     return x1_image, y1_image, x2_image, y2_image
 
-def redact_whole_pymupdf_page(rect_height:float, rect_width:float, image:Image, page:Page, custom_colours, border:float = 5, image_dimensions:dict={}):
+def redact_whole_pymupdf_page(rect_height:float, rect_width:float, page:Page, custom_colours:bool=False, border:float = 5, redact_pdf:bool=True):
     # Small border to page that remains white
-    border = 5
+    
     # Define the coordinates for the Rect
     whole_page_x1, whole_page_y1 = 0 + border, 0 + border  # Bottom-left corner
-    whole_page_x2, whole_page_y2 = rect_width - border, rect_height - border  # Top-right corner
 
-    # whole_page_image_x1, whole_page_image_y1, whole_page_image_x2, whole_page_image_y2 = convert_pymupdf_to_image_coords(page, whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2, image, image_dimensions=image_dimensions)
+    # If border is a tiny value, assume that we want relative values
+    if border < 0.1:
+        whole_page_x2, whole_page_y2 = 1 - border, 1 - border  # Top-right corner
+    else:
+        whole_page_x2, whole_page_y2 = rect_width - border, rect_height - border  # Top-right corner
 
     # Create new image annotation element based on whole page coordinates
     whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
 
     # Write whole page annotation to annotation boxes
     whole_page_img_annotation_box = {}
-    whole_page_img_annotation_box["xmin"] = whole_page_x1 #whole_page_image_x1
-    whole_page_img_annotation_box["ymin"] = whole_page_y1 #whole_page_image_y1
-    whole_page_img_annotation_box["xmax"] = whole_page_x2 #whole_page_image_x2
-    whole_page_img_annotation_box["ymax"] =  whole_page_y2 #whole_page_image_y2
+    whole_page_img_annotation_box["xmin"] = whole_page_x1
+    whole_page_img_annotation_box["ymin"] = whole_page_y1
+    whole_page_img_annotation_box["xmax"] = whole_page_x2
+    whole_page_img_annotation_box["ymax"] =  whole_page_y2
     whole_page_img_annotation_box["color"] = (0,0,0)
     whole_page_img_annotation_box["label"] = "Whole page"
 
-    redact_single_box(page, whole_page_rect, whole_page_img_annotation_box, custom_colours)
+    if redact_pdf == True:
+        redact_single_box(page, whole_page_rect, whole_page_img_annotation_box, custom_colours)
 
     return whole_page_img_annotation_box
 
@@ -1292,7 +1296,13 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     df = pd.DataFrame({
         "image": [anno.get("image") for anno in all_annotations],
         # Ensure 'boxes' defaults to an empty list if missing or None
-        "boxes": [anno.get("boxes") if isinstance(anno.get("boxes"), list) else [] for anno in all_annotations]
+        "boxes": [
+                    anno.get("boxes") if isinstance(anno.get("boxes"), list)
+                    else [anno.get("boxes")] if isinstance(anno.get("boxes"), dict)
+                    else []
+                    for anno in all_annotations
+                ]
+
     })
 
     # 2. Calculate the page number using the helper function

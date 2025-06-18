@@ -228,5 +228,6 @@ def upload_log_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=
             print(final_out_message_str)
     else:
         final_out_message_str = "App not set to run AWS functions"
+        print(final_out_message_str)
 
     return final_out_message_str

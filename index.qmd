@@ -1,0 +1,23 @@
+---
+title: "Home"
+---
+
+version: 0.7.0
+
+Welcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.
+
+Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app.
+
+## Document redaction
+
+Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](src/user_guide.qmd) for a walkthrough on how to use the app.
+
+![Handwriting and signatures redacted example](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/refs/heads/main/review_redactions/Signatures%20and%20handwriting%20found.PNG)
+    
+To identify text in documents, the app provides several options. 'Local' text/OCR image analysis uses spacy/tesseract, and works quite well for documents with typed text. If available, choose 'AWS Textract service' to redact more complex elements e.g. signatures or handwriting. The app then identifies personal information to redaction. The 'Local' is based on spaCy, is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
+
+After redaction, suggested redactions can be reviewed and modified on the 'Review redactions' tab. The original pdf can be uploaded here alongside a '...redaction_file.csv' to continue a previous redaction/review task. See the 'Redaction settings' tab to choose which pages to redact, the type of information to redact (e.g. people, places), or custom terms to always include/ exclude from redaction.
+
+NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.
+
+
