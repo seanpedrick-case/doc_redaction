@@ -543,15 +543,14 @@ def apply_whole_page_redactions_from_list(duplicate_page_numbers_df:pd.DataFrame
 
             if current_page_existing_boxes_group:
                 # Check if we already have a whole page redaction for this page
-                if not any(box.get("label", "Whole page") for box in current_page_existing_boxes_group["boxes"]):
+                if not any(box["label"] == "Whole page" for box in current_page_existing_boxes_group["boxes"]):
                     current_page_existing_boxes_group["boxes"].append(annotation_box)
 
                 else:
                     # Optional: Print a message if a whole-page redaction already exists for this page
                     print(f"Whole page redaction for page {page} already exists in annotations, skipping addition.")
                     pass
-            else:
-                # Create new annotation entry
+            else:                # Create new annotation entry
                                 
                 all_annotations.append(new_annotation_group)
 
