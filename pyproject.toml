@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "0.6.8"
+version = "0.7.0"
 description = "Redact PDF/image-based documents, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,8 +23,8 @@ dependencies = [
     "spacy==3.8.4",
     # Direct URL dependency for spacy model
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
-    "gradio==5.29.1",
-    "boto3==1.38.4",
+    "gradio==5.34.0",
+    "boto3==1.38.35",
     "pyarrow==19.0.1",
     "openpyxl==3.1.5",
     "Faker==36.1.1",
@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://seanpedrick-case.github.io/doc_redaction/README.html"
+Homepage = "https://seanpedrick-case.github.io/doc_redaction/"
 repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 [project.optional-dependencies]

@@ -1114,7 +1114,7 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
     # If whole page is to be redacted, do that here
     if redact_whole_page == True:
 
-        whole_page_img_annotation_box = redact_whole_pymupdf_page(rect_height, rect_width, image, page, custom_colours, border = 5, image_dimensions=image_dimensions)
+        whole_page_img_annotation_box = redact_whole_pymupdf_page(rect_height, rect_width, page, custom_colours, border = 5)
         all_image_annotation_boxes.append(whole_page_img_annotation_box)
 
     out_annotation_boxes = {
@@ -1372,10 +1372,19 @@ def redact_image_pdf(file_path:str,
     if current_loop_page == 0: page_loop_start = 0
     else: page_loop_start = current_loop_page
 
-    progress_bar = tqdm(range(page_loop_start, number_of_pages), unit="pages remaining", desc="Redacting pages")    
+    progress_bar = tqdm(range(page_loop_start, number_of_pages), unit="pages remaining", desc="Redacting pages")
 
-    all_line_level_ocr_results_df_list = [all_line_level_ocr_results_df]
-    all_pages_decision_process_table_list = [all_pages_decision_process_table]    
+    # If there's data from a previous run (passed in via the DataFrame parameters), add it
+    all_line_level_ocr_results_list = []
+    all_pages_decision_process_list = []
+
+    if not all_line_level_ocr_results_df.empty:
+        all_line_level_ocr_results_list.extend(all_line_level_ocr_results_df.to_dict('records'))
+    if not all_pages_decision_process_table.empty:
+        all_pages_decision_process_list.extend(all_pages_decision_process_table.to_dict('records'))   
+
+    #all_line_level_ocr_results_list = [all_line_level_ocr_results_df.to_dict('records')]#[all_line_level_ocr_results_df]
+    #all_pages_decision_process_list = [all_pages_decision_process_table.to_dict('records')]#[all_pages_decision_process_table]    
 
     # Go through each page
     for page_no in progress_bar:
@@ -1525,7 +1534,10 @@ def redact_image_pdf(file_path:str,
                 'height': result.height
             } for result in page_line_level_ocr_results['results']])
 
-            all_line_level_ocr_results_df_list.append(line_level_ocr_results_df)
+            #all_line_level_ocr_results_list.append(line_level_ocr_results_df.to_dict('records'))
+
+            if not line_level_ocr_results_df.empty: # Ensure there are records to add
+                all_line_level_ocr_results_list.extend(line_level_ocr_results_df.to_dict('records'))
 
             if pii_identification_method != NO_REDACTION_PII_OPTION:
                 # Step 2: Analyse text and identify PII
@@ -1637,7 +1649,10 @@ def redact_image_pdf(file_path:str,
                 'page': reported_page_number             
             } for result in page_merged_redaction_bboxes])
 
-            all_pages_decision_process_table_list.append(decision_process_table)
+            #all_pages_decision_process_list.append(decision_process_table.to_dict('records'))
+
+            if not decision_process_table.empty: # Ensure there are records to add
+                all_pages_decision_process_list.extend(decision_process_table.to_dict('records'))
 
             decision_process_table = fill_missing_ids(decision_process_table)
             decision_process_table.to_csv(output_folder + "decision_process_table_with_ids.csv")
@@ -1685,8 +1700,11 @@ def redact_image_pdf(file_path:str,
                     if all_page_line_level_ocr_results_with_words_json_file_path not in log_files_output_paths:
                         log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path)
 
-                all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list)
-                all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_df_list)
+                #all_pages_decision_process_table = pd.concat(all_pages_decision_process_list)
+                #all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_list)
+
+                all_pages_decision_process_table = pd.DataFrame(all_pages_decision_process_list)
+                all_line_level_ocr_results_df = pd.DataFrame(all_line_level_ocr_results_list)
 
 
                 current_loop_page += 1
@@ -1733,9 +1751,11 @@ def redact_image_pdf(file_path:str,
                 if all_page_line_level_ocr_results_with_words_json_file_path not in log_files_output_paths:
                     log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path)
 
+            #all_pages_decision_process_table = pd.concat(all_pages_decision_process_list)
+            #all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_list)
 
-            all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list)
-            all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_df_list)
+            all_pages_decision_process_table = pd.DataFrame(all_pages_decision_process_list)
+            all_line_level_ocr_results_df = pd.DataFrame(all_line_level_ocr_results_list)
 
             return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words
                
@@ -1758,8 +1778,8 @@ def redact_image_pdf(file_path:str,
         if all_page_line_level_ocr_results_with_words_json_file_path not in log_files_output_paths:
             log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path)
 
-    all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list)
-    all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_df_list)
+    all_pages_decision_process_table = pd.DataFrame(all_pages_decision_process_list) #pd.concat(all_pages_decision_process_list)
+    all_line_level_ocr_results_df = pd.DataFrame(all_line_level_ocr_results_list) #pd.concat(all_line_level_ocr_results_list)
 
     # Convert decision table and ocr results to relative coordinates
     all_pages_decision_process_table = divide_coordinates_by_page_sizes(all_pages_decision_process_table, page_sizes_df, xmin="xmin", xmax="xmax", ymin="ymin", ymax="ymax")
@@ -2002,11 +2022,11 @@ def redact_text_pdf(
     tic = time.perf_counter()
 
     if isinstance(all_line_level_ocr_results_df, pd.DataFrame):
-        all_line_level_ocr_results_df_list = [all_line_level_ocr_results_df]
+        all_line_level_ocr_results_list = [all_line_level_ocr_results_df]
 
     if isinstance(all_pages_decision_process_table, pd.DataFrame):
         # Convert decision outputs to list of dataframes:
-        all_pages_decision_process_table_list = [all_pages_decision_process_table]
+        all_pages_decision_process_list = [all_pages_decision_process_table]
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         out_message = "Connection to AWS Comprehend service not found."
@@ -2133,7 +2153,7 @@ def redact_text_pdf(
                     page_decision_process_table = create_text_redaction_process_results(page_analyser_results, page_redaction_bounding_boxes, current_loop_page)  
 
                     if not page_decision_process_table.empty:
-                        all_pages_decision_process_table_list.append(page_decision_process_table)
+                        all_pages_decision_process_list.append(page_decision_process_table)
 
                 # Else, user chose not to run redaction
                 else: 
@@ -2145,7 +2165,7 @@ def redact_text_pdf(
                 if not page_text_ocr_outputs.empty:
                     page_text_ocr_outputs = page_text_ocr_outputs.sort_values(["top", "left"], ascending=[False, False]).reset_index(drop=True)
                     page_text_ocr_outputs = page_text_ocr_outputs.loc[:, ["page", "text", "left", "top", "width", "height"]]
-                    all_line_level_ocr_results_df_list.append(page_text_ocr_outputs)
+                    all_line_level_ocr_results_list.append(page_text_ocr_outputs)
 
                 toc = time.perf_counter()
 
@@ -2168,8 +2188,8 @@ def redact_text_pdf(
                         annotations_all_pages.append(page_image_annotations)
 
                     # Write logs
-                    all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list) 
-                    all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_df_list)
+                    all_pages_decision_process_table = pd.concat(all_pages_decision_process_list) 
+                    all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_list)
                     
 
                     current_loop_page += 1
@@ -2193,16 +2213,16 @@ def redact_text_pdf(
             progress.close(_tqdm=progress_bar)
 
             # Write logs
-            all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list) 
+            all_pages_decision_process_table = pd.concat(all_pages_decision_process_list) 
 
             return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
         
     # Write all page outputs
-    all_pages_decision_process_table = pd.concat(all_pages_decision_process_table_list)
+    all_pages_decision_process_table = pd.concat(all_pages_decision_process_list)
 
-    #print("all_line_level_ocr_results_df_list:", all_line_level_ocr_results_df_list)
+    #print("all_line_level_ocr_results_list:", all_line_level_ocr_results_list)
 
-    all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_df_list)
+    all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_list)
 
     #print("all_line_level_ocr_results_df after concat:", all_line_level_ocr_results_df)
     

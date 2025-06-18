@@ -1,0 +1,233 @@
+---
+title: "App installation guide (with CDK)"
+format:
+  html:
+    toc: true # Enable the table of contents
+    toc-depth: 3 # Include headings up to level 2 (##)
+    toc-title: "On this page" # Optional: Title for your TOC
+---
+
+# Introduction
+
+This guide gives an overview of how to install the app in an AWS environment using the code in the cdk/ folder of this Github repo. The most important thing you need is some familiarity with AWS and how to use it via console or command line, as well as administrator access to at least one region. Then follow the below steps.
+
+## Prerequisites
+
+*   Install git on your computer from: [https://git-scm.com](https://git-scm.com)
+*   You will also need to install nodejs and npm: [https://docs.npmjs.com/downloading-and-installing-node-js-and-npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
+*   You will need an AWS Administrator account in your desired region to install.
+*   You will need AWS CDK v2 installed: [https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+*   You will need to bootstrap the environment with CDK in both your primary region, and `us-east-1` if installing CloudFront and associated WAF.
+    ```bash
+    # Bootstrap your primary region
+    cdk bootstrap aws://<YOUR_AWS_ACCOUNT>/eu-west-1
+
+    # Bootstrap the us-east-1 region
+    cdk bootstrap aws://<YOUR_AWS_ACCOUNT>/us-east-1
+    ```
+*   In command line, write:
+    ```bash
+    git clone https://github.com/seanpedrick-case/doc_redaction.git
+    ```
+
+# VPC ACM Certificate
+
+This CDK code is designed to work within an existing VPC. The code does not create a new VPC if it doesn't exist. So you will need to do that yourself.
+
+Additionally, to get full HTTPS data transfer through the app, you will need an SSL certificate registered with AWS Certificate Manager.
+
+You can either use the SSL certificate from a domain, or import an existing certificate into Certificate Manager. Ask your IT admin if you need help with this.
+
+## If getting an SSL certificate for an existing domain
+
+Make sure to point the certificate to `*.<domain-name>`.
+
+Update your DNS records to include the CNAME record given by AWS. After your stack has been created, you will also need to create a CNAME DNS record for your domain pointing to your load balancer DNS with a subdomain, e.g., `redaction.<domain-name>`.
+
+1.  Create a python environment, load in packages from `requirements.txt`.
+
+    Need a `cdk.json` in the `cdk` folder. It should contain the following:
+
+    ```json
+    {
+        "app": "<PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED>python.exe app.py",
+        "context": {
+          "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true,
+          "@aws-cdk/core:stackRelativeExports": true,
+          "@aws-cdk/aws-rds:lowercaseDbIdentifier": true,
+          "@aws-cdk/aws-lambda:recognizeVersionProps": true,
+          "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+          "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
+          "@aws-cdk/aws-ecs:arnFormatIncludesClusterName": true,
+          "@aws-cdk/core:newStyleStackSynthesis": true,
+          "aws-cdk:enableDiffNoFail": true,
+          "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": true,
+          "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,
+          "@aws-cdk/core:target-partitions": [
+            "aws",
+            "aws-cn"
+          ]
+        }
+      }
+    ```
+
+2.  Create a `cdk_config.env` file in the `config` subfolder. Here as a minimum it would be useful to put the following details in the env file (below are example values, other possible variables to use here can be seen in the `cdk` folder/`cdk_config.py`).
+
+    ```ini
+    CDK_PREFIX=example-prefix # Prefix to most created elements in your stack
+    VPC_NAME=example-vpc-name # Name of the VPC within which all the other elements will be created
+    AWS_REGION=us-west-1 # Region where elements will be created
+    AWS_ACCOUNT_ID=1234567890 # AWS account ID that has administrator access that you will use for deploying the stack
+    CDK_FOLDER=C:/path_to_cdk_folder/ # The place where the cdk folder code is located
+    CONTEXT_FILE=C:/path_to_cdk_folder/cdk.context.json
+    EXISTING_IGW_ID=igw-1234567890 # (optional) The ID for an existing internet gateway that you want to use instead of creating a new one
+    SINGLE_NAT_GATEWAY_ID=nat-123456789 # (optional) The ID for an existing NAT gateway that you want to use instead of creating a new one
+    COGNITO_USER_POOL_DOMAIN_PREFIX=lambeth-redaction-37924 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.
+    RUN_USEAST_STACK=False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).
+    ```
+
+**Note: If you are using an SSL certificate with Cognito login on the application load balancer, you can set COGNITO_AUTH to 0 above, as you don't need the second login step to get to the app**
+
+# Subnets
+
+### NOTE: I would generally advise creating new subnets as then you will be sure about connectivity between AWS resources that underpin your app.
+
+*   If you set no subnets, the app will try to use existing private and public subnets. This approach is risky as the app may overlap with IP addresses assigned to existing AWS resources. It is advised to at least specify existing subnets that you know are available, or create your own using one of the below methods.
+
+*   If you want to use existing subnets, you can list them in the following environment variables:
+    *   `PUBLIC_SUBNETS_TO_USE=["PublicSubnet1", "PublicSubnet2", "PublicSubnet3"]`
+    *   `PRIVATE_SUBNETS_TO_USE=["PrivateSubnet1", "PrivateSubnet2", "PrivateSubnet3"]`
+
+*   If you want to create new subnets, you need to also specify CIDR blocks and availability zones for the new subnets. The app will check with you upon deployment whether these CIDR blocks are available before trying to create.
+    *   `PUBLIC_SUBNET_CIDR_BLOCKS=['10.222.333.0/28', '10.222.333.16/28', '10.222.333.32/28']`
+    *   `PUBLIC_SUBNET_AVAILABILITY_ZONES=['eu-east-1a', 'eu-east-1b', 'eu-east-1c']`
+    *   `PRIVATE_SUBNET_CIDR_BLOCKS=['10.222.333.48/28', '10.222.333.64/28', '10.222.333.80/28']`
+    *   `PRIVATE_SUBNET_AVAILABILITY_ZONES=['eu-east-1a', 'eu-east-1b', 'eu-east-1c']`
+
+If you try to create subnets in invalid CIDR blocks / availability zones, the console output will tell you and it will show you the currently occupied CIDR blocks to help find a space for new subnets you want to create.
+
+3.  In command line in console, go to your `cdk` folder in the redaction app folder. Run `cdk deploy --all`. This should try to deploy the first stack in the `app.py` file.
+
+    Hopefully everything will deploy successfully and you will be able to see your new stack in CloudFormation in the AWS console.
+
+4.  Tasks for after CDK deployment
+
+# Tasks performed by `post_cdk_build_quickstart.py`
+
+**Note:** The following tasks are done by the `post_cdk_build_quickstart.py` file that you can find in the `cdk` folder. You will need to run this when logged in with AWS SSO through command line. I will describe how to do this in AWS console just in case the `.py` file doesn't work for you.
+
+## Codebuild
+
+Need to build CodeBuild project after stack has finished building, as there will be no container in ECR.
+
+Go to CodeBuild -> your project -> click Start build. Check the logs, the build should be progressing.
+
+## Create a `config.env` file and upload to S3
+
+The Fargate task definition references a `config.env` file.
+
+Need to create a `config.env` file to upload to the S3 bucket that has the variables:
+
+```ini
+COGNITO_AUTH=1
+RUN_AWS_FUNCTIONS=1
+SESSION_OUTPUT_FOLDER=True # If this is False it currently seems to fail to allow for writable log directories
+```
+
+Go to S3 and choose the new `...-logs` bucket that you created. Upload the `config.env` file into this bucket.
+
+## Update Elastic Container Service
+
+Now that the app container is in Elastic Container Registry, you can proceed to run the app on a Fargate server.
+
+Go to your new cluster, your new service, and select 'Update service'.
+
+Select 'Force new deployment', and then set 'Desired number of tasks' to 1.
+
+# Additional Manual Tasks
+
+# Update DNS records for your domain (If using a domain for the SSL certificate)
+
+To do this, you need to create a CNAME DNS record for your domain pointing to your load balancer DNS from a subdomain of your main domain registration, e.g., `redaction.<domain-name>`.
+
+# Cognito
+
+Go to Cognito and create a user with your own email address. Generate a password.
+
+Go to Cognito -> App clients -> Login pages -> View login page.
+
+Enter the email and temporary password details that come in the email (don't include the last full stop!).
+
+Change your password.
+
+## Set MFA (optional)
+On the Cognito user pool page you can also enable MFA, if you are using an SSL certificate with Cognito login on the Application Load Balancer. Go to Cognito -> your user pool -> Sign in ->  Multi-factor authentication
+
+# Create CloudFront distribution 
+**Note: this is only relevant if you set `RUN_USEAST_STACK` to 'False' during CDK deployment**
+
+If you were not able to create a CloudFront distribution via CDK, you should be able to do it through console. I would advise using CloudFront as the front end to the app.
+
+Create a new CloudFront distribution.
+
+*   **If you have used an SSL certificate in your CDK code:**
+    *   **For Origin:**
+        *   Choose the domain name associated with the certificate as the origin.
+        *   Choose HTTPS only as the protocol.
+        *   Keep everything else default.
+    *   **For Behavior (modify default behavior):**
+        *   Under Viewer protocol policy choose 'Redirect HTTP to HTTPS'.
+
+*   **If you have not used an SSL certificate in your CDK code:**
+    *   **For Origin:**
+        *   Choose your elastic load balancer as the origin. This will fill in the elastic load balancer DNS.
+        *   Choose HTTP only as the protocol.
+        *   Keep everything else default.
+    *   **For Behavior (modify default behavior):**
+        *   Under Viewer protocol policy choose 'HTTP and HTTPS'.
+
+## Security features
+
+In your CloudFront distribution, under 'Security' -> Edit -> Enable security protections.
+
+Choose rate limiting (default is fine).
+
+Create.
+
+In CloudFront geographic restrictions -> Countries -> choose an Allow list of countries.
+
+Click again on Edit.
+
+AWS WAF protection enabled you should see a link titled 'View details of your configuration'.
+
+Go to Rules -> `AWS-AWSManagedRulesCommonRuleSet`, click Edit.
+
+Under `SizeRestrictions_BODY` choose rule action override 'Override to Allow'. This is needed to allow for file upload to the app.
+
+# Change Cognito redirection URL to your CloudFront distribution
+
+Go to Cognito -> your user pool -> App Clients -> Login pages -> Managed login configuration.
+
+Ensure that the callback URL is:
+*   If not using an SSL certificate and Cognito login - `https://<CloudFront domain name>`
+*   If using an SSL certificate, you should have three:
+    *   `https://<CloudFront domain name>`
+    *   `https://<CloudFront domain name>/oauth2/idpresponse`
+    *   `https://<CloudFront domain name>/oauth/idpresponse`
+
+# Force traffic to come from specific CloudFront distribution (optional)
+
+Note that this only potentially helps with security if you are not using an SSL certificate with Cognito login on your application load balancer.
+
+Go to EC2 - Load Balancers -> Your load balancer -> Listeners -> Your listener -> Add rule.
+
+*   Add Condition -> Host header.
+*   Change Host header value to your CloudFront distribution without the `https://` or `http://` at the front.
+*   Forward to redaction target group.
+*   Turn on group stickiness for 12 hours.
+*   Next.
+*   Choose priority 1.
+
+Then, change the default listener rule.
+
+*   Under Routing action change to 'Return fixed response'.
