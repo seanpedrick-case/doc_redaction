@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.7.31">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>App installation guide (with CDK) – Document Redaction App</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../">
+<script src="../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/popper.min.js"></script>
+<script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-e1a5c8363afafaef2c763b6775fbf3ca.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../site_libs/bootstrap/bootstrap-dfb324f25d9b1687192fa8be62ac8f9c.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+<link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../index.html">
+    <span class="navbar-title">Document Redaction App</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../index.html"> 
+<span class="menu-text">Home</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/user_guide.html"> 
+<span class="menu-text">User guide</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/faq.html"> 
+<span class="menu-text">User FAQ</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="../src/installation_guide.html" aria-current="page"> 
+<span class="menu-text">App installation guide (with CDK)</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/app_settings.html"> 
+<span class="menu-text">App settings management guide</span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#introduction" id="toc-introduction" class="nav-link active" data-scroll-target="#introduction">Introduction</a>
+  <ul class="collapse">
+  <li><a href="#prerequisites" id="toc-prerequisites" class="nav-link" data-scroll-target="#prerequisites">Prerequisites</a></li>
+  </ul></li>
+  <li><a href="#vpc-acm-certificate" id="toc-vpc-acm-certificate" class="nav-link" data-scroll-target="#vpc-acm-certificate">VPC ACM Certificate</a>
+  <ul class="collapse">
+  <li><a href="#if-getting-an-ssl-certificate-for-an-existing-domain" id="toc-if-getting-an-ssl-certificate-for-an-existing-domain" class="nav-link" data-scroll-target="#if-getting-an-ssl-certificate-for-an-existing-domain">If getting an SSL certificate for an existing domain</a></li>
+  </ul></li>
+  <li><a href="#subnets" id="toc-subnets" class="nav-link" data-scroll-target="#subnets">Subnets</a>
+  <ul class="collapse">
+  <li><a href="#note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app." id="toc-note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app." class="nav-link" data-scroll-target="#note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app.">NOTE: I would generally advise creating new subnets as then you will be sure about connectivity between AWS resources that underpin your app.</a></li>
+  </ul></li>
+  <li><a href="#tasks-performed-by-post_cdk_build_quickstart.py" id="toc-tasks-performed-by-post_cdk_build_quickstart.py" class="nav-link" data-scroll-target="#tasks-performed-by-post_cdk_build_quickstart.py">Tasks performed by <code>post_cdk_build_quickstart.py</code></a>
+  <ul class="collapse">
+  <li><a href="#codebuild" id="toc-codebuild" class="nav-link" data-scroll-target="#codebuild">Codebuild</a></li>
+  <li><a href="#create-a-config.env-file-and-upload-to-s3" id="toc-create-a-config.env-file-and-upload-to-s3" class="nav-link" data-scroll-target="#create-a-config.env-file-and-upload-to-s3">Create a <code>config.env</code> file and upload to S3</a></li>
+  <li><a href="#update-elastic-container-service" id="toc-update-elastic-container-service" class="nav-link" data-scroll-target="#update-elastic-container-service">Update Elastic Container Service</a></li>
+  </ul></li>
+  <li><a href="#additional-manual-tasks" id="toc-additional-manual-tasks" class="nav-link" data-scroll-target="#additional-manual-tasks">Additional Manual Tasks</a></li>
+  <li><a href="#update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate" id="toc-update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate" class="nav-link" data-scroll-target="#update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate">Update DNS records for your domain (If using a domain for the SSL certificate)</a></li>
+  <li><a href="#cognito" id="toc-cognito" class="nav-link" data-scroll-target="#cognito">Cognito</a>
+  <ul class="collapse">
+  <li><a href="#set-mfa-optional" id="toc-set-mfa-optional" class="nav-link" data-scroll-target="#set-mfa-optional">Set MFA (optional)</a></li>
+  </ul></li>
+  <li><a href="#create-cloudfront-distribution" id="toc-create-cloudfront-distribution" class="nav-link" data-scroll-target="#create-cloudfront-distribution">Create CloudFront distribution</a>
+  <ul class="collapse">
+  <li><a href="#security-features" id="toc-security-features" class="nav-link" data-scroll-target="#security-features">Security features</a></li>
+  </ul></li>
+  <li><a href="#change-cognito-redirection-url-to-your-cloudfront-distribution" id="toc-change-cognito-redirection-url-to-your-cloudfront-distribution" class="nav-link" data-scroll-target="#change-cognito-redirection-url-to-your-cloudfront-distribution">Change Cognito redirection URL to your CloudFront distribution</a></li>
+  <li><a href="#force-traffic-to-come-from-specific-cloudfront-distribution-optional" id="toc-force-traffic-to-come-from-specific-cloudfront-distribution-optional" class="nav-link" data-scroll-target="#force-traffic-to-come-from-specific-cloudfront-distribution-optional">Force traffic to come from specific CloudFront distribution (optional)</a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">App installation guide (with CDK)</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="introduction" class="level1">
+<h1>Introduction</h1>
+<p>This guide gives an overview of how to install the app in an AWS environment using the code in the cdk/ folder of this Github repo. The most important thing you need is some familiarity with AWS and how to use it via console or command line, as well as administrator access to at least one region. Then follow the below steps.</p>
+<section id="prerequisites" class="level2">
+<h2 class="anchored" data-anchor-id="prerequisites">Prerequisites</h2>
+<ul>
+<li><p>Install git on your computer from: <a href="https://git-scm.com">https://git-scm.com</a></p></li>
+<li><p>You will also need to install nodejs and npm: <a href="https://docs.npmjs.com/downloading-and-installing-node-js-and-npm">https://docs.npmjs.com/downloading-and-installing-node-js-and-npm</a></p></li>
+<li><p>You will need an AWS Administrator account in your desired region to install.</p></li>
+<li><p>You will need AWS CDK v2 installed: <a href="https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html">https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html</a></p></li>
+<li><p>You will need to bootstrap the environment with CDK in both your primary region, and <code>us-east-1</code> if installing CloudFront and associated WAF.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Bootstrap your primary region</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">cdk</span> bootstrap aws://<span class="op">&lt;</span>YOUR_AWS_ACCOUNT<span class="op">&gt;</span>/eu-west-1</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Bootstrap the us-east-1 region</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="ex">cdk</span> bootstrap aws://<span class="op">&lt;</span>YOUR_AWS_ACCOUNT<span class="op">&gt;</span>/us-east-1</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div></li>
+<li><p>In command line, write: <code>bash     git clone https://github.com/seanpedrick-case/doc_redaction.git</code></p></li>
+</ul>
+</section>
+</section>
+<section id="vpc-acm-certificate" class="level1">
+<h1>VPC ACM Certificate</h1>
+<p>This CDK code is designed to work within an existing VPC. The code does not create a new VPC if it doesn’t exist. So you will need to do that yourself.</p>
+<p>Additionally, to get full HTTPS data transfer through the app, you will need an SSL certificate registered with AWS Certificate Manager.</p>
+<p>You can either use the SSL certificate from a domain, or import an existing certificate into Certificate Manager. Ask your IT admin if you need help with this.</p>
+<section id="if-getting-an-ssl-certificate-for-an-existing-domain" class="level2">
+<h2 class="anchored" data-anchor-id="if-getting-an-ssl-certificate-for-an-existing-domain">If getting an SSL certificate for an existing domain</h2>
+<p>Make sure to point the certificate to <code>*.&lt;domain-name&gt;</code>.</p>
+<p>Update your DNS records to include the CNAME record given by AWS. After your stack has been created, you will also need to create a CNAME DNS record for your domain pointing to your load balancer DNS with a subdomain, e.g., <code>redaction.&lt;domain-name&gt;</code>.</p>
+<ol type="1">
+<li><p>Create a python environment, load in packages from <code>requirements.txt</code>.</p>
+<p>Need a <code>cdk.json</code> in the <code>cdk</code> folder. It should contain the following:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json code-with-copy"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"app"</span><span class="fu">:</span> <span class="st">"&lt;PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED&gt;python.exe app.py"</span><span class="fu">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"context"</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/core:stackRelativeExports"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-rds:lowercaseDbIdentifier"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-lambda:recognizeVersionProps"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-lambda:recognizeLayerVersion"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-ecs:arnFormatIncludesClusterName"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/core:newStyleStackSynthesis"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"aws-cdk:enableDiffNoFail"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-ec2:restrictDefaultSecurityGroup"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-apigateway:disableCloudWatchRole"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/core:target-partitions"</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws"</span><span class="ot">,</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws-cn"</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>      <span class="ot">]</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div></li>
+<li><p>Create a <code>cdk_config.env</code> file in the <code>config</code> subfolder. Here as a minimum it would be useful to put the following details in the env file (below are example values, other possible variables to use here can be seen in the <code>cdk</code> folder/<code>cdk_config.py</code>).</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_PREFIX</span><span class="ot">=</span><span class="st">example-prefix # Prefix to most created elements in your stack</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="dt">VPC_NAME</span><span class="ot">=</span><span class="st">example-vpc-name # Name of the VPC within which all the other elements will be created</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_REGION</span><span class="ot">=</span><span class="st">us-west-1 # Region where elements will be created</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_ACCOUNT_ID</span><span class="ot">=</span><span class="st">1234567890 # AWS account ID that has administrator access that you will use for deploying the stack</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_FOLDER</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/ # The place where the cdk folder code is located</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="dt">CONTEXT_FILE</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/cdk.context.json</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="dt">EXISTING_IGW_ID</span><span class="ot">=</span><span class="st">igw-1234567890 # (optional) The ID for an existing internet gateway that you want to use instead of creating a new one</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="dt">SINGLE_NAT_GATEWAY_ID</span><span class="ot">=</span><span class="st">nat-123456789 # (optional) The ID for an existing NAT gateway that you want to use instead of creating a new one</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_USER_POOL_DOMAIN_PREFIX</span><span class="ot">=</span><span class="st">lambeth-redaction-37924 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_USEAST_STACK</span><span class="ot">=</span><span class="st">False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div></li>
+</ol>
+<p><strong>Note: If you are using an SSL certificate with Cognito login on the application load balancer, you can set COGNITO_AUTH to 0 above, as you don’t need the second login step to get to the app</strong></p>
+</section>
+</section>
+<section id="subnets" class="level1">
+<h1>Subnets</h1>
+<section id="note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app." class="level3">
+<h3 class="anchored" data-anchor-id="note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app.">NOTE: I would generally advise creating new subnets as then you will be sure about connectivity between AWS resources that underpin your app.</h3>
+<ul>
+<li><p>If you set no subnets, the app will try to use existing private and public subnets. This approach is risky as the app may overlap with IP addresses assigned to existing AWS resources. It is advised to at least specify existing subnets that you know are available, or create your own using one of the below methods.</p></li>
+<li><p>If you want to use existing subnets, you can list them in the following environment variables:</p>
+<ul>
+<li><code>PUBLIC_SUBNETS_TO_USE=["PublicSubnet1", "PublicSubnet2", "PublicSubnet3"]</code></li>
+<li><code>PRIVATE_SUBNETS_TO_USE=["PrivateSubnet1", "PrivateSubnet2", "PrivateSubnet3"]</code></li>
+</ul></li>
+<li><p>If you want to create new subnets, you need to also specify CIDR blocks and availability zones for the new subnets. The app will check with you upon deployment whether these CIDR blocks are available before trying to create.</p>
+<ul>
+<li><code>PUBLIC_SUBNET_CIDR_BLOCKS=['10.222.333.0/28', '10.222.333.16/28', '10.222.333.32/28']</code></li>
+<li><code>PUBLIC_SUBNET_AVAILABILITY_ZONES=['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</code></li>
+<li><code>PRIVATE_SUBNET_CIDR_BLOCKS=['10.222.333.48/28', '10.222.333.64/28', '10.222.333.80/28']</code></li>
+<li><code>PRIVATE_SUBNET_AVAILABILITY_ZONES=['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</code></li>
+</ul></li>
+</ul>
+<p>If you try to create subnets in invalid CIDR blocks / availability zones, the console output will tell you and it will show you the currently occupied CIDR blocks to help find a space for new subnets you want to create.</p>
+<ol start="3" type="1">
+<li><p>In command line in console, go to your <code>cdk</code> folder in the redaction app folder. Run <code>cdk deploy --all</code>. This should try to deploy the first stack in the <code>app.py</code> file.</p>
+<p>Hopefully everything will deploy successfully and you will be able to see your new stack in CloudFormation in the AWS console.</p></li>
+<li><p>Tasks for after CDK deployment</p></li>
+</ol>
+</section>
+</section>
+<section id="tasks-performed-by-post_cdk_build_quickstart.py" class="level1">
+<h1>Tasks performed by <code>post_cdk_build_quickstart.py</code></h1>
+<p><strong>Note:</strong> The following tasks are done by the <code>post_cdk_build_quickstart.py</code> file that you can find in the <code>cdk</code> folder. You will need to run this when logged in with AWS SSO through command line. I will describe how to do this in AWS console just in case the <code>.py</code> file doesn’t work for you.</p>
+<section id="codebuild" class="level2">
+<h2 class="anchored" data-anchor-id="codebuild">Codebuild</h2>
+<p>Need to build CodeBuild project after stack has finished building, as there will be no container in ECR.</p>
+<p>Go to CodeBuild -&gt; your project -&gt; click Start build. Check the logs, the build should be progressing.</p>
+</section>
+<section id="create-a-config.env-file-and-upload-to-s3" class="level2">
+<h2 class="anchored" data-anchor-id="create-a-config.env-file-and-upload-to-s3">Create a <code>config.env</code> file and upload to S3</h2>
+<p>The Fargate task definition references a <code>config.env</code> file.</p>
+<p>Need to create a <code>config.env</code> file to upload to the S3 bucket that has the variables:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="dv">1</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_AWS_FUNCTIONS</span><span class="ot">=</span><span class="dv">1</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SESSION_OUTPUT_FOLDER</span><span class="ot">=</span><span class="st">True # If this is False it currently seems to fail to allow for writable log directories</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>Go to S3 and choose the new <code>...-logs</code> bucket that you created. Upload the <code>config.env</code> file into this bucket.</p>
+</section>
+<section id="update-elastic-container-service" class="level2">
+<h2 class="anchored" data-anchor-id="update-elastic-container-service">Update Elastic Container Service</h2>
+<p>Now that the app container is in Elastic Container Registry, you can proceed to run the app on a Fargate server.</p>
+<p>Go to your new cluster, your new service, and select ‘Update service’.</p>
+<p>Select ‘Force new deployment’, and then set ‘Desired number of tasks’ to 1.</p>
+</section>
+</section>
+<section id="additional-manual-tasks" class="level1">
+<h1>Additional Manual Tasks</h1>
+</section>
+<section id="update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate" class="level1">
+<h1>Update DNS records for your domain (If using a domain for the SSL certificate)</h1>
+<p>To do this, you need to create a CNAME DNS record for your domain pointing to your load balancer DNS from a subdomain of your main domain registration, e.g., <code>redaction.&lt;domain-name&gt;</code>.</p>
+</section>
+<section id="cognito" class="level1">
+<h1>Cognito</h1>
+<p>Go to Cognito and create a user with your own email address. Generate a password.</p>
+<p>Go to Cognito -&gt; App clients -&gt; Login pages -&gt; View login page.</p>
+<p>Enter the email and temporary password details that come in the email (don’t include the last full stop!).</p>
+<p>Change your password.</p>
+<section id="set-mfa-optional" class="level2">
+<h2 class="anchored" data-anchor-id="set-mfa-optional">Set MFA (optional)</h2>
+<p>On the Cognito user pool page you can also enable MFA, if you are using an SSL certificate with Cognito login on the Application Load Balancer. Go to Cognito -&gt; your user pool -&gt; Sign in -&gt; Multi-factor authentication</p>
+</section>
+</section>
+<section id="create-cloudfront-distribution" class="level1">
+<h1>Create CloudFront distribution</h1>
+<p><strong>Note: this is only relevant if you set <code>RUN_USEAST_STACK</code> to ‘False’ during CDK deployment</strong></p>
+<p>If you were not able to create a CloudFront distribution via CDK, you should be able to do it through console. I would advise using CloudFront as the front end to the app.</p>
+<p>Create a new CloudFront distribution.</p>
+<ul>
+<li><strong>If you have used an SSL certificate in your CDK code:</strong>
+<ul>
+<li><strong>For Origin:</strong>
+<ul>
+<li>Choose the domain name associated with the certificate as the origin.</li>
+<li>Choose HTTPS only as the protocol.</li>
+<li>Keep everything else default.</li>
+</ul></li>
+<li><strong>For Behavior (modify default behavior):</strong>
+<ul>
+<li>Under Viewer protocol policy choose ‘Redirect HTTP to HTTPS’.</li>
+</ul></li>
+</ul></li>
+<li><strong>If you have not used an SSL certificate in your CDK code:</strong>
+<ul>
+<li><strong>For Origin:</strong>
+<ul>
+<li>Choose your elastic load balancer as the origin. This will fill in the elastic load balancer DNS.</li>
+<li>Choose HTTP only as the protocol.</li>
+<li>Keep everything else default.</li>
+</ul></li>
+<li><strong>For Behavior (modify default behavior):</strong>
+<ul>
+<li>Under Viewer protocol policy choose ‘HTTP and HTTPS’.</li>
+</ul></li>
+</ul></li>
+</ul>
+<section id="security-features" class="level2">
+<h2 class="anchored" data-anchor-id="security-features">Security features</h2>
+<p>In your CloudFront distribution, under ‘Security’ -&gt; Edit -&gt; Enable security protections.</p>
+<p>Choose rate limiting (default is fine).</p>
+<p>Create.</p>
+<p>In CloudFront geographic restrictions -&gt; Countries -&gt; choose an Allow list of countries.</p>
+<p>Click again on Edit.</p>
+<p>AWS WAF protection enabled you should see a link titled ‘View details of your configuration’.</p>
+<p>Go to Rules -&gt; <code>AWS-AWSManagedRulesCommonRuleSet</code>, click Edit.</p>
+<p>Under <code>SizeRestrictions_BODY</code> choose rule action override ‘Override to Allow’. This is needed to allow for file upload to the app.</p>
+</section>
+</section>
+<section id="change-cognito-redirection-url-to-your-cloudfront-distribution" class="level1">
+<h1>Change Cognito redirection URL to your CloudFront distribution</h1>
+<p>Go to Cognito -&gt; your user pool -&gt; App Clients -&gt; Login pages -&gt; Managed login configuration.</p>
+<p>Ensure that the callback URL is: * If not using an SSL certificate and Cognito login - <code>https://&lt;CloudFront domain name&gt;</code> * If using an SSL certificate, you should have three: * <code>https://&lt;CloudFront domain name&gt;</code> * <code>https://&lt;CloudFront domain name&gt;/oauth2/idpresponse</code> * <code>https://&lt;CloudFront domain name&gt;/oauth/idpresponse</code></p>
+</section>
+<section id="force-traffic-to-come-from-specific-cloudfront-distribution-optional" class="level1">
+<h1>Force traffic to come from specific CloudFront distribution (optional)</h1>
+<p>Note that this only potentially helps with security if you are not using an SSL certificate with Cognito login on your application load balancer.</p>
+<p>Go to EC2 - Load Balancers -&gt; Your load balancer -&gt; Listeners -&gt; Your listener -&gt; Add rule.</p>
+<ul>
+<li>Add Condition -&gt; Host header.</li>
+<li>Change Host header value to your CloudFront distribution without the <code>https://</code> or <code>http://</code> at the front.</li>
+<li>Forward to redaction target group.</li>
+<li>Turn on group stickiness for 12 hours.</li>
+<li>Next.</li>
+<li>Choose priority 1.</li>
+</ul>
+<p>Then, change the default listener rule.</p>
+<ul>
+<li>Under Routing action change to ‘Return fixed response’.</li>
+</ul>
+
+
+</section>
+
+<a onclick="window.scrollTo(0, 0); return false;" role="button" id="quarto-back-to-top"><i class="bi bi-arrow-up"></i> Back to top</a></main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+        const codeEl = trigger.previousElementSibling.cloneNode(true);
+        for (const childEl of codeEl.children) {
+          if (isCodeAnnotation(childEl)) {
+            childEl.remove();
+          }
+        }
+        return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/seanpedrick-case\.github\.io\/doc_redaction\/");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

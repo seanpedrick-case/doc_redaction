@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.7.31">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>User FAQ – Document Redaction App</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../">
+<script src="../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/popper.min.js"></script>
+<script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-e1a5c8363afafaef2c763b6775fbf3ca.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../site_libs/bootstrap/bootstrap-dfb324f25d9b1687192fa8be62ac8f9c.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+
+
+<link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../index.html">
+    <span class="navbar-title">Document Redaction App</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../index.html"> 
+<span class="menu-text">Home</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/user_guide.html"> 
+<span class="menu-text">User guide</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="../src/faq.html" aria-current="page"> 
+<span class="menu-text">User FAQ</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/installation_guide.html"> 
+<span class="menu-text">App installation guide (with CDK)</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/app_settings.html"> 
+<span class="menu-text">App settings management guide</span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#general-advice" id="toc-general-advice" class="nav-link active" data-scroll-target="#general-advice">General Advice:</a></li>
+  <li><a href="#general-questions" id="toc-general-questions" class="nav-link" data-scroll-target="#general-questions">General questions</a></li>
+  <li><a href="#troubleshooting" id="toc-troubleshooting" class="nav-link" data-scroll-target="#troubleshooting">Troubleshooting</a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">User FAQ</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="general-advice" class="level2">
+<h2 class="anchored" data-anchor-id="general-advice">General Advice:</h2>
+<ul>
+<li><strong>Read the User Guide</strong>: Many common questions are addressed in the detailed User Guide sections.</li>
+<li><strong>Start Simple</strong>: If you’re new, try redacting with default options first before customising extensively.</li>
+<li><strong>Human Review is Key</strong>: Always manually review the <code>...redacted.pdf</code> or use the ‘<strong>Review redactions</strong>’ tab. No automated system is perfect.</li>
+<li><strong>Save Incrementally</strong>: When working on the ‘<strong>Review redactions</strong>’ tab, use the ‘<strong>Save changes on current page to file</strong>’ button periodically, especially for large documents.</li>
+</ul>
+</section>
+<section id="general-questions" class="level2">
+<h2 class="anchored" data-anchor-id="general-questions">General questions</h2>
+<section id="what-is-document-redaction-and-what-does-this-app-do" class="level4">
+<h4 class="anchored" data-anchor-id="what-is-document-redaction-and-what-does-this-app-do">What is document redaction and what does this app do?</h4>
+<p>Document redaction is the process of removing sensitive or personally identifiable information (PII) from documents. This application is a tool that automates this process for various document types, including PDFs, images, open text, and tabular data (<code>XLSX</code>/<code>CSV</code>/<code>Parquet</code>). It identifies potential PII using different methods and allows users to review, modify, and export the suggested redactions.</p>
+</section>
+<section id="what-types-of-documents-and-data-can-be-redacted" class="level4">
+<h4 class="anchored" data-anchor-id="what-types-of-documents-and-data-can-be-redacted">What types of documents and data can be redacted?</h4>
+<p>The app can handle a variety of formats. For documents, it supports <code>PDF</code>s and images (<code>JPG</code>, <code>PNG</code>). For tabular data, it works with <code>XLSX</code>, <code>CSV</code>, and <code>Parquet</code> files. Additionally, it can redact open text that is copied and pasted directly into the application interface.</p>
+</section>
+<section id="how-does-the-app-identify-text-and-pii-for-redaction" class="level4">
+<h4 class="anchored" data-anchor-id="how-does-the-app-identify-text-and-pii-for-redaction">How does the app identify text and PII for redaction?</h4>
+<p>The app employs several methods for text extraction and PII identification. Text can be extracted directly from selectable <code>PDF</code> text, using a local Optical Character Recognition (OCR) model for image-based content, or through the <strong>AWS Textract service</strong> for more complex documents, handwriting, and signatures (if available). For PII identification, it can use a local model based on the <code>spacy</code> package or the <strong>AWS Comprehend service</strong> for more accurate results (if available).</p>
+</section>
+<section id="can-i-customise-what-information-is-redacted" class="level4">
+<h4 class="anchored" data-anchor-id="can-i-customise-what-information-is-redacted">Can I customise what information is redacted?</h4>
+<p>Yes, the app offers extensive customisation options. You can define terms that should never be redacted (an ‘<strong>allow list</strong>’), terms that should always be redacted (a ‘<strong>deny list</strong>’), and specify entire pages to be fully redacted using <code>CSV</code> files. You can also select specific types of entities to redact, such as dates, or remove default entity types that are not relevant to your needs.</p>
+</section>
+<section id="how-can-i-review-and-modify-the-suggested-redactions" class="level4">
+<h4 class="anchored" data-anchor-id="how-can-i-review-and-modify-the-suggested-redactions">How can I review and modify the suggested redactions?</h4>
+<p>The app provides a dedicated ‘<strong>Review redactions</strong>’ tab with a visual interface. You can upload the original document and the generated review file (<code>CSV</code>) to see the suggested redactions overlaid on the document. Here, you can move, resize, delete, and add new redaction boxes. You can also filter suggested redactions based on criteria and exclude them individually or in groups.</p>
+</section>
+<section id="can-i-work-with-tabular-data-or-copy-and-pasted-text" class="level4">
+<h4 class="anchored" data-anchor-id="can-i-work-with-tabular-data-or-copy-and-pasted-text">Can I work with tabular data or copy and pasted text?</h4>
+<p>Yes, the app has a dedicated tab for redacting tabular data files (<code>XLSX</code>/<code>CSV</code>) and open text. For tabular data, you can upload your file and select which columns to redact. For open text, you can simply paste the text into a box. You can then choose the redaction method and the desired output format for the anonymised data.</p>
+</section>
+<section id="what-are-the-options-for-the-anonymisation-format-of-redacted-text" class="level4">
+<h4 class="anchored" data-anchor-id="what-are-the-options-for-the-anonymisation-format-of-redacted-text">What are the options for the anonymisation format of redacted text?</h4>
+<p>When redacting tabular data or open text, you have several options for how the redacted information is replaced. The default is to replace the text with ‘<strong>REDACTED</strong>’. Other options include replacing it with the entity type (e.g., ‘PERSON’), redacting completely (removing the text), replacing it with a consistent hash value, or masking it with stars (’*’).</p>
+</section>
+<section id="can-i-export-or-import-redactions-tofrom-other-software-like-adobe-acrobat" class="level4">
+<h4 class="anchored" data-anchor-id="can-i-export-or-import-redactions-tofrom-other-software-like-adobe-acrobat">Can I export or import redactions to/from other software like Adobe Acrobat?</h4>
+<p>Yes, the app supports exporting and importing redaction data using the <strong>Adobe Acrobat</strong> comment file format (<code>.xfdf</code>). You can export suggested redactions from the app to an <code>.xfdf</code> file that can be opened in <strong>Adobe</strong>. Conversely, you can import an <code>.xfdf</code> file created in <strong>Adobe</strong> into the app to generate a review file (<code>CSV</code>) for further work within the application.</p>
+</section>
+</section>
+<section id="troubleshooting" class="level2">
+<h2 class="anchored" data-anchor-id="troubleshooting">Troubleshooting</h2>
+<section id="q1-the-app-missed-some-personal-information-or-redacted-things-it-shouldnt-have.-is-it-broken" class="level4">
+<h4 class="anchored" data-anchor-id="q1-the-app-missed-some-personal-information-or-redacted-things-it-shouldnt-have.-is-it-broken">Q1: The app missed some personal information or redacted things it shouldn’t have. Is it broken?</h4>
+<p>A: Not necessarily. The app is not 100% accurate and is designed as an aid. The <code>README</code> explicitly states: “<strong>NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed by a human before using the final outputs.</strong>” * <strong>Solution</strong>: Always use the ‘<strong>Review redactions</strong>’ tab to manually inspect, add, remove, or modify redactions.</p>
+</section>
+<section id="q2-i-uploaded-a-pdf-but-no-text-was-found-or-redactions-are-very-poor-using-the-local-model---selectable-text-option." class="level4">
+<h4 class="anchored" data-anchor-id="q2-i-uploaded-a-pdf-but-no-text-was-found-or-redactions-are-very-poor-using-the-local-model---selectable-text-option.">Q2: I uploaded a <code>PDF</code>, but no text was found, or redactions are very poor using the ‘<strong>Local model - selectable text</strong>’ option.</h4>
+<p>A: This option only works if your <code>PDF</code> has actual selectable text. If your <code>PDF</code> is an image scan (even if it looks like text), this method won’t work well. * <strong>Solution</strong>: * Try the ‘<strong>Local OCR model - PDFs without selectable text</strong>’ option. This uses Tesseract OCR to “read” the text from images. * For best results, especially with complex documents, handwriting, or signatures, use the ‘<strong>AWS Textract service - all PDF types</strong>’ if available.</p>
+</section>
+<section id="q3-handwriting-or-signatures-are-not-being-redacted-properly." class="level4">
+<h4 class="anchored" data-anchor-id="q3-handwriting-or-signatures-are-not-being-redacted-properly.">Q3: Handwriting or signatures are not being redacted properly.</h4>
+<p>A: The ‘<strong>Local</strong>’ text/OCR methods (selectable text or Tesseract) struggle with handwriting and signatures. * <strong>Solution</strong>: * Use the ‘<strong>AWS Textract service</strong>’ for text extraction. * Ensure that on the main ‘<strong>Redact PDFs/images</strong>’ tab, under “<strong>Optional - select signature extraction</strong>” (when <strong>AWS Textract</strong> is chosen), you have enabled handwriting and/or signature detection. Note that signature detection has higher cost implications.</p>
+</section>
+<section id="q4-the-options-for-aws-textract-service-or-aws-comprehend-are-missing-or-greyed-out." class="level4">
+<h4 class="anchored" data-anchor-id="q4-the-options-for-aws-textract-service-or-aws-comprehend-are-missing-or-greyed-out.">Q4: The options for ‘<strong>AWS Textract service</strong>’ or ‘<strong>AWS Comprehend</strong>’ are missing or greyed out.</h4>
+<p>A: These services are typically only available when the app is running in an <strong>AWS</strong> environment or has been specifically configured by your system admin to access these services (e.g., via <code>API</code> keys). * <strong>Solution</strong>: * Check if your instance of the app is supposed to have <strong>AWS</strong> services enabled. * If running outside <strong>AWS</strong>, see the “<strong>Using AWS Textract and Comprehend when not running in an AWS environment</strong>” section in the advanced guide. This involves configuring <strong>AWS</strong> access keys, which should be done with IT and data security approval.</p>
+</section>
+<section id="q5-i-re-processed-the-same-document-and-it-seems-to-be-taking-a-long-time-and-potentially-costing-more-with-aws-services.-can-i-avoid-this" class="level4">
+<h4 class="anchored" data-anchor-id="q5-i-re-processed-the-same-document-and-it-seems-to-be-taking-a-long-time-and-potentially-costing-more-with-aws-services.-can-i-avoid-this">Q5: I re-processed the same document, and it seems to be taking a long time and potentially costing more with <strong>AWS</strong> services. Can I avoid this?</h4>
+<p>A: Yes. If you have previously processed a document with <strong>AWS Textract</strong> or the <strong>Local OCR</strong> model, the app generates a <code>.json</code> output file (<code>..._textract.json</code> or <code>..._ocr_results_with_words.json</code>). * <strong>Solution</strong>: When re-uploading your original document for redaction, also upload the corresponding <code>.json</code> file. The app should detect this (the “<strong>Existing Textract output file found</strong>” box may be checked), skipping the expensive text extraction step.</p>
+</section>
+<section id="q6-my-app-crashed-or-i-reloaded-the-page.-are-my-output-files-lost" class="level4">
+<h4 class="anchored" data-anchor-id="q6-my-app-crashed-or-i-reloaded-the-page.-are-my-output-files-lost">Q6: My app crashed, or I reloaded the page. Are my output files lost?</h4>
+<p>A: If you are logged in via <strong>AWS Cognito</strong> and the server hasn’t been shut down, you might be able to recover them. * <strong>Solution</strong>: Go to the ‘<strong>Redaction settings</strong>’ tab, scroll to the bottom, and look for ‘<strong>View all output files from this session</strong>’.</p>
+</section>
+<section id="q7-my-custom-allow-list-terms-to-never-redact-or-deny-list-terms-to-always-redact-isnt-working." class="level4">
+<h4 class="anchored" data-anchor-id="q7-my-custom-allow-list-terms-to-never-redact-or-deny-list-terms-to-always-redact-isnt-working.">Q7: My custom allow list (terms to never redact) or deny list (terms to always redact) isn’t working.</h4>
+<p>A: There are a few common reasons: * <strong>File Format</strong>: Ensure your list is a <code>.csv</code> file with terms in the first column only, with no column header. * <strong>Case Sensitivity</strong>: Terms in the allow/deny list are case sensitive. * <strong>Deny List &amp; ‘CUSTOM’ Entity</strong>: For a deny list to work, you must select the ‘<strong>CUSTOM</strong>’ entity type in ‘<strong>Redaction settings</strong>’ under ‘<strong>Entities to redact</strong>’. * <strong>Manual Additions</strong>: If you manually added terms in the app interface (under ‘<strong>Manually modify custom allow…</strong>’), ensure you pressed <code>Enter</code> after typing each term in its cell. * <strong>Fuzzy Search for Deny List</strong>: If you intend to use fuzzy matching for your deny list, ensure ‘<strong>CUSTOM_FUZZY</strong>’ is selected as an entity type, and you’ve configured the “<strong>maximum number of spelling mistakes allowed.</strong>”</p>
+</section>
+<section id="q8-im-trying-to-review-redactions-but-the-pdf-in-the-viewer-looks-like-its-already-redacted-with-black-boxes." class="level4">
+<h4 class="anchored" data-anchor-id="q8-im-trying-to-review-redactions-but-the-pdf-in-the-viewer-looks-like-its-already-redacted-with-black-boxes.">Q8: I’m trying to review redactions, but the <code>PDF</code> in the viewer looks like it’s already redacted with black boxes.</h4>
+<p>A: You likely uploaded the <code>...redacted.pdf</code> file instead of the original document. * <strong>Solution</strong>: On the ‘<strong>Review redactions</strong>’ tab, ensure you upload the original, unredacted <code>PDF</code> alongside the <code>..._review_file.csv</code>.</p>
+</section>
+<section id="q9-i-cant-move-or-pan-the-document-in-the-review-redactions-viewer-when-zoomed-in." class="level4">
+<h4 class="anchored" data-anchor-id="q9-i-cant-move-or-pan-the-document-in-the-review-redactions-viewer-when-zoomed-in.">Q9: I can’t move or pan the document in the ‘<strong>Review redactions</strong>’ viewer when zoomed in.</h4>
+<p>A: You are likely in “<strong>add redaction boxes</strong>” mode. * <strong>Solution</strong>: Scroll to the bottom of the document viewer pane and click the hand icon. This switches to “<strong>modify mode</strong>,” allowing you to pan the document by clicking and dragging, and also to move/resize existing redaction boxes.</p>
+</section>
+<section id="q10-i-accidentally-clicked-exclude-all-items-in-table-from-redactions-on-the-review-redactions-tab-without-filtering-and-now-all-my-redactions-are-gone" class="level4">
+<h4 class="anchored" data-anchor-id="q10-i-accidentally-clicked-exclude-all-items-in-table-from-redactions-on-the-review-redactions-tab-without-filtering-and-now-all-my-redactions-are-gone">Q10: I accidentally clicked “<strong>Exclude all items in table from redactions</strong>” on the ‘<strong>Review redactions</strong>’ tab without filtering, and now all my redactions are gone!</h4>
+<p>A: This can happen if you don’t apply a filter first. * <strong>Solution</strong>: Click the ‘<strong>Undo last element removal</strong>’ button immediately. This should restore the redactions. Always ensure you have clicked the blue tick icon next to the search box to apply your filter before using “<strong>Exclude all items…</strong>”.</p>
+</section>
+<section id="q11-redaction-of-my-csv-or-xlsx-file-isnt-working-correctly." class="level4">
+<h4 class="anchored" data-anchor-id="q11-redaction-of-my-csv-or-xlsx-file-isnt-working-correctly.">Q11: Redaction of my <code>CSV</code> or <code>XLSX</code> file isn’t working correctly.</h4>
+<p>A: The app expects a specific format for tabular data. * <strong>Solution</strong>: Ensure your data file has a simple table format, with the table starting in the first cell (<code>A1</code>). There should be no other information or multiple tables within the sheet you intend to redact. For <code>XLSX</code> files, each sheet to be redacted must follow this format.</p>
+</section>
+<section id="q12-the-identify-duplicate-pages-feature-isnt-finding-duplicates-i-expect-or-its-flagging-too-many-pages." class="level4">
+<h4 class="anchored" data-anchor-id="q12-the-identify-duplicate-pages-feature-isnt-finding-duplicates-i-expect-or-its-flagging-too-many-pages.">Q12: The “<strong>Identify duplicate pages</strong>” feature isn’t finding duplicates I expect, or it’s flagging too many pages.</h4>
+<p>A: This feature uses text similarity based on the <code>ocr_outputs.csv</code> files and has a default similarity threshold (e.g., 90%). * <strong>Solution</strong>: * Ensure you’ve uploaded the correct <code>ocr_outputs.csv</code> files for all documents you’re comparing. * Review the <code>page_similarity_results.csv</code> output to see the similarity scores. The 90% threshold might be too high or too low for your specific documents. The current version of the app described doesn’t seem to allow changing this threshold in the <code>UI</code>, so you’d mainly use the output to inform your manual review.</p>
+</section>
+<section id="q13-i-exported-a-review-file-to-adobe-.xfdf-but-when-i-open-it-in-adobe-acrobat-it-cant-find-the-pdf-or-shows-no-redactions." class="level4">
+<h4 class="anchored" data-anchor-id="q13-i-exported-a-review-file-to-adobe-.xfdf-but-when-i-open-it-in-adobe-acrobat-it-cant-find-the-pdf-or-shows-no-redactions.">Q13: I exported a review file to Adobe (<code>.xfdf</code>), but when I open it in Adobe Acrobat, it can’t find the <code>PDF</code> or shows no redactions.</h4>
+<p>A: When <strong>Adobe Acrobat</strong> prompts you, it needs to be pointed to the exact original <code>PDF</code>. * <strong>Solution</strong>: Ensure you select the original, unredacted <code>PDF</code> file that was used to generate the <code>..._review_file.csv</code> (and subsequently the <code>.xfdf</code> file) when <strong>Adobe Acrobat</strong> asks for the associated document.</p>
+</section>
+<section id="q14-my-aws-textract-api-job-submitted-via-submit-whole-document-to-aws-textract-api-is-taking-a-long-time-or-i-dont-know-if-its-finished." class="level4">
+<h4 class="anchored" data-anchor-id="q14-my-aws-textract-api-job-submitted-via-submit-whole-document-to-aws-textract-api-is-taking-a-long-time-or-i-dont-know-if-its-finished.">Q14: My <strong>AWS Textract API</strong> job (submitted via “<strong>Submit whole document to AWS Textract API…</strong>”) is taking a long time, or I don’t know if it’s finished.</h4>
+<p>A: Large documents can take time. The document estimates about five seconds per page as a rough guide. * <strong>Solution</strong>: * After submitting, a <strong>Job ID</strong> will appear. * Periodically click the ‘<strong>Check status of Textract job and download</strong>’ button. Processing continues in the background. * Once ready, the <code>_textract.json</code> output will appear in the output area.</p>
+</section>
+<section id="q15-im-trying-to-redact-specific-terms-from-my-deny-list-but-they-are-not-being-picked-up-even-though-the-custom-entity-is-selected." class="level4">
+<h4 class="anchored" data-anchor-id="q15-im-trying-to-redact-specific-terms-from-my-deny-list-but-they-are-not-being-picked-up-even-though-the-custom-entity-is-selected.">Q15: I’m trying to redact specific terms from my deny list, but they are not being picked up, even though the ‘<strong>CUSTOM</strong>’ entity is selected.</h4>
+<p>A: The deny list matches whole words with exact spelling by default. * <strong>Solution</strong>: * Double-check the spelling and case in your deny list. * If you expect misspellings to be caught, you need to use the ‘<strong>CUSTOM_FUZZY</strong>’ entity type and configure the “<strong>maximum number of spelling mistakes allowed</strong>” under ‘<strong>Redaction settings</strong>’. Then, upload your deny list.</p>
+</section>
+<section id="q16-i-set-the-lowest-page-to-redact-and-highest-page-to-redact-in-redaction-settings-but-the-app-still-seems-to-process-or-show-redactions-outside-this-range." class="level4">
+<h4 class="anchored" data-anchor-id="q16-i-set-the-lowest-page-to-redact-and-highest-page-to-redact-in-redaction-settings-but-the-app-still-seems-to-process-or-show-redactions-outside-this-range.">Q16: I set the “<strong>Lowest page to redact</strong>” and “<strong>Highest page to redact</strong>” in ‘<strong>Redaction settings</strong>’, but the app still seems to process or show redactions outside this range.</h4>
+<p>A: The page range setting primarily controls which pages have redactions applied in the final <code>...redacted.pdf</code>. The underlying text extraction (especially with OCR/Textract) might still process the whole document to generate the <code>...ocr_results.csv</code> or <code>..._textract.json</code>. When reviewing, the <code>review_file.csv</code> might initially contain all potential redactions found across the document. * <strong>Solution</strong>: * Ensure the <code>...redacted.pdf</code> correctly reflects the page range. * When reviewing, use the page navigation and filters on the ‘<strong>Review redactions</strong>’ tab to focus on your desired page range. The final application of redactions from the review tab should also respect the range if it’s still set, but primarily it works off the <code>review_file.csv</code>.</p>
+</section>
+<section id="q17-my-full-page-redaction-list-isnt-working.-i-uploaded-a-csv-with-page-numbers-but-those-pages-arent-blacked-out." class="level4">
+<h4 class="anchored" data-anchor-id="q17-my-full-page-redaction-list-isnt-working.-i-uploaded-a-csv-with-page-numbers-but-those-pages-arent-blacked-out.">Q17: My “<strong>Full page redaction list</strong>” isn’t working. I uploaded a <code>CSV</code> with page numbers, but those pages aren’t blacked out.</h4>
+<p>A: Common issues include: * <strong>File Format</strong>: Ensure your list is a <code>.csv</code> file with page numbers in the first column only, with no column header. Each page number should be on a new row. * <strong>Redaction Task</strong>: Simply uploading the list doesn’t automatically redact. You need to: 1. Upload the <code>PDF</code> you want to redact. 2. Upload the full page redaction <code>CSV</code> in ‘<strong>Redaction settings</strong>’. 3. It’s often best to deselect all other entity types in ‘<strong>Redaction settings</strong>’ if you only want to redact these full pages. 4. Run the ‘<strong>Redact document</strong>’ process. The output <code>...redacted.pdf</code> should show the full pages redacted, and the <code>...review_file.csv</code> will list these pages.</p>
+</section>
+<section id="q18-i-merged-multiple-...review_file.csv-files-but-the-output-seems-to-have-duplicate-redaction-boxes-or-some-are-missing." class="level4">
+<h4 class="anchored" data-anchor-id="q18-i-merged-multiple-...review_file.csv-files-but-the-output-seems-to-have-duplicate-redaction-boxes-or-some-are-missing.">Q18: I merged multiple <code>...review_file.csv</code> files, but the output seems to have duplicate redaction boxes or some are missing.</h4>
+<p>A: The merge feature simply combines all rows from the input review files. * <strong>Solution</strong>: * <strong>Duplicates</strong>: If the same redaction (same location, text, label) was present in multiple input files, it will appear multiple times in the merged file. You’ll need to manually remove these duplicates on the ‘<strong>Review redactions</strong>’ tab or by editing the merged <code>...review_file.csv</code> in a spreadsheet editor before review. * <strong>Missing</strong>: Double-check that all intended <code>...review_file.csv</code> files were correctly uploaded for the merge. Ensure the files themselves contained the expected redactions.</p>
+</section>
+<section id="q19-i-imported-an-.xfdf-adobe-comment-file-but-the-review_file.csv-generated-doesnt-accurately-reflect-the-highlights-or-comments-i-made-in-adobe-acrobat." class="level4">
+<h4 class="anchored" data-anchor-id="q19-i-imported-an-.xfdf-adobe-comment-file-but-the-review_file.csv-generated-doesnt-accurately-reflect-the-highlights-or-comments-i-made-in-adobe-acrobat.">Q19: I imported an <code>.xfdf</code> Adobe comment file, but the <code>review_file.csv</code> generated doesn’t accurately reflect the highlights or comments I made in Adobe Acrobat.</h4>
+<p>A: The app converts Adobe’s comment/highlight information into its review_file format. Discrepancies can occur if: * <strong>Comment Types</strong>: The app primarily looks for highlight-style annotations that it can interpret as redaction areas. Other Adobe comment types (e.g., sticky notes without highlights, text strike-throughs not intended as redactions) might not translate. * <strong>Complexity</strong>: Very complex or unusually shaped Adobe annotations might not convert perfectly. * <strong>PDF Version</strong>: Ensure the <code>PDF</code> uploaded alongside the <code>.xfdf</code> is the exact same original, unredacted <code>PDF</code> that the comments were made on in Adobe. * <strong>Solution</strong>: After import, always open the generated <code>review_file.csv</code> (with the original <code>PDF</code>) on the ‘<strong>Review redactions</strong>’ tab to verify and adjust as needed.</p>
+</section>
+<section id="q20-the-textract-api-job-status-table-under-submit-whole-document-to-aws-textract-api-only-shows-recent-jobs-or-i-cant-find-an-older-job-id-i-submitted." class="level4">
+<h4 class="anchored" data-anchor-id="q20-the-textract-api-job-status-table-under-submit-whole-document-to-aws-textract-api-only-shows-recent-jobs-or-i-cant-find-an-older-job-id-i-submitted.">Q20: The <strong>Textract API</strong> job status table (under “<strong>Submit whole document to AWS Textract API…</strong>”) only shows recent jobs, or I can’t find an older <strong>Job ID</strong> I submitted.</h4>
+<p>A: The table showing <strong>Textract</strong> job statuses might have a limit or only show jobs from the current session or within a certain timeframe (e.g., “up to seven days old” is mentioned). * <strong>Solution</strong>: * It’s good practice to note down the <strong>Job ID</strong> immediately after submission if you plan to check it much later. * If the <code>_textract.json</code> file was successfully created from a previous job, you can re-upload that <code>.json</code> file with your original <code>PDF</code> to bypass the <code>API</code> call and proceed directly to redaction or OCR conversion.</p>
+</section>
+<section id="q21-i-edited-a-...review_file.csv-in-excel-e.g.-changed-coordinates-labels-colors-but-when-i-upload-it-to-the-review-redactions-tab-the-boxes-are-misplaced-the-wrong-color-or-it-causes-errors." class="level4">
+<h4 class="anchored" data-anchor-id="q21-i-edited-a-...review_file.csv-in-excel-e.g.-changed-coordinates-labels-colors-but-when-i-upload-it-to-the-review-redactions-tab-the-boxes-are-misplaced-the-wrong-color-or-it-causes-errors.">Q21: I edited a <code>...review_file.csv</code> in Excel (e.g., changed coordinates, labels, colors), but when I upload it to the ‘<strong>Review redactions</strong>’ tab, the boxes are misplaced, the wrong color, or it causes errors.</h4>
+<p>A: The <code>review_file.csv</code> has specific columns and data formats (e.g., coordinates, <code>RGB</code> color tuples like <code>(0,0,255)</code>). * <strong>Solution</strong>: * <strong>Coordinates (xmin, ymin, xmax, ymax)</strong>: Ensure these are numeric and make sense for <code>PDF</code> coordinates. Drastic incorrect changes can misplace boxes. * <strong>Colors</strong>: Ensure the color column uses the <code>(R,G,B)</code> format, e.g., <code>(0,0,255)</code> for blue, not hex codes or color names, unless the app specifically handles that (the guide mentions <code>RGB</code>). * <strong>CSV Integrity</strong>: Ensure you save the file strictly as a <code>CSV</code>. Excel sometimes adds extra formatting or changes delimiters if not saved carefully. * <strong>Column Order</strong>: Do not change the order of columns in the <code>review_file.csv</code>. * <strong>Test Small Changes</strong>: Modify one or two rows/values first to see the effect before making bulk changes.</p>
+</section>
+<section id="q22-the-cost-and-time-estimation-feature-isnt-showing-up-or-its-giving-unexpected-results." class="level4">
+<h4 class="anchored" data-anchor-id="q22-the-cost-and-time-estimation-feature-isnt-showing-up-or-its-giving-unexpected-results.">Q22: The cost and time estimation feature isn’t showing up, or it’s giving unexpected results.</h4>
+<p>A: This feature depends on admin configuration and certain conditions. * <strong>Solution</strong>: * <strong>Admin Enabled</strong>: Confirm with your system admin that the cost/time estimation feature is enabled in the app’s configuration. * <strong>AWS Services</strong>: Estimation is typically most relevant when using <strong>AWS Textract</strong> or <strong>Comprehend</strong>. If you’re only using ‘<strong>Local</strong>’ models, the estimation might be simpler or not show <strong>AWS</strong>-related costs. * <strong>Existing Output</strong>: If “<strong>Existing Textract output file found</strong>” is checked (because you uploaded a pre-existing <code>_textract.json</code>), the estimated cost and time should be significantly lower for the <strong>Textract</strong> part of the process.</p>
+</section>
+<section id="q23-im-prompted-for-a-cost-code-but-i-dont-know-what-to-enter-or-my-search-isnt-finding-it." class="level4">
+<h4 class="anchored" data-anchor-id="q23-im-prompted-for-a-cost-code-but-i-dont-know-what-to-enter-or-my-search-isnt-finding-it.">Q23: I’m prompted for a “<strong>cost code</strong>,” but I don’t know what to enter, or my search isn’t finding it.</h4>
+<p>A: Cost code selection is an optional feature enabled by system admins for tracking <strong>AWS</strong> usage. * <strong>Solution</strong>: * <strong>Contact Admin/Team</strong>: If you’re unsure which cost code to use, consult your team lead or the system administrator who manages the redaction app. They should provide the correct code or guidance. * <strong>Search Tips</strong>: Try searching by project name, department, or any known identifiers for your cost center. The search might be case-sensitive or require exact phrasing.</p>
+</section>
+<section id="q24-i-selected-hash-as-the-anonymisation-output-format-for-my-tabular-data-but-the-output-still-shows-redacted-or-something-else." class="level4">
+<h4 class="anchored" data-anchor-id="q24-i-selected-hash-as-the-anonymisation-output-format-for-my-tabular-data-but-the-output-still-shows-redacted-or-something-else.">Q24: I selected “<strong>hash</strong>” as the anonymisation output format for my tabular data, but the output still shows “<strong>REDACTED</strong>” or something else.</h4>
+<p>A: Ensure the selection was correctly registered before redacting. * <strong>Solution</strong>: * Double-check on the ‘<strong>Open text or Excel/csv files</strong>’ tab, under ‘<strong>Anonymisation output format</strong>,’ that “<strong>hash</strong>” (or your desired format) is indeed selected. * Try re-selecting it and then click ‘<strong>Redact text/data files</strong>’ again. * If the issue persists, it might be a bug or a specific interaction with your data type that prevents hashing. Report this to your app administrator. “<strong>Hash</strong>” should replace PII with a consistent unique <code>ID</code> for each unique piece of PII.</p>
+</section>
+<section id="q25-im-using-custom_fuzzy-for-my-deny-list.-i-have-should-fuzzy-search-match-on-entire-phrases-in-deny-list-checked-but-its-still-matching-individual-words-within-my-phrases-or-matching-things-i-dont-expect." class="level4">
+<h4 class="anchored" data-anchor-id="q25-im-using-custom_fuzzy-for-my-deny-list.-i-have-should-fuzzy-search-match-on-entire-phrases-in-deny-list-checked-but-its-still-matching-individual-words-within-my-phrases-or-matching-things-i-dont-expect.">Q25: I’m using ‘<strong>CUSTOM_FUZZY</strong>’ for my deny list. I have “<strong>Should fuzzy search match on entire phrases in deny list</strong>” checked, but it’s still matching individual words within my phrases or matching things I don’t expect.</h4>
+<p>A: Fuzzy matching on entire phrases can be complex. The “<strong>maximum number of spelling mistakes allowed</strong>” applies to the entire phrase. * <strong>Solution</strong>: * <strong>Mistake Count</strong>: If your phrase is long and the allowed mistakes are few, it might not find matches if the errors are distributed. Conversely, too many allowed mistakes on a short phrase can lead to over-matching. Experiment with the mistake count. * <strong>Specificity</strong>: If “<strong>match on entire phrases</strong>” is unchecked, it will fuzzy match each individual word (excluding stop words) in your deny list phrases. This can be very broad. Ensure this option is set according to your needs. * <strong>Test with Simple Phrases</strong>: Try a very simple phrase with a known, small number of errors to see if the core fuzzy logic is working as you expect, then build up complexity.</p>
+</section>
+<section id="q26-i-locked-in-a-new-redaction-box-format-on-the-review-redactions-tab-label-colour-but-now-i-want-to-change-it-or-go-back-to-the-pop-up-for-each-new-box." class="level4">
+<h4 class="anchored" data-anchor-id="q26-i-locked-in-a-new-redaction-box-format-on-the-review-redactions-tab-label-colour-but-now-i-want-to-change-it-or-go-back-to-the-pop-up-for-each-new-box.">Q26: I “<strong>locked in</strong>” a new redaction box format on the ‘<strong>Review redactions</strong>’ tab (label, colour), but now I want to change it or go back to the pop-up for each new box.</h4>
+<p>A: When a format is locked, a new icon (described as looking like a “<strong>gift tag</strong>”) appears at the bottom of the document viewer. * <strong>Solution</strong>: * Click the “<strong>gift tag</strong>” icon at the bottom of the document viewer pane. * This will allow you to change the default locked format. * To go back to the pop-up appearing for each new box, click the lock icon within that “<strong>gift tag</strong>” menu again to “<strong>unlock</strong>” it (it should turn from blue to its original state).</p>
+</section>
+<section id="q27-i-clicked-redact-document-processing-seemed-to-complete-e.g.-progress-bar-finished-complete-message-shown-but-no-output-files-...redacted.pdf-...review_file.csv-appeared-in-the-output-area." class="level4">
+<h4 class="anchored" data-anchor-id="q27-i-clicked-redact-document-processing-seemed-to-complete-e.g.-progress-bar-finished-complete-message-shown-but-no-output-files-...redacted.pdf-...review_file.csv-appeared-in-the-output-area.">Q27: I clicked “<strong>Redact document</strong>,” processing seemed to complete (e.g., progress bar finished, “complete” message shown), but no output files (<code>...redacted.pdf</code>, <code>...review_file.csv</code>) appeared in the output area.</h4>
+<p>A: This could be due to various reasons: * <strong>No PII Found</strong>: If absolutely no PII was detected according to your settings (entities, allow/deny lists), the app might not generate a <code>...redacted.pdf</code> if there’s nothing to redact, though a <code>review_file.csv</code> (potentially empty) and <code>ocr_results.csv</code> should still ideally appear. * <strong>Error During File Generation</strong>: An unhandled error might have occurred silently during the final file creation step. * <strong>Browser/UI Issue</strong>: The <code>UI</code> might not have refreshed to show the files. * <strong>Permissions</strong>: In rare cases, if running locally, there might be file system permission issues preventing the app from writing outputs. * <strong>Solution</strong>: * Try refreshing the browser page (if feasible without losing input data, or after re-uploading). * Check the ‘<strong>Redaction settings</strong>’ tab for ‘<strong>View all output files from this session</strong>’ (if logged in via Cognito) – they might be listed there. * Try a very simple document with obvious PII and default settings to see if any output is generated. * Check browser developer console (<code>F12</code>) for any error messages.</p>
+</section>
+<section id="q28-when-reviewing-i-click-on-a-row-in-the-search-suggested-redactions-table.-the-page-changes-but-the-specific-redaction-box-isnt-highlighted-or-the-view-doesnt-scroll-to-it." class="level4">
+<h4 class="anchored" data-anchor-id="q28-when-reviewing-i-click-on-a-row-in-the-search-suggested-redactions-table.-the-page-changes-but-the-specific-redaction-box-isnt-highlighted-or-the-view-doesnt-scroll-to-it.">Q28: When reviewing, I click on a row in the ‘<strong>Search suggested redactions</strong>’ table. The page changes, but the specific redaction box isn’t highlighted, or the view doesn’t scroll to it.</h4>
+<p>A: The highlighting feature (“should change the colour of redaction box to blue”) is an aid. * <strong>Solution</strong>: * Ensure you are on the correct page. The table click should take you there. * The highlighting might be subtle or conflict with other <code>UI</code> elements. Manually scan the page for the text/label mentioned in the table row. * Scrolling to the exact box isn’t explicitly guaranteed, especially on very dense pages. The main function is page navigation.</p>
+</section>
+<section id="q29-i-rotated-a-page-in-the-review-redactions-document-viewer-and-now-all-subsequent-pages-are-also-rotated-or-if-i-navigate-away-and-back-the-rotation-is-lost." class="level4">
+<h4 class="anchored" data-anchor-id="q29-i-rotated-a-page-in-the-review-redactions-document-viewer-and-now-all-subsequent-pages-are-also-rotated-or-if-i-navigate-away-and-back-the-rotation-is-lost.">Q29: I rotated a page in the ‘<strong>Review redactions</strong>’ document viewer, and now all subsequent pages are also rotated, or if I navigate away and back, the rotation is lost.</h4>
+<p>A: The <code>README</code> states: “<strong>When you switch page, the viewer will stay in your selected orientation, so if it looks strange, just rotate the page again and hopefully it will look correct!</strong>” * <strong>Solution</strong>: * The rotation is a viewing aid for the current page session in the viewer. It does not permanently alter the original <code>PDF</code>. * If subsequent pages appear incorrectly rotated, use the rotation buttons again for that new page. * The rotation state might reset if you reload files or perform certain actions. Simply re-apply rotation as needed for viewing.</p>
+
+
+</section>
+</section>
+
+<a onclick="window.scrollTo(0, 0); return false;" role="button" id="quarto-back-to-top"><i class="bi bi-arrow-up"></i> Back to top</a></main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+        const codeEl = trigger.previousElementSibling.cloneNode(true);
+        for (const childEl of codeEl.children) {
+          if (isCodeAnnotation(childEl)) {
+            childEl.remove();
+          }
+        }
+        return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/seanpedrick-case\.github\.io\/doc_redaction\/");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
