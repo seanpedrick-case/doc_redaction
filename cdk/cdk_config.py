@@ -82,8 +82,12 @@ CONTEXT_FILE = get_or_create_env_var('CONTEXT_FILE', 'cdk.context.json') # Defin
 CDK_FOLDER = get_or_create_env_var('CDK_FOLDER', '') # FULL_PATH_TO_CDK_FOLDER_HERE (with forward slash)
 RUN_USEAST_STACK = get_or_create_env_var('RUN_USEAST_STACK', 'False')
 
-### VPC
+### VPC and connections
 VPC_NAME = get_or_create_env_var('VPC_NAME', '')
+NEW_VPC_DEFAULT_NAME = get_or_create_env_var('NEW_VPC_DEFAULT_NAME', f'{CDK_PREFIX}vpc')
+NEW_VPC_CIDR = get_or_create_env_var('NEW_VPC_CIDR', '') # "10.0.0.0/24"
+
+
 EXISTING_IGW_ID = get_or_create_env_var('EXISTING_IGW_ID', '')
 SINGLE_NAT_GATEWAY_ID = get_or_create_env_var('SINGLE_NAT_GATEWAY_ID', '')
 
@@ -121,6 +125,10 @@ ECR_CDK_REPO_NAME = get_or_create_env_var('ECR_CDK_REPO_NAME', f"{CDK_PREFIX}{EC
 ### S3
 S3_LOG_CONFIG_BUCKET_NAME = get_or_create_env_var('S3_LOG_CONFIG_BUCKET_NAME', f"{CDK_PREFIX}s3-logs".lower()) # S3 bucket names need to be lower case
 S3_OUTPUT_BUCKET_NAME = get_or_create_env_var('S3_OUTPUT_BUCKET_NAME', f"{CDK_PREFIX}s3-output".lower())
+
+### KMS KEYS FOR S3 AND SECRETS MANAGER
+USE_CUSTOM_KMS_KEY = get_or_create_env_var('USE_CUSTOM_KMS_KEY', '1')
+CUSTOM_KMS_KEY_NAME = get_or_create_env_var('CUSTOM_KMS_KEY_NAME', f"alias/{CDK_PREFIX}kms-key".lower())
 
 ### ECS
 FARGATE_TASK_DEFINITION_NAME = get_or_create_env_var('FARGATE_TASK_DEFINITION_NAME', f"{CDK_PREFIX}FargateTaskDefinition")
@@ -160,7 +168,7 @@ CLOUDFRONT_DOMAIN = get_or_create_env_var('CLOUDFRONT_DOMAIN', "cloudfront_place
 
 
 # Certificate for Application load balancer (optional, for HTTPS and logins through the ALB)
-ACM_CERTIFICATE_ARN = get_or_create_env_var('ACM_CERTIFICATE_ARN', '')
+ACM_SSL_CERTIFICATE_ARN = get_or_create_env_var('ACM_SSL_CERTIFICATE_ARN', '')
 SSL_CERTIFICATE_DOMAIN = get_or_create_env_var('SSL_CERTIFICATE_DOMAIN', '') # e.g. example.com or www.example.com
 
 # This should be the CloudFront domain, the domain linked to your ACM certificate, or the DNS of your application load balancer in console afterwards
