@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>App installation guide (with CDK) – Document Redaction App</title>
+<title>App installation guide (with CDK or locally on Windows) – Document Redaction App</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -160,36 +160,27 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#introduction" id="toc-introduction" class="nav-link active" data-scroll-target="#introduction">Introduction</a>
+  <li><a href="#installation-with-cdk" id="toc-installation-with-cdk" class="nav-link active" data-scroll-target="#installation-with-cdk">Installation with CDK</a>
   <ul class="collapse">
   <li><a href="#prerequisites" id="toc-prerequisites" class="nav-link" data-scroll-target="#prerequisites">Prerequisites</a></li>
-  </ul></li>
-  <li><a href="#vpc-acm-certificate" id="toc-vpc-acm-certificate" class="nav-link" data-scroll-target="#vpc-acm-certificate">VPC ACM Certificate</a>
+  <li><a href="#note-on-acm-certificates" id="toc-note-on-acm-certificates" class="nav-link" data-scroll-target="#note-on-acm-certificates">Note on ACM Certificates</a></li>
+  <li><a href="#steps-to-install-the-app-using-cdk" id="toc-steps-to-install-the-app-using-cdk" class="nav-link" data-scroll-target="#steps-to-install-the-app-using-cdk">Steps to install the app using CDK</a>
   <ul class="collapse">
-  <li><a href="#if-getting-an-ssl-certificate-for-an-existing-domain" id="toc-if-getting-an-ssl-certificate-for-an-existing-domain" class="nav-link" data-scroll-target="#if-getting-an-ssl-certificate-for-an-existing-domain">If getting an SSL certificate for an existing domain</a></li>
+  <li><a href="#create-a-python-environment-load-in-packages-from-requirements.txt." id="toc-create-a-python-environment-load-in-packages-from-requirements.txt." class="nav-link" data-scroll-target="#create-a-python-environment-load-in-packages-from-requirements.txt.">1. Create a python environment, load in packages from <code>requirements.txt</code>.</a></li>
+  <li><a href="#create-a-cdk_config.env-file-in-the-config-subfolder." id="toc-create-a-cdk_config.env-file-in-the-config-subfolder." class="nav-link" data-scroll-target="#create-a-cdk_config.env-file-in-the-config-subfolder.">2. Create a <code>cdk_config.env</code> file in the <code>config</code> subfolder.</a></li>
+  <li><a href="#deploy-your-aws-stack-using-cdk-deploy-all" id="toc-deploy-your-aws-stack-using-cdk-deploy-all" class="nav-link" data-scroll-target="#deploy-your-aws-stack-using-cdk-deploy-all">3. Deploy your AWS stack using cdk deploy –all</a></li>
+  <li><a href="#tasks-for-after-cdk-deployment" id="toc-tasks-for-after-cdk-deployment" class="nav-link" data-scroll-target="#tasks-for-after-cdk-deployment">4. Tasks for after CDK deployment</a></li>
   </ul></li>
-  <li><a href="#subnets" id="toc-subnets" class="nav-link" data-scroll-target="#subnets">Subnets</a>
+  <li><a href="#additional-manual-tasks" id="toc-additional-manual-tasks" class="nav-link" data-scroll-target="#additional-manual-tasks">Additional Manual Tasks</a>
   <ul class="collapse">
-  <li><a href="#note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app." id="toc-note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app." class="nav-link" data-scroll-target="#note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app.">NOTE: I would generally advise creating new subnets as then you will be sure about connectivity between AWS resources that underpin your app.</a></li>
-  </ul></li>
-  <li><a href="#tasks-performed-by-post_cdk_build_quickstart.py" id="toc-tasks-performed-by-post_cdk_build_quickstart.py" class="nav-link" data-scroll-target="#tasks-performed-by-post_cdk_build_quickstart.py">Tasks performed by <code>post_cdk_build_quickstart.py</code></a>
-  <ul class="collapse">
-  <li><a href="#codebuild" id="toc-codebuild" class="nav-link" data-scroll-target="#codebuild">Codebuild</a></li>
-  <li><a href="#create-a-config.env-file-and-upload-to-s3" id="toc-create-a-config.env-file-and-upload-to-s3" class="nav-link" data-scroll-target="#create-a-config.env-file-and-upload-to-s3">Create a <code>config.env</code> file and upload to S3</a></li>
-  <li><a href="#update-elastic-container-service" id="toc-update-elastic-container-service" class="nav-link" data-scroll-target="#update-elastic-container-service">Update Elastic Container Service</a></li>
-  </ul></li>
-  <li><a href="#additional-manual-tasks" id="toc-additional-manual-tasks" class="nav-link" data-scroll-target="#additional-manual-tasks">Additional Manual Tasks</a></li>
   <li><a href="#update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate" id="toc-update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate" class="nav-link" data-scroll-target="#update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate">Update DNS records for your domain (If using a domain for the SSL certificate)</a></li>
-  <li><a href="#cognito" id="toc-cognito" class="nav-link" data-scroll-target="#cognito">Cognito</a>
-  <ul class="collapse">
-  <li><a href="#set-mfa-optional" id="toc-set-mfa-optional" class="nav-link" data-scroll-target="#set-mfa-optional">Set MFA (optional)</a></li>
-  </ul></li>
-  <li><a href="#create-cloudfront-distribution" id="toc-create-cloudfront-distribution" class="nav-link" data-scroll-target="#create-cloudfront-distribution">Create CloudFront distribution</a>
-  <ul class="collapse">
-  <li><a href="#security-features" id="toc-security-features" class="nav-link" data-scroll-target="#security-features">Security features</a></li>
-  </ul></li>
+  <li><a href="#create-a-user-in-cognito" id="toc-create-a-user-in-cognito" class="nav-link" data-scroll-target="#create-a-user-in-cognito">Create a user in Cognito</a></li>
+  <li><a href="#set-multi-factor-authentication-for-cognito-loginsoptional-but-recommended" id="toc-set-multi-factor-authentication-for-cognito-loginsoptional-but-recommended" class="nav-link" data-scroll-target="#set-multi-factor-authentication-for-cognito-loginsoptional-but-recommended">Set Multi-Factor Authentication for Cognito logins(optional but recommended)</a></li>
+  <li><a href="#create-cloudfront-distribution" id="toc-create-cloudfront-distribution" class="nav-link" data-scroll-target="#create-cloudfront-distribution">Create CloudFront distribution</a></li>
   <li><a href="#change-cognito-redirection-url-to-your-cloudfront-distribution" id="toc-change-cognito-redirection-url-to-your-cloudfront-distribution" class="nav-link" data-scroll-target="#change-cognito-redirection-url-to-your-cloudfront-distribution">Change Cognito redirection URL to your CloudFront distribution</a></li>
   <li><a href="#force-traffic-to-come-from-specific-cloudfront-distribution-optional" id="toc-force-traffic-to-come-from-specific-cloudfront-distribution-optional" class="nav-link" data-scroll-target="#force-traffic-to-come-from-specific-cloudfront-distribution-optional">Force traffic to come from specific CloudFront distribution (optional)</a></li>
+  </ul></li>
+  </ul></li>
   </ul>
 </nav>
     </div>
@@ -198,7 +189,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">App installation guide (with CDK)</h1>
+<h1 class="title">App installation guide (with CDK or locally on Windows)</h1>
 </div>
 
 
@@ -215,17 +206,17 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
-<section id="introduction" class="level1">
-<h1>Introduction</h1>
-<p>This guide gives an overview of how to install the app in an AWS environment using the code in the cdk/ folder of this Github repo. The most important thing you need is some familiarity with AWS and how to use it via console or command line, as well as administrator access to at least one region. Then follow the below steps.</p>
+<section id="installation-with-cdk" class="level1">
+<h1>Installation with CDK</h1>
+<p>This guide gives an overview of how to install the app in an AWS environment using the code in the ‘cdk/’ folder of this Github repo. The most important thing you need is some familiarity with AWS and how to use it via console or command line, as well as administrator access to at least one region. Then follow the below steps.</p>
 <section id="prerequisites" class="level2">
 <h2 class="anchored" data-anchor-id="prerequisites">Prerequisites</h2>
 <ul>
+<li><p>Ensure you have an AWS Administrator account in your desired region to be able to deploy all the resources mentioned in cdk_stack.py.</p></li>
 <li><p>Install git on your computer from: <a href="https://git-scm.com">https://git-scm.com</a></p></li>
-<li><p>You will also need to install nodejs and npm: <a href="https://docs.npmjs.com/downloading-and-installing-node-js-and-npm">https://docs.npmjs.com/downloading-and-installing-node-js-and-npm</a></p></li>
-<li><p>You will need an AWS Administrator account in your desired region to install.</p></li>
-<li><p>You will need AWS CDK v2 installed: <a href="https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html">https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html</a></p></li>
-<li><p>You will need to bootstrap the environment with CDK in both your primary region, and <code>us-east-1</code> if installing CloudFront and associated WAF.</p>
+<li><p>Install nodejs and npm: <a href="https://docs.npmjs.com/downloading-and-installing-node-js-and-npm">https://docs.npmjs.com/downloading-and-installing-node-js-and-npm</a>. If using Windows, it may be easiest to install from the .msi installer at the bottom of the page <a href="https://nodejs.org/en/download/">here</a>.</p></li>
+<li><p>Install AWS CDK v2: <a href="https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html">https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html</a></p></li>
+<li><p>Bootstrap the environment with CDK in both your primary region, and <code>us-east-1</code> if installing CloudFront and associated WAF.</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Bootstrap your primary region</span></span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">cdk</span> bootstrap aws://<span class="op">&lt;</span>YOUR_AWS_ACCOUNT<span class="op">&gt;</span>/eu-west-1</span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
@@ -234,125 +225,151 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li><p>In command line, write: <code>bash     git clone https://github.com/seanpedrick-case/doc_redaction.git</code></p></li>
 </ul>
 </section>
-</section>
-<section id="vpc-acm-certificate" class="level1">
-<h1>VPC ACM Certificate</h1>
-<p>This CDK code is designed to work within an existing VPC. The code does not create a new VPC if it doesn’t exist. So you will need to do that yourself.</p>
-<p>Additionally, to get full HTTPS data transfer through the app, you will need an SSL certificate registered with AWS Certificate Manager.</p>
-<p>You can either use the SSL certificate from a domain, or import an existing certificate into Certificate Manager. Ask your IT admin if you need help with this.</p>
-<section id="if-getting-an-ssl-certificate-for-an-existing-domain" class="level2">
-<h2 class="anchored" data-anchor-id="if-getting-an-ssl-certificate-for-an-existing-domain">If getting an SSL certificate for an existing domain</h2>
-<p>Make sure to point the certificate to <code>*.&lt;domain-name&gt;</code>.</p>
+<section id="note-on-acm-certificates" class="level2">
+<h2 class="anchored" data-anchor-id="note-on-acm-certificates">Note on ACM Certificates</h2>
+<p>To get full HTTPS data transfer through the app, you will need an SSL certificate registered with AWS Certificate Manager.</p>
+<p>You can either use the SSL certificate from a domain, or import an existing certificate into Certificate Manager. If you’re not sure, ask your IT admin if you need help with this. If getting an SSL certificate for an existing domain, make sure to point the certificate to <code>*.&lt;domain-name&gt;</code>.</p>
 <p>Update your DNS records to include the CNAME record given by AWS. After your stack has been created, you will also need to create a CNAME DNS record for your domain pointing to your load balancer DNS with a subdomain, e.g., <code>redaction.&lt;domain-name&gt;</code>.</p>
-<ol type="1">
-<li><p>Create a python environment, load in packages from <code>requirements.txt</code>.</p>
-<p>Need a <code>cdk.json</code> in the <code>cdk</code> folder. It should contain the following:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode json code-with-copy"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"app"</span><span class="fu">:</span> <span class="st">"&lt;PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED&gt;python.exe app.py"</span><span class="fu">,</span></span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"context"</span><span class="fu">:</span> <span class="fu">{</span></span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/core:stackRelativeExports"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-rds:lowercaseDbIdentifier"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-lambda:recognizeVersionProps"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-lambda:recognizeLayerVersion"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-ecs:arnFormatIncludesClusterName"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/core:newStyleStackSynthesis"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"aws-cdk:enableDiffNoFail"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-ec2:restrictDefaultSecurityGroup"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/aws-apigateway:disableCloudWatchRole"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>      <span class="dt">"@aws-cdk/core:target-partitions"</span><span class="fu">:</span> <span class="ot">[</span></span>
-<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws"</span><span class="ot">,</span></span>
-<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws-cn"</span></span>
-<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>      <span class="ot">]</span></span>
-<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
-<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div></li>
-<li><p>Create a <code>cdk_config.env</code> file in the <code>config</code> subfolder. Here as a minimum it would be useful to put the following details in the env file (below are example values, other possible variables to use here can be seen in the <code>cdk</code> folder/<code>cdk_config.py</code>).</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_PREFIX</span><span class="ot">=</span><span class="st">example-prefix # Prefix to most created elements in your stack</span></span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="dt">VPC_NAME</span><span class="ot">=</span><span class="st">example-vpc-name # Name of the VPC within which all the other elements will be created</span></span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_REGION</span><span class="ot">=</span><span class="st">us-west-1 # Region where elements will be created</span></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_ACCOUNT_ID</span><span class="ot">=</span><span class="st">1234567890 # AWS account ID that has administrator access that you will use for deploying the stack</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_FOLDER</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/ # The place where the cdk folder code is located</span></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="dt">CONTEXT_FILE</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/cdk.context.json</span></span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="dt">EXISTING_IGW_ID</span><span class="ot">=</span><span class="st">igw-1234567890 # (optional) The ID for an existing internet gateway that you want to use instead of creating a new one</span></span>
-<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="dt">SINGLE_NAT_GATEWAY_ID</span><span class="ot">=</span><span class="st">nat-123456789 # (optional) The ID for an existing NAT gateway that you want to use instead of creating a new one</span></span>
-<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_USER_POOL_DOMAIN_PREFIX</span><span class="ot">=</span><span class="st">lambeth-redaction-37924 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.</span></span>
-<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_USEAST_STACK</span><span class="ot">=</span><span class="st">False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div></li>
-</ol>
-<p><strong>Note: If you are using an SSL certificate with Cognito login on the application load balancer, you can set COGNITO_AUTH to 0 above, as you don’t need the second login step to get to the app</strong></p>
 </section>
+<section id="steps-to-install-the-app-using-cdk" class="level2">
+<h2 class="anchored" data-anchor-id="steps-to-install-the-app-using-cdk">Steps to install the app using CDK</h2>
+<section id="create-a-python-environment-load-in-packages-from-requirements.txt." class="level3">
+<h3 class="anchored" data-anchor-id="create-a-python-environment-load-in-packages-from-requirements.txt.">1. Create a python environment, load in packages from <code>requirements.txt</code>.</h3>
+<pre><code>You need a `cdk.json` in the `cdk` folder. It should contain the following:
+
+```json
+{
+    "app": "&lt;PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED&gt;/python.exe app.py",
+    "context": {
+      "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true,
+      "@aws-cdk/core:stackRelativeExports": true,
+      "@aws-cdk/aws-rds:lowercaseDbIdentifier": true,
+      "@aws-cdk/aws-lambda:recognizeVersionProps": true,
+      "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+      "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
+      "@aws-cdk/aws-ecs:arnFormatIncludesClusterName": true,
+      "@aws-cdk/core:newStyleStackSynthesis": true,
+      "aws-cdk:enableDiffNoFail": true,
+      "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": true,
+      "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,
+      "@aws-cdk/core:target-partitions": [
+        "aws",
+        "aws-cn"
+      ]
+    }
+  }
+```</code></pre>
 </section>
-<section id="subnets" class="level1">
-<h1>Subnets</h1>
-<section id="note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app." class="level3">
-<h3 class="anchored" data-anchor-id="note-i-would-generally-advise-creating-new-subnets-as-then-you-will-be-sure-about-connectivity-between-aws-resources-that-underpin-your-app.">NOTE: I would generally advise creating new subnets as then you will be sure about connectivity between AWS resources that underpin your app.</h3>
+<section id="create-a-cdk_config.env-file-in-the-config-subfolder." class="level3">
+<h3 class="anchored" data-anchor-id="create-a-cdk_config.env-file-in-the-config-subfolder.">2. Create a <code>cdk_config.env</code> file in the <code>config</code> subfolder.</h3>
+<p>Depending on which environment variables you put in this file, you can choose whether to install the app in a completely new VPC, or in an existing VPC. The following shows you example config files that you could use.</p>
+<section id="deploying-the-app-an-a-brand-new-vpc" class="level4">
+<h4 class="anchored" data-anchor-id="deploying-the-app-an-a-brand-new-vpc">Deploying the app an a brand new VPC</h4>
+<p>Here as a minimum it would be useful to put the following details in the cdk_config.env file (below are all example values, other possible variables to use here can be seen in the <code>cdk</code> folder/<code>cdk_config.py</code>).</p>
+<pre><code>```ini
+CDK_PREFIX=example-prefix # This prefix will be added to the name of most of the created elements in your stack
+NEW_VPC_CIDR=10.0.0.0/24 # The CIDR range for your newly created VPC
+AWS_REGION=&lt;your-region&gt; # Region where elements will be created
+AWS_ACCOUNT_ID=1234567890 # AWS account ID that has administrator access that you will use for deploying the stack
+CDK_FOLDER=C:/path_to_cdk_folder/ # The place where the cdk folder code is located
+CONTEXT_FILE=C:/path_to_cdk_folder/cdk.context.json
+
+COGNITO_USER_POOL_DOMAIN_PREFIX=redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.
+COGNITO_AUTH=1 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  
+USE_CLOUDFRONT=True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.
+RUN_USEAST_STACK=False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).
+CLOUDFRONT_DOMAIN=&lt;example&gt;.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.
+# If you are using an SSL certificate with your ALB (highly recommended):
+ACM_SSL_CERTIFICATE_ARN=&lt;SSL Certificate ARN&gt; # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager
+SSL_CERTIFICATE_DOMAIN=redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager
+
+```</code></pre>
+<p><strong>Note: If you are using an SSL certificate with Cognito login on the application load balancer (strongly advised), you can set COGNITO_AUTH to 0 above, as you don’t need the second login step to get to the app</strong></p>
+</section>
+<section id="in-an-existing-vpc" class="level4">
+<h4 class="anchored" data-anchor-id="in-an-existing-vpc">In an existing VPC</h4>
+<p>From the above example, remove the variable ‘NEW_VPC_CIDR’ and replace with the below:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="dt">VPC_NAME</span><span class="ot">=</span><span class="st">example-vpc-name # Name of the VPC within which all the other elements will be created</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="dt">EXISTING_IGW_ID</span><span class="ot">=</span><span class="st">igw-1234567890 # (optional) The ID for an existing internet gateway that you want to use instead of creating a new one</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SINGLE_NAT_GATEWAY_ID</span><span class="ot">=</span><span class="st">nat-123456789 # (optional) The ID for an existing NAT gateway that you want to use instead of creating a new one</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<section id="subnets" class="level5">
+<h5 class="anchored" data-anchor-id="subnets">Subnets</h5>
+<p>If you are using an existing VPC then you may want to deploy the app within existing subnets rather than creating new ones:</p>
 <ul>
-<li><p>If you set no subnets, the app will try to use existing private and public subnets. This approach is risky as the app may overlap with IP addresses assigned to existing AWS resources. It is advised to at least specify existing subnets that you know are available, or create your own using one of the below methods.</p></li>
-<li><p>If you want to use existing subnets, you can list them in the following environment variables:</p>
-<ul>
-<li><code>PUBLIC_SUBNETS_TO_USE=["PublicSubnet1", "PublicSubnet2", "PublicSubnet3"]</code></li>
-<li><code>PRIVATE_SUBNETS_TO_USE=["PrivateSubnet1", "PrivateSubnet2", "PrivateSubnet3"]</code></li>
-</ul></li>
-<li><p>If you want to create new subnets, you need to also specify CIDR blocks and availability zones for the new subnets. The app will check with you upon deployment whether these CIDR blocks are available before trying to create.</p>
-<ul>
-<li><code>PUBLIC_SUBNET_CIDR_BLOCKS=['10.222.333.0/28', '10.222.333.16/28', '10.222.333.32/28']</code></li>
-<li><code>PUBLIC_SUBNET_AVAILABILITY_ZONES=['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</code></li>
-<li><code>PRIVATE_SUBNET_CIDR_BLOCKS=['10.222.333.48/28', '10.222.333.64/28', '10.222.333.80/28']</code></li>
-<li><code>PRIVATE_SUBNET_AVAILABILITY_ZONES=['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</code></li>
-</ul></li>
+<li><p>If you define no subnets in environment variables, the app will try to use existing private and public subnets. Bear in mind the app may overlap with IP addresses assigned to existing AWS resources. It is advised to at least specify existing subnets that you know are available, or create your own using one of the below methods.</p></li>
+<li><p>If you want to use existing subnets, you can list them in the following environment variables:</p></li>
 </ul>
+<div class="sourceCode" id="cb5"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PublicSubnet1", "PublicSubnet2", "PublicSubnet3"]`</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PrivateSubnet1", "PrivateSubnet2", "PrivateSubnet3"]`</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<ul>
+<li>If you want to create new subnets, you need to also specify CIDR blocks and availability zones for the new subnets. The app will check with you upon deployment whether these CIDR blocks are available before trying to create.</li>
+</ul>
+<div class="sourceCode" id="cb6"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.0/28', '10.222.333.16/28', '10.222.333.32/28']</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.48/28', '10.222.333.64/28', '10.222.333.80/28']</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p>If you try to create subnets in invalid CIDR blocks / availability zones, the console output will tell you and it will show you the currently occupied CIDR blocks to help find a space for new subnets you want to create.</p>
-<ol start="3" type="1">
-<li><p>In command line in console, go to your <code>cdk</code> folder in the redaction app folder. Run <code>cdk deploy --all</code>. This should try to deploy the first stack in the <code>app.py</code> file.</p>
-<p>Hopefully everything will deploy successfully and you will be able to see your new stack in CloudFormation in the AWS console.</p></li>
-<li><p>Tasks for after CDK deployment</p></li>
-</ol>
 </section>
 </section>
-<section id="tasks-performed-by-post_cdk_build_quickstart.py" class="level1">
-<h1>Tasks performed by <code>post_cdk_build_quickstart.py</code></h1>
-<p><strong>Note:</strong> The following tasks are done by the <code>post_cdk_build_quickstart.py</code> file that you can find in the <code>cdk</code> folder. You will need to run this when logged in with AWS SSO through command line. I will describe how to do this in AWS console just in case the <code>.py</code> file doesn’t work for you.</p>
-<section id="codebuild" class="level2">
-<h2 class="anchored" data-anchor-id="codebuild">Codebuild</h2>
-<p>Need to build CodeBuild project after stack has finished building, as there will be no container in ECR.</p>
-<p>Go to CodeBuild -&gt; your project -&gt; click Start build. Check the logs, the build should be progressing.</p>
 </section>
-<section id="create-a-config.env-file-and-upload-to-s3" class="level2">
-<h2 class="anchored" data-anchor-id="create-a-config.env-file-and-upload-to-s3">Create a <code>config.env</code> file and upload to S3</h2>
-<p>The Fargate task definition references a <code>config.env</code> file.</p>
-<p>Need to create a <code>config.env</code> file to upload to the S3 bucket that has the variables:</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="dv">1</span></span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_AWS_FUNCTIONS</span><span class="ot">=</span><span class="dv">1</span></span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SESSION_OUTPUT_FOLDER</span><span class="ot">=</span><span class="st">True # If this is False it currently seems to fail to allow for writable log directories</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>Go to S3 and choose the new <code>...-logs</code> bucket that you created. Upload the <code>config.env</code> file into this bucket.</p>
+<section id="deploy-your-aws-stack-using-cdk-deploy-all" class="level3">
+<h3 class="anchored" data-anchor-id="deploy-your-aws-stack-using-cdk-deploy-all">3. Deploy your AWS stack using cdk deploy –all</h3>
+<p>In command line in console, go to your <code>cdk</code> folder in the redaction app folder. Run <code>cdk deploy --all</code>. This should try to deploy the first stack in the <code>app.py</code> file.</p>
+<p>Hopefully everything will deploy successfully and you will be able to see your new stack in CloudFormation in the AWS console.</p>
 </section>
-<section id="update-elastic-container-service" class="level2">
-<h2 class="anchored" data-anchor-id="update-elastic-container-service">Update Elastic Container Service</h2>
-<p>Now that the app container is in Elastic Container Registry, you can proceed to run the app on a Fargate server.</p>
-<p>Go to your new cluster, your new service, and select ‘Update service’.</p>
+<section id="tasks-for-after-cdk-deployment" class="level3">
+<h3 class="anchored" data-anchor-id="tasks-for-after-cdk-deployment">4. Tasks for after CDK deployment</h3>
+<p>The CDK deployment will create all the AWS resources needed to run the redaction app. However, there are some objects in AWS</p>
+<section id="run-post_cdk_build_quickstart.py" class="level4">
+<h4 class="anchored" data-anchor-id="run-post_cdk_build_quickstart.py">Run <code>post_cdk_build_quickstart.py</code></h4>
+<p>The following tasks are done by the <code>post_cdk_build_quickstart.py</code> file that you can find in the <code>cdk</code> folder. You will need to run this when logged in with AWS SSO through command line. I will describe how to do this in AWS console just in case the <code>.py</code> file doesn’t work for you.</p>
+<section id="codebuild" class="level5">
+<h5 class="anchored" data-anchor-id="codebuild">Codebuild</h5>
+<p>You need to build CodeBuild project after stack has finished deploying your CDK stack, as there will be no container in ECR.</p>
+<p>If you don’t want to run the ‘post_cdk_build_quickstart.py’ file, in console, go to CodeBuild -&gt; your project -&gt; click Start build. Check the logs, the build should complete in about 6-7 minutes.</p>
+</section>
+<section id="create-a-config.env-file-and-upload-to-s3" class="level5">
+<h5 class="anchored" data-anchor-id="create-a-config.env-file-and-upload-to-s3">Create a <code>config.env</code> file and upload to S3</h5>
+<p>The ‘post_cdk_build_quickstart’ file will upload a config file to S3, as the Fargate task definition references a <code>config.env</code> file.</p>
+<p>if you want to do this manually:</p>
+<p>Create a <code>config.env</code> file to upload to the S3 bucket that has at least the following variables:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">1 # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_AWS_FUNCTIONS</span><span class="ot">=</span><span class="st">1 # This will enable the app to communicate with AWS services.</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SESSION_OUTPUT_FOLDER</span><span class="ot">=</span><span class="st">True # This will put outputs for each user in separate output folders.</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<ul>
+<li>Then, go to S3 and choose the new <code>...-logs</code> bucket that you created. Upload the <code>config.env</code> file into this bucket.</li>
+</ul>
+</section>
+<section id="update-elastic-container-service" class="level5">
+<h5 class="anchored" data-anchor-id="update-elastic-container-service">Update Elastic Container Service</h5>
+<p>Now that the app container is in Elastic Container Registry, you can proceed to run the app on a Fargate server. The ‘post_cdk_build_quickstart.py’ file will do this for you, but you can also try this in Console. In ECS, go to your new cluster, your new service, and select ‘Update service’.</p>
 <p>Select ‘Force new deployment’, and then set ‘Desired number of tasks’ to 1.</p>
 </section>
 </section>
-<section id="additional-manual-tasks" class="level1">
-<h1>Additional Manual Tasks</h1>
-</section>
-<section id="update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate" class="level1">
-<h1>Update DNS records for your domain (If using a domain for the SSL certificate)</h1>
-<p>To do this, you need to create a CNAME DNS record for your domain pointing to your load balancer DNS from a subdomain of your main domain registration, e.g., <code>redaction.&lt;domain-name&gt;</code>.</p>
-</section>
-<section id="cognito" class="level1">
-<h1>Cognito</h1>
-<p>Go to Cognito and create a user with your own email address. Generate a password.</p>
-<p>Go to Cognito -&gt; App clients -&gt; Login pages -&gt; View login page.</p>
-<p>Enter the email and temporary password details that come in the email (don’t include the last full stop!).</p>
-<p>Change your password.</p>
-<section id="set-mfa-optional" class="level2">
-<h2 class="anchored" data-anchor-id="set-mfa-optional">Set MFA (optional)</h2>
-<p>On the Cognito user pool page you can also enable MFA, if you are using an SSL certificate with Cognito login on the Application Load Balancer. Go to Cognito -&gt; your user pool -&gt; Sign in -&gt; Multi-factor authentication</p>
 </section>
 </section>
-<section id="create-cloudfront-distribution" class="level1">
-<h1>Create CloudFront distribution</h1>
+<section id="additional-manual-tasks" class="level2">
+<h2 class="anchored" data-anchor-id="additional-manual-tasks">Additional Manual Tasks</h2>
+<section id="update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate" class="level3">
+<h3 class="anchored" data-anchor-id="update-dns-records-for-your-domain-if-using-a-domain-for-the-ssl-certificate">Update DNS records for your domain (If using a domain for the SSL certificate)</h3>
+<p>If the SSL certificate you are using is associated with a domain, you will need to update the DNS records for your domain registered with the AWS SSL certificate. To do this, you need to create a CNAME DNS record for your domain pointing to your load balancer DNS from a subdomain of your main domain registration, e.g., <code>redaction.&lt;domain-name&gt;</code>.</p>
+</section>
+<section id="create-a-user-in-cognito" class="level3">
+<h3 class="anchored" data-anchor-id="create-a-user-in-cognito">Create a user in Cognito</h3>
+<p>You will next need to a create a user in Cognito to be able to log into the app.</p>
+<ul>
+<li>Go to Cognito and create a user with your own email address. Generate a password.</li>
+<li>Go to Cognito -&gt; App clients -&gt; Login pages -&gt; View login page.</li>
+<li>Enter the email and temporary password details that come in the email (don’t include the last full stop!).</li>
+<li>Change your password on the screen that pops up. You should now be able to login to the app.</li>
+</ul>
+</section>
+<section id="set-multi-factor-authentication-for-cognito-loginsoptional-but-recommended" class="level3">
+<h3 class="anchored" data-anchor-id="set-multi-factor-authentication-for-cognito-loginsoptional-but-recommended">Set Multi-Factor Authentication for Cognito logins(optional but recommended)</h3>
+<p>On the Cognito user pool page you can also enable MFA, if you are using an SSL certificate with Cognito login on the Application Load Balancer. Go to Cognito -&gt; your user pool -&gt; Sign in -&gt; Multi-factor authentication.</p>
+</section>
+<section id="create-cloudfront-distribution" class="level3">
+<h3 class="anchored" data-anchor-id="create-cloudfront-distribution">Create CloudFront distribution</h3>
 <p><strong>Note: this is only relevant if you set <code>RUN_USEAST_STACK</code> to ‘False’ during CDK deployment</strong></p>
 <p>If you were not able to create a CloudFront distribution via CDK, you should be able to do it through console. I would advise using CloudFront as the front end to the app.</p>
 <p>Create a new CloudFront distribution.</p>
@@ -384,25 +401,27 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </ul></li>
 </ul></li>
 </ul>
-<section id="security-features" class="level2">
-<h2 class="anchored" data-anchor-id="security-features">Security features</h2>
-<p>In your CloudFront distribution, under ‘Security’ -&gt; Edit -&gt; Enable security protections.</p>
-<p>Choose rate limiting (default is fine).</p>
-<p>Create.</p>
-<p>In CloudFront geographic restrictions -&gt; Countries -&gt; choose an Allow list of countries.</p>
-<p>Click again on Edit.</p>
-<p>AWS WAF protection enabled you should see a link titled ‘View details of your configuration’.</p>
-<p>Go to Rules -&gt; <code>AWS-AWSManagedRulesCommonRuleSet</code>, click Edit.</p>
-<p>Under <code>SizeRestrictions_BODY</code> choose rule action override ‘Override to Allow’. This is needed to allow for file upload to the app.</p>
+<section id="security-features" class="level4">
+<h4 class="anchored" data-anchor-id="security-features">Security features</h4>
+<p>You can add security features to your CloudFront distribution (recommended). If you use WAF, you will also need to change the default settings to allow for file upload to the app.</p>
+<ul>
+<li>In your CloudFront distribution, under ‘Security’ -&gt; Edit -&gt; Enable security protections.</li>
+<li>Choose rate limiting (default is fine). Then click Create.</li>
+<li>In CloudFront geographic restrictions -&gt; Countries -&gt; choose an Allow list of countries.</li>
+<li>Click again on Edit.</li>
+<li>In AWS WAF protection enabled you should see a link titled ‘View details of your configuration’.</li>
+<li>Go to Rules -&gt; <code>AWS-AWSManagedRulesCommonRuleSet</code>, click Edit.</li>
+<li>Under <code>SizeRestrictions_BODY</code> choose rule action override ‘Override to Allow’. This is needed to allow for file upload to the app.</li>
+</ul>
 </section>
 </section>
-<section id="change-cognito-redirection-url-to-your-cloudfront-distribution" class="level1">
-<h1>Change Cognito redirection URL to your CloudFront distribution</h1>
+<section id="change-cognito-redirection-url-to-your-cloudfront-distribution" class="level3">
+<h3 class="anchored" data-anchor-id="change-cognito-redirection-url-to-your-cloudfront-distribution">Change Cognito redirection URL to your CloudFront distribution</h3>
 <p>Go to Cognito -&gt; your user pool -&gt; App Clients -&gt; Login pages -&gt; Managed login configuration.</p>
 <p>Ensure that the callback URL is: * If not using an SSL certificate and Cognito login - <code>https://&lt;CloudFront domain name&gt;</code> * If using an SSL certificate, you should have three: * <code>https://&lt;CloudFront domain name&gt;</code> * <code>https://&lt;CloudFront domain name&gt;/oauth2/idpresponse</code> * <code>https://&lt;CloudFront domain name&gt;/oauth/idpresponse</code></p>
 </section>
-<section id="force-traffic-to-come-from-specific-cloudfront-distribution-optional" class="level1">
-<h1>Force traffic to come from specific CloudFront distribution (optional)</h1>
+<section id="force-traffic-to-come-from-specific-cloudfront-distribution-optional" class="level3">
+<h3 class="anchored" data-anchor-id="force-traffic-to-come-from-specific-cloudfront-distribution-optional">Force traffic to come from specific CloudFront distribution (optional)</h3>
 <p>Note that this only potentially helps with security if you are not using an SSL certificate with Cognito login on your application load balancer.</p>
 <p>Go to EC2 - Load Balancers -&gt; Your load balancer -&gt; Listeners -&gt; Your listener -&gt; Add rule.</p>
 <ul>
@@ -417,8 +436,11 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <ul>
 <li>Under Routing action change to ‘Return fixed response’.</li>
 </ul>
+<p>You should now have successfully installed the document redaction app in an AWS environment using CDK.</p>
 
 
+</section>
+</section>
 </section>
 
 <a onclick="window.scrollTo(0, 0); return false;" role="button" id="quarto-back-to-top"><i class="bi bi-arrow-up"></i> Back to top</a></main> <!-- /main -->
