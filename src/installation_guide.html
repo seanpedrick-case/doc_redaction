@@ -235,30 +235,27 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <h2 class="anchored" data-anchor-id="steps-to-install-the-app-using-cdk">Steps to install the app using CDK</h2>
 <section id="create-a-python-environment-load-in-packages-from-requirements.txt." class="level3">
 <h3 class="anchored" data-anchor-id="create-a-python-environment-load-in-packages-from-requirements.txt.">1. Create a python environment, load in packages from <code>requirements.txt</code>.</h3>
-<pre><code>You need a `cdk.json` in the `cdk` folder. It should contain the following:
-
-```json
-{
-    "app": "&lt;PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED&gt;/python.exe app.py",
-    "context": {
-      "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true,
-      "@aws-cdk/core:stackRelativeExports": true,
-      "@aws-cdk/aws-rds:lowercaseDbIdentifier": true,
-      "@aws-cdk/aws-lambda:recognizeVersionProps": true,
-      "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
-      "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
-      "@aws-cdk/aws-ecs:arnFormatIncludesClusterName": true,
-      "@aws-cdk/core:newStyleStackSynthesis": true,
-      "aws-cdk:enableDiffNoFail": true,
-      "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": true,
-      "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,
-      "@aws-cdk/core:target-partitions": [
-        "aws",
-        "aws-cn"
-      ]
-    }
-  }
-```</code></pre>
+<p>You need a <code>cdk.json</code> in the <code>cdk</code> folder. It should contain the following:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json code-with-copy"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"app"</span><span class="fu">:</span> <span class="st">"&lt;PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED&gt;/python.exe app.py"</span><span class="fu">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"context"</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:stackRelativeExports"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-rds:lowercaseDbIdentifier"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeVersionProps"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeLayerVersion"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ecs:arnFormatIncludesClusterName"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:newStyleStackSynthesis"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"aws-cdk:enableDiffNoFail"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ec2:restrictDefaultSecurityGroup"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:disableCloudWatchRole"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:target-partitions"</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws"</span><span class="ot">,</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws-cn"</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>        <span class="ot">]</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </section>
 <section id="create-a-cdk_config.env-file-in-the-config-subfolder." class="level3">
 <h3 class="anchored" data-anchor-id="create-a-cdk_config.env-file-in-the-config-subfolder.">2. Create a <code>cdk_config.env</code> file in the <code>config</code> subfolder.</h3>
@@ -266,24 +263,20 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <section id="deploying-the-app-an-a-brand-new-vpc" class="level4">
 <h4 class="anchored" data-anchor-id="deploying-the-app-an-a-brand-new-vpc">Deploying the app an a brand new VPC</h4>
 <p>Here as a minimum it would be useful to put the following details in the cdk_config.env file (below are all example values, other possible variables to use here can be seen in the <code>cdk</code> folder/<code>cdk_config.py</code>).</p>
-<pre><code>```ini
-CDK_PREFIX=example-prefix # This prefix will be added to the name of most of the created elements in your stack
-NEW_VPC_CIDR=10.0.0.0/24 # The CIDR range for your newly created VPC
-AWS_REGION=&lt;your-region&gt; # Region where elements will be created
-AWS_ACCOUNT_ID=1234567890 # AWS account ID that has administrator access that you will use for deploying the stack
-CDK_FOLDER=C:/path_to_cdk_folder/ # The place where the cdk folder code is located
-CONTEXT_FILE=C:/path_to_cdk_folder/cdk.context.json
-
-COGNITO_USER_POOL_DOMAIN_PREFIX=redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.
-COGNITO_AUTH=1 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  
-USE_CLOUDFRONT=True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.
-RUN_USEAST_STACK=False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).
-CLOUDFRONT_DOMAIN=&lt;example&gt;.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.
-# If you are using an SSL certificate with your ALB (highly recommended):
-ACM_SSL_CERTIFICATE_ARN=&lt;SSL Certificate ARN&gt; # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager
-SSL_CERTIFICATE_DOMAIN=redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager
-
-```</code></pre>
+<div class="sourceCode" id="cb3"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_PREFIX</span><span class="ot">=</span><span class="st">example-prefix # This prefix will be added to the name of most of the created elements in your stack</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="dt">NEW_VPC_CIDR</span><span class="ot">=</span><span class="st">10.0.0.0/24 # The CIDR range for your newly created VPC</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_REGION</span><span class="ot">=</span><span class="st">&lt;your-region&gt; # Region where elements will be created</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_ACCOUNT_ID</span><span class="ot">=</span><span class="st">1234567890 # AWS account ID that has administrator access that you will use for deploying the stack</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_FOLDER</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/ # The place where the cdk folder code is located</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="dt">CONTEXT_FILE</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/cdk.context.json</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_USER_POOL_DOMAIN_PREFIX</span><span class="ot">=</span><span class="st">redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">1 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  </span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_CLOUDFRONT</span><span class="ot">=</span><span class="st">True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_USEAST_STACK</span><span class="ot">=</span><span class="st">False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a><span class="dt">CLOUDFRONT_DOMAIN</span><span class="ot">=</span><span class="st">&lt;example&gt;.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a><span class="co"># If you are using an SSL certificate with your ALB (highly recommended):</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a><span class="dt">ACM_SSL_CERTIFICATE_ARN</span><span class="ot">=</span><span class="st">&lt;SSL Certificate ARN&gt; # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager</span></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="dt">SSL_CERTIFICATE_DOMAIN</span><span class="ot">=</span><span class="st">redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Note: If you are using an SSL certificate with Cognito login on the application load balancer (strongly advised), you can set COGNITO_AUTH to 0 above, as you don’t need the second login step to get to the app</strong></p>
 </section>
 <section id="in-an-existing-vpc" class="level4">
