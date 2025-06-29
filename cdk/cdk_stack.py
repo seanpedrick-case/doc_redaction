@@ -21,11 +21,12 @@ from aws_cdk import (
     aws_elasticloadbalancingv2 as elbv2,
     aws_logs as logs,
     aws_wafv2 as wafv2,
+    aws_kms as kms,
     aws_dynamodb as dynamodb # Import the DynamoDB module    
 )
 
 from constructs import Construct
-from cdk_config import CDK_PREFIX, VPC_NAME, AWS_MANAGED_TASK_ROLES_LIST, GITHUB_REPO_USERNAME, GITHUB_REPO_NAME, GITHUB_REPO_BRANCH, ECS_TASK_MEMORY_SIZE, ECS_TASK_CPU_SIZE, CUSTOM_HEADER, CUSTOM_HEADER_VALUE, AWS_REGION, CLOUDFRONT_GEO_RESTRICTION, DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS, GRADIO_SERVER_PORT, PUBLIC_SUBNETS_TO_USE, PUBLIC_SUBNET_CIDR_BLOCKS, PUBLIC_SUBNET_AVAILABILITY_ZONES, PRIVATE_SUBNETS_TO_USE, PRIVATE_SUBNET_CIDR_BLOCKS, PRIVATE_SUBNET_AVAILABILITY_ZONES, CODEBUILD_PROJECT_NAME, ECS_SECURITY_GROUP_NAME, ALB_NAME_SECURITY_GROUP_NAME, ALB_NAME, COGNITO_USER_POOL_NAME, COGNITO_USER_POOL_CLIENT_NAME, COGNITO_USER_POOL_CLIENT_SECRET_NAME, FARGATE_TASK_DEFINITION_NAME, ECS_SERVICE_NAME, WEB_ACL_NAME, CLOUDFRONT_DISTRIBUTION_NAME, ECS_TASK_ROLE_NAME, ALB_TARGET_GROUP_NAME, S3_LOG_CONFIG_BUCKET_NAME, S3_OUTPUT_BUCKET_NAME, ACM_CERTIFICATE_ARN, CLUSTER_NAME, CODEBUILD_ROLE_NAME, ECS_TASK_EXECUTION_ROLE_NAME, ECR_CDK_REPO_NAME, ECS_LOG_GROUP_NAME, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, TASK_DEFINITION_FILE_LOCATION, EXISTING_IGW_ID, SINGLE_NAT_GATEWAY_ID, NAT_GATEWAY_NAME, COGNITO_USER_POOL_DOMAIN_PREFIX, COGNITO_REDIRECTION_URL, AWS_ACCOUNT_ID, ECS_USE_FARGATE_SPOT, ECS_READ_ONLY_FILE_SYSTEM, USE_CLOUDFRONT, LOAD_BALANCER_WEB_ACL_NAME
+from cdk_config import CDK_PREFIX, VPC_NAME, AWS_MANAGED_TASK_ROLES_LIST, GITHUB_REPO_USERNAME, GITHUB_REPO_NAME, GITHUB_REPO_BRANCH, ECS_TASK_MEMORY_SIZE, ECS_TASK_CPU_SIZE, CUSTOM_HEADER, CUSTOM_HEADER_VALUE, AWS_REGION, CLOUDFRONT_GEO_RESTRICTION, DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS, GRADIO_SERVER_PORT, PUBLIC_SUBNETS_TO_USE, PUBLIC_SUBNET_CIDR_BLOCKS, PUBLIC_SUBNET_AVAILABILITY_ZONES, PRIVATE_SUBNETS_TO_USE, PRIVATE_SUBNET_CIDR_BLOCKS, PRIVATE_SUBNET_AVAILABILITY_ZONES, CODEBUILD_PROJECT_NAME, ECS_SECURITY_GROUP_NAME, ALB_NAME_SECURITY_GROUP_NAME, ALB_NAME, COGNITO_USER_POOL_NAME, COGNITO_USER_POOL_CLIENT_NAME, COGNITO_USER_POOL_CLIENT_SECRET_NAME, FARGATE_TASK_DEFINITION_NAME, ECS_SERVICE_NAME, WEB_ACL_NAME, CLOUDFRONT_DISTRIBUTION_NAME, ECS_TASK_ROLE_NAME, ALB_TARGET_GROUP_NAME, S3_LOG_CONFIG_BUCKET_NAME, S3_OUTPUT_BUCKET_NAME, ACM_SSL_CERTIFICATE_ARN, CLUSTER_NAME, CODEBUILD_ROLE_NAME, ECS_TASK_EXECUTION_ROLE_NAME, ECR_CDK_REPO_NAME, ECS_LOG_GROUP_NAME, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, TASK_DEFINITION_FILE_LOCATION, EXISTING_IGW_ID, SINGLE_NAT_GATEWAY_ID, NAT_GATEWAY_NAME, COGNITO_USER_POOL_DOMAIN_PREFIX, COGNITO_REDIRECTION_URL, AWS_ACCOUNT_ID, ECS_USE_FARGATE_SPOT, ECS_READ_ONLY_FILE_SYSTEM, USE_CLOUDFRONT, LOAD_BALANCER_WEB_ACL_NAME, NEW_VPC_DEFAULT_NAME, NEW_VPC_CIDR, USE_CUSTOM_KMS_KEY, S3_KMS_KEY_NAME
 from cdk_functions import create_subnets, create_web_acl_with_common_rules, add_custom_policies, add_alb_https_listener_with_cert, create_nat_gateway # Only keep CDK-native functions
 
 def _get_env_list(env_var_name: str) -> List[str]:
@@ -67,20 +68,80 @@ class CdkStack(Stack):
                 print(f"Warning: Context key '{key}' not found or not a list. Returning empty list.")
                 return []
             # Optional: Add validation that all items in the list are dicts
-            return ctx_value       
+            return ctx_value
+
+        self.template_options.description = "Deployment of the 'doc_redaction' PDF, image, and XLSX/CSV redaction app. Git repo available at: https://github.com/seanpedrick-case/doc_redaction."  
 
 
         # --- VPC and Subnets (Assuming VPC is always lookup, Subnets are created/returned by create_subnets) ---
-        # --- VPC Lookup (Always lookup as per your assumption) ---
-        try:
-            vpc = ec2.Vpc.from_lookup(
+        new_vpc_created = False
+        if VPC_NAME:
+            print("Looking for current VPC:", VPC_NAME)
+            try:
+                vpc = ec2.Vpc.from_lookup(
+                    self,
+                    "VPC",
+                    vpc_name=VPC_NAME
+                )
+                print("Successfully looked up VPC:", vpc.vpc_id)
+            except Exception as e:
+                raise Exception(f"Could not look up VPC with name '{VPC_NAME}' due to: {e}")
+        
+        elif NEW_VPC_DEFAULT_NAME:
+            new_vpc_created = True
+            print(f"NEW_VPC_DEFAULT_NAME ('{NEW_VPC_DEFAULT_NAME}') is set. Creating a new VPC.")
+
+            # Configuration for the new VPC
+            # You can make these configurable via context as well, e.g.,
+            # new_vpc_cidr = self.node.try_get_context("new_vpc_cidr") or "10.0.0.0/24"
+            # new_vpc_max_azs = self.node.try_get_context("new_vpc_max_azs") or 2 # Use 2 AZs by default for HA
+            # new_vpc_nat_gateways = self.node.try_get_context("new_vpc_nat_gateways") or new_vpc_max_azs # One NAT GW per AZ for HA
+                                                                                                    # or 1 for cost savings if acceptable
+            if not NEW_VPC_CIDR:
+                raise Exception("App has been instructed to create a new VPC but not VPC CDR range provided to variable NEW_VPC_CIDR")
+            
+            print("Provided NEW_VPC_CIDR range:", NEW_VPC_CIDR)
+
+            new_vpc_cidr = NEW_VPC_CIDR
+            new_vpc_max_azs = 2 # Creates resources in 2 AZs. Adjust as needed.
+            
+            # For "a NAT gateway", you can set nat_gateways=1.
+            # For resilience (NAT GW per AZ), set nat_gateways=new_vpc_max_azs.
+            # The Vpc construct will create NAT Gateway(s) if subnet_type PRIVATE_WITH_EGRESS is used
+            # and nat_gateways > 0.
+            new_vpc_nat_gateways = 1 # Creates a single NAT Gateway for cost-effectiveness.
+                                     # If you need one per AZ for higher availability, set this to new_vpc_max_azs.
+
+            vpc = ec2.Vpc(
                 self,
-                "VPC",
-                vpc_name=VPC_NAME
+                "MyNewLogicalVpc", # This is the CDK construct ID
+                vpc_name=NEW_VPC_DEFAULT_NAME,
+                ip_addresses=ec2.IpAddresses.cidr(new_vpc_cidr),
+                max_azs=new_vpc_max_azs,
+                nat_gateways=new_vpc_nat_gateways, # Number of NAT gateways to create
+                subnet_configuration=[
+                    ec2.SubnetConfiguration(
+                        name="Public", # Name prefix for public subnets
+                        subnet_type=ec2.SubnetType.PUBLIC,
+                        cidr_mask=28  # Adjust CIDR mask as needed (e.g., /24 provides ~250 IPs per subnet)
+                    ),
+                    ec2.SubnetConfiguration(
+                        name="Private", # Name prefix for private subnets
+                        subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, # Ensures these subnets have NAT Gateway access
+                        cidr_mask=28  # Adjust CIDR mask as needed
+                    )
+                    # You could also add ec2.SubnetType.PRIVATE_ISOLATED if needed
+                ],
+                # Internet Gateway is created and configured automatically for PUBLIC subnets.
+                # Route tables for public subnets will point to the IGW.
+                # Route tables for PRIVATE_WITH_EGRESS subnets will point to the NAT Gateway(s).
             )
-            print("Successfully looked up VPC:", vpc.vpc_id)
-        except Exception as e:
-            raise Exception(f"Could not look up VPC with name '{VPC_NAME}' due to: {e}")
+            print(f"Successfully created new VPC: {vpc.vpc_id} with name '{NEW_VPC_DEFAULT_NAME}'")
+            # If nat_gateways > 0, vpc.nat_gateway_ips will contain EIPs if Vpc created them.
+            # vpc.public_subnets, vpc.private_subnets, vpc.isolated_subnets are populated.            
+
+        else:
+            raise Exception("VPC_NAME for current VPC not found, and NEW_VPC_DEFAULT_NAME not found to create a new VPC")
         
         # --- Subnet Handling (Check Context and Create/Import) ---
         # Initialize lists to hold ISubnet objects (L2) and CfnSubnet/CfnRouteTable (L1)
@@ -100,35 +161,68 @@ class CdkStack(Stack):
             print("vpc.public_subnets:", vpc.public_subnets)
             print("vpc.private_subnets:", vpc.private_subnets)
 
-            # public_subnets_by_az: Dict[str, List[ec2.ISubnet]] = {}
-            # private_subnets_by_az: Dict[str, List[ec2.ISubnet]] = {}
+            if vpc.public_subnets: # These are already one_per_az if max_azs was used and Vpc created them
+                self.public_subnets.extend(vpc.public_subnets)
+            else:
+                self.node.add_warning("No public subnets found in the VPC.")
 
-            # Iterate through the subnets exposed by the Vpc L2 construct.
-            # for subnet in vpc.public_subnets:
-            #     az = subnet.availability_zone
-            #     if az not in public_subnets_by_az:
-            #         public_subnets_by_az[az] = []
-            #     public_subnets_by_az[az].append(subnet)
+            # Get private subnets with egress specifically
+            #selected_private_subnets_with_egress = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)           
 
+            print(f"Selected from VPC: {len(self.public_subnets)} public, {len(self.private_subnets)} private_with_egress subnets.")
+
+            if len(self.public_subnets) < 1 or len(self.private_subnets) < 1 : # Simplified check for new VPC
+                 # If new_vpc_max_azs was 1, you'd have 1 of each. If 2, then 2 of each.
+                 # The original check ' < 2' might be too strict if new_vpc_max_azs=1
+                 pass # For new VPC, allow single AZ setups if configured that way. The VPC construct ensures one per AZ up to max_azs.
+
+            if not self.public_subnets and not self.private_subnets:
+                print("Error: No public or private subnets could be found in the VPC for automatic selection. "
+                      "You must either specify subnets in *_SUBNETS_TO_USE or ensure the VPC has discoverable subnets.")
+                raise RuntimeError("No suitable subnets found for automatic selection.")
+            else:
+                print(f"Automatically selected {len(self.public_subnets)} public and {len(self.private_subnets)} private subnets based on VPC properties.")
+            
             selected_public_subnets = vpc.select_subnets(subnet_type=ec2.SubnetType.PUBLIC, one_per_az=True)
             private_subnets_egress = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, one_per_az=True)
-            private_subnets_isolated = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, one_per_az=True)
-
-            combined_subnet_objects = []
 
             if private_subnets_egress.subnets:
-                # Add the first PRIVATE_WITH_EGRESS subnet
-                combined_subnet_objects.append(private_subnets_egress.subnets[0])
+                self.private_subnets.extend(private_subnets_egress.subnets)
+            else:
+                self.node.add_warning("No PRIVATE_WITH_EGRESS subnets found in the VPC.")
+
+            try:
+                private_subnets_isolated = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, one_per_az=True)
+            except Exception as e:
+                private_subnets_isolated = []
+                print("Could not find any isolated subnets due to:", e)
+
+            
+
+            ###
+            combined_subnet_objects = []
+
+            if private_subnets_isolated:
+                if private_subnets_egress.subnets:
+                    # Add the first PRIVATE_WITH_EGRESS subnet
+                    combined_subnet_objects.append(private_subnets_egress.subnets[0])
+            elif not private_subnets_isolated:
+                if private_subnets_egress.subnets:
+                    # Add the first PRIVATE_WITH_EGRESS subnet
+                    combined_subnet_objects.extend(private_subnets_egress.subnets)
             else:
                 self.node.add_warning("No PRIVATE_WITH_EGRESS subnets found to select the first one.")
 
             # Add all PRIVATE_ISOLATED subnets *except* the first one (if they exist)
-            if len(private_subnets_isolated.subnets) > 1:
-                combined_subnet_objects.extend(private_subnets_isolated.subnets[1:])
-            elif private_subnets_isolated.subnets: # Only 1 isolated subnet, add a warning if [1:] was desired
-                self.node.add_warning("Only one PRIVATE_ISOLATED subnet found, private_subnets_isolated.subnets[1:] will be empty.")
-            else:
-                self.node.add_warning("No PRIVATE_ISOLATED subnets found.")
+            try:
+                if len(private_subnets_isolated.subnets) > 1:
+                    combined_subnet_objects.extend(private_subnets_isolated.subnets[1:])
+                elif private_subnets_isolated.subnets: # Only 1 isolated subnet, add a warning if [1:] was desired
+                    self.node.add_warning("Only one PRIVATE_ISOLATED subnet found, private_subnets_isolated.subnets[1:] will be empty.")
+                else:
+                    self.node.add_warning("No PRIVATE_ISOLATED subnets found.")
+            except Exception as e:
+                print("Could not identify private isolated subnets due to:", e)
 
             # Create an ec2.SelectedSubnets object from the combined private subnet list.
             selected_private_subnets = vpc.select_subnets(
@@ -138,29 +232,6 @@ class CdkStack(Stack):
             print("selected_public_subnets:", selected_public_subnets)
             print("selected_private_subnets:", selected_private_subnets)
 
-
-            #self.private_route_tables_cfn = []
-
-            # for subnet in vpc.private_subnets:
-            #     az = subnet.availability_zone
-            #     if az not in private_subnets_by_az:
-            #         private_subnets_by_az[az] = []
-            #     private_subnets_by_az[az].append(subnet)
-
-            #selected_public_subnets: List[ec2.ISubnet] = []
-            #selected_private_subnets: List[ec2.ISubnet] = []
-
-            # Select one public subnet per AZ, preferring the first one found
-            # for az in sorted(public_subnets_by_az.keys()):
-            #     if public_subnets_by_az[az]:
-            #         selected_public_subnets.append(public_subnets_by_az[az][0])
-            #         print(f"Selected existing public subnet: {public_subnets_by_az[az][0].subnet_id} from AZ {az}.")
-
-            # Select one private subnet per AZ, preferring the first one found
-            # for az in sorted(private_subnets_by_az.keys()):
-            #     if private_subnets_by_az[az]:
-            #         selected_private_subnets.append(private_subnets_by_az[az][0])
-            #         print(f"Selected existing private subnet: {private_subnets_by_az[az][0].subnet_id} from AZ {az}.")
 
             if len(selected_public_subnets.subnet_ids) < 2 or len(selected_private_subnets.subnet_ids) < 2:
                 raise Exception("Need at least two public or private subnets in different availability zones")
@@ -222,11 +293,11 @@ class CdkStack(Stack):
                 self.public_subnets.extend(newly_created_public_subnets)
                 self.public_route_tables_cfn.extend(newly_created_public_rts_cfn)
 
-        if not self.public_subnets:
-            raise Exception("No public subnets found or created, exiting.")
-        
+        if not self.public_subnets and not names_to_create_public and not PUBLIC_SUBNETS_TO_USE :
+            raise Exception("No public subnets found or created, exiting.")        
 
         # --- NAT Gateway Creation/Lookup ---
+        print("Creating NAT gateway/located existing")
         self.single_nat_gateway_id = None
 
         nat_gw_id_from_context = SINGLE_NAT_GATEWAY_ID
@@ -234,9 +305,20 @@ class CdkStack(Stack):
         if nat_gw_id_from_context:
             print(f"Using existing NAT Gateway ID from context: {nat_gw_id_from_context}")
             self.single_nat_gateway_id = nat_gw_id_from_context
-        else:
-            # If not in context, create a new one, but only if we have a public subnet.
-            if self.public_subnets:
+
+        elif new_vpc_created and new_vpc_nat_gateways > 0 and hasattr(vpc, 'nat_gateways') and vpc.nat_gateways:
+            self.single_nat_gateway_id = vpc.nat_gateways[0].gateway_id
+            print(f"Using NAT Gateway {self.single_nat_gateway_id} created by the new VPC construct.")
+
+        if not self.single_nat_gateway_id:
+            print("Creating a new NAT gateway")
+
+            if hasattr(vpc, 'nat_gateways') and vpc.nat_gateways:
+                print("Existing NAT gateway found in vpc")
+                pass
+            
+                # If not in context, create a new one, but only if we have a public subnet.
+            elif self.public_subnets:
                 print("NAT Gateway ID not found in context. Creating a new one.")
                 # Place the NAT GW in the first available public subnet
                 first_public_subnet = self.public_subnets[0]
@@ -248,7 +330,7 @@ class CdkStack(Stack):
                     nat_gateway_id_context_key=SINGLE_NAT_GATEWAY_ID
                 )
             else:
-                print("WARNING: No public subnets available. Cannot create a NAT Gateway.")
+                print("WARNING: No public subnets available and NAT gateway not found in existing VPC. Cannot create a NAT Gateway.")
 
 
         # --- 4. Process Private Subnets ---
@@ -280,17 +362,24 @@ class CdkStack(Stack):
         else:
             print("No private subnets specified for creation in context ('private_subnets_to_create').")
 
-        if not self.private_subnets:
+        # if not self.private_subnets:
+        #     raise Exception("No private subnets found or created, exiting.")
+        
+        if not self.private_subnets and not names_to_create_private and not PRIVATE_SUBNETS_TO_USE:
+            # This condition might need adjustment for new VPCs.
             raise Exception("No private subnets found or created, exiting.")
 
         # --- 5. Sanity Check and Output ---
-
-        # Output the single NAT Gateway ID for verification
+        # Output the single NAT Gateway ID for verification        
         if self.single_nat_gateway_id:
             CfnOutput(self, "SingleNatGatewayId", value=self.single_nat_gateway_id,
-                      description="ID of the single NAT Gateway used for private subnets.")
+                      description="ID of the single NAT Gateway resolved or created.")
+        elif NEW_VPC_DEFAULT_NAME and (self.node.try_get_context("new_vpc_nat_gateways") or 1) > 0:
+            print("INFO: A new VPC was created with NAT Gateway(s). Their routing is handled by the VPC construct. No single_nat_gateway_id was explicitly set for separate output.")
         else:
-            raise Exception("No single NAT Gateway was created or resolved.")
+            out_message = "WARNING: No single NAT Gateway was resolved or created explicitly by the script's logic after VPC setup."
+            print(out_message)
+            raise Exception(out_message)
 
         # --- Outputs for other stacks/regions ---
         # These are crucial for cross-stack, cross-region referencing
@@ -303,34 +392,6 @@ class CdkStack(Stack):
         self.params["public_route_tables"] = self.public_route_tables_cfn
 
 
-#class CdkStackMain(Stack):
- #   def __init__(self, scope: Construct, construct_id: str, private_subnets:List[ec2.ISubnet]=[], private_route_tables: List[ec2.CfnRouteTable]=[], public_subnets:List[ec2.ISubnet]=[], public_route_tables: List[ec2.CfnRouteTable]=[], **kwargs) -> None:
-  #      super().__init__(scope, construct_id, **kwargs)
-
-        # --- Helper to get context values ---
-        # def get_context_bool(key: str, default: bool = False) -> bool:
-        #     return self.node.try_get_context(key) or default
-
-        # def get_context_str(key: str, default: str = None) -> str:
-        #      return self.node.try_get_context(key) or default
-        
-        # def get_context_dict(key: str, default: dict = None) -> dict:
-        #     return self.node.try_get_context(key) or default
-        
-        # def get_context_list_of_dicts(key: str) -> List[Dict[str, Any]]:
-        #     ctx_value = self.node.try_get_context(key)
-
-        #     if not isinstance(ctx_value, list):
-        #         print(f"Warning: Context key '{key}' not found or not a list. Returning empty list.")
-        #         return []
-        #     # Optional: Add validation that all items in the list are dicts
-        #     return ctx_value
-        
-        # self.private_subnets: List[ec2.ISubnet] = private_subnets
-        # self.private_route_tables_cfn: List[ec2.CfnRouteTable] = private_route_tables
-        # self.public_subnets: List[ec2.ISubnet] = public_subnets
-        # self.public_route_tables_cfn: List[ec2.CfnRouteTable] = public_route_tables
-
         private_subnet_selection = ec2.SubnetSelection(subnets=self.private_subnets)
         public_subnet_selection = ec2.SubnetSelection(subnets=self.public_subnets)  
 
@@ -339,16 +400,6 @@ class CdkStack(Stack):
 
         for sub in public_subnet_selection.subnets:
             print("public subnet:", sub.subnet_id, "is in availability zone:", sub.availability_zone)
-
-        # try:
-        #     vpc = ec2.Vpc.from_lookup(
-        #         self,
-        #         "VPC",
-        #         vpc_name=VPC_NAME
-        #     )
-        #     print("Successfully looked up VPC")
-        # except Exception as e:
-        #     raise Exception(f"Could not look up VPC with name '{VPC_NAME}' due to: {e}")
 
         print("Private subnet route tables:", self.private_route_tables_cfn)
 
@@ -368,31 +419,60 @@ class CdkStack(Stack):
                 description="The id for the S3 Gateway Endpoint.") # Specify the S3 service
 
         # --- IAM Roles ---
-        try:
-            codebuild_role_name = CODEBUILD_ROLE_NAME
-            custom_sts_kms_policy = """{
-"Version": "2012-10-17",
-"Statement": [
-    {
-        "Sid": "STSCallerIdentity",
-        "Effect": "Allow",
-        "Action": [
-            "sts:GetCallerIdentity"
-        ],
-        "Resource": "*"
-    },
-    {
-      "Sid": "KMSAccess",
-      "Effect": "Allow",
-      "Action": [
-        "kms:Encrypt",
-        "kms:Decrypt",
-        "kms:GenerateDataKey"
-      ],
-      "Resource": "*"
+        if USE_CUSTOM_KMS_KEY == '1':
+            kms_key = kms.Key(self, "RedactionSharedKmsKey", alias=S3_KMS_KEY_NAME, removal_policy=RemovalPolicy.DESTROY)
+
+            custom_sts_kms_policy_dict = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "STSCallerIdentity",
+                "Effect": "Allow",
+                "Action": [
+                    "sts:GetCallerIdentity"
+                ],
+                "Resource": "*"
+            },
+            {
+              "Sid": "KMSAccess",
+              "Effect": "Allow",
+              "Action": [
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:GenerateDataKey"
+              ],
+              "Resource": kms_key.key_arn # Use key_arn, as it's the full ARN, safer than key_id
+            }
+        ]
     }
-]
-}"""
+        else:
+            kms_key = None
+
+            custom_sts_kms_policy_dict = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "STSCallerIdentity",
+                "Effect": "Allow",
+                "Action": [
+                    "sts:GetCallerIdentity"
+                ],
+                "Resource": "*"
+            }  ,          
+        {
+                      "Sid": "KMSSecretsManagerDecrypt", # Explicitly add decrypt for default key
+                      "Effect": "Allow",
+                      "Action": [
+                        "kms:Decrypt"
+                      ],
+                      "Resource": f"arn:aws:kms:{AWS_REGION}:{AWS_ACCOUNT_ID}:key/aws/secretsmanager"
+                    }
+                ]
+            }
+        custom_sts_kms_policy = json.dumps(custom_sts_kms_policy_dict, indent=4)
+
+        try:
+            codebuild_role_name = CODEBUILD_ROLE_NAME            
 
             if get_context_bool(f"exists:{codebuild_role_name}"):
                 # If exists, lookup/import the role using ARN from context
@@ -458,13 +538,21 @@ class CdkStack(Stack):
                 bucket = s3.Bucket.from_bucket_name(self, "LogConfigBucket", bucket_name=log_bucket_name)
                 print("Using existing S3 bucket", log_bucket_name)
             else:
-                bucket = s3.Bucket(self, "LogConfigBucket", bucket_name=log_bucket_name,
-                versioned=False, # Set to True if you need versioning
-                # IMPORTANT: Set removal_policy to DESTROY
-                removal_policy=RemovalPolicy.DESTROY,
-                # IMPORTANT: Set auto_delete_objects to True to empty the bucket before deletion
-                auto_delete_objects=True
-                ) # Explicitly set bucket_name
+                if USE_CUSTOM_KMS_KEY == '1' and isinstance(kms_key, kms.Key):
+                    bucket = s3.Bucket(self, "LogConfigBucket", bucket_name=log_bucket_name,
+                    versioned=False,
+                    removal_policy=RemovalPolicy.DESTROY,
+                    auto_delete_objects=True,
+                    encryption=s3.BucketEncryption.KMS,
+                    encryption_key=kms_key
+                    )
+                else:                
+                    bucket = s3.Bucket(self, "LogConfigBucket", bucket_name=log_bucket_name,
+                    versioned=False,
+                    removal_policy=RemovalPolicy.DESTROY,
+                    auto_delete_objects=True
+                    )
+
                 print("Created S3 bucket", log_bucket_name)
 
             # Add policies - this will apply to both created and imported buckets
@@ -491,18 +579,31 @@ class CdkStack(Stack):
                 output_bucket = s3.Bucket.from_bucket_name(self, "OutputBucket", bucket_name=output_bucket_name)
                 print("Using existing Output bucket", output_bucket_name)
             else:
-                output_bucket = s3.Bucket(self, "OutputBucket", bucket_name=output_bucket_name,
-                     lifecycle_rules=[
+                if USE_CUSTOM_KMS_KEY == '1' and isinstance(kms_key, kms.Key):
+                    output_bucket = s3.Bucket(self, "OutputBucket", bucket_name=output_bucket_name,
+                    lifecycle_rules=[
                          s3.LifecycleRule(
                              expiration=Duration.days(int(DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS))
                          )
                      ],
-                    versioned=False, # Set to True if you need versioning
-                    # IMPORTANT: Set removal_policy to DESTROY
+                    versioned=False,
                     removal_policy=RemovalPolicy.DESTROY,
-                    # IMPORTANT: Set auto_delete_objects to True to empty the bucket before deletion
+                    auto_delete_objects=True,
+                    encryption=s3.BucketEncryption.KMS,
+                    encryption_key=kms_key
+                    )
+                else:                
+                    output_bucket = s3.Bucket(self, "OutputBucket", bucket_name=output_bucket_name,
+                    lifecycle_rules=[
+                         s3.LifecycleRule(
+                             expiration=Duration.days(int(DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS))
+                         )
+                     ],
+                    versioned=False,
+                    removal_policy=RemovalPolicy.DESTROY,
                     auto_delete_objects=True
-                )
+                    )
+
                 print("Created Output bucket:", output_bucket_name)
 
             # Add policies to output bucket
@@ -602,14 +703,7 @@ class CdkStack(Stack):
         # --- Security Groups ---
         try:
             ecs_security_group_name = ECS_SECURITY_GROUP_NAME
-            # Following checks by name don't really work
-            # Use CDK's from_lookup_by_name which handles lookup or throws an error if not found
-            #try:
-            #     ecs_security_group = ec2.SecurityGroup.from_lookup_by_name(
-            #         self, "ECSSecurityGroup", vpc=vpc, security_group_name=ecs_security_group_name
-            #     )
-            #     print(f"Using existing Security Group: {ecs_security_group_name}")
-            # except Exception: # If lookup fails, create
+
             try:
                  ecs_security_group = ec2.SecurityGroup(
                      self,
@@ -622,12 +716,7 @@ class CdkStack(Stack):
                 print("Failed to create ECS security group due to:", e)
 
             alb_security_group_name = ALB_NAME_SECURITY_GROUP_NAME
-            # try:
-            #     alb_security_group = ec2.SecurityGroup.from_lookup_by_name(
-            #         self, "ALBSecurityGroup", vpc=vpc, security_group_name=alb_security_group_name
-            #     )
-            #     print(f"Using existing Security Group: {alb_security_group_name}")
-            # except Exception: # If lookup fails, create
+
             try:
                 alb_security_group = ec2.SecurityGroup(
                     self,
@@ -717,8 +806,6 @@ class CdkStack(Stack):
                 print("Successfully created new Application Load Balancer")
         except Exception as e:
             raise Exception("Could not handle application load balancer due to:", e)
-        
-
 
         # --- Cognito User Pool ---
         try:
@@ -738,7 +825,7 @@ class CdkStack(Stack):
                 print(f"Created new user pool {user_pool.user_pool_id}.")
 
             # If you're using a certificate, assume that you will be using the ALB Cognito login features. You need different redirect URLs to accept the token that comes from Cognito authentication.                
-            if ACM_CERTIFICATE_ARN:
+            if ACM_SSL_CERTIFICATE_ARN:
                 redirect_uris = [COGNITO_REDIRECTION_URL, COGNITO_REDIRECTION_URL + "/oauth2/idpresponse"]
             else:
                 redirect_uris = [COGNITO_REDIRECTION_URL]
@@ -786,31 +873,39 @@ class CdkStack(Stack):
 
         # --- Secrets Manager Secret ---
         try:
-             secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
-             if get_context_bool(f"exists:{secret_name}"):
+            secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
+            if get_context_bool(f"exists:{secret_name}"):
                  # Lookup by name
                  secret = secretsmanager.Secret.from_secret_name_v2(self, "CognitoSecret", secret_name=secret_name)
                  print(f"Using existing Secret {secret_name}.")
-             else:
-                 secret = secretsmanager.Secret(self, "CognitoSecret", # Logical ID
-                     secret_name=secret_name, # Explicit resource name
-                     secret_object_value={
-                         "REDACTION_USER_POOL_ID": SecretValue.unsafe_plain_text(user_pool.user_pool_id), # Use the CDK attribute
-                         "REDACTION_CLIENT_ID": SecretValue.unsafe_plain_text(user_pool_client.user_pool_client_id), # Use the CDK attribute
-                         "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret # Use the CDK attribute
-                     }
-                 )
-                 print(f"Created new secret {secret_name}.")
+            else:
+                if USE_CUSTOM_KMS_KEY == '1' and isinstance(kms_key, kms.Key):
+                    secret = secretsmanager.Secret(self, "CognitoSecret", # Logical ID
+                        secret_name=secret_name, # Explicit resource name
+                        secret_object_value={
+                            "REDACTION_USER_POOL_ID": SecretValue.unsafe_plain_text(user_pool.user_pool_id), # Use the CDK attribute
+                            "REDACTION_CLIENT_ID": SecretValue.unsafe_plain_text(user_pool_client.user_pool_client_id), # Use the CDK attribute
+                            "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret # Use the CDK attribute
+                        },
+                        encryption_key=kms_key
+                    )
+                else:
+                    secret = secretsmanager.Secret(self, "CognitoSecret", # Logical ID
+                        secret_name=secret_name, # Explicit resource name
+                        secret_object_value={
+                            "REDACTION_USER_POOL_ID": SecretValue.unsafe_plain_text(user_pool.user_pool_id), # Use the CDK attribute
+                            "REDACTION_CLIENT_ID": SecretValue.unsafe_plain_text(user_pool_client.user_pool_client_id), # Use the CDK attribute
+                            "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret # Use the CDK attribute
+                        }
+                    )
+
+                print(f"Created new secret {secret_name}.")
 
         except Exception as e:
              raise Exception("Could not handle Secrets Manager secret due to:", e)
 
         # --- Fargate Task Definition ---
         try:
-            # For task definitions, re-creating with the same logical ID creates new revisions.
-            # If you want to use a *specific existing revision*, you'd need to look it up by ARN.
-            # If you want to update the latest revision, defining it here is the standard.
-            # Let's assume we always define it here to get revision management.
             fargate_task_definition_name = FARGATE_TASK_DEFINITION_NAME
 
             read_only_file_system = ECS_READ_ONLY_FILE_SYSTEM == 'True'     
@@ -906,8 +1001,8 @@ class CdkStack(Stack):
 
             cdk_managed_log_group = logs.LogGroup(self, "MyTaskLogGroup", # CDK Logical ID
             log_group_name=log_group_name_from_config,
-            retention=logs.RetentionDays.ONE_MONTH, # Example: set retention
-            removal_policy=RemovalPolicy.DESTROY # If you want it deleted when stack is deleted
+            retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY
             )
 
             epheremal_storage_volume_cdk_obj = ecs.Volume(
@@ -926,10 +1021,7 @@ class CdkStack(Stack):
                 cpu_architecture=ecs.CpuArchitecture.X86_64,
                 operating_system_family=ecs.OperatingSystemFamily.LINUX
             ),
-            # 1. Specify the total ephemeral storage for the task
             ephemeral_storage_gib=21, # Minimum is 21 GiB
-            # 2. Define the volume at the task level
-            # This volume will use the ephemeral storage configured above.
             volumes=[epheremal_storage_volume_cdk_obj]
             )
             print("Fargate task definition defined.")
@@ -1093,7 +1185,7 @@ class CdkStack(Stack):
             print(f"ALB listener on port {listener_port} defined.")
 
 
-            if ACM_CERTIFICATE_ARN:
+            if ACM_SSL_CERTIFICATE_ARN:
                 http_listener.add_action(
                         "DefaultAction", # Logical ID for the default action
                         action=elbv2.ListenerAction.redirect(protocol='HTTPS',
@@ -1135,7 +1227,7 @@ class CdkStack(Stack):
                 print("Added targets and actions to ALB HTTP listener.")            
 
             # Now the same for HTTPS if you have an ACM certificate
-            if ACM_CERTIFICATE_ARN:
+            if ACM_SSL_CERTIFICATE_ARN:
                 listener_port_https = 443
                 # Check if Listener exists - from_listener_arn or lookup by port/ALB                
 
@@ -1143,7 +1235,7 @@ class CdkStack(Stack):
                 self,
                 "MyHttpsListener", # Logical ID for the HTTPS listener
                 alb,
-                acm_certificate_arn=ACM_CERTIFICATE_ARN,
+                ACM_SSL_CERTIFICATE_ARN=ACM_SSL_CERTIFICATE_ARN,
                 default_target_group=target_group,
                 enable_cognito_auth=True,
                 cognito_user_pool=user_pool,

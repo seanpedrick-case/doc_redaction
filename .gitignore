@@ -25,6 +25,7 @@ cdk/cdk.out/*
 cdk/archive/*
 tld/*
 tmp/*
+docs/*
 cdk.out/*
 cdk.json
 cdk.context.json

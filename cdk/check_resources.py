@@ -49,150 +49,151 @@ def check_and_set_context():
     context_data = {}
 
     # --- Find the VPC ID first ---
-    print("VPC_NAME:", VPC_NAME)
-    vpc_id, nat_gateways = get_vpc_id_by_name(VPC_NAME)
+    if VPC_NAME:
+        print("VPC_NAME:", VPC_NAME)
+        vpc_id, nat_gateways = get_vpc_id_by_name(VPC_NAME)
 
-    # If you expect only one, or one per AZ and you're creating one per AZ in CDK:
-    if nat_gateways:
-        # For simplicity, let's just check if *any* NAT exists in the VPC
-        # A more robust check would match by subnet, AZ, or a specific tag.
-        context_data["exists:NatGateway"] = True
-        context_data["id:NatGateway"] = nat_gateways[0]['NatGatewayId'] # Store the ID of the first one found
-    else:
-        context_data["exists:NatGateway"] = False
-        context_data["id:NatGateway"] = None
+        # If you expect only one, or one per AZ and you're creating one per AZ in CDK:
+        if nat_gateways:
+            # For simplicity, let's just check if *any* NAT exists in the VPC
+            # A more robust check would match by subnet, AZ, or a specific tag.
+            context_data["exists:NatGateway"] = True
+            context_data["id:NatGateway"] = nat_gateways[0]['NatGatewayId'] # Store the ID of the first one found
+        else:
+            context_data["exists:NatGateway"] = False
+            context_data["id:NatGateway"] = None
 
-    if not vpc_id:
-        # If the VPC doesn't exist, you might not be able to check/create subnets.
-        # Decide how to handle this: raise an error, set a flag, etc.
-        raise RuntimeError(f"Required VPC '{VPC_NAME}' not found. Cannot proceed with subnet checks.")
+        if not vpc_id:
+            # If the VPC doesn't exist, you might not be able to check/create subnets.
+            # Decide how to handle this: raise an error, set a flag, etc.
+            raise RuntimeError(f"Required VPC '{VPC_NAME}' not found. Cannot proceed with subnet checks.")
 
-    context_data["vpc_id"] = vpc_id # Store VPC ID in context
+        context_data["vpc_id"] = vpc_id # Store VPC ID in context
 
-    # SUBNET CHECKS
-    context_data: Dict[str, Any] = {}
-    all_proposed_subnets_data: List[Dict[str, str]] = []
+        # SUBNET CHECKS
+        context_data: Dict[str, Any] = {}
+        all_proposed_subnets_data: List[Dict[str, str]] = []
 
-    # Flag to indicate if full validation mode (with CIDR/AZs) is active
-    full_validation_mode = False
+        # Flag to indicate if full validation mode (with CIDR/AZs) is active
+        full_validation_mode = False
 
-    # Determine if full validation mode is possible/desired
-    # It's 'desired' if CIDR/AZs are provided, and their lengths match the name lists.
-    public_ready_for_full_validation = (
-        len(PUBLIC_SUBNETS_TO_USE) > 0 and
-        len(PUBLIC_SUBNET_CIDR_BLOCKS) == len(PUBLIC_SUBNETS_TO_USE) and
-        len(PUBLIC_SUBNET_AVAILABILITY_ZONES) == len(PUBLIC_SUBNETS_TO_USE)
-    )
-    private_ready_for_full_validation = (
-        len(PRIVATE_SUBNETS_TO_USE) > 0 and
-        len(PRIVATE_SUBNET_CIDR_BLOCKS) == len(PRIVATE_SUBNETS_TO_USE) and
-        len(PRIVATE_SUBNET_AVAILABILITY_ZONES) == len(PRIVATE_SUBNETS_TO_USE)
-    )
+        # Determine if full validation mode is possible/desired
+        # It's 'desired' if CIDR/AZs are provided, and their lengths match the name lists.
+        public_ready_for_full_validation = (
+            len(PUBLIC_SUBNETS_TO_USE) > 0 and
+            len(PUBLIC_SUBNET_CIDR_BLOCKS) == len(PUBLIC_SUBNETS_TO_USE) and
+            len(PUBLIC_SUBNET_AVAILABILITY_ZONES) == len(PUBLIC_SUBNETS_TO_USE)
+        )
+        private_ready_for_full_validation = (
+            len(PRIVATE_SUBNETS_TO_USE) > 0 and
+            len(PRIVATE_SUBNET_CIDR_BLOCKS) == len(PRIVATE_SUBNETS_TO_USE) and
+            len(PRIVATE_SUBNET_AVAILABILITY_ZONES) == len(PRIVATE_SUBNETS_TO_USE)
+        )
 
-    # Activate full validation if *any* type of subnet (public or private) has its full details provided.
-    # You might adjust this logic if you require ALL subnet types to have CIDRs, or NONE.
-    if public_ready_for_full_validation or private_ready_for_full_validation:
-        full_validation_mode = True
+        # Activate full validation if *any* type of subnet (public or private) has its full details provided.
+        # You might adjust this logic if you require ALL subnet types to have CIDRs, or NONE.
+        if public_ready_for_full_validation or private_ready_for_full_validation:
+            full_validation_mode = True
 
-        # If some are ready but others aren't, print a warning or raise an error based on your strictness
-        if public_ready_for_full_validation and not private_ready_for_full_validation and PRIVATE_SUBNETS_TO_USE:
-            print("Warning: Public subnets have CIDRs/AZs, but private subnets do not. Only public will be fully validated/created with CIDRs.")
-        if private_ready_for_full_validation and not public_ready_for_full_validation and PUBLIC_SUBNETS_TO_USE:
-            print("Warning: Private subnets have CIDRs/AZs, but public subnets do not. Only private will be fully validated/created with CIDRs.")
+            # If some are ready but others aren't, print a warning or raise an error based on your strictness
+            if public_ready_for_full_validation and not private_ready_for_full_validation and PRIVATE_SUBNETS_TO_USE:
+                print("Warning: Public subnets have CIDRs/AZs, but private subnets do not. Only public will be fully validated/created with CIDRs.")
+            if private_ready_for_full_validation and not public_ready_for_full_validation and PUBLIC_SUBNETS_TO_USE:
+                print("Warning: Private subnets have CIDRs/AZs, but public subnets do not. Only private will be fully validated/created with CIDRs.")
 
-        # Prepare data for validate_subnet_creation_parameters for all subnets that have full details
-        if public_ready_for_full_validation:
-            for i, name in enumerate(PUBLIC_SUBNETS_TO_USE):
-                all_proposed_subnets_data.append({
-                    'name': name,
-                    'cidr': PUBLIC_SUBNET_CIDR_BLOCKS[i],
-                    'az': PUBLIC_SUBNET_AVAILABILITY_ZONES[i]
-                })
-        if private_ready_for_full_validation:
-            for i, name in enumerate(PRIVATE_SUBNETS_TO_USE):
-                all_proposed_subnets_data.append({
-                    'name': name,
-                    'cidr': PRIVATE_SUBNET_CIDR_BLOCKS[i],
-                    'az': PRIVATE_SUBNET_AVAILABILITY_ZONES[i]
-                })
-
-
-    print(f"Target VPC ID for Boto3 lookup: {vpc_id}")
-
-    # Fetch all existing subnets in the target VPC once to avoid repeated API calls
-    try:
-        existing_aws_subnets = _get_existing_subnets_in_vpc(vpc_id)
-    except Exception as e:
-        print(f"Failed to fetch existing VPC subnets. Aborting. Error: {e}")
-        raise SystemExit(1) # Exit immediately if we can't get baseline data
-    
-    print("\n--- Running Name-Only Subnet Existence Check Mode ---")
-    # Fallback: check only by name using the existing data
-    checked_public_subnets = {}
-    if PUBLIC_SUBNETS_TO_USE:
-        for subnet_name in PUBLIC_SUBNETS_TO_USE:
-            print("subnet_name:", subnet_name)
-            exists, subnet_id = check_subnet_exists_by_name(subnet_name, existing_aws_subnets)
-            checked_public_subnets[subnet_name] = {"exists": exists, "id": subnet_id}
-
-            # If the subnet exists, remove it from the proposed subnets list
-            if checked_public_subnets[subnet_name]["exists"] == True:
-                all_proposed_subnets_data = [
-                    subnet for subnet in all_proposed_subnets_data 
-                    if subnet['name'] != subnet_name
-                ]
-
-    context_data["checked_public_subnets"] = checked_public_subnets
-
-    checked_private_subnets = {}
-    if PRIVATE_SUBNETS_TO_USE:
-        for subnet_name in PRIVATE_SUBNETS_TO_USE:
-            print("subnet_name:", subnet_name)
-            exists, subnet_id = check_subnet_exists_by_name(subnet_name, existing_aws_subnets)
-            checked_private_subnets[subnet_name] = {"exists": exists, "id": subnet_id}
-
-            # If the subnet exists, remove it from the proposed subnets list
-            if checked_private_subnets[subnet_name]["exists"] == True:
-                all_proposed_subnets_data = [
-                    subnet for subnet in all_proposed_subnets_data 
-                    if subnet['name'] != subnet_name
-                ]
-
-    context_data["checked_private_subnets"] = checked_private_subnets
-
-
-
-    print("\nName-only existence subnet check complete.\n")
-
-    if full_validation_mode:
-        print("\n--- Running in Full Subnet Validation Mode (CIDR/AZs provided) ---")
-        try:
-            validate_subnet_creation_parameters(vpc_id, all_proposed_subnets_data, existing_aws_subnets)
-            print("\nPre-synth validation successful. Proceeding with CDK synth.\n")
-
-            # Populate context_data for downstream CDK construct creation
-            context_data["public_subnets_to_create"] = []
+            # Prepare data for validate_subnet_creation_parameters for all subnets that have full details
             if public_ready_for_full_validation:
                 for i, name in enumerate(PUBLIC_SUBNETS_TO_USE):
-                    context_data["public_subnets_to_create"].append({
+                    all_proposed_subnets_data.append({
                         'name': name,
                         'cidr': PUBLIC_SUBNET_CIDR_BLOCKS[i],
-                        'az': PUBLIC_SUBNET_AVAILABILITY_ZONES[i],
-                        'is_public': True
+                        'az': PUBLIC_SUBNET_AVAILABILITY_ZONES[i]
                     })
-            context_data["private_subnets_to_create"] = []
             if private_ready_for_full_validation:
                 for i, name in enumerate(PRIVATE_SUBNETS_TO_USE):
-                    context_data["private_subnets_to_create"].append({
+                    all_proposed_subnets_data.append({
                         'name': name,
                         'cidr': PRIVATE_SUBNET_CIDR_BLOCKS[i],
-                        'az': PRIVATE_SUBNET_AVAILABILITY_ZONES[i],
-                        'is_public': False
+                        'az': PRIVATE_SUBNET_AVAILABILITY_ZONES[i]
                     })
 
-        except (ValueError, Exception) as e:
-            print(f"\nFATAL ERROR: Subnet parameter validation failed: {e}\n")
-            raise SystemExit(1) # Exit if validation fails
+
+        print(f"Target VPC ID for Boto3 lookup: {vpc_id}")
+
+        # Fetch all existing subnets in the target VPC once to avoid repeated API calls
+        try:
+            existing_aws_subnets = _get_existing_subnets_in_vpc(vpc_id)
+        except Exception as e:
+            print(f"Failed to fetch existing VPC subnets. Aborting. Error: {e}")
+            raise SystemExit(1) # Exit immediately if we can't get baseline data
+        
+        print("\n--- Running Name-Only Subnet Existence Check Mode ---")
+        # Fallback: check only by name using the existing data
+        checked_public_subnets = {}
+        if PUBLIC_SUBNETS_TO_USE:
+            for subnet_name in PUBLIC_SUBNETS_TO_USE:
+                print("subnet_name:", subnet_name)
+                exists, subnet_id = check_subnet_exists_by_name(subnet_name, existing_aws_subnets)
+                checked_public_subnets[subnet_name] = {"exists": exists, "id": subnet_id}
+
+                # If the subnet exists, remove it from the proposed subnets list
+                if checked_public_subnets[subnet_name]["exists"] == True:
+                    all_proposed_subnets_data = [
+                        subnet for subnet in all_proposed_subnets_data 
+                        if subnet['name'] != subnet_name
+                    ]
+
+        context_data["checked_public_subnets"] = checked_public_subnets
+
+        checked_private_subnets = {}
+        if PRIVATE_SUBNETS_TO_USE:
+            for subnet_name in PRIVATE_SUBNETS_TO_USE:
+                print("subnet_name:", subnet_name)
+                exists, subnet_id = check_subnet_exists_by_name(subnet_name, existing_aws_subnets)
+                checked_private_subnets[subnet_name] = {"exists": exists, "id": subnet_id}
+
+                # If the subnet exists, remove it from the proposed subnets list
+                if checked_private_subnets[subnet_name]["exists"] == True:
+                    all_proposed_subnets_data = [
+                        subnet for subnet in all_proposed_subnets_data 
+                        if subnet['name'] != subnet_name
+                    ]
+
+        context_data["checked_private_subnets"] = checked_private_subnets
+
+
+
+        print("\nName-only existence subnet check complete.\n")
+
+        if full_validation_mode:
+            print("\n--- Running in Full Subnet Validation Mode (CIDR/AZs provided) ---")
+            try:
+                validate_subnet_creation_parameters(vpc_id, all_proposed_subnets_data, existing_aws_subnets)
+                print("\nPre-synth validation successful. Proceeding with CDK synth.\n")
+
+                # Populate context_data for downstream CDK construct creation
+                context_data["public_subnets_to_create"] = []
+                if public_ready_for_full_validation:
+                    for i, name in enumerate(PUBLIC_SUBNETS_TO_USE):
+                        context_data["public_subnets_to_create"].append({
+                            'name': name,
+                            'cidr': PUBLIC_SUBNET_CIDR_BLOCKS[i],
+                            'az': PUBLIC_SUBNET_AVAILABILITY_ZONES[i],
+                            'is_public': True
+                        })
+                context_data["private_subnets_to_create"] = []
+                if private_ready_for_full_validation:
+                    for i, name in enumerate(PRIVATE_SUBNETS_TO_USE):
+                        context_data["private_subnets_to_create"].append({
+                            'name': name,
+                            'cidr': PRIVATE_SUBNET_CIDR_BLOCKS[i],
+                            'az': PRIVATE_SUBNET_AVAILABILITY_ZONES[i],
+                            'is_public': False
+                        })
+
+            except (ValueError, Exception) as e:
+                print(f"\nFATAL ERROR: Subnet parameter validation failed: {e}\n")
+                raise SystemExit(1) # Exit if validation fails
 
     # Example checks and setting context values
     # IAM Roles

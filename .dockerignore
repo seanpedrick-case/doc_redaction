@@ -13,6 +13,7 @@ tesseract/*
 poppler/*
 build/*
 dist/*
+docs/*
 build_deps/*
 user_guide/*
 cdk/config/*
