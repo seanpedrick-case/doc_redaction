@@ -209,6 +209,9 @@ if LOGGING == 'True':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 LOG_FILE_NAME = get_or_create_env_var('LOG_FILE_NAME', 'log.csv')
+USAGE_LOG_FILE_NAME = get_or_create_env_var('USAGE_LOG_FILE_NAME', LOG_FILE_NAME)
+FEEDBACK_LOG_FILE_NAME = get_or_create_env_var('FEEDBACK_LOG_FILE_NAME', LOG_FILE_NAME)
+
 
 
 ###

@@ -15,7 +15,7 @@ nlp = en_core_web_lg.load()
 
 similarity_threshold = 0.95
 
-def combine_ocr_output_text(input_files:List[str], output_folder:str=OUTPUT_FOLDER):
+def combine_ocr_output_text(input_files:List[str], combine_pages:bool=True, output_folder:str=OUTPUT_FOLDER):
     """
     Combines text from multiple CSV files containing page and text columns.
     Groups text by file and page number, concatenating text within these groups.
@@ -52,7 +52,14 @@ def combine_ocr_output_text(input_files:List[str], output_folder:str=OUTPUT_FOLD
         df['text'] = df['text'].fillna('').astype(str)
         
         # Group by page and concatenate text
-        grouped = df.groupby('page')['text'].apply(' '.join).reset_index()
+        if combine_pages == True:
+            grouped = df.groupby('page')['text'].apply(' '.join).reset_index()
+        else:
+            df['line_number_by_page'] = df.groupby('page').cumcount() + 1
+            df['page'] = df['page'].astype(str).str.zfill(5) + df['line_number_by_page'].astype(str).str.zfill(5)
+            df['page'] = df['page'].astype(int)
+
+            grouped = df.drop('line_number_by_page', axis=1)
         
         # Add filename column
         grouped['file'] = os.path.basename(file_path)
@@ -143,7 +150,7 @@ def map_metadata_subdocument(subdocument_df:pd.DataFrame, metadata_source_df:pd.
 
     return final_df
 
-def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str) -> list:
+def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str, combine_pages:bool = True) -> list:
     """
     Saves the main results DataFrame and generates per-file redaction lists.
     This function is extracted to be reusable.
@@ -151,6 +158,7 @@ def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str)
     Args:
         final_df (pd.DataFrame): The DataFrame containing the final match results.
         output_folder (str): The folder to save the output files.
+        combine_pages (bool, optional): Boolean to check whether the text from pages have been combined into one, or if instead the duplicate match has been conducted line by line.
 
     Returns:
         list: A list of paths to all generated files.
@@ -172,32 +180,33 @@ def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str)
 
     # 2. Save per-file redaction lists
     # Use 'Page2_File' as the source of duplicate content
-    grouping_col = 'Page2_File'
-    if grouping_col not in final_df.columns:
-        print("Warning: 'Page2_File' column not found. Cannot generate redaction lists.")
-        return output_paths
+    if combine_pages == True:
+        grouping_col = 'Page2_File'
+        if grouping_col not in final_df.columns:
+            print("Warning: 'Page2_File' column not found. Cannot generate redaction lists.")
+            return output_paths
 
-    for redact_file, group in final_df.groupby(grouping_col):
-        output_file_name_stem = Path(redact_file).stem
-        output_file_path = output_folder_path / f"{output_file_name_stem}_pages_to_redact.csv"
-        
-        all_pages_to_redact = set()
-        is_subdocument_match = 'Page2_Start_Page' in group.columns
+        for redact_file, group in final_df.groupby(grouping_col):
+            output_file_name_stem = Path(redact_file).stem
+            output_file_path = output_folder_path / f"{output_file_name_stem}_pages_to_redact.csv"
+            
+            all_pages_to_redact = set()
+            is_subdocument_match = 'Page2_Start_Page' in group.columns
 
-        if is_subdocument_match:
-            for _, row in group.iterrows():
-                pages_in_range = range(int(row['Page2_Start_Page']), int(row['Page2_End_Page']) + 1)
-                all_pages_to_redact.update(pages_in_range)
-        else:
-            pages = group['Page2_Page'].unique()
-            all_pages_to_redact.update(pages)
-        
-        if all_pages_to_redact:
-            redaction_df = pd.DataFrame(sorted(list(all_pages_to_redact)), columns=['Page_to_Redact'])
-            redaction_df.to_csv(output_file_path, header=False, index=False)
+            if is_subdocument_match:
+                for _, row in group.iterrows():
+                    pages_in_range = range(int(row['Page2_Start_Page']), int(row['Page2_End_Page']) + 1)
+                    all_pages_to_redact.update(pages_in_range)
+            else:
+                pages = group['Page2_Page'].unique()
+                all_pages_to_redact.update(pages)
+            
+            if all_pages_to_redact:
+                redaction_df = pd.DataFrame(sorted(list(all_pages_to_redact)), columns=['Page_to_Redact'])
+                redaction_df.to_csv(output_file_path, header=False, index=False)
 
-            output_paths.append(str(output_file_path))
-            print(f"Redaction list for {redact_file} saved to {output_file_path}")
+                output_paths.append(str(output_file_path))
+                print(f"Redaction list for {redact_file} saved to {output_file_path}")
             
     return output_paths
 
@@ -206,7 +215,8 @@ def identify_similar_pages(
     similarity_threshold: float = 0.9,
     min_word_count: int = 10,
     min_consecutive_pages: int = 1,
-    greedy_match: bool = False, # NEW parameter
+    greedy_match: bool = False,
+    combine_pages:bool=True,
     output_folder: str = OUTPUT_FOLDER,
     progress=Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, List[str], pd.DataFrame]:
@@ -341,7 +351,7 @@ def identify_similar_pages(
     
     progress(0.8, desc="Saving output files")
     
-    output_paths = save_results_and_redaction_lists(final_df, output_folder)
+    output_paths = save_results_and_redaction_lists(final_df, output_folder, combine_pages)
 
     return final_df, output_paths, df_combined
 
@@ -395,7 +405,7 @@ def exclude_match(results_df:pd.DataFrame, selected_index:int, output_folder="./
     # Return the updated dataframe, the new file list, and clear the preview panes
     return updated_df, new_output_paths, None, None
 
-def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:int, min_consecutive:int, greedy_match:bool, preview_length:int=500, progress=gr.Progress(track_tqdm=True)):
+def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:int, min_consecutive:int, greedy_match:bool, duplicates_by_line_or_page_bool:bool=True, preview_length:int=500, progress=gr.Progress(track_tqdm=True)):
     """
     Wrapper function updated to include the 'greedy_match' boolean.
     """
@@ -404,7 +414,7 @@ def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:
         return None, None, None
         
     progress(0, desc="Combining input files...")
-    df_combined, _ = combine_ocr_output_text(files)
+    df_combined, _ = combine_ocr_output_text(files, combine_pages=duplicates_by_line_or_page_bool)
 
     if df_combined.empty:
         gr.Warning("No data found in the uploaded files.")
@@ -417,6 +427,7 @@ def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:
         min_word_count=min_words,
         min_consecutive_pages=int(min_consecutive),
         greedy_match=greedy_match,
+        combine_pages=duplicates_by_line_or_page_bool,
         progress=progress
     )
 
