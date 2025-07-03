@@ -252,15 +252,9 @@ def check_for_relevant_ocr_output_with_words(doc_file_name_no_extension_textbox:
         print("No valid text extraction method found. Returning False")
         return False
     
-    print("doc_file_name_no_extension_textbox:", doc_file_name_no_extension_textbox)
-
     doc_file_with_ending = doc_file_name_no_extension_textbox + file_ending
 
-    print("doc_file_with_ending:", doc_file_with_ending)
-
     local_ocr_output_path = os.path.join(output_folder, doc_file_with_ending)
-
-    print("looking for file path:", local_ocr_output_path)
 
     if os.path.exists(local_ocr_output_path):
         print("Existing OCR with words analysis output file found.")    

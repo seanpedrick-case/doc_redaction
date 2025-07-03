@@ -484,6 +484,20 @@ def choose_and_run_redactor(file_paths:List[str],
         # Output file paths names
         orig_pdf_file_path = output_folder + pdf_file_name_with_ext
         review_file_path = orig_pdf_file_path + '_review_file.csv'
+        
+        # Load in all_ocr_results_with_words if it exists as a file path and doesn't exist already
+        file_name = get_file_name_without_type(file_path)  
+
+        if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION: file_ending = "_ocr_results_with_words_local_text.json"
+        elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION: file_ending = "_ocr_results_with_words_local_ocr.json"
+        elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION: file_ending = "_ocr_results_with_words_textract.json"
+        all_page_line_level_ocr_results_with_words_json_file_path = output_folder + file_name + file_ending
+        
+        if not all_page_line_level_ocr_results_with_words:
+            if local_ocr_output_found_checkbox == True and os.path.exists(all_page_line_level_ocr_results_with_words_json_file_path):
+                all_page_line_level_ocr_results_with_words, is_missing, log_files_output_paths = load_and_convert_ocr_results_with_words_json(all_page_line_level_ocr_results_with_words_json_file_path, log_files_output_paths, page_sizes_df)
+                #original_all_page_line_level_ocr_results_with_words = all_page_line_level_ocr_results_with_words.copy()          
+
 
         # Remove any existing review_file paths from the review file outputs
         if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
@@ -556,7 +570,7 @@ def choose_and_run_redactor(file_paths:List[str],
             all_line_level_ocr_results_df,
             all_pages_decision_process_table,
             pymupdf_doc,
-            [], # All line level ocr results with words
+            all_page_line_level_ocr_results_with_words,
             pii_identification_method,
             comprehend_query_number,
             comprehend_client,
@@ -616,15 +630,13 @@ def choose_and_run_redactor(file_paths:List[str],
             duplication_file_path_outputs.append(ocr_file_path)
 
             if all_page_line_level_ocr_results_with_words:
-                #print("all_page_line_level_ocr_results_with_words:", all_page_line_level_ocr_results_with_words)                
+                #print("all_page_line_level_ocr_results_with_words:", all_page_line_level_ocr_results_with_words)
+                # 
+                #if original_all_page_line_level_ocr_results_with_words != all_page_line_level_ocr_results_with_words:   
                 
                 all_page_line_level_ocr_results_with_words = merge_page_results(all_page_line_level_ocr_results_with_words)
 
-                # print("all_page_line_level_ocr_results_with_words:", all_page_line_level_ocr_results_with_words)
-
-                file_name = get_file_name_without_type(file_path)  
-
-                all_page_line_level_ocr_results_with_words_json_file_path = output_folder + file_name + "_ocr_results_with_words.json"
+                # print("all_page_line_level_ocr_results_with_words:", all_page_line_level_ocr_results_with_words)               
 
                 with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
                     json.dump(all_page_line_level_ocr_results_with_words, json_file, separators=(",", ":"))
@@ -635,9 +647,17 @@ def choose_and_run_redactor(file_paths:List[str],
 
                 all_page_line_level_ocr_results_with_words_df = divide_coordinates_by_page_sizes(all_page_line_level_ocr_results_with_words_df, page_sizes_df, xmin="line_x0", xmax="line_x1", ymin="line_y0", ymax="line_y1")
 
-                all_page_line_level_ocr_results_with_words_df_file_path = output_folder + file_name + "_ocr_results_with_words.csv"
+                all_page_line_level_ocr_results_with_words_df.sort_values(["page", "line", "word_x0"], inplace=True)
+                all_page_line_level_ocr_results_with_words_df_file_path = (output_folder + file_name + file_ending).replace(".json", ".csv")
+                all_page_line_level_ocr_results_with_words_df.to_csv(all_page_line_level_ocr_results_with_words_df_file_path, index = None)
 
-                all_page_line_level_ocr_results_with_words_df.to_csv(all_page_line_level_ocr_results_with_words_df_file_path)  
+                
+
+                if all_page_line_level_ocr_results_with_words_json_file_path not in log_files_output_paths:
+                    log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path)
+
+                if all_page_line_level_ocr_results_with_words_df_file_path not in log_files_output_paths:
+                    log_files_output_paths.append(all_page_line_level_ocr_results_with_words_df_file_path)
 
             # Convert the gradio annotation boxes to relative coordinates
             # Convert annotations_all_pages to a consistent relative coordinate format output
@@ -703,8 +723,7 @@ def choose_and_run_redactor(file_paths:List[str],
     if not review_file_path: review_out_file_paths = [prepared_pdf_file_paths[-1]]
     else: review_out_file_paths = [prepared_pdf_file_paths[-1], review_file_path]
 
-    if total_textract_query_number > number_of_pages:
-        total_textract_query_number = number_of_pages
+    if total_textract_query_number > number_of_pages: total_textract_query_number = number_of_pages
 
     return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages_divide, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words
 
@@ -1431,8 +1450,6 @@ def redact_image_pdf(file_path:str,
     if not all_pages_decision_process_table.empty:
         all_pages_decision_process_list.extend(all_pages_decision_process_table.to_dict('records'))   
 
-    #all_line_level_ocr_results_list = [all_line_level_ocr_results_df.to_dict('records')]#[all_line_level_ocr_results_df]
-    #all_pages_decision_process_list = [all_pages_decision_process_table.to_dict('records')]#[all_pages_decision_process_table]    
 
     # Go through each page
     for page_no in progress_bar:
@@ -1572,6 +1589,8 @@ def redact_image_pdf(file_path:str,
                 
                 page_line_level_ocr_results, handwriting_or_signature_boxes, page_signature_recogniser_results, page_handwriting_recogniser_results, page_line_level_ocr_results_with_words = json_to_ocrresult(text_blocks, page_width, page_height, reported_page_number)
 
+                all_page_line_level_ocr_results_with_words.append(page_line_level_ocr_results_with_words)
+
             # Convert to DataFrame and add to ongoing logging table
             line_level_ocr_results_df = pd.DataFrame([{
                 'page': page_line_level_ocr_results['page'],
@@ -1581,8 +1600,6 @@ def redact_image_pdf(file_path:str,
                 'width': result.width,
                 'height': result.height
             } for result in page_line_level_ocr_results['results']])
-
-            #all_line_level_ocr_results_list.append(line_level_ocr_results_df.to_dict('records'))
 
             if not line_level_ocr_results_df.empty: # Ensure there are records to add
                 all_line_level_ocr_results_list.extend(line_level_ocr_results_df.to_dict('records'))
@@ -1737,25 +1754,7 @@ def redact_image_pdf(file_path:str,
                             json.dump(textract_data, json_file, separators=(",", ":"))  # indent=4 makes the JSON file pretty-printed
 
                         if textract_json_file_path not in log_files_output_paths:
-                            log_files_output_paths.append(textract_json_file_path)
-
-                    all_page_line_level_ocr_results_with_words_json_file_path_textract = output_folder + file_name + "_ocr_results_with_words_textract.json"
-
-                    with open(all_page_line_level_ocr_results_with_words_json_file_path_textract, 'w') as json_file:
-                        json.dump(all_page_line_level_ocr_results_with_words, json_file, separators=(",", ":"))  # indent=4 makes the JSON file pretty-printed
-
-                    if all_page_line_level_ocr_results_with_words_json_file_path_textract not in log_files_output_paths:
-                        log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path_textract)
-
-                if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
-                    if original_all_page_line_level_ocr_results_with_words != all_page_line_level_ocr_results_with_words:
-                        # Write the updated existing textract data back to the JSON file
-
-                        with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
-                            json.dump(all_page_line_level_ocr_results_with_words, json_file, separators=(",", ":"))
-
-                    if all_page_line_level_ocr_results_with_words_json_file_path not in log_files_output_paths:
-                        log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path)
+                            log_files_output_paths.append(textract_json_file_path)                    
 
                 all_pages_decision_process_table = pd.DataFrame(all_pages_decision_process_list)
                 all_line_level_ocr_results_df = pd.DataFrame(all_line_level_ocr_results_list)
@@ -2338,7 +2337,6 @@ def redact_text_pdf(
                     pass
                     #print("Not redacting page:", page_no)
 
-
                 # Join extracted text outputs for all lines together
                 if not page_text_ocr_outputs.empty:
                     #page_text_ocr_outputs = page_text_ocr_outputs.sort_values(["top", "left"], ascending=[False, False]).reset_index(drop=True)
@@ -2421,10 +2419,10 @@ def redact_text_pdf(
         all_line_level_ocr_results_df['top'] = all_line_level_ocr_results_df['top'].astype(float)
         all_line_level_ocr_results_df['top'] = 1 - all_line_level_ocr_results_df['top']
 
-    all_page_line_level_ocr_results_with_words_json_file_path = output_folder + file_name + "_ocr_results_with_words_local_text.json"
+    #all_page_line_level_ocr_results_with_words_json_file_path = output_folder + file_name + "_ocr_results_with_words_local_text.json"
 
     #print("all_page_line_level_ocr_results_with_words:", all_page_line_level_ocr_results_with_words)
-    with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
-        json.dump(all_page_line_level_ocr_results_with_words, json_file, separators=(",", ":"))
+    #with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
+    #    json.dump(all_page_line_level_ocr_results_with_words, json_file, separators=(",", ":"))
                     
     return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, all_page_line_level_ocr_results_with_words

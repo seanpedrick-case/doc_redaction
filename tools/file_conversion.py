@@ -1026,10 +1026,10 @@ def divide_coordinates_by_page_sizes(
         if divisors_numeric and "image_width" in df_abs.columns and "image_height" in df_abs.columns:
              # Use np.errstate to suppress warnings about division by zero or NaN if desired
              with np.errstate(divide='ignore', invalid='ignore'):
-                df_abs[xmin] = df_abs[xmin] / df_abs["image_width"]
-                df_abs[xmax] = df_abs[xmax] / df_abs["image_width"]
-                df_abs[ymin] = df_abs[ymin] / df_abs["image_height"]
-                df_abs[ymax] = df_abs[ymax] / df_abs["image_height"]
+                df_abs[xmin] = round(df_abs[xmin] / df_abs["image_width"],6)
+                df_abs[xmax] = round(df_abs[xmax] / df_abs["image_width"],6)
+                df_abs[ymin] = round(df_abs[ymin] / df_abs["image_height"],6)
+                df_abs[ymax] = round(df_abs[ymax] / df_abs["image_height"],6)
                 # Replace potential infinities with NaN (optional, depending on desired outcome)
                 df_abs.replace([np.inf, -np.inf], np.nan, inplace=True)
         else:
