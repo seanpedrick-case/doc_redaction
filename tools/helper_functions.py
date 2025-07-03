@@ -244,13 +244,27 @@ def check_for_existing_textract_file(doc_file_name_no_extension_textbox:str, out
     else:
         return False
     
-def check_for_existing_local_ocr_file(doc_file_name_no_extension_textbox:str, output_folder:str=OUTPUT_FOLDER):
-    local_ocr_output_path = os.path.join(output_folder, doc_file_name_no_extension_textbox + "_ocr_results_with_words.json")
+def check_for_relevant_ocr_output_with_words(doc_file_name_no_extension_textbox:str, text_extraction_method:str, output_folder:str=OUTPUT_FOLDER):
+    if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION: file_ending = "_ocr_results_with_words_local_text.json"
+    elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION: file_ending = "_ocr_results_with_words_local_ocr.json"
+    elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION: file_ending = "_ocr_results_with_words_textract.json"
+    else:
+        print("No valid text extraction method found. Returning False")
+        return False
+    
+    print("doc_file_name_no_extension_textbox:", doc_file_name_no_extension_textbox)
+
+    doc_file_with_ending = doc_file_name_no_extension_textbox + file_ending
+
+    print("doc_file_with_ending:", doc_file_with_ending)
+
+    local_ocr_output_path = os.path.join(output_folder, doc_file_with_ending)
+
+    print("looking for file path:", local_ocr_output_path)
 
     if os.path.exists(local_ocr_output_path):
-        print("Existing local OCR analysis output file found.")    
-        return True
-    
+        print("Existing OCR with words analysis output file found.")    
+        return True    
     else:
         return False
 
