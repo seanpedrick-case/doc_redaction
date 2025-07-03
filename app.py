@@ -2,8 +2,8 @@ import os
 import pandas as pd
 import gradio as gr
 from gradio_image_annotation import image_annotator
-from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, REDACTION_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE, OUTPUT_COST_CODES_PATH, OUTPUT_ALLOW_LIST_PATH, COGNITO_AUTH, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_ACCESS_LOG_HEADERS, CSV_ACCESS_LOG_HEADERS, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_FEEDBACK_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, USAGE_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_USAGE_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, TEXTRACT_JOBS_S3_INPUT_LOC,  TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, TEXT_EXTRACTION_MODELS, PII_DETECTION_MODELS, DEFAULT_TEXT_EXTRACTION_MODEL, DEFAULT_PII_DETECTION_MODEL, LOG_FILE_NAME, CHOSEN_COMPREHEND_ENTITIES, FULL_COMPREHEND_ENTITY_LIST, CHOSEN_REDACT_ENTITIES, FULL_ENTITY_LIST, FILE_INPUT_HEIGHT, TABULAR_PII_DETECTION_MODELS, USAGE_LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME
-from tools.helper_functions import put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, reset_review_vars, merge_csv_files, load_all_output_files, update_dataframe, check_for_existing_textract_file, load_in_default_cost_codes, enforce_cost_codes, calculate_aws_costs, calculate_time_taken, reset_base_dataframe, reset_ocr_base_dataframe, update_cost_code_dataframe_from_dropdown_select, check_for_existing_local_ocr_file, reset_data_vars, reset_aws_call_vars, _get_env_list
+from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, REDACTION_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE, OUTPUT_COST_CODES_PATH, OUTPUT_ALLOW_LIST_PATH, COGNITO_AUTH, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_ACCESS_LOG_HEADERS, CSV_ACCESS_LOG_HEADERS, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_FEEDBACK_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, USAGE_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_USAGE_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, TEXTRACT_JOBS_S3_INPUT_LOC,  TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, TEXT_EXTRACTION_MODELS, PII_DETECTION_MODELS, DEFAULT_TEXT_EXTRACTION_MODEL, DEFAULT_PII_DETECTION_MODEL, LOG_FILE_NAME, CHOSEN_COMPREHEND_ENTITIES, FULL_COMPREHEND_ENTITY_LIST, CHOSEN_REDACT_ENTITIES, FULL_ENTITY_LIST, FILE_INPUT_HEIGHT, TABULAR_PII_DETECTION_MODELS, USAGE_LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, S3_FEEDBACK_LOGS_FOLDER, S3_ACCESS_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER
+from tools.helper_functions import put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, reset_review_vars, merge_csv_files, load_all_output_files, update_dataframe, check_for_existing_textract_file, load_in_default_cost_codes, enforce_cost_codes, calculate_aws_costs, calculate_time_taken, reset_base_dataframe, reset_ocr_base_dataframe, update_cost_code_dataframe_from_dropdown_select, check_for_existing_local_ocr_file, reset_data_vars, reset_aws_call_vars, _get_env_list, ensure_folder_exists
 from tools.aws_functions import download_file_from_s3, upload_log_file_to_s3
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
@@ -12,11 +12,21 @@ from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.custom_csvlogger import CSVLogger_custom
-from tools.find_duplicate_pages import run_duplicate_analysis, exclude_match, handle_selection_and_preview, apply_whole_page_redactions_from_list
+from tools.find_duplicate_pages import run_duplicate_analysis, exclude_match, handle_selection_and_preview, apply_whole_page_redactions_from_list, create_annotation_objects_from_duplicates
 from tools.textract_batch_call import analyse_document_with_textract_api, poll_whole_document_textract_analysis_progress_and_download, load_in_textract_job_details, check_for_provided_job_id, check_textract_outputs_exist, replace_existing_pdf_input_for_whole_document_outputs
 
 # Suppress downcasting warnings
 pd.set_option('future.no_silent_downcasting', True)
+
+# Ensure that output folders exist
+ensure_folder_exists(CONFIG_FOLDER)
+ensure_folder_exists(OUTPUT_FOLDER)
+ensure_folder_exists(INPUT_FOLDER)
+ensure_folder_exists(GRADIO_TEMP_DIR)
+ensure_folder_exists(MPLCONFIGDIR)
+ensure_folder_exists(FEEDBACK_LOGS_FOLDER)
+ensure_folder_exists(ACCESS_LOGS_FOLDER)
+ensure_folder_exists(USAGE_LOGS_FOLDER)
 
 # Convert string environment variables to string or list
 if SAVE_LOGS_TO_CSV == "True": SAVE_LOGS_TO_CSV = True 
@@ -89,15 +99,15 @@ with app:
     # Backup versions of these objects in case you make a mistake
     backup_review_state = gr.Dataframe(visible=False)
     backup_image_annotations_state = gr.State([])
-    backup_recogniser_entity_dataframe_base = gr.Dataframe(visible=False)    
+    backup_recogniser_entity_dataframe_base = gr.Dataframe(visible=False)
     
     # Logging variables
     access_logs_state = gr.Textbox(label= "access_logs_state", value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME, visible=False)
-    access_s3_logs_loc_state = gr.Textbox(label= "access_s3_logs_loc_state", value=ACCESS_LOGS_FOLDER, visible=False)
+    access_s3_logs_loc_state = gr.Textbox(label= "access_s3_logs_loc_state", value=S3_ACCESS_LOGS_FOLDER, visible=False)
     feedback_logs_state = gr.Textbox(label= "feedback_logs_state", value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME, visible=False)
-    feedback_s3_logs_loc_state = gr.Textbox(label= "feedback_s3_logs_loc_state", value=FEEDBACK_LOGS_FOLDER, visible=False)
+    feedback_s3_logs_loc_state = gr.Textbox(label= "feedback_s3_logs_loc_state", value=S3_FEEDBACK_LOGS_FOLDER, visible=False)
     usage_logs_state = gr.Textbox(label= "usage_logs_state", value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME, visible=False)
-    usage_s3_logs_loc_state = gr.Textbox(label= "usage_s3_logs_loc_state", value=USAGE_LOGS_FOLDER, visible=False)
+    usage_s3_logs_loc_state = gr.Textbox(label= "usage_s3_logs_loc_state", value=S3_USAGE_LOGS_FOLDER, visible=False)
 
     session_hash_textbox = gr.Textbox(label= "session_hash_textbox", value="", visible=False)
     textract_metadata_textbox = gr.Textbox(label = "textract_metadata_textbox", value="", visible=False)
@@ -164,7 +174,7 @@ with app:
 
     load_s3_whole_document_textract_logs_bool = gr.Textbox(label = "Load Textract logs or not", value=LOAD_PREVIOUS_TEXTRACT_JOBS_S3, visible=False)    
     s3_whole_document_textract_logs_subfolder = gr.Textbox(label = "Default Textract whole_document S3 input folder", value=TEXTRACT_JOBS_S3_LOC, visible=False)
-    local_whole_document_textract_logs_subfolder = gr.Textbox(label = "Default Textract whole_document S3 output folder", value=TEXTRACT_JOBS_LOCAL_LOC, visible=False)       
+    local_whole_document_textract_logs_subfolder = gr.Textbox(label = "Default Textract whole_document S3 output folder", value=TEXTRACT_JOBS_LOCAL_LOC, visible=False)
 
     s3_default_cost_codes_file = gr.Textbox(label = "Default cost centre file", value=S3_COST_CODES_PATH, visible=False)
     default_cost_codes_output_folder_location = gr.Textbox(label = "Output default cost centre location", value=OUTPUT_COST_CODES_PATH, visible=False)
@@ -173,9 +183,8 @@ with app:
 
     # Base tables that are not modified subsequent to load
     recogniser_entity_dataframe_base = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[], "id":[]}), col_count=4, type="pandas", visible=False, label="recogniser_entity_dataframe_base", show_search="filter", headers=["page", "label", "text", "id"], show_fullscreen_button=True, wrap=True, static_columns=[0,1,2,3])
-    all_line_level_ocr_results_df_base = gr.Dataframe(value=pd.DataFrame(), headers=["page", "text"], col_count=(2, 'fixed'), row_count = (0, "dynamic"),  label="All OCR results", type="pandas", wrap=True, show_fullscreen_button=True, show_search='filter', show_label=False, show_copy_button=True, visible=False)
-    all_line_level_ocr_results_df_placeholder = gr.Dataframe(visible=False)
-    cost_code_dataframe_base = gr.Dataframe(value=pd.DataFrame(), row_count = (0, "dynamic"), label="Cost codes", type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True, show_search='filter', wrap=True, max_height=200, visible=False)
+    all_line_level_ocr_results_df_base = gr.Dataframe(value=pd.DataFrame(), headers=["page","text", "left","top","width","height"], row_count = (0, "dynamic"),  label="All OCR results", type="pandas", wrap=True, show_fullscreen_button=True, show_search='filter', show_label=False, show_copy_button=True, visible=False)
+    all_line_level_ocr_results_df_placeholder = gr.Dataframe(visible=False)    
 
     # Placeholder for selected entity dataframe row
     selected_entity_id = gr.Textbox(value="", label="selected_entity_id", visible=False)
@@ -197,6 +206,7 @@ with app:
     page_break_return = gr.Checkbox(value = False, label="Page break reached", visible=False)
 
     # Placeholders for elements that may be made visible later below depending on environment variables
+    cost_code_dataframe_base = gr.Dataframe(value=pd.DataFrame(), row_count = (0, "dynamic"), label="Cost codes", type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True, show_search='filter', wrap=True, max_height=200, visible=False)
     cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(), type="pandas", visible=False, wrap=True)
     cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis. Please contact Finance if you can't find your cost code in the given list.", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible=False)
 
@@ -225,6 +235,9 @@ with app:
 
     textract_job_output_file = gr.File(label="Textract job output files", height=FILE_INPUT_HEIGHT, visible=False)
     convert_textract_outputs_to_ocr_results = gr.Button("Placeholder - Convert Textract job outputs to OCR results (needs relevant document file uploaded above)", variant="secondary", visible=False)
+
+    ## Duplicate search object
+    new_duplicate_search_annotation_object = gr.Dropdown(value=None, label="new_duplicate_search_annotation_object", allow_custom_value=True, visible=False)
 
     ###
     # UI DESIGN
@@ -408,7 +421,7 @@ with app:
                 with gr.Row():
                     duplicate_threshold_input = gr.Number(value=0.95, label="Similarity threshold", info="Score (0-1) to consider pages a match.")
                     min_word_count_input = gr.Number(value=10, label="Minimum word count", info="Pages with fewer words than this value are ignored.")
-                    duplicates_by_line_or_page_bool = gr.Checkbox(value=True, label="Analyse duplicate text by page (off for by line)")
+                    combine_page_text_for_duplicates_bool = gr.Checkbox(value=True, label="Analyse duplicate text by page (off for by line)")
 
                 gr.Markdown("#### Matching Strategy")
                 greedy_match_input = gr.Checkbox(
@@ -588,7 +601,7 @@ with app:
         cost_code_choice_drop.select(update_cost_code_dataframe_from_dropdown_select, inputs=[cost_code_choice_drop, cost_code_dataframe_base], outputs=[cost_code_dataframe])
 
     in_doc_files.upload(fn=get_input_file_names, inputs=[in_doc_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count]).\
-    success(fn = prepare_image_or_pdf, inputs=[in_doc_files, text_extract_method_radio, latest_file_completed_text, redaction_output_summary_textbox, first_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool_false, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_base, local_ocr_output_found_checkbox]).\
+    success(fn = prepare_image_or_pdf, inputs=[in_doc_files, text_extract_method_radio, all_line_level_ocr_results_df_base, latest_file_completed_text, redaction_output_summary_textbox, first_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool_false, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_base, local_ocr_output_found_checkbox]).\
     success(fn=check_for_existing_textract_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[textract_output_found_checkbox]).\
     success(fn=check_for_existing_local_ocr_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[local_ocr_output_found_checkbox])
 
@@ -627,7 +640,7 @@ with app:
     textract_job_detail_df.select(df_select_callback_textract_api, inputs=[textract_output_found_checkbox], outputs=[job_id_textbox, job_type_dropdown, selected_job_id_row])
 
     convert_textract_outputs_to_ocr_results.click(replace_existing_pdf_input_for_whole_document_outputs, inputs = [s3_whole_document_textract_input_subfolder, doc_file_name_no_extension_textbox, output_folder_textbox, s3_whole_document_textract_default_bucket, in_doc_files, input_folder_textbox], outputs = [in_doc_files, doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count]).\
-        success(fn = prepare_image_or_pdf, inputs=[in_doc_files, text_extract_method_radio, latest_file_completed_text, redaction_output_summary_textbox, first_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool_false, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_base, local_ocr_output_found_checkbox]).\
+        success(fn = prepare_image_or_pdf, inputs=[in_doc_files, text_extract_method_radio, all_line_level_ocr_results_df_base, latest_file_completed_text, redaction_output_summary_textbox, first_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool_false, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_base, local_ocr_output_found_checkbox]).\
         success(fn=check_for_existing_textract_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[textract_output_found_checkbox]).\
         success(fn=check_for_existing_local_ocr_file, inputs=[doc_file_name_no_extension_textbox, output_folder_textbox], outputs=[local_ocr_output_found_checkbox]).\
         success(fn= check_textract_outputs_exist, inputs=[textract_output_found_checkbox]).\
@@ -644,7 +657,7 @@ with app:
     # Upload previous files for modifying redactions
     upload_previous_review_file_btn.click(fn=reset_review_vars, inputs=None, outputs=[recogniser_entity_dataframe, recogniser_entity_dataframe_base]).\
         success(fn=get_input_file_names, inputs=[output_review_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count]).\
-        success(fn = prepare_image_or_pdf, inputs=[output_review_files, text_extract_method_radio, latest_file_completed_text, redaction_output_summary_textbox, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_base, local_ocr_output_found_checkbox], api_name="prepare_doc").\
+        success(fn = prepare_image_or_pdf, inputs=[output_review_files, text_extract_method_radio, all_line_level_ocr_results_df_base, latest_file_completed_text, redaction_output_summary_textbox, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_base, local_ocr_output_found_checkbox], api_name="prepare_doc").\
         success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_df, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_sizes, all_image_annotations_state])
     
     # Manual updates to review di
@@ -725,6 +738,7 @@ with app:
         success(apply_redactions_to_review_df_and_files, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_df, output_folder_textbox, do_not_save_pdf_state, page_sizes], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output, review_file_df]).\
         success(update_all_entity_df_dropdowns, inputs=[recogniser_entity_dataframe_base, recogniser_entity_dropdown, page_entity_dropdown, text_entity_dropdown], outputs=[recogniser_entity_dropdown, text_entity_dropdown, page_entity_dropdown])
     
+    # Undo last redaction exclusion action
     undo_last_removal_btn.click(undo_last_removal, inputs=[backup_review_state, backup_image_annotations_state, backup_recogniser_entity_dataframe_base], outputs=[review_file_df, all_image_annotations_state, recogniser_entity_dataframe_base]).\
         success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_df, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_sizes, all_image_annotations_state]).\
         success(apply_redactions_to_review_df_and_files, inputs=[annotator, doc_full_file_name_textbox, pdf_doc_state, all_image_annotations_state, annotate_current_page, review_file_df, output_folder_textbox, do_not_save_pdf_state, page_sizes], outputs=[pdf_doc_state, all_image_annotations_state, output_review_files, log_files_output, review_file_df])
@@ -734,16 +748,17 @@ with app:
         success(update_annotator_page_from_review_df, inputs=[review_file_df, images_pdf_state, page_sizes, all_image_annotations_state, annotator, selected_ocr_dataframe_row, input_folder_textbox, doc_full_file_name_textbox], outputs=[annotator, all_image_annotations_state, annotate_current_page, page_sizes, review_file_df, annotate_previous_page]).\
         success(increase_bottom_page_count_based_on_top, inputs=[annotate_current_page], outputs=[annotate_current_page_bottom])
 
+    # Reset the OCR results filter
     reset_all_ocr_results_btn.click(reset_ocr_base_dataframe, inputs=[all_line_level_ocr_results_df_base], outputs=[all_line_level_ocr_results_df])
     
     # Convert review file to xfdf Adobe format
     convert_review_file_to_adobe_btn.click(fn=get_input_file_names, inputs=[output_review_files], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count]).\
-        success(fn = prepare_image_or_pdf, inputs=[output_review_files, text_extract_method_radio, latest_file_completed_text, redaction_output_summary_textbox, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_placeholder, local_ocr_output_found_checkbox]).\
+        success(fn = prepare_image_or_pdf, inputs=[output_review_files, text_extract_method_radio, all_line_level_ocr_results_df_base, latest_file_completed_text, redaction_output_summary_textbox, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_placeholder, local_ocr_output_found_checkbox]).\
         success(convert_df_to_xfdf, inputs=[output_review_files, pdf_doc_state, images_pdf_state, output_folder_textbox, document_cropboxes, page_sizes], outputs=[adobe_review_files_out])
     
     # Convert xfdf Adobe file back to review_file.csv
     convert_adobe_to_review_file_btn.click(fn=get_input_file_names, inputs=[adobe_review_files_out], outputs=[doc_file_name_no_extension_textbox, doc_file_name_with_extension_textbox, doc_full_file_name_textbox, doc_file_name_textbox_list, total_pdf_page_count]).\
-        success(fn = prepare_image_or_pdf, inputs=[adobe_review_files_out, text_extract_method_radio, latest_file_completed_text, redaction_output_summary_textbox, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_placeholder, local_ocr_output_found_checkbox]).\
+        success(fn = prepare_image_or_pdf, inputs=[adobe_review_files_out, text_extract_method_radio, all_line_level_ocr_results_df_base, latest_file_completed_text, redaction_output_summary_textbox, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_placeholder, local_ocr_output_found_checkbox]).\
         success(fn=convert_xfdf_to_dataframe, inputs=[adobe_review_files_out, pdf_doc_state, images_pdf_state, output_folder_textbox], outputs=[output_review_files], scroll_to_output=True)
     
     ###
@@ -764,6 +779,8 @@ with app:
     ###
     # IDENTIFY DUPLICATE PAGES
     ###
+    #in_duplicate_pages.upload(fn = prepare_image_or_pdf, inputs=[in_duplicate_pages, text_extract_method_radio, all_line_level_ocr_results_df_base, latest_file_completed_text, redaction_output_summary_textbox, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_line_level_ocr_results_df_base, local_ocr_output_found_checkbox])
+
     find_duplicate_pages_btn.click(
         fn=run_duplicate_analysis,
         inputs=[
@@ -772,7 +789,7 @@ with app:
             min_word_count_input,
             min_consecutive_pages_input,
             greedy_match_input,
-            duplicates_by_line_or_page_bool
+            combine_page_text_for_duplicates_bool
         ],
         outputs=[
             results_df_preview,
@@ -795,9 +812,9 @@ with app:
         outputs=[results_df_preview, duplicate_files_out, page1_text_preview, page2_text_preview]
     )
 
-    apply_match_btn.click(
-        fn=apply_whole_page_redactions_from_list,
-        inputs=[in_fully_redacted_list_state, doc_file_name_with_extension_textbox, review_file_df, duplicate_files_out, pdf_doc_state, page_sizes, all_image_annotations_state],
+    apply_match_btn.click(fn=create_annotation_objects_from_duplicates, inputs=[results_df_preview, all_line_level_ocr_results_df_base, page_sizes, combine_page_text_for_duplicates_bool], outputs=[new_duplicate_search_annotation_object]).\
+        success(fn=apply_whole_page_redactions_from_list,
+        inputs=[in_fully_redacted_list_state, doc_file_name_with_extension_textbox, review_file_df, duplicate_files_out, pdf_doc_state, page_sizes, all_image_annotations_state, combine_page_text_for_duplicates_bool, new_duplicate_search_annotation_object],
         outputs=[review_file_df, all_image_annotations_state]).\
         success(update_annotator_page_from_review_df, inputs=[review_file_df, images_pdf_state, page_sizes, all_image_annotations_state, annotator, selected_entity_dataframe_row, input_folder_textbox, doc_full_file_name_textbox], outputs=[annotator, all_image_annotations_state, annotate_current_page, page_sizes, review_file_df, annotate_previous_page]).\
         success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_df, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_sizes, all_image_annotations_state])

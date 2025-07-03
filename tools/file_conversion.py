@@ -455,6 +455,7 @@ def create_page_size_objects(pymupdf_doc:Document, image_sizes_width:List[float]
 def prepare_image_or_pdf(
     file_paths: List[str],
     in_redact_method: str,
+    all_line_level_ocr_results_df:pd.DataFrame,
     latest_file_completed: int = 0,
     out_message: List[str] = [],
     first_loop_state: bool = False,
@@ -506,7 +507,6 @@ def prepare_image_or_pdf(
     pymupdf_doc = []
     all_img_details = []    
     review_file_csv = pd.DataFrame()
-    all_line_level_ocr_results_df = pd.DataFrame()
     out_textract_path = ""
     combined_out_message = ""
     final_out_message = ""
@@ -1289,6 +1289,7 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     '''
     if not all_annotations:
         # Return an empty DataFrame with the expected schema if input is empty
+        print("No annotations found, returning empty dataframe")
         return pd.DataFrame(columns=["image", "page", "xmin", "xmax", "ymin", "ymax", "text", "id"])
 
     # 1. Create initial DataFrame from the list of annotations
@@ -1302,7 +1303,6 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
                     else []
                     for anno in all_annotations
                 ]
-
     })
 
     # 2. Calculate the page number using the helper function
@@ -1715,6 +1715,75 @@ def fill_missing_box_ids(data_input: dict) -> dict:
         #print("No missing or invalid box IDs found.")
 
 
+    # The input dictionary 'data_input' has been modified in place
+    return data_input
+
+def fill_missing_box_ids_each_box(data_input: Dict) -> Dict:
+    """
+    Generates unique alphanumeric IDs for bounding boxes in a list
+    where the 'id' is missing, blank, or not a 12-character string.
+
+    Args:
+        data_input (Dict): The input dictionary containing 'image' and 'boxes' keys.
+                           'boxes' should be a list of dictionaries, each potentially
+                           with an 'id' key.
+
+    Returns:
+        Dict: The input dictionary with missing/invalid box IDs filled.
+              Note: The function modifies the input dictionary in place.
+    """
+    # --- Input Validation ---
+    if not isinstance(data_input, dict):
+        raise TypeError("Input 'data_input' must be a dictionary.")
+    if 'boxes' not in data_input or not isinstance(data_input.get('boxes'), list):
+        # If there are no boxes, there's nothing to do.
+        return data_input
+
+    boxes_list = data_input['boxes']
+    id_length = 12
+    character_set = string.ascii_letters + string.digits
+
+    # --- 1. Get ALL Existing IDs to Ensure Uniqueness ---
+    # Collect all valid existing IDs from the entire list first.
+    existing_ids = set()
+    for box in boxes_list:
+        if isinstance(box, dict):
+            box_id = box.get('id')
+            if isinstance(box_id, str) and len(box_id) == id_length:
+                existing_ids.add(box_id)
+
+    # --- 2. Iterate and Fill IDs for each box ---
+    generated_ids_this_run = set() # Keep track of IDs generated in this run
+    num_filled = 0
+
+    for box in boxes_list:
+        if not isinstance(box, dict):
+            continue # Skip items in the list that are not dictionaries
+
+        box_id = box.get('id')
+
+        # Check if this specific box needs a new ID
+        needs_new_id = (
+            box_id is None or
+            not isinstance(box_id, str) or
+            box_id.strip() == "" or
+            len(box_id) != id_length
+        )
+
+        if needs_new_id:
+            # Generate a truly unique ID
+            while True:
+                candidate_id = ''.join(random.choices(character_set, k=id_length))
+                # Check against original IDs and newly generated IDs
+                if candidate_id not in existing_ids and candidate_id not in generated_ids_this_run:
+                    generated_ids_this_run.add(candidate_id)
+                    box['id'] = candidate_id # Assign the ID to the individual box
+                    num_filled += 1
+                    break # Move to the next box
+
+    if num_filled > 0:
+        print(f"Successfully filled {num_filled} missing or invalid box IDs.")
+    
     # The input dictionary 'data_input' has been modified in place
     return data_input
 

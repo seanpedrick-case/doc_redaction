@@ -287,7 +287,7 @@ def choose_and_run_redactor(file_paths:List[str],
     # Call prepare_image_or_pdf only if needed
     if prepare_images_flag is not None:
         out_message, prepared_pdf_file_paths, pdf_image_file_paths, annotate_max_pages, annotate_max_pages_bottom, pymupdf_doc, annotations_all_pages, review_file_state, document_cropboxes, page_sizes, textract_output_found, all_img_details_state, placeholder_ocr_results_df, local_ocr_output_found_checkbox = prepare_image_or_pdf(
-            file_paths_loop, text_extraction_method, 0, out_message, True, 
+            file_paths_loop, text_extraction_method, all_line_level_ocr_results_df, 0, out_message, True, 
             annotate_max_pages, annotations_all_pages, document_cropboxes, redact_whole_page_list, 
             output_folder, prepare_images=prepare_images_flag, page_sizes=page_sizes, input_folder=input_folder
         )   
@@ -887,7 +887,6 @@ def prepare_custom_image_recogniser_result_annotation_box(page:Page, annot:dict,
 
     return img_annotation_box, rect
 
-
 def convert_pikepdf_annotations_to_result_annotation_box(page:Page, annot:dict, image:Image=None, convert_pikepdf_to_pymupdf_coords:bool=True, page_sizes_df:pd.DataFrame=pd.DataFrame(), image_dimensions:dict={}):
     '''
     Convert redaction objects with pikepdf coordinates to annotation boxes for PyMuPDF that can then be redacted from the document. First 1. converts pikepdf to pymupdf coordinates, then 2. converts pymupdf coordinates to image coordinates if page is an image.
@@ -931,23 +930,6 @@ def convert_pikepdf_annotations_to_result_annotation_box(page:Page, annot:dict, 
         img_annotation_box["text"] = ""
     
     return img_annotation_box, rect
-
-# def set_cropbox_safely(page, original_cropbox):
-#     """
-#     Sets the cropbox of a page, ensuring it's not larger than the mediabox.
-#     If the original cropbox is larger, the mediabox is used instead.
-
-#     Args:
-#         page: The PyMuPdf page object.
-#         original_cropbox: The fitz.Rect representing the desired cropbox.
-#     """
-#     mediabox = page.mediabox
-#     if original_cropbox.width > mediabox.width or original_cropbox.height > mediabox.height:
-#         #print("Warning: Requested cropbox is larger than the mediabox. Using mediabox instead.")
-#         page.set_cropbox(mediabox)
-#     else:
-#         page.set_cropbox(original_cropbox)
-
 
 def set_cropbox_safely(page: Page, original_cropbox: Optional[Rect]):
     """
@@ -994,7 +976,6 @@ def set_cropbox_safely(page: Page, original_cropbox: Optional[Rect]):
         page.set_cropbox(mediabox)
     else:
         page.set_cropbox(original_cropbox)
-
 
 def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None, custom_colours:bool=False, redact_whole_page:bool=False, convert_pikepdf_to_pymupdf_coords:bool=True, original_cropbox:List[Rect]=[], page_sizes_df:pd.DataFrame=pd.DataFrame()):
 
@@ -1787,7 +1768,6 @@ def redact_image_pdf(file_path:str,
     all_line_level_ocr_results_df = divide_coordinates_by_page_sizes(all_line_level_ocr_results_df, page_sizes_df, xmin="left", xmax="width", ymin="top", ymax="height")
 
     return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words
-
 
 ###
 # PIKEPDF TEXT DETECTION/REDACTION

@@ -1429,7 +1429,6 @@ def convert_df_to_xfdf(input_files:List[str], pdf_doc:Document, image_paths:List
 
     return output_paths
 
-
 ### Convert xfdf coordinates back to image for app
 
 def convert_adobe_coords_to_image(pdf_page_width:float, pdf_page_height:float, image_width:float, image_height:float, x1:float, y1:float, x2:float, y2:float):

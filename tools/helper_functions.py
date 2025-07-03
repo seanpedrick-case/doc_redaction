@@ -89,6 +89,16 @@ def update_cost_code_dataframe_from_dropdown_select(cost_dropdown_selection:str,
                                     ]
     return cost_code_df
 
+def ensure_folder_exists(output_folder:str):
+    """Checks if the specified folder exists, creates it if not."""   
+
+    if not os.path.exists(output_folder):
+        # Create the folder if it doesn't exist
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"Created the {output_folder} folder.")
+    else:
+        print(f"The {output_folder} folder already exists.")
+
 def update_dataframe(df:pd.DataFrame):
     df_copy = df.copy()
     return df_copy

@@ -28,16 +28,6 @@ def get_or_create_env_var(var_name:str, default_value:str, print_val:bool=False)
     
     return value
 
-def ensure_folder_exists(output_folder:str):
-    """Checks if the specified folder exists, creates it if not."""   
-
-    if not os.path.exists(output_folder):
-        # Create the folder if it doesn't exist
-        os.makedirs(output_folder, exist_ok=True)
-        print(f"Created the {output_folder} folder.")
-    else:
-        print(f"The {output_folder} folder already exists.")
-
 def add_folder_to_path(folder_path: str):
     '''
     Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist. Function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
@@ -59,14 +49,11 @@ def add_folder_to_path(folder_path: str):
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
 
-
 ###
 # LOAD CONFIG FROM ENV FILE
 ###
 
 CONFIG_FOLDER = get_or_create_env_var('CONFIG_FOLDER', 'config/')
-
-ensure_folder_exists(CONFIG_FOLDER)
 
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
 APP_CONFIG_PATH = get_or_create_env_var('APP_CONFIG_PATH', CONFIG_FOLDER + 'app_config.env') # e.g. config/app_config.env
@@ -115,9 +102,6 @@ CUSTOM_HEADER = get_or_create_env_var('CUSTOM_HEADER', '')
 # Retrieving or setting CUSTOM_HEADER_VALUE
 CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', '')
 
-
-
-
 ###
 # Image options
 ###
@@ -134,9 +118,6 @@ SESSION_OUTPUT_FOLDER = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'False') 
 OUTPUT_FOLDER = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/') # 'output/'
 INPUT_FOLDER = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/') # 'input/'
 
-ensure_folder_exists(OUTPUT_FOLDER)
-ensure_folder_exists(INPUT_FOLDER)
-
 # Allow for files to be saved in a temporary folder for increased security in some instances
 if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP": 
     # Create a temporary directory
@@ -146,12 +127,8 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
         if OUTPUT_FOLDER == "TEMP": OUTPUT_FOLDER = temp_dir + "/"
         if INPUT_FOLDER == "TEMP": INPUT_FOLDER = temp_dir + "/"
 
-
 GRADIO_TEMP_DIR = get_or_create_env_var('GRADIO_TEMP_DIR', 'tmp/gradio_tmp/') # Default Gradio temp folder
 MPLCONFIGDIR = get_or_create_env_var('MPLCONFIGDIR', 'tmp/matplotlib_cache/') # Matplotlib cache folder
-
-ensure_folder_exists(GRADIO_TEMP_DIR)
-ensure_folder_exists(MPLCONFIGDIR)
 
 ###
 # LOGGING OPTIONS
@@ -164,32 +141,33 @@ SAVE_LOGS_TO_CSV = get_or_create_env_var('SAVE_LOGS_TO_CSV', 'True')
 
 USE_LOG_SUBFOLDERS = get_or_create_env_var('USE_LOG_SUBFOLDERS', 'True')
 
+FEEDBACK_LOGS_FOLDER = get_or_create_env_var('FEEDBACK_LOGS_FOLDER', 'feedback/')
+ACCESS_LOGS_FOLDER = get_or_create_env_var('ACCESS_LOGS_FOLDER', 'logs/')
+USAGE_LOGS_FOLDER = get_or_create_env_var('USAGE_LOGS_FOLDER', 'usage/')
+
 if USE_LOG_SUBFOLDERS == "True":
     day_log_subfolder = today_rev + '/'
     host_name_subfolder = HOST_NAME + '/'
     full_log_subfolder = day_log_subfolder + host_name_subfolder
-else:
-    full_log_subfolder = ""
 
-FEEDBACK_LOGS_FOLDER = get_or_create_env_var('FEEDBACK_LOGS_FOLDER', 'feedback/' + full_log_subfolder)
-ACCESS_LOGS_FOLDER = get_or_create_env_var('ACCESS_LOGS_FOLDER', 'logs/' + full_log_subfolder)
-USAGE_LOGS_FOLDER = get_or_create_env_var('USAGE_LOGS_FOLDER', 'usage/' + full_log_subfolder)
+    FEEDBACK_LOGS_FOLDER = FEEDBACK_LOGS_FOLDER + full_log_subfolder
+    ACCESS_LOGS_FOLDER = ACCESS_LOGS_FOLDER + full_log_subfolder
+    USAGE_LOGS_FOLDER = USAGE_LOGS_FOLDER + full_log_subfolder
 
-ensure_folder_exists(FEEDBACK_LOGS_FOLDER)
-ensure_folder_exists(ACCESS_LOGS_FOLDER)
-ensure_folder_exists(USAGE_LOGS_FOLDER)
+
+S3_FEEDBACK_LOGS_FOLDER = get_or_create_env_var('S3_FEEDBACK_LOGS_FOLDER', FEEDBACK_LOGS_FOLDER)
+S3_ACCESS_LOGS_FOLDER = get_or_create_env_var('S3_ACCESS_LOGS_FOLDER', ACCESS_LOGS_FOLDER)
+S3_USAGE_LOGS_FOLDER = get_or_create_env_var('S3_USAGE_LOGS_FOLDER', USAGE_LOGS_FOLDER)
 
 # Should the redacted file name be included in the logs? In some instances, the names of the files themselves could be sensitive, and should not be disclosed beyond the app. So, by default this is false.
 DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS', 'False')
 
 # Further customisation options for CSV logs
-
 CSV_ACCESS_LOG_HEADERS = get_or_create_env_var('CSV_ACCESS_LOG_HEADERS', '') # If blank, uses component labels
 CSV_FEEDBACK_LOG_HEADERS = get_or_create_env_var('CSV_FEEDBACK_LOG_HEADERS', '') # If blank, uses component labels
 CSV_USAGE_LOG_HEADERS = get_or_create_env_var('CSV_USAGE_LOG_HEADERS', '["session_hash_textbox", "doc_full_file_name_textbox", "data_full_file_name_textbox", "actual_time_taken_number",	"total_page_count",	"textract_query_number", "pii_detection_method", "comprehend_query_number",  "cost_code", "textract_handwriting_signature", "host_name_textbox", "text_extraction_method", "is_this_a_textract_api_call"]') # If blank, uses component labels
 
 ### DYNAMODB logs. Whether to save to DynamoDB, and the headers of the table
-
 SAVE_LOGS_TO_DYNAMODB = get_or_create_env_var('SAVE_LOGS_TO_DYNAMODB', 'False')
 
 ACCESS_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('ACCESS_LOG_DYNAMODB_TABLE_NAME', 'redaction_access_log')
@@ -211,7 +189,6 @@ if LOGGING == 'True':
 LOG_FILE_NAME = get_or_create_env_var('LOG_FILE_NAME', 'log.csv')
 USAGE_LOG_FILE_NAME = get_or_create_env_var('USAGE_LOG_FILE_NAME', LOG_FILE_NAME)
 FEEDBACK_LOG_FILE_NAME = get_or_create_env_var('FEEDBACK_LOG_FILE_NAME', LOG_FILE_NAME)
-
 
 
 ###
