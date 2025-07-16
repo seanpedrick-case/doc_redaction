@@ -17,7 +17,6 @@ from gradio_client import utils as client_utils
 import gradio as gr
 from gradio import utils, wasm_utils
 from tools.config import AWS_REGION, AWS_ACCESS_KEY, AWS_SECRET_KEY, RUN_AWS_FUNCTIONS
-from botocore.exceptions import NoCredentialsError, TokenRetrievalError
 
 
 if TYPE_CHECKING:
@@ -78,12 +77,15 @@ class CSVLogger_custom(FlaggingCallback):
         os.makedirs(self.flagging_dir, exist_ok=True)
 
         if replacement_headers:
+            if additional_headers is None:
+                additional_headers = []                
+
             if len(replacement_headers) != len(self.components):
                 raise ValueError(
                     f"replacement_headers must have the same length as components "
                     f"({len(replacement_headers)} provided, {len(self.components)} expected)"
                 )
-            headers = replacement_headers + ["timestamp"]
+            headers = replacement_headers + additional_headers + ["timestamp"]
         else:
             if additional_headers is None:
                 additional_headers = []
@@ -141,12 +143,14 @@ class CSVLogger_custom(FlaggingCallback):
     replacement_headers: list[str] | None = None
 ) -> int:
         if self.first_time:
+            print("First time creating file")
             additional_headers = []
             if flag_option is not None:
                 additional_headers.append("flag")
             if username is not None:
                 additional_headers.append("username")
             additional_headers.append("id")
+            #additional_headers.append("timestamp")
             self._create_dataset_file(additional_headers=additional_headers, replacement_headers=replacement_headers)
             self.first_time = False
 
@@ -177,12 +181,11 @@ class CSVLogger_custom(FlaggingCallback):
         if username is not None:
             csv_data.append(username)
 
-
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] # Correct format for Amazon Athena
-        csv_data.append(timestamp)
-
         generated_id = str(uuid.uuid4())
         csv_data.append(generated_id)
+
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] # Correct format for Amazon Athena
+        csv_data.append(timestamp)        
 
         # Build the headers
         headers = (
@@ -192,8 +195,8 @@ class CSVLogger_custom(FlaggingCallback):
             headers.append("flag")
         if username is not None:
             headers.append("username")
-        headers.append("timestamp")
         headers.append("id")
+        headers.append("timestamp")        
 
         line_count = -1
 

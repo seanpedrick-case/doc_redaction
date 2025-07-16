@@ -454,7 +454,8 @@ def create_page_size_objects(pymupdf_doc:Document, image_sizes_width:List[float]
 
 def prepare_image_or_pdf(
     file_paths: List[str],
-    in_redact_method: str,
+    text_extract_method: str,
+    all_line_level_ocr_results_df:pd.DataFrame,
     latest_file_completed: int = 0,
     out_message: List[str] = [],
     first_loop_state: bool = False,
@@ -467,7 +468,7 @@ def prepare_image_or_pdf(
     prepare_images:bool=True,
     page_sizes:list[dict]=[],
     textract_output_found:bool = False,
-    local_ocr_output_found:bool = False,   
+    relevant_ocr_output_with_words_found:bool = False,   
     progress: Progress = Progress(track_tqdm=True)
 ) -> tuple[List[str], List[str]]:
     """
@@ -478,7 +479,7 @@ def prepare_image_or_pdf(
 
     Args:
         file_paths (List[str]): List of file paths to process.
-        in_redact_method (str): The redaction method to use.
+        text_extract_method (str): The redaction method to use.
         latest_file_completed (optional, int): Index of the last completed file.
         out_message (optional, List[str]): List to store output messages.
         first_loop_state (optional, bool): Flag indicating if this is the first iteration.
@@ -490,7 +491,7 @@ def prepare_image_or_pdf(
         prepare_images (optional, bool): A boolean indicating whether to create images for each PDF page. Defaults to True.
         page_sizes(optional, List[dict]): A list of dicts containing information about page sizes in various formats.
         textract_output_found (optional, bool): A boolean indicating whether Textract analysis output has already been found. Defaults to False.
-        local_ocr_output_found (optional, bool): A boolean indicating whether local OCR analysis output has already been found. Defaults to False.
+        relevant_ocr_output_with_words_found (optional, bool): A boolean indicating whether local OCR analysis output has already been found. Defaults to False.
         progress (optional, Progress): Progress tracker for the operation
         
 
@@ -506,7 +507,6 @@ def prepare_image_or_pdf(
     pymupdf_doc = []
     all_img_details = []    
     review_file_csv = pd.DataFrame()
-    all_line_level_ocr_results_df = pd.DataFrame()
     out_textract_path = ""
     combined_out_message = ""
     final_out_message = ""
@@ -542,7 +542,7 @@ def prepare_image_or_pdf(
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, local_ocr_output_found
+        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, relevant_ocr_output_with_words_found
 
     progress(0.1, desc='Preparing file')
 
@@ -599,8 +599,8 @@ def prepare_image_or_pdf(
             
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
             # Check if the file is an image type and the user selected text ocr option
-            if file_extension in ['.jpg', '.jpeg', '.png'] and in_redact_method == SELECTABLE_TEXT_EXTRACT_OPTION:
-                in_redact_method = TESSERACT_TEXT_EXTRACT_OPTION
+            if file_extension in ['.jpg', '.jpeg', '.png'] and text_extract_method == SELECTABLE_TEXT_EXTRACT_OPTION:
+                text_extract_method = TESSERACT_TEXT_EXTRACT_OPTION
 
             # Convert image to a pymupdf document
             pymupdf_doc = pymupdf.open()  # Create a new empty document
@@ -663,15 +663,18 @@ def prepare_image_or_pdf(
             elif (file_extension in ['.json']) and '_ocr_results_with_words' in file_path_without_ext: #(prepare_for_review != True):
                 print("Saving local OCR output")
                 # Copy it to the output folder so it can be used later.
-                output_ocr_results_with_words_json_file_name = file_path_without_ext
-                if not file_path.endswith("_ocr_results_with_words.json"): output_ocr_results_with_words_json_file_name = file_path_without_ext + "_ocr_results_with_words.json"
-                else: output_ocr_results_with_words_json_file_name = file_path_without_ext + ".json"
+                output_ocr_results_with_words_json_file_name = file_path_without_ext + ".json"
+                # if not file_path.endswith("_ocr_results_with_words.json"): output_ocr_results_with_words_json_file_name = file_path_without_ext + "_ocr_results_with_words.json"
+                # else: output_ocr_results_with_words_json_file_name = file_path_without_ext + ".json"
 
                 out_ocr_results_with_words_path = os.path.join(output_folder, output_ocr_results_with_words_json_file_name)
 
                 # Use shutil to copy the file directly
                 shutil.copy2(file_path, out_ocr_results_with_words_path)  # Preserves metadata
-                local_ocr_output_found = True                
+
+                if text_extract_method == SELECTABLE_TEXT_EXTRACT_OPTION and file_path.endswith("_ocr_results_with_words_local_text.json"): relevant_ocr_output_with_words_found = True
+                if text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION and file_path.endswith("_ocr_results_with_words_local_ocr.json"): relevant_ocr_output_with_words_found = True
+                if text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION and file_path.endswith("_ocr_results_with_words_textract.json"): relevant_ocr_output_with_words_found = True       
                 continue
 
             # NEW IF STATEMENT
@@ -768,13 +771,13 @@ def prepare_image_or_pdf(
 
         # Must be something else, return with error message
         else:
-            if in_redact_method == TESSERACT_TEXT_EXTRACT_OPTION or in_redact_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+            if text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION or text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION:
                 if is_pdf_or_image(file_path) == False:
                     out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
                     print(out_message)
                     raise Exception(out_message)
 
-            elif in_redact_method == SELECTABLE_TEXT_EXTRACT_OPTION:
+            elif text_extract_method == SELECTABLE_TEXT_EXTRACT_OPTION:
                 if is_pdf(file_path) == False:
                     out_message = "Please upload a PDF file for text analysis."
                     print(out_message)
@@ -793,7 +796,7 @@ def prepare_image_or_pdf(
 
     number_of_pages = len(page_sizes)#len(image_file_paths)
         
-    return combined_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, local_ocr_output_found
+    return combined_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, relevant_ocr_output_with_words_found
 
 def load_and_convert_ocr_results_with_words_json(ocr_results_with_words_json_file_path:str, log_files_output_paths:str, page_sizes_df:pd.DataFrame):
     """
@@ -1023,10 +1026,10 @@ def divide_coordinates_by_page_sizes(
         if divisors_numeric and "image_width" in df_abs.columns and "image_height" in df_abs.columns:
              # Use np.errstate to suppress warnings about division by zero or NaN if desired
              with np.errstate(divide='ignore', invalid='ignore'):
-                df_abs[xmin] = df_abs[xmin] / df_abs["image_width"]
-                df_abs[xmax] = df_abs[xmax] / df_abs["image_width"]
-                df_abs[ymin] = df_abs[ymin] / df_abs["image_height"]
-                df_abs[ymax] = df_abs[ymax] / df_abs["image_height"]
+                df_abs[xmin] = round(df_abs[xmin] / df_abs["image_width"],6)
+                df_abs[xmax] = round(df_abs[xmax] / df_abs["image_width"],6)
+                df_abs[ymin] = round(df_abs[ymin] / df_abs["image_height"],6)
+                df_abs[ymax] = round(df_abs[ymax] / df_abs["image_height"],6)
                 # Replace potential infinities with NaN (optional, depending on desired outcome)
                 df_abs.replace([np.inf, -np.inf], np.nan, inplace=True)
         else:
@@ -1289,6 +1292,7 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     '''
     if not all_annotations:
         # Return an empty DataFrame with the expected schema if input is empty
+        print("No annotations found, returning empty dataframe")
         return pd.DataFrame(columns=["image", "page", "xmin", "xmax", "ymin", "ymax", "text", "id"])
 
     # 1. Create initial DataFrame from the list of annotations
@@ -1302,7 +1306,6 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
                     else []
                     for anno in all_annotations
                 ]
-
     })
 
     # 2. Calculate the page number using the helper function
@@ -1715,6 +1718,75 @@ def fill_missing_box_ids(data_input: dict) -> dict:
         #print("No missing or invalid box IDs found.")
 
 
+    # The input dictionary 'data_input' has been modified in place
+    return data_input
+
+def fill_missing_box_ids_each_box(data_input: Dict) -> Dict:
+    """
+    Generates unique alphanumeric IDs for bounding boxes in a list
+    where the 'id' is missing, blank, or not a 12-character string.
+
+    Args:
+        data_input (Dict): The input dictionary containing 'image' and 'boxes' keys.
+                           'boxes' should be a list of dictionaries, each potentially
+                           with an 'id' key.
+
+    Returns:
+        Dict: The input dictionary with missing/invalid box IDs filled.
+              Note: The function modifies the input dictionary in place.
+    """
+    # --- Input Validation ---
+    if not isinstance(data_input, dict):
+        raise TypeError("Input 'data_input' must be a dictionary.")
+    if 'boxes' not in data_input or not isinstance(data_input.get('boxes'), list):
+        # If there are no boxes, there's nothing to do.
+        return data_input
+
+    boxes_list = data_input['boxes']
+    id_length = 12
+    character_set = string.ascii_letters + string.digits
+
+    # --- 1. Get ALL Existing IDs to Ensure Uniqueness ---
+    # Collect all valid existing IDs from the entire list first.
+    existing_ids = set()
+    for box in boxes_list:
+        if isinstance(box, dict):
+            box_id = box.get('id')
+            if isinstance(box_id, str) and len(box_id) == id_length:
+                existing_ids.add(box_id)
+
+    # --- 2. Iterate and Fill IDs for each box ---
+    generated_ids_this_run = set() # Keep track of IDs generated in this run
+    num_filled = 0
+
+    for box in boxes_list:
+        if not isinstance(box, dict):
+            continue # Skip items in the list that are not dictionaries
+
+        box_id = box.get('id')
+
+        # Check if this specific box needs a new ID
+        needs_new_id = (
+            box_id is None or
+            not isinstance(box_id, str) or
+            box_id.strip() == "" or
+            len(box_id) != id_length
+        )
+
+        if needs_new_id:
+            # Generate a truly unique ID
+            while True:
+                candidate_id = ''.join(random.choices(character_set, k=id_length))
+                # Check against original IDs and newly generated IDs
+                if candidate_id not in existing_ids and candidate_id not in generated_ids_this_run:
+                    generated_ids_this_run.add(candidate_id)
+                    box['id'] = candidate_id # Assign the ID to the individual box
+                    num_filled += 1
+                    break # Move to the next box
+
+    if num_filled > 0:
+        print(f"Successfully filled {num_filled} missing or invalid box IDs.")
+    
     # The input dictionary 'data_input' has been modified in place
     return data_input
 

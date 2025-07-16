@@ -42,30 +42,30 @@ Update your DNS records to include the CNAME record given by AWS. After your sta
 
 ### 1.  Create a python environment, load in packages from `requirements.txt`.
 
-    You need a `cdk.json` in the `cdk` folder. It should contain the following:
+You need a `cdk.json` in the `cdk` folder. It should contain the following:
 
-    ```json
-    {
-        "app": "<PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED>/python.exe app.py",
-        "context": {
-          "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true,
-          "@aws-cdk/core:stackRelativeExports": true,
-          "@aws-cdk/aws-rds:lowercaseDbIdentifier": true,
-          "@aws-cdk/aws-lambda:recognizeVersionProps": true,
-          "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
-          "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
-          "@aws-cdk/aws-ecs:arnFormatIncludesClusterName": true,
-          "@aws-cdk/core:newStyleStackSynthesis": true,
-          "aws-cdk:enableDiffNoFail": true,
-          "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": true,
-          "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,
-          "@aws-cdk/core:target-partitions": [
-            "aws",
-            "aws-cn"
-          ]
-        }
-      }
-    ```
+```json
+{
+    "app": "<PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED>/python.exe app.py",
+    "context": {
+        "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true,
+        "@aws-cdk/core:stackRelativeExports": true,
+        "@aws-cdk/aws-rds:lowercaseDbIdentifier": true,
+        "@aws-cdk/aws-lambda:recognizeVersionProps": true,
+        "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+        "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
+        "@aws-cdk/aws-ecs:arnFormatIncludesClusterName": true,
+        "@aws-cdk/core:newStyleStackSynthesis": true,
+        "aws-cdk:enableDiffNoFail": true,
+        "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": true,
+        "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,
+        "@aws-cdk/core:target-partitions": [
+        "aws",
+        "aws-cn"
+        ]
+    }
+    }
+```
 
 ### 2.  Create a `cdk_config.env` file in the `config` subfolder. 
 
@@ -75,24 +75,22 @@ Depending on which environment variables you put in this file, you can choose wh
 
 Here as a minimum it would be useful to put the following details in the cdk_config.env file (below are all example values, other possible variables to use here can be seen in the `cdk` folder/`cdk_config.py`).
 
-    ```ini
-    CDK_PREFIX=example-prefix # This prefix will be added to the name of most of the created elements in your stack
-    NEW_VPC_CIDR=10.0.0.0/24 # The CIDR range for your newly created VPC
-    AWS_REGION=<your-region> # Region where elements will be created
-    AWS_ACCOUNT_ID=1234567890 # AWS account ID that has administrator access that you will use for deploying the stack
-    CDK_FOLDER=C:/path_to_cdk_folder/ # The place where the cdk folder code is located
-    CONTEXT_FILE=C:/path_to_cdk_folder/cdk.context.json
-    
-    COGNITO_USER_POOL_DOMAIN_PREFIX=redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.
-    COGNITO_AUTH=1 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  
-    USE_CLOUDFRONT=True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.
-    RUN_USEAST_STACK=False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).
-    CLOUDFRONT_DOMAIN=<example>.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.
-    # If you are using an SSL certificate with your ALB (highly recommended):
-    ACM_SSL_CERTIFICATE_ARN=<SSL Certificate ARN> # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager
-    SSL_CERTIFICATE_DOMAIN=redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager
-    
-    ```
+```ini
+CDK_PREFIX=example-prefix # This prefix will be added to the name of most of the created elements in your stack
+NEW_VPC_CIDR=10.0.0.0/24 # The CIDR range for your newly created VPC
+AWS_REGION=<your-region> # Region where elements will be created
+AWS_ACCOUNT_ID=1234567890 # AWS account ID that has administrator access that you will use for deploying the stack
+CDK_FOLDER=C:/path_to_cdk_folder/ # The place where the cdk folder code is located
+CONTEXT_FILE=C:/path_to_cdk_folder/cdk.context.json
+COGNITO_USER_POOL_DOMAIN_PREFIX=redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.
+COGNITO_AUTH=1 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  
+USE_CLOUDFRONT=True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.
+RUN_USEAST_STACK=False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).
+CLOUDFRONT_DOMAIN=<example>.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.
+# If you are using an SSL certificate with your ALB (highly recommended):
+ACM_SSL_CERTIFICATE_ARN=<SSL Certificate ARN> # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager
+SSL_CERTIFICATE_DOMAIN=redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager
+```
 
 **Note: If you are using an SSL certificate with Cognito login on the application load balancer (strongly advised), you can set COGNITO_AUTH to 0 above, as you don't need the second login step to get to the app**
 
