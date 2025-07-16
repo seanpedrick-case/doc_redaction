@@ -8,7 +8,7 @@ import copy
 
 from tqdm import tqdm
 from PIL import Image, ImageChops, ImageFile, ImageDraw
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 import pandas as pd
 
 from pdfminer.high_level import extract_pages
@@ -58,6 +58,49 @@ def sum_numbers_before_seconds(string:str):
     sum_of_numbers = round(sum(numbers),1)
 
     return sum_of_numbers
+
+def merge_page_results(data):
+    merged = {}
+
+    for item in data:
+        page = item["page"]
+
+        if page not in merged:
+            merged[page] = {
+                "page": page,
+                "results": {}
+            }
+
+        # Merge line-level results into the existing page
+        merged[page]["results"].update(item.get("results", {}))
+
+    return list(merged.values())
+
+def word_level_ocr_output_to_dataframe(ocr_result: dict) -> pd.DataFrame:
+    rows = []
+    ocr_result = ocr_result[0]
+
+    page_number = int(ocr_result['page'])
+
+    for line_key, line_data in ocr_result['results'].items():
+        line_number = int(line_data['line'])
+        for word in line_data['words']:
+            rows.append({
+                'page': page_number,
+                'line': line_number,
+                'word_text': word['text'],
+                'word_x0': word['bounding_box'][0],
+                'word_y0': word['bounding_box'][1],
+                'word_x1': word['bounding_box'][2],
+                'word_y1': word['bounding_box'][3],
+                'line_text': line_data['text'],
+                'line_x0': line_data['bounding_box'][0],
+                'line_y0': line_data['bounding_box'][1],
+                'line_x1': line_data['bounding_box'][2],
+                'line_y1': line_data['bounding_box'][3],
+            })
+
+    return pd.DataFrame(rows)
 
 def choose_and_run_redactor(file_paths:List[str],
  prepared_pdf_file_paths:List[str],
@@ -287,7 +330,7 @@ def choose_and_run_redactor(file_paths:List[str],
     # Call prepare_image_or_pdf only if needed
     if prepare_images_flag is not None:
         out_message, prepared_pdf_file_paths, pdf_image_file_paths, annotate_max_pages, annotate_max_pages_bottom, pymupdf_doc, annotations_all_pages, review_file_state, document_cropboxes, page_sizes, textract_output_found, all_img_details_state, placeholder_ocr_results_df, local_ocr_output_found_checkbox = prepare_image_or_pdf(
-            file_paths_loop, text_extraction_method, 0, out_message, True, 
+            file_paths_loop, text_extraction_method, all_line_level_ocr_results_df, 0, out_message, True, 
             annotate_max_pages, annotations_all_pages, document_cropboxes, redact_whole_page_list, 
             output_folder, prepare_images=prepare_images_flag, page_sizes=page_sizes, input_folder=input_folder
         )   
@@ -441,6 +484,20 @@ def choose_and_run_redactor(file_paths:List[str],
         # Output file paths names
         orig_pdf_file_path = output_folder + pdf_file_name_with_ext
         review_file_path = orig_pdf_file_path + '_review_file.csv'
+        
+        # Load in all_ocr_results_with_words if it exists as a file path and doesn't exist already
+        file_name = get_file_name_without_type(file_path)  
+
+        if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION: file_ending = "_ocr_results_with_words_local_text.json"
+        elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION: file_ending = "_ocr_results_with_words_local_ocr.json"
+        elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION: file_ending = "_ocr_results_with_words_textract.json"
+        all_page_line_level_ocr_results_with_words_json_file_path = output_folder + file_name + file_ending
+        
+        if not all_page_line_level_ocr_results_with_words:
+            if local_ocr_output_found_checkbox == True and os.path.exists(all_page_line_level_ocr_results_with_words_json_file_path):
+                all_page_line_level_ocr_results_with_words, is_missing, log_files_output_paths = load_and_convert_ocr_results_with_words_json(all_page_line_level_ocr_results_with_words_json_file_path, log_files_output_paths, page_sizes_df)
+                #original_all_page_line_level_ocr_results_with_words = all_page_line_level_ocr_results_with_words.copy()          
+
 
         # Remove any existing review_file paths from the review file outputs
         if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
@@ -499,7 +556,7 @@ def choose_and_run_redactor(file_paths:List[str],
             # Analyse text-based pdf
             print('Redacting file as text-based PDF')
             
-            pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number = redact_text_pdf(
+            pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, all_page_line_level_ocr_results_with_words = redact_text_pdf(
             file_path,
             language,
             chosen_redact_entities,
@@ -513,6 +570,7 @@ def choose_and_run_redactor(file_paths:List[str],
             all_line_level_ocr_results_df,
             all_pages_decision_process_table,
             pymupdf_doc,
+            all_page_line_level_ocr_results_with_words,
             pii_identification_method,
             comprehend_query_number,
             comprehend_client,
@@ -522,7 +580,8 @@ def choose_and_run_redactor(file_paths:List[str],
             match_fuzzy_whole_phrase_bool,
             page_sizes_df,
             document_cropboxes,
-            text_extraction_only)
+            text_extraction_only,
+            output_folder=output_folder)
         else:
             out_message = "No redaction method selected"
             print(out_message)
@@ -536,9 +595,7 @@ def choose_and_run_redactor(file_paths:List[str],
             current_loop_page = 999
 
             if latest_file_completed != len(file_paths_list):
-                print("Completed file number:", str(latest_file_completed), "there are more files to do")                    
-
-            
+                print("Completed file number:", str(latest_file_completed), "there are more files to do")                                
             
             # Save redacted file
             if pii_identification_method != NO_REDACTION_PII_OPTION:
@@ -571,6 +628,36 @@ def choose_and_run_redactor(file_paths:List[str],
             out_file_paths.append(ocr_file_path)
 
             duplication_file_path_outputs.append(ocr_file_path)
+
+            if all_page_line_level_ocr_results_with_words:
+                #print("all_page_line_level_ocr_results_with_words:", all_page_line_level_ocr_results_with_words)
+                # 
+                #if original_all_page_line_level_ocr_results_with_words != all_page_line_level_ocr_results_with_words:   
+                
+                all_page_line_level_ocr_results_with_words = merge_page_results(all_page_line_level_ocr_results_with_words)
+
+                # print("all_page_line_level_ocr_results_with_words:", all_page_line_level_ocr_results_with_words)               
+
+                with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
+                    json.dump(all_page_line_level_ocr_results_with_words, json_file, separators=(",", ":"))
+
+                all_page_line_level_ocr_results_with_words_df = word_level_ocr_output_to_dataframe(all_page_line_level_ocr_results_with_words)
+
+                all_page_line_level_ocr_results_with_words_df = divide_coordinates_by_page_sizes(all_page_line_level_ocr_results_with_words_df, page_sizes_df, xmin="word_x0", xmax="word_x1", ymin="word_y0", ymax="word_y1")
+
+                all_page_line_level_ocr_results_with_words_df = divide_coordinates_by_page_sizes(all_page_line_level_ocr_results_with_words_df, page_sizes_df, xmin="line_x0", xmax="line_x1", ymin="line_y0", ymax="line_y1")
+
+                all_page_line_level_ocr_results_with_words_df.sort_values(["page", "line", "word_x0"], inplace=True)
+                all_page_line_level_ocr_results_with_words_df_file_path = (output_folder + file_name + file_ending).replace(".json", ".csv")
+                all_page_line_level_ocr_results_with_words_df.to_csv(all_page_line_level_ocr_results_with_words_df_file_path, index = None)
+
+                
+
+                if all_page_line_level_ocr_results_with_words_json_file_path not in log_files_output_paths:
+                    log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path)
+
+                if all_page_line_level_ocr_results_with_words_df_file_path not in log_files_output_paths:
+                    log_files_output_paths.append(all_page_line_level_ocr_results_with_words_df_file_path)
 
             # Convert the gradio annotation boxes to relative coordinates
             # Convert annotations_all_pages to a consistent relative coordinate format output
@@ -636,8 +723,7 @@ def choose_and_run_redactor(file_paths:List[str],
     if not review_file_path: review_out_file_paths = [prepared_pdf_file_paths[-1]]
     else: review_out_file_paths = [prepared_pdf_file_paths[-1], review_file_path]
 
-    if total_textract_query_number > number_of_pages:
-        total_textract_query_number = number_of_pages
+    if total_textract_query_number > number_of_pages: total_textract_query_number = number_of_pages
 
     return combined_out_message, out_file_paths, out_file_paths, gr.Number(value=latest_file_completed, label="Number of documents redacted", interactive=False, visible=False), log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages_divide, gr.Number(value=current_loop_page, precision=0, interactive=False, label = "Last redacted page in document", visible=False), gr.Checkbox(value = True, label="Page break reached", visible=False), all_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words
 
@@ -887,7 +973,6 @@ def prepare_custom_image_recogniser_result_annotation_box(page:Page, annot:dict,
 
     return img_annotation_box, rect
 
-
 def convert_pikepdf_annotations_to_result_annotation_box(page:Page, annot:dict, image:Image=None, convert_pikepdf_to_pymupdf_coords:bool=True, page_sizes_df:pd.DataFrame=pd.DataFrame(), image_dimensions:dict={}):
     '''
     Convert redaction objects with pikepdf coordinates to annotation boxes for PyMuPDF that can then be redacted from the document. First 1. converts pikepdf to pymupdf coordinates, then 2. converts pymupdf coordinates to image coordinates if page is an image.
@@ -931,23 +1016,6 @@ def convert_pikepdf_annotations_to_result_annotation_box(page:Page, annot:dict, 
         img_annotation_box["text"] = ""
     
     return img_annotation_box, rect
-
-# def set_cropbox_safely(page, original_cropbox):
-#     """
-#     Sets the cropbox of a page, ensuring it's not larger than the mediabox.
-#     If the original cropbox is larger, the mediabox is used instead.
-
-#     Args:
-#         page: The PyMuPdf page object.
-#         original_cropbox: The fitz.Rect representing the desired cropbox.
-#     """
-#     mediabox = page.mediabox
-#     if original_cropbox.width > mediabox.width or original_cropbox.height > mediabox.height:
-#         #print("Warning: Requested cropbox is larger than the mediabox. Using mediabox instead.")
-#         page.set_cropbox(mediabox)
-#     else:
-#         page.set_cropbox(original_cropbox)
-
 
 def set_cropbox_safely(page: Page, original_cropbox: Optional[Rect]):
     """
@@ -994,7 +1062,6 @@ def set_cropbox_safely(page: Page, original_cropbox: Optional[Rect]):
         page.set_cropbox(mediabox)
     else:
         page.set_cropbox(original_cropbox)
-
 
 def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None, custom_colours:bool=False, redact_whole_page:bool=False, convert_pikepdf_to_pymupdf_coords:bool=True, original_cropbox:List[Rect]=[], page_sizes_df:pd.DataFrame=pd.DataFrame()):
 
@@ -1362,7 +1429,7 @@ def redact_image_pdf(file_path:str,
 
     # If running local OCR option, check if file already exists. If it does, load in existing data
     if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:                
-        all_page_line_level_ocr_results_with_words_json_file_path = output_folder + file_name + "_ocr_results_with_words.json"
+        all_page_line_level_ocr_results_with_words_json_file_path = output_folder + file_name + "_ocr_results_with_words_local_ocr.json"
         all_page_line_level_ocr_results_with_words, is_missing, log_files_output_paths = load_and_convert_ocr_results_with_words_json(all_page_line_level_ocr_results_with_words_json_file_path, log_files_output_paths, page_sizes_df)
         original_all_page_line_level_ocr_results_with_words = all_page_line_level_ocr_results_with_words.copy()
 
@@ -1383,8 +1450,6 @@ def redact_image_pdf(file_path:str,
     if not all_pages_decision_process_table.empty:
         all_pages_decision_process_list.extend(all_pages_decision_process_table.to_dict('records'))   
 
-    #all_line_level_ocr_results_list = [all_line_level_ocr_results_df.to_dict('records')]#[all_line_level_ocr_results_df]
-    #all_pages_decision_process_list = [all_pages_decision_process_table.to_dict('records')]#[all_pages_decision_process_table]    
 
     # Go through each page
     for page_no in progress_bar:
@@ -1524,6 +1589,8 @@ def redact_image_pdf(file_path:str,
                 
                 page_line_level_ocr_results, handwriting_or_signature_boxes, page_signature_recogniser_results, page_handwriting_recogniser_results, page_line_level_ocr_results_with_words = json_to_ocrresult(text_blocks, page_width, page_height, reported_page_number)
 
+                all_page_line_level_ocr_results_with_words.append(page_line_level_ocr_results_with_words)
+
             # Convert to DataFrame and add to ongoing logging table
             line_level_ocr_results_df = pd.DataFrame([{
                 'page': page_line_level_ocr_results['page'],
@@ -1533,8 +1600,6 @@ def redact_image_pdf(file_path:str,
                 'width': result.width,
                 'height': result.height
             } for result in page_line_level_ocr_results['results']])
-
-            #all_line_level_ocr_results_list.append(line_level_ocr_results_df.to_dict('records'))
 
             if not line_level_ocr_results_df.empty: # Ensure there are records to add
                 all_line_level_ocr_results_list.extend(line_level_ocr_results_df.to_dict('records'))
@@ -1681,31 +1746,18 @@ def redact_image_pdf(file_path:str,
                     # Append new annotation if it doesn't exist
                     annotations_all_pages.append(page_image_annotations)
 
-
+                # Save word level options
                 if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
                     if original_textract_data != textract_data:
                         # Write the updated existing textract data back to the JSON file
                         with open(textract_json_file_path, 'w') as json_file:
                             json.dump(textract_data, json_file, separators=(",", ":"))  # indent=4 makes the JSON file pretty-printed
 
-                    if textract_json_file_path not in log_files_output_paths:
-                        log_files_output_paths.append(textract_json_file_path)
-
-                if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
-                    if original_all_page_line_level_ocr_results_with_words != all_page_line_level_ocr_results_with_words:
-                        # Write the updated existing textract data back to the JSON file
-                        with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
-                            json.dump(all_page_line_level_ocr_results_with_words, json_file, separators=(",", ":"))  # indent=4 makes the JSON file pretty-printed
-
-                    if all_page_line_level_ocr_results_with_words_json_file_path not in log_files_output_paths:
-                        log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path)
-
-                #all_pages_decision_process_table = pd.concat(all_pages_decision_process_list)
-                #all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_list)
+                        if textract_json_file_path not in log_files_output_paths:
+                            log_files_output_paths.append(textract_json_file_path)                    
 
                 all_pages_decision_process_table = pd.DataFrame(all_pages_decision_process_list)
                 all_line_level_ocr_results_df = pd.DataFrame(all_line_level_ocr_results_list)
-
 
                 current_loop_page += 1
 
@@ -1788,7 +1840,6 @@ def redact_image_pdf(file_path:str,
 
     return pymupdf_doc, all_pages_decision_process_table, log_files_output_paths, textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_line_level_ocr_results_df, comprehend_query_number, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words
 
-
 ###
 # PIKEPDF TEXT DETECTION/REDACTION
 ###
@@ -1804,22 +1855,21 @@ def get_text_container_characters(text_container:LTTextContainer):
         return characters
     return []
 
-def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tuple[List[OCRResult], List[LTChar]]:
+def create_line_level_ocr_results_from_characters(char_objects:List[LTChar]) -> Tuple[List[OCRResult], List[LTChar]]:
     '''
     Create an OCRResult object based on a list of pdfminer LTChar objects.
     '''
 
     line_level_results_out = []
     line_level_characters_out = []
-    #all_line_level_characters_out = []
-    character_objects_out = []  # New list to store character objects
-    # character_text_objects_out = []
+    line_level_words_out = {}
+    character_objects_out = []
 
     # Initialize variables
     full_text = ""
     added_text = ""
     overall_bbox = [float('inf'), float('inf'), float('-inf'), float('-inf')]  # [x0, y0, x1, y1]
-    word_bboxes = []
+    line_bboxes = []
 
     # Iterate through the character objects
     current_word = ""
@@ -1833,7 +1883,6 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
             # character_text_objects_out.append(character_text)        
 
         if isinstance(char, LTAnno):
-
             added_text = char.get_text()
         
             # Handle double quotes
@@ -1842,17 +1891,17 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
             # Handle space separately by finalizing the word
             full_text += added_text  # Adds space or newline
 
-            if current_word:  # Only finalize if there is a current word
-                word_bboxes.append((current_word, current_word_bbox))
+            if current_word:  # Only finalise if there is a current word
+                line_bboxes.append((current_word, current_word_bbox))
                 current_word = ""
                 current_word_bbox = [float('inf'), float('inf'), float('-inf'), float('-inf')]  # Reset for next word
 
             # Check for line break (assuming a new line is indicated by a specific character)
             if '\n' in added_text:
 
-                # Finalize the current line
+                # finalise the current line
                 if current_word:
-                    word_bboxes.append((current_word, current_word_bbox))
+                    line_bboxes.append((current_word, current_word_bbox))
                 # Create an OCRResult for the current line
                 line_level_results_out.append(OCRResult(full_text.strip(), round(overall_bbox[0], 2), round(overall_bbox[1], 2), round(overall_bbox[2] - overall_bbox[0], 2), round(overall_bbox[3] - overall_bbox[1], 2)))
                 line_level_characters_out.append(character_objects_out)
@@ -1892,23 +1941,138 @@ def create_text_bounding_boxes_from_characters(char_objects:List[LTChar]) -> Tup
         current_word_bbox[2] = max(current_word_bbox[2], x1)  # x1
         current_word_bbox[3] = max(current_word_bbox[3], y1)  # y1
 
-    # Finalize the last word if any
+    # Finalise the last word if any
     if current_word:
-        word_bboxes.append((current_word, current_word_bbox))
+        line_bboxes.append((current_word, current_word_bbox))
 
     if full_text:
+        print("full_text found")
         if re.search(r'[^\x00-\x7F]', full_text):  # Matches any non-ASCII character
             # Convert special characters to a human-readable format
 
             full_text = clean_unicode_text(full_text)
             full_text = full_text.strip()
 
+        line_ocr_result_bbox = round(overall_bbox[0],2), round(overall_bbox[1], 2), round(overall_bbox[2]-overall_bbox[0],2), round(overall_bbox[3]-overall_bbox[1],2)
 
-        line_level_results_out.append(OCRResult(full_text.strip(), round(overall_bbox[0],2), round(overall_bbox[1], 2), round(overall_bbox[2]-overall_bbox[0],2), round(overall_bbox[3]-overall_bbox[1],2)))
+        line_ocr_result = OCRResult(full_text.strip(), line_ocr_result_bbox)
 
-    #line_level_characters_out = character_objects_out        
+        line_level_results_out.append(line_ocr_result)       
 
-    return line_level_results_out, line_level_characters_out  # Return both results and character objects
+    else:
+        line_ocr_result_bbox = []
+
+    # if line_ocr_result_bbox:
+    #     line_level_words_out["page"] = 1
+    #     line_level_words_out['results'] = {'text_line_1':{"line":1, "text":full_text, "bounding_box": line_ocr_result_bbox, "words": line_bboxes}}
+    # else:
+    #     line_level_words_out = {}
+     
+
+    return line_level_results_out, line_level_characters_out # Return both results and character objects
+
+def generate_word_level_ocr(char_objects: List, page_number: int, text_line_number:int) -> Dict[str, Any]:
+    """
+    Generates a dictionary with line and word-level OCR results from a list of pdfminer.six objects.
+
+    This robust version handles real-world pdfminer.six output by:
+    1. Filtering out non-character (LTAnno) objects that lack coordinate data.
+    2. Sorting all text characters (LTChar) into a proper reading order.
+    3. Using an adaptive threshold for detecting spaces based on character font size.
+
+    Args:
+        char_objects: A mixed list of pdfminer.six LTChar and LTAnno objects from a single page.
+        page_number: The page number where the characters are from.
+
+    Returns:
+        A dictionary formatted with page, line, and word-level results.
+    """
+    # **CRITICAL FIX: Filter out LTAnno objects, as they lack '.bbox' and are not needed for layout analysis.**
+    text_chars = [c for c in char_objects if isinstance(c, LTChar)]
+
+    if not text_chars:
+        return {"page": str(page_number), "results": {}}
+
+    # Sort the remaining text characters into reading order.
+    text_chars.sort(key=lambda c: (-c.bbox[3], c.bbox[0]))
+
+    page_data = {"page": str(page_number), "results": {}}
+    line_number = text_line_number
+
+    # State variables
+    line_text, line_bbox, line_words = "", [float('inf'), float('inf'), -1, -1], []
+    current_word_text, current_word_bbox = "", [float('inf'), float('inf'), -1, -1]
+    prev_char = None
+
+    def finalize_word():
+        nonlocal current_word_text, current_word_bbox
+        word_text = current_word_text.strip()
+        if word_text:
+            line_words.append({
+                "text": word_text,
+                "bounding_box": [round(b, 2) for b in current_word_bbox]
+            })
+        current_word_text = ""
+        current_word_bbox = [float('inf'), float('inf'), -1, -1]
+
+    def finalize_line():
+        nonlocal line_text, line_bbox, line_words, line_number, prev_char
+        finalize_word()
+        if line_text.strip():
+            page_data["results"][f"text_line_{line_number}"] = {
+                "line": line_number,
+                "text": line_text.strip(),
+                "bounding_box": [round(b, 2) for b in line_bbox],
+                "words": line_words
+            }
+            line_number += 1
+            line_text, line_bbox, line_words = "", [float('inf'), float('inf'), -1, -1], []
+            prev_char = None
+
+    for char in text_chars:
+        char_text = clean_unicode_text(char.get_text())
+
+        if prev_char:
+            char_height = char.bbox[3] - char.bbox[1]
+            vertical_gap = abs(char.bbox[1] - prev_char.bbox[1])
+
+            # Line break detection
+            if vertical_gap > char_height * 0.7:
+                finalize_line()
+            else:
+                # Check for spacing between characters
+                space_threshold = char.size * 0.5
+                gap = char.bbox[0] - prev_char.bbox[2]
+                if gap > max(space_threshold, 1.0):
+                    finalize_word()
+                    line_text += " "
+
+        # ✅ Explicitly finalize if space character
+        if char_text == " ":
+            finalize_word()
+            line_text += " "
+            prev_char = char
+            continue
+
+        current_word_text += char_text
+        line_text += char_text
+
+        # Update bounding boxes
+        current_word_bbox[0] = min(current_word_bbox[0], char.bbox[0])
+        current_word_bbox[1] = min(current_word_bbox[1], char.bbox[1])
+        current_word_bbox[2] = max(current_word_bbox[2], char.bbox[2])
+        current_word_bbox[3] = max(current_word_bbox[3], char.bbox[3])
+
+        line_bbox[0] = min(line_bbox[0], char.bbox[0])
+        line_bbox[1] = min(line_bbox[1], char.bbox[1])
+        line_bbox[2] = max(line_bbox[2], char.bbox[2])
+        line_bbox[3] = max(line_bbox[3], char.bbox[3])
+
+        prev_char = char
+
+    finalize_line()
+
+    return page_data
 
 def create_text_redaction_process_results(analyser_results, analysed_bounding_boxes, page_num):
     decision_process_table = pd.DataFrame()
@@ -1958,7 +2122,7 @@ def create_pikepdf_annotations_for_bounding_boxes(analysed_bounding_boxes):
     return pikepdf_redaction_annotations_on_page
 
 def redact_text_pdf(
-    filename: str,  # Path to the PDF file to be redacted
+    file_path: str,  # Path to the PDF file to be redacted
     language: str,  # Language of the PDF content
     chosen_redact_entities: List[str],  # List of entities to be redacted
     chosen_redact_comprehend_entities: List[str],
@@ -1971,6 +2135,7 @@ def redact_text_pdf(
     all_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(columns=["page", "text",	"left", "top", "width", "height"]),  # DataFrame for OCR results
     all_pages_decision_process_table:pd.DataFrame = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "text", "id"]),  # DataFrame for decision process table
     pymupdf_doc: List = [],  # List of PyMuPDF documents
+    all_page_line_level_ocr_results_with_words: List = [], 
     pii_identification_method: str = "Local",
     comprehend_query_number:int = 0,
     comprehend_client="",
@@ -1981,6 +2146,7 @@ def redact_text_pdf(
     page_sizes_df:pd.DataFrame=pd.DataFrame(),
     original_cropboxes:List[dict]=[],
     text_extraction_only:bool=False,
+    output_folder:str=OUTPUT_FOLDER,
     page_break_val: int = int(PAGE_BREAK_VALUE),  # Value for page break
     max_time: int = int(MAX_TIME_VALUE),    
     progress: Progress = Progress(track_tqdm=True)  # Progress tracking object
@@ -1990,7 +2156,7 @@ def redact_text_pdf(
     Redact chosen entities from a PDF that is made up of multiple pages that are not images.
     
     Input Variables:
-    - filename: Path to the PDF file to be redacted
+    - file_path: Path to the PDF file to be redacted
     - language: Language of the PDF content
     - chosen_redact_entities: List of entities to be redacted
     - chosen_redact_comprehend_entities: List of entities to be redacted for AWS Comprehend
@@ -2014,6 +2180,7 @@ def redact_text_pdf(
     - page_sizes_df (pd.DataFrame, optional): A pandas dataframe containing page size information.
     - original_cropboxes (List[dict], optional): A list of dictionaries containing pymupdf cropbox information.
     - text_extraction_only (bool, optional): Should the function only extract text, or also do redaction.
+    - output_folder (str, optional): The output folder for the function
     - page_break_val: Value for page break
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.    
     - progress: Progress tracking object
@@ -2043,8 +2210,13 @@ def redact_text_pdf(
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
 
     # Open with Pikepdf to get text lines
-    pikepdf_pdf = Pdf.open(filename)
-    number_of_pages = len(pikepdf_pdf.pages)    
+    pikepdf_pdf = Pdf.open(file_path)
+    number_of_pages = len(pikepdf_pdf.pages)
+
+    file_name = get_file_name_without_type(file_path) 
+
+    if not all_page_line_level_ocr_results_with_words:
+        all_page_line_level_ocr_results_with_words = [] 
     
     # Check that page_min and page_max are within expected ranges
     if page_max > number_of_pages or page_max == 0:
@@ -2076,7 +2248,7 @@ def redact_text_pdf(
 
         if page_min <= page_no < page_max:
             # Go page by page
-            for page_layout in extract_pages(filename, page_numbers = [page_no], maxpages=1):
+            for page_layout in extract_pages(file_path, page_numbers = [page_no], maxpages=1):
                 
                 all_page_line_text_extraction_characters = []
                 all_page_line_level_text_extraction_results_list = []
@@ -2088,14 +2260,18 @@ def redact_text_pdf(
                 page_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "text", "id"])    
                 page_text_ocr_outputs = pd.DataFrame(columns=["page", "text", "left", "top", "width", "height"])  
 
+                text_line_no = 0
                 for n, text_container in enumerate(page_layout):                    
                     characters = []
 
                     if isinstance(text_container, LTTextContainer) or isinstance(text_container, LTAnno):
                         characters = get_text_container_characters(text_container)
+                        text_line_no += 1
 
                     # Create dataframe for all the text on the page
-                    line_level_text_results_list, line_characters = create_text_bounding_boxes_from_characters(characters)
+                    line_level_text_results_list, line_characters, = create_line_level_ocr_results_from_characters(characters)
+
+                    line_level_ocr_results_with_words = generate_word_level_ocr(characters, page_number=int(reported_page_number), text_line_number=text_line_no)
 
                     ### Create page_text_ocr_outputs (OCR format outputs)
                     if line_level_text_results_list:
@@ -2113,6 +2289,7 @@ def redact_text_pdf(
 
                     all_page_line_level_text_extraction_results_list.extend(line_level_text_results_list)
                     all_page_line_text_extraction_characters.extend(line_characters)
+                    all_page_line_level_ocr_results_with_words.append(line_level_ocr_results_with_words)                    
 
                 ### REDACTION
                 if pii_identification_method != NO_REDACTION_PII_OPTION:
@@ -2160,12 +2337,11 @@ def redact_text_pdf(
                     pass
                     #print("Not redacting page:", page_no)
 
-
                 # Join extracted text outputs for all lines together
                 if not page_text_ocr_outputs.empty:
-                    page_text_ocr_outputs = page_text_ocr_outputs.sort_values(["top", "left"], ascending=[False, False]).reset_index(drop=True)
+                    #page_text_ocr_outputs = page_text_ocr_outputs.sort_values(["top", "left"], ascending=[False, False]).reset_index(drop=True)
                     page_text_ocr_outputs = page_text_ocr_outputs.loc[:, ["page", "text", "left", "top", "width", "height"]]
-                    all_line_level_ocr_results_list.append(page_text_ocr_outputs)
+                    all_line_level_ocr_results_list.append(page_text_ocr_outputs)                    
 
                 toc = time.perf_counter()
 
@@ -2194,7 +2370,7 @@ def redact_text_pdf(
 
                     current_loop_page += 1
 
-                    return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
+                    return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, all_page_line_level_ocr_results_with_words
                 
         # Check if the image already exists in annotations_all_pages
         existing_index = next((index for index, ann in enumerate(annotations_all_pages) if ann["image"] == page_image_annotations["image"]), None)
@@ -2215,7 +2391,7 @@ def redact_text_pdf(
             # Write logs
             all_pages_decision_process_table = pd.concat(all_pages_decision_process_list) 
 
-            return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
+            return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, all_page_line_level_ocr_results_with_words
         
     # Write all page outputs
     all_pages_decision_process_table = pd.concat(all_pages_decision_process_list)
@@ -2242,5 +2418,11 @@ def redact_text_pdf(
     if not all_line_level_ocr_results_df.empty:
         all_line_level_ocr_results_df['top'] = all_line_level_ocr_results_df['top'].astype(float)
         all_line_level_ocr_results_df['top'] = 1 - all_line_level_ocr_results_df['top']
+
+    #all_page_line_level_ocr_results_with_words_json_file_path = output_folder + file_name + "_ocr_results_with_words_local_text.json"
+
+    #print("all_page_line_level_ocr_results_with_words:", all_page_line_level_ocr_results_with_words)
+    #with open(all_page_line_level_ocr_results_with_words_json_file_path, 'w') as json_file:
+    #    json.dump(all_page_line_level_ocr_results_with_words, json_file, separators=(",", ":"))
                     
-    return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number
+    return pymupdf_doc, all_pages_decision_process_table, all_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, all_page_line_level_ocr_results_with_words
