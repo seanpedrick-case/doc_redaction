@@ -85,8 +85,7 @@ def enforce_cost_codes(enforce_cost_code_textbox:str, cost_code_choice:str, cost
     return
 
 def update_cost_code_dataframe_from_dropdown_select(cost_dropdown_selection:str, cost_code_df:pd.DataFrame):
-    cost_code_df = cost_code_df.loc[cost_code_df.iloc[:,0] == cost_dropdown_selection, :
-                                    ]
+    cost_code_df = cost_code_df.loc[cost_code_df.iloc[:,0] == cost_dropdown_selection, :]
     return cost_code_df
 
 def ensure_folder_exists(output_folder:str):
@@ -262,7 +261,6 @@ def check_for_relevant_ocr_output_with_words(doc_file_name_no_extension_textbox:
     else:
         return False
 
-# 
 def add_folder_to_path(folder_path: str):
     '''
     Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist. Function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
@@ -576,4 +574,14 @@ def reset_base_dataframe(df:pd.DataFrame):
 
 def reset_ocr_base_dataframe(df:pd.DataFrame):
     return df.iloc[:, [0,1]]
+
+def reset_ocr_with_words_base_dataframe(df:pd.DataFrame, page_entity_dropdown_redaction_value:str):
+    
+    df["index"] = df.index
+    output_df = df.copy()
+
+    df["page"]=df["page"].astype(str)
+
+    output_df_filtered = df.loc[df["page"]==str(page_entity_dropdown_redaction_value), ["page", "line", "word_text", "word_x0", "word_y0", "word_x1", "word_y1", "index"]]
+    return output_df_filtered, output_df
     

@@ -497,7 +497,9 @@ def anon_wrapper_func(
 
     # Anonymise the selected columns
     anon_df_part_out, key_string, decision_process_output_str = anonymise_script(anon_df_part, anon_strat, language, chosen_redact_entities, in_allow_list, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client)
-        
+
+    anon_df_part_out.replace("^nan$", "", regex=True, inplace=True)
+
     # Rejoin the dataframe together
     anon_df_out = pd.concat([anon_df_part_out, anon_df_remain], axis = 1)
     anon_df_out = anon_df_out[all_cols_original_order]
@@ -531,7 +533,7 @@ def anon_wrapper_func(
 
     else:
         anon_export_file_name = output_folder + out_file_part + "_anon_" + anon_strat_txt + ".csv"
-        anon_df_out.to_csv(anon_export_file_name, index = None)
+        anon_df_out.to_csv(anon_export_file_name, index = None, encoding="utf-8-sig")
 
         decision_process_log_output_file = anon_export_file_name + "_decision_process_output.txt"
         with open(decision_process_log_output_file, "w") as f:

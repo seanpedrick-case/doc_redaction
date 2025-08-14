@@ -5,6 +5,7 @@ from typing import List, Dict, Optional, Union, Tuple
 from dataclasses import dataclass
 import time
 import cv2
+import re
 import copy
 import botocore
 from copy import deepcopy
@@ -801,6 +802,78 @@ def recreate_page_line_level_ocr_results_with_page(page_line_level_ocr_results_w
     
     return page_line_level_ocr_results_with_page
 
+def split_words_and_punctuation_from_line(line_of_words: List[OCRResult]) -> List[OCRResult]:
+    """
+    Takes a list of OCRResult objects and splits words with trailing/leading punctuation.
+
+    For a word like "example.", it creates two new OCRResult objects for "example"
+    and "." and estimates their bounding boxes. Words with internal hyphens like
+    "high-tech" are preserved.
+    """
+    # Punctuation that will be split off. Hyphen is not included.
+    PUNCTUATION_TO_SPLIT = {'.', ',', '?', '!', ':', ';', '(', ')', '[', ']', '{', '}'}
+    
+    new_word_list = []
+    
+    for word_result in line_of_words:
+        word_text = word_result.text
+        
+        # This regex finds a central "core" word, and captures leading and trailing punctuation
+        # Handles cases like "(word)." -> group1='(', group2='word', group3='.'
+        match = re.match(r"([(\[{]*)(.*?)_?([.,?!:;)\}\]]*)$", word_text)
+
+        # Handle words with internal hyphens that might confuse the regex
+        if '-' in word_text and not match.group(2):
+             core_part_text = word_text
+             leading_punc = ""
+             trailing_punc = ""
+        elif match:
+            leading_punc, core_part_text, trailing_punc = match.groups()
+        else: # Failsafe
+            new_word_list.append(word_result)
+            continue
+            
+        # If no split is needed, just add the original and continue
+        if not leading_punc and not trailing_punc:
+            new_word_list.append(word_result)
+            continue
+            
+        # --- A split is required ---
+        # Estimate new bounding boxes by proportionally allocating width
+        original_width = word_result.width
+        if not word_text or original_width == 0: continue # Failsafe
+        
+        avg_char_width = original_width / len(word_text)
+        current_left = word_result.left
+
+        # Add leading punctuation if it exists
+        if leading_punc:
+            punc_width = avg_char_width * len(leading_punc)
+            new_word_list.append(OCRResult(
+                text=leading_punc, left=current_left, top=word_result.top, 
+                width=punc_width, height=word_result.height
+            ))
+            current_left += punc_width
+
+        # Add the core part of the word
+        if core_part_text:
+            core_width = avg_char_width * len(core_part_text)
+            new_word_list.append(OCRResult(
+                text=core_part_text, left=current_left, top=word_result.top,
+                width=core_width, height=word_result.height
+            ))
+            current_left += core_width
+
+        # Add trailing punctuation if it exists
+        if trailing_punc:
+            punc_width = avg_char_width * len(trailing_punc)
+            new_word_list.append(OCRResult(
+                text=trailing_punc, left=current_left, top=word_result.top,
+                width=punc_width, height=word_result.height
+            ))
+            
+    return new_word_list
+
 def create_ocr_result_with_children(combined_results:dict, i:int, current_bbox:dict, current_line:list):
         combined_results["text_line_" + str(i)] = {
         "line": i,
@@ -816,83 +889,7 @@ def create_ocr_result_with_children(combined_results:dict, i:int, current_bbox:d
     }
         return combined_results["text_line_" + str(i)]
 
-def combine_ocr_results(ocr_results: dict, x_threshold: float = 50.0, y_threshold: float = 12.0, page: int = 1):
-    '''
-    Group OCR results into lines based on y_threshold. Create line level ocr results, and word level OCR results
-    '''
-
-    lines = []
-    current_line = []
-    for result in sorted(ocr_results, key=lambda x: x.top):
-        if not current_line or abs(result.top - current_line[0].top) <= y_threshold:
-            current_line.append(result)
-        else:
-            lines.append(current_line)
-            current_line = [result]
-    if current_line:
-        lines.append(current_line)
-
-    # Sort each line by left position
-    for line in lines:
-        line.sort(key=lambda x: x.left)
-
-    # Flatten the sorted lines back into a single list
-    sorted_results = [result for line in lines for result in line]
-
-    page_line_level_ocr_results = []
-    page_line_level_ocr_results_with_words = {}
-    current_line = []
-    current_bbox = None
-    line_counter = 1      
-
-    for result in sorted_results:
-        if not current_line:
-            # Start a new line
-            current_line.append(result)
-            current_bbox = result
-        else:
-            # Check if the result is on the same line (y-axis) and close horizontally (x-axis)
-            last_result = current_line[-1]
-
-            if abs(result.top - last_result.top) <= y_threshold and \
-               (result.left - (last_result.left + last_result.width)) <= x_threshold:
-                # Update the bounding box to include the new word
-                new_right = max(current_bbox.left + current_bbox.width, result.left + result.width)
-                current_bbox = OCRResult(
-                    text=f"{current_bbox.text} {result.text}",
-                    left=current_bbox.left,
-                    top=current_bbox.top,
-                    width=new_right - current_bbox.left,
-                    height=max(current_bbox.height, result.height)
-                )
-                current_line.append(result)
-            else:              
-
-                # Commit the current line and start a new one
-                page_line_level_ocr_results.append(current_bbox)
-
-                page_line_level_ocr_results_with_words["text_line_" + str(line_counter)] = create_ocr_result_with_children(page_line_level_ocr_results_with_words, line_counter, current_bbox, current_line)
-                #page_line_level_ocr_results_with_words["text_line_" + str(line_counter)]["page"] = page
-
-                line_counter += 1
-                current_line = [result]
-                current_bbox = result
-    # Append the last line
-    if current_bbox:
-        page_line_level_ocr_results.append(current_bbox)
-
-        page_line_level_ocr_results_with_words["text_line_" + str(line_counter)] = create_ocr_result_with_children(page_line_level_ocr_results_with_words, line_counter, current_bbox, current_line)
-        #page_line_level_ocr_results_with_words["text_line_" + str(line_counter)]["page"] = page
-
-    # Add page key to the line level results
-    page_line_level_ocr_results_with_page = {"page": page, "results": page_line_level_ocr_results}
-    page_line_level_ocr_results_with_words = {"page": page, "results": page_line_level_ocr_results_with_words}
-
-    return page_line_level_ocr_results_with_page, page_line_level_ocr_results_with_words
-
-
-# Function to combine OCR results into line-level results
-# def combine_ocr_results(ocr_results:dict, x_threshold:float=50.0, y_threshold:float=12.0):
+# def combine_ocr_results(ocr_results: dict, x_threshold: float = 50.0, y_threshold: float = 12.0, page: int = 1):
 #     '''
 #     Group OCR results into lines based on y_threshold. Create line level ocr results, and word level OCR results
 #     '''
@@ -952,15 +949,77 @@ def combine_ocr_results(ocr_results: dict, x_threshold: float = 50.0, y_threshol
 #                 line_counter += 1
 #                 current_line = [result]
 #                 current_bbox = result
-
 #     # Append the last line
 #     if current_bbox:
 #         page_line_level_ocr_results.append(current_bbox)
 
 #         page_line_level_ocr_results_with_words["text_line_" + str(line_counter)] = create_ocr_result_with_children(page_line_level_ocr_results_with_words, line_counter, current_bbox, current_line)
 
+#     # Add page key to the line level results
+#     page_line_level_ocr_results_with_page = {"page": page, "results": page_line_level_ocr_results}
+#     page_line_level_ocr_results_with_words = {"page": page, "results": page_line_level_ocr_results_with_words}
 
-#     return page_line_level_ocr_results, page_line_level_ocr_results_with_words
+#     return page_line_level_ocr_results_with_page, page_line_level_ocr_results_with_words
+
+def combine_ocr_results(ocr_results: List[OCRResult], x_threshold: float = 50.0, y_threshold: float = 12.0, page: int = 1):
+    """
+    Group OCR results into lines, splitting words from punctuation.
+    """
+    if not ocr_results:
+        return {"page": page, "results": []}, {"page": page, "results": {}}
+
+    lines = []
+    current_line = []
+    for result in sorted(ocr_results, key=lambda x: (x.top, x.left)):
+        if not current_line or abs(result.top - current_line[0].top) <= y_threshold:
+            current_line.append(result)
+        else:
+            lines.append(sorted(current_line, key=lambda x: x.left))
+            current_line = [result]
+    if current_line:
+        lines.append(sorted(current_line, key=lambda x: x.left))
+
+    page_line_level_ocr_results = []
+    page_line_level_ocr_results_with_words = {}
+    line_counter = 1
+
+    for line in lines:
+        if not line:
+            continue
+
+        # Process the line to split punctuation from words
+        processed_line = split_words_and_punctuation_from_line(line)
+
+        # Re-calculate the line-level text and bounding box from the ORIGINAL words
+        line_text = " ".join([word.text for word in line])
+        line_left = line[0].left
+        line_top = min(word.top for word in line)
+        line_right = max(word.left + word.width for word in line)
+        line_bottom = max(word.top + word.height for word in line)
+        
+        final_line_bbox = OCRResult(
+            text=line_text,
+            left=line_left,
+            top=line_top,
+            width=line_right - line_left,
+            height=line_bottom - line_top
+        )
+        
+        page_line_level_ocr_results.append(final_line_bbox)
+        
+        # Use the PROCESSED line to create the children
+        create_ocr_result_with_children(
+            page_line_level_ocr_results_with_words, 
+            line_counter, 
+            final_line_bbox, 
+            processed_line  # <-- Use the new, split list of words
+        )
+        line_counter += 1
+
+    page_level_results_with_page = {"page": page, "results": page_line_level_ocr_results}
+    page_level_results_with_words = {"page": page, "results": page_line_level_ocr_results_with_words}
+
+    return page_level_results_with_page, page_level_results_with_words
 
 class CustomImageAnalyzerEngine:
     def __init__(

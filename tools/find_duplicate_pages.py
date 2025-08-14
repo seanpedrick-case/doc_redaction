@@ -320,9 +320,6 @@ def identify_similar_pages(
             return pd.DataFrame(), [], df_combined
 
         subdocument_df = pd.DataFrame(all_sequences)
-        # We can add back the average similarity if needed, but it requires more lookups.
-        # For now, we'll omit it for simplicity in the greedy approach.
-        # ... (The rest is metadata mapping, same as the subdocument case)
 
     elif min_consecutive_pages > 1:
         # --- STRATEGY 2: Fixed-Length Subdocument Matching ---
@@ -357,12 +354,7 @@ def identify_similar_pages(
     output_paths = save_results_and_redaction_lists(final_df, output_folder, combine_pages)
 
     return final_df, output_paths, df_combined
-
-# ==============================================================================
-# GRADIO HELPER FUNCTIONS
-# ==============================================================================
-
-# full_data:pd.DataFrame, 
+ 
 def handle_selection_and_preview(evt: gr.SelectData, results_df:pd.DataFrame, full_duplicate_data_by_file: dict):
     """
     This single function handles a user selecting a row. It:
@@ -673,7 +665,6 @@ def apply_whole_page_redactions_from_list(duplicate_page_numbers_df: pd.DataFram
 
     return review_file_out, all_annotations
 
-
 # --- 1. Helper Function to Parse the Combined Page/Line ID ---
 def _parse_page_line_id(combined_id: int) -> Tuple[int, int]:
     """
@@ -689,102 +680,6 @@ def _parse_page_line_id(combined_id: int) -> Tuple[int, int]:
     page = int(s_id[:5])
     line = int(s_id[5:])
     return page, line
-
-# def create_annotations_from_ocr_outputs(ocr_results_df_lines_to_annotate:pd.DataFrame):
-#     '''
-#     Create a set of annotation boxes based on selected ocr_results_df lines. 
-#     '''
-#     annotations_by_page = []
-
-#     # --- Build Annotation Boxes for each selected line ---
-#     for _, line_row in ocr_results_df_lines_to_annotate.iterrows():
-#         # The coordinates are relative, so xmax = left + width and ymax = top + height
-#         box = {
-#             "label": "Similar Text", # Or any other label you prefer
-#             "xmin": line_row['left'],
-#             "ymin": line_row['top'] + line_row['height'],
-#             "xmax": line_row['left'] + line_row['width'],
-#             "ymax": line_row['top'] ,
-#             "text": line_row['text']
-#         }
-#         # --- 6. Group the box by its page number ---
-#         page_number = line_row['page']
-#         annotations_by_page[page_number].append(box)
-
-#     return annotations_by_page
-
-# def create_annotation_objects_from_duplicates(
-#     duplicates_df: pd.DataFrame, 
-#     ocr_results_df: pd.DataFrame,
-#     combine_pages:bool=False
-# ) -> List[Dict]:
-#     """
-#     Creates structured annotation objects from selected ocr outputs.
-
-#     Args:
-#         duplicates_df (pd.DataFrame): DataFrame containing duplicate ranges with
-#                                       columns like 'Page2_Start_Page' and 'Page2_End_Page'.
-#         ocr_results_df (pd.DataFrame): DataFrame with OCR results, including columns
-#                                        'page', 'text', 'left', 'top', 'width', 'height'.
-
-#     Returns:
-#         List[Dict]: A list of dictionaries, where each dict represents a page and its
-#                     list of annotation boxes, in the format:
-#                     [{"page": 1, "boxes": [...]}, {"page": 2, "boxes": [...]}]
-#     """
-#     annotations_by_page = []
-
-#     if combine_pages == False:
-
-#         # --- 2. Prepare OCR Data: Add a line number column if it doesn't exist ---
-#         if 'line_number_by_page' not in ocr_results_df.columns:
-#             print("Generating 'line_number_by_page' for ocr_results_df...")
-#             # Sort by page and original position to ensure correct line numbering
-#             ocr_results_df = ocr_results_df.sort_values(by=['page', 'top', 'left']).reset_index(drop=True)
-#             ocr_results_df['line_number_by_page'] = ocr_results_df.groupby('page').cumcount() + 1
-            
-#         # Use defaultdict to easily append to lists for each page
-#         annotations_by_page = defaultdict(list)
-
-#         # --- 3. Iterate through each duplicate range ---
-#         for _, row in duplicates_df.iterrows():
-#             # Parse the start and end page/line numbers from the duplicate row
-#             start_page, start_line = _parse_page_line_id(row['Page2_Start_Page'])
-#             end_page, end_line = _parse_page_line_id(row['Page2_End_Page'])
-            
-#             # --- 4. Select OCR Lines based on the range ---
-#             # This logic correctly handles ranges within a single page and across multiple pages
-#             if start_page == end_page:
-#                 # Simple case: the range is on a single page
-#                 condition = (
-#                     (ocr_results_df['page'] == start_page) &
-#                     (ocr_results_df['line_number_by_page'].between(start_line, end_line))
-#                 )
-#             else:
-#                 # Complex case: the range spans multiple pages
-#                 # Condition for the first page in the range
-#                 cond_start = (ocr_results_df['page'] == start_page) & (ocr_results_df['line_number_by_page'] >= start_line)
-#                 # Condition for all pages between the start and end
-#                 cond_middle = ocr_results_df['page'].between(start_page + 1, end_page - 1)
-#                 # Condition for the last page in the range
-#                 cond_end = (ocr_results_df['page'] == end_page) & (ocr_results_df['line_number_by_page'] <= end_line)
-                
-#                 condition = cond_start | cond_middle | cond_end
-
-#             lines_to_annotate = ocr_results_df[condition]        
-            
-#             annotations_by_page = create_annotations_from_ocr_outputs(lines_to_annotate)
-                
-#         # --- Format the final output list ---
-#         final_output = []
-#         # Sort by page number for a predictable order
-#         for page, boxes in sorted(annotations_by_page.items()):
-#             final_output.append({
-#                 "page": page,
-#                 "boxes": boxes
-#             })
-        
-#     return final_output
 
 def create_annotation_objects_from_duplicates(
     duplicates_df: pd.DataFrame, 
@@ -850,11 +745,8 @@ def create_annotation_objects_from_duplicates(
                     "id": "" # to be filled in after
                 }
                 page_number = line_row['page']
-
                 
                 annotations_by_page[page_number].append(box)
-
-        print("annotations_by_page:", annotations_by_page) 
                 
         # --- Format the final output list using the page-to-image map ---
         final_output = []
@@ -878,39 +770,5 @@ def create_annotation_objects_from_duplicates(
                 # Handle cases where a page might not have a corresponding image path
                 print(f"Warning: Page {page_num} found in OCR data but has no corresponding "
                     f"entry in the 'page_sizes' object. This page's annotations will be skipped.")
-                
-    print("final_output:", final_output)
         
     return final_output
-
-# --- Example Usage ---
-
-# 1. Create your example DataFrames
-# duplicates_data = {
-#     'Page1_File': ['doc_a.csv'],
-#     'Page1_Start_Page': [100009],
-#     'Page1_End_Page': [100021],
-#     'Page2_File': ['doc_a.csv'],
-#     'Page2_Start_Page': [100027], # Page 1, Line 27
-#     'Page2_End_Page': [200005],   # Page 2, Line 5
-# }
-# duplicates_df = pd.DataFrame(duplicates_data)
-
-# ocr_data = {
-#     'page': [1]*30 + [2]*10, # 30 lines on page 1, 10 on page 2
-#     'text': [f"Text on page {p}, line {l}" for p in [1, 2] for l in range(1, (31 if p==1 else 11))],
-#     # Example coordinates (using small, consistent values for demonstration)
-#     'left': [0.1] * 40,
-#     'top': [i*0.02 for i in range(30)] + [i*0.02 for i in range(10)],
-#     'width': [0.8] * 40,
-#     'height': [0.015] * 40,
-# }
-# ocr_results_df = pd.DataFrame(ocr_data)
-
-
-# # 2. Run the function
-# generated_annotations = create_annotation_objects_from_duplicates(duplicates_df, ocr_results_df)
-
-# # 3. Print the result
-# import json
-# print(json.dumps(generated_annotations, indent=2))

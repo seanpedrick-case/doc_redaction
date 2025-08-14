@@ -154,10 +154,9 @@ if USE_LOG_SUBFOLDERS == "True":
     ACCESS_LOGS_FOLDER = ACCESS_LOGS_FOLDER + full_log_subfolder
     USAGE_LOGS_FOLDER = USAGE_LOGS_FOLDER + full_log_subfolder
 
-
-S3_FEEDBACK_LOGS_FOLDER = get_or_create_env_var('S3_FEEDBACK_LOGS_FOLDER', FEEDBACK_LOGS_FOLDER)
-S3_ACCESS_LOGS_FOLDER = get_or_create_env_var('S3_ACCESS_LOGS_FOLDER', ACCESS_LOGS_FOLDER)
-S3_USAGE_LOGS_FOLDER = get_or_create_env_var('S3_USAGE_LOGS_FOLDER', USAGE_LOGS_FOLDER)
+S3_FEEDBACK_LOGS_FOLDER = get_or_create_env_var('S3_FEEDBACK_LOGS_FOLDER', 'feedback/' + full_log_subfolder)
+S3_ACCESS_LOGS_FOLDER = get_or_create_env_var('S3_ACCESS_LOGS_FOLDER', 'logs/' + full_log_subfolder)
+S3_USAGE_LOGS_FOLDER = get_or_create_env_var('S3_USAGE_LOGS_FOLDER', 'usage/' + full_log_subfolder)
 
 # Should the redacted file name be included in the logs? In some instances, the names of the files themselves could be sensitive, and should not be disclosed beyond the app. So, by default this is false.
 DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS', 'False')
