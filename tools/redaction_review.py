@@ -1,6 +1,5 @@
 import os
 import re
-import gradio as gr
 import pandas as pd
 import numpy as np
 import pandas as pd
@@ -17,6 +16,7 @@ import pymupdf
 from PIL import ImageDraw, Image
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+import gradio as gr
 
 from tools.config import OUTPUT_FOLDER, MAX_IMAGE_PIXELS, INPUT_FOLDER, COMPRESS_REDACTED_PDF
 from tools.file_conversion import is_pdf, convert_annotation_json_to_review_df, convert_review_df_to_annotation_json, process_single_page_for_image_conversion, multiply_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, remove_duplicate_images_with_blank_boxes, fill_missing_ids, divide_coordinates_by_page_sizes, save_pdf_with_or_without_compression, fill_missing_ids_in_list
@@ -473,8 +473,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     existing_annotations_df: pd.DataFrame,
     existing_annotations_list: List[Dict],
     existing_recogniser_entity_df: pd.DataFrame,
-    progress = gr.Progress(track_tqdm=True)
-) -> Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    progress:gr.Progress=gr.Progress()) -> Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     This function processes filtered OCR results with words to create new annotation objects. It merges these new annotations with existing ones, ensuring that horizontally adjacent boxes are combined for cleaner redactions. The function also updates the existing recogniser entity DataFrame and returns the updated annotations in both DataFrame and list-of-dicts formats.
 
@@ -491,7 +490,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
         Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]: A tuple containing the updated annotations list, updated existing annotations list, updated annotations DataFrame, updated existing annotations DataFrame, updated recogniser entity DataFrame, and the original existing recogniser entity DataFrame.
     """
 
-    progress(0.2, "Identifying new redactions to add")  
+    progress(0.2, desc="Identifying new redactions to add")  
     print("Identifying new redactions to add")
     if filtered_ocr_results_with_words_df.empty:
         print("No new annotations to add.")
@@ -520,11 +519,11 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
                 'word_text': 'text'
             })
 
-            progress(0.3, "Checking for adjacent annotations to merge...")            
+            progress(0.3, desc="Checking for adjacent annotations to merge...")            
             print("Checking for adjacent annotations to merge...")
             new_annotations_df = _merge_horizontally_adjacent_boxes(new_annotations_df)
 
-            progress(0.4, "Creating new redaction IDs...")
+            progress(0.4, desc="Creating new redaction IDs...")
             print("Creating new redaction IDs...")
             existing_ids = set(existing_annotations_df['id'].dropna()) if 'id' in existing_annotations_df.columns else set()
             num_new_ids = len(new_annotations_df)
@@ -536,7 +535,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
 
             key_cols = ['page', 'label', 'xmin', 'ymin', 'xmax', 'ymax', 'text']
 
-            progress(0.5, "Checking suggested redactions against existing")
+            progress(0.5, desc="Checking suggested redactions against existing")
             
             if existing_annotations_df.empty or not all(col in existing_annotations_df.columns for col in key_cols):
                 unique_new_df = new_annotations_df
@@ -584,7 +583,6 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     # 3. Sort the DataFrame based on this new custom order.
     merged_df = merged_df.sort_values('image')
     
-    # --- NEW CODE END ---
     
     final_annotations_list = []
     box_cols = ['label', 'color', 'xmin', 'ymin', 'xmax', 'ymax', 'text', 'id']
@@ -610,6 +608,8 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             "image": image_path,
             "boxes": boxes
         })
+    
+    progress(1.0, desc="Completed annotation processing")
 
     return final_annotations_list, existing_annotations_list, updated_annotations_df, existing_annotations_df, updated_recogniser_entity_df, existing_recogniser_entity_df
 

@@ -1,28 +1,28 @@
-pdfminer.six==20240706
+pdfminer.six==20250506
 pdf2image==1.17.0
-pymupdf==1.26.1
-opencv-python==4.10.0.84
-presidio_analyzer==2.2.358
-presidio_anonymizer==2.2.358
-presidio-image-redactor==0.0.56
-pikepdf==9.5.2
-pandas==2.3.0
-scikit-learn==1.6.1
+pymupdf==1.26.3
+opencv-python==4.12.0.88
+presidio_analyzer==2.2.359
+presidio_anonymizer==2.2.359
+presidio-image-redactor==0.0.57
+pikepdf==9.10.2
+pandas==2.3.1
+scikit-learn==1.7.1
 spacy==3.8.7
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
-gradio==5.34.2
-boto3==1.39.4
-pyarrow==20.0.0
+gradio==5.42.0
+boto3==1.40.10
+pyarrow==21.0.0
 openpyxl==3.1.5
-Faker==36.1.1
-python-levenshtein==0.26.1
+Faker==37.5.3
+python-levenshtein==0.27.1
 spaczz==0.6.1
 # The following version 
 https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.3/gradio_image_annotation-0.3.3-py3-none-any.whl # This version includes rotation, image zoom, and default labels, as well as the option to include id for annotation boxes
-rapidfuzz==3.12.1
+rapidfuzz==3.13.0
 python-dotenv==1.0.1
-numpy==1.26.4
-awslambdaric==3.0.1
+#numpy==1.26.4
+awslambdaric==3.1.1
 
 
 
