@@ -22,7 +22,7 @@ def reset_state_vars():
             show_share_button=False,
             show_remove_button=False,
             interactive=False
-        ), [], [], pd.DataFrame(), pd.DataFrame(), [], [], "", False, 0
+        ), [], [], pd.DataFrame(), pd.DataFrame(), [], [], "", False, 0, []
 
 def reset_ocr_results_state():
     return pd.DataFrame(), pd.DataFrame(), []
@@ -573,7 +573,10 @@ def reset_base_dataframe(df:pd.DataFrame):
     return df
 
 def reset_ocr_base_dataframe(df:pd.DataFrame):
-    return df.iloc[:, [0,1]]
+    if df.empty:
+        return pd.DataFrame()
+    else:
+        return df.loc[:, ["page", "text"]]
 
 def reset_ocr_with_words_base_dataframe(df:pd.DataFrame, page_entity_dropdown_redaction_value:str):
     

@@ -12,7 +12,7 @@ from tools.data_anonymise import anonymise_data_files
 from tools.auth import authenticate_user
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.custom_csvlogger import CSVLogger_custom
-from tools.find_duplicate_pages import run_duplicate_analysis, exclude_match, handle_selection_and_preview, apply_whole_page_redactions_from_list, create_annotation_objects_from_duplicates
+from tools.find_duplicate_pages import run_duplicate_analysis, exclude_match, handle_selection_and_preview, apply_whole_page_redactions_from_list, create_annotation_objects_from_duplicates, run_full_search_and_analysis
 from tools.textract_batch_call import analyse_document_with_textract_api, poll_whole_document_textract_analysis_progress_and_download, load_in_textract_job_details, check_for_provided_job_id, check_textract_outputs_exist, replace_existing_pdf_input_for_whole_document_outputs
 
 # Suppress downcasting warnings
@@ -409,8 +409,15 @@ with app:
                 with gr.Tab("Search and redact"):
                     with gr.Accordion("Search text", open=True):
                         with gr.Row(equal_height=True):
-                            page_entity_dropdown_redaction = gr.Dropdown(label="Page", value="1", allow_custom_value=True)                    
-                            reset_dropdowns_btn_new = gr.Button(value="Reset page filter")
+                            page_entity_dropdown_redaction = gr.Dropdown(label="Page", value="1", allow_custom_value=True, scale=4)                    
+                            reset_dropdowns_btn_new = gr.Button(value="Reset page filter", scale=1)
+
+                        with gr.Row():
+                            multi_word_search_text = gr.Textbox(label="Multi-word text search", value="", scale=4)
+                            multi_word_search_text_btn = gr.Button(value="Search", scale=1)
+
+                        with gr.Accordion("Search options", open=False):
+                            similarity_search_score_minimum = gr.Number(value=1.0, minimum=0.4, maximum=1.0, label="Minimum similarity score for match (max=1)")
 
                         all_page_line_level_ocr_results_with_words_df = gr.Dataframe(pd.DataFrame(data={"page":[], "line":[], "word_text":[], "word_x0":[],	"word_y0":[],"word_x1":[],"word_y1":[]}), type="pandas", label="Click table row to select and go to page", headers=["page", "line", "word_text", "word_x0","word_y0","word_x1","word_y1"], show_fullscreen_button=True, wrap=False, max_height=400, show_search="filter")
                                                                     
@@ -472,6 +479,7 @@ with app:
             with gr.Row():
                 results_df_preview = gr.Dataframe(
                     label="Similarity Results",
+                    headers=["Page1_File",	"Page1_Start_Page",	"Page1_End_Page",	"Page2_File",	"Page2_Start_Page",	"Page2_End_Page",	"Match_Length",	"Avg_Similarity",	"Page1_Text",	"Page2_Text"],
                     wrap=True,
                     show_fullscreen_button=True,
                     show_search=True,
@@ -636,7 +644,7 @@ with app:
     success(fn=check_for_relevant_ocr_output_with_words, inputs=[doc_file_name_no_extension_textbox, text_extract_method_radio, output_folder_textbox], outputs=[relevant_ocr_output_with_words_found_checkbox])
 
     # Run redaction function
-    document_redact_btn.click(fn = reset_state_vars, outputs=[all_image_annotations_state, all_page_line_level_ocr_results_df_base, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state, recogniser_entity_dataframe, recogniser_entity_dataframe_base, pdf_doc_state, duplication_file_path_outputs_list_state, redaction_output_summary_textbox, is_a_textract_api_call, textract_query_number]).\
+    document_redact_btn.click(fn = reset_state_vars, outputs=[all_image_annotations_state, all_page_line_level_ocr_results_df_base, all_decision_process_table_state, comprehend_query_number, textract_metadata_textbox, annotator, output_file_list_state, log_files_output_list_state, recogniser_entity_dataframe, recogniser_entity_dataframe_base, pdf_doc_state, duplication_file_path_outputs_list_state, redaction_output_summary_textbox, is_a_textract_api_call, textract_query_number, all_page_line_level_ocr_results_with_words]).\
         success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
         success(fn= choose_and_run_redactor, inputs=[in_doc_files, prepared_pdf_state, images_pdf_state, in_redact_language, in_redact_entities, in_redact_comprehend_entities, text_extract_method_radio, in_allow_list_state, in_deny_list_state, in_fully_redacted_list_state, latest_file_completed_num, redaction_output_summary_textbox, output_file_list_state, log_files_output_list_state, first_loop_state, page_min, page_max, actual_time_taken_number, handwrite_signature_checkbox, textract_metadata_textbox, all_image_annotations_state, all_page_line_level_ocr_results_df_base, all_decision_process_table_state, pdf_doc_state, current_loop_page_number, page_break_return, pii_identification_method_drop, comprehend_query_number, max_fuzzy_spelling_mistakes_num, match_fuzzy_whole_phrase_bool, aws_access_key_textbox, aws_secret_key_textbox, annotate_max_pages, review_file_df, output_folder_textbox, document_cropboxes, page_sizes, textract_output_found_checkbox, only_extract_text_radio, duplication_file_path_outputs_list_state, latest_review_file_path, input_folder_textbox, textract_query_number, latest_ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words, all_page_line_level_ocr_results_with_words_df_base],
                     outputs=[redaction_output_summary_textbox, output_file, output_file_list_state, latest_file_completed_num, log_files_output, log_files_output_list_state, actual_time_taken_number, textract_metadata_textbox, pdf_doc_state, all_image_annotations_state, current_loop_page_number, page_break_return, all_page_line_level_ocr_results_df_base, all_decision_process_table_state, comprehend_query_number, output_review_files, annotate_max_pages, annotate_max_pages_bottom, prepared_pdf_state, images_pdf_state, review_file_df, page_sizes, duplication_file_path_outputs_list_state, in_duplicate_pages, latest_review_file_path, textract_query_number, latest_ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words, all_page_line_level_ocr_results_with_words_df_base, backup_review_state], api_name="redact_doc")
@@ -690,7 +698,7 @@ with app:
         success(fn = prepare_image_or_pdf, inputs=[output_review_files, text_extract_method_radio, all_page_line_level_ocr_results_df_base, all_page_line_level_ocr_results_with_words_df_base, latest_file_completed_num, redaction_output_summary_textbox, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_page_line_level_ocr_results_df_base, relevant_ocr_output_with_words_found_checkbox,  all_page_line_level_ocr_results_with_words_df_base], api_name="prepare_doc").\
         success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, page_entity_dropdown_redaction, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_df, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_entity_dropdown_redaction, page_sizes, all_image_annotations_state])
     
-    # Manual updates to review di
+    # Manual updates to review df
     review_file_df.input(update_annotator_page_from_review_df, inputs=[review_file_df, images_pdf_state, page_sizes, all_image_annotations_state, annotator, selected_entity_dataframe_row, input_folder_textbox, doc_full_file_name_textbox], outputs=[annotator, all_image_annotations_state, annotate_current_page, page_sizes, review_file_df, annotate_previous_page]).\
         success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, page_entity_dropdown_redaction, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_df, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_entity_dropdown_redaction, page_sizes, all_image_annotations_state])
 
@@ -782,6 +790,32 @@ with app:
     ###
     page_entity_dropdown_redaction.select(update_redact_choice_df_from_page_dropdown, inputs=[page_entity_dropdown_redaction, all_page_line_level_ocr_results_with_words_df_base], outputs=[all_page_line_level_ocr_results_with_words_df])
 
+    multi_word_search_text.submit(
+    fn=run_full_search_and_analysis,
+    inputs=[
+        multi_word_search_text,
+        all_page_line_level_ocr_results_with_words_df_base,
+        similarity_search_score_minimum
+    ],
+    outputs=[
+        all_page_line_level_ocr_results_with_words_df,
+        duplicate_files_out,
+        full_duplicate_data_by_file
+    ])
+
+    multi_word_search_text_btn.click(
+    fn=run_full_search_and_analysis,
+    inputs=[
+        multi_word_search_text,
+        all_page_line_level_ocr_results_with_words_df_base,
+        similarity_search_score_minimum
+    ],
+    outputs=[
+        all_page_line_level_ocr_results_with_words_df,
+        duplicate_files_out,
+        full_duplicate_data_by_file
+    ])
+
     # Clicking on a cell in the redact items table will take you to that page
     all_page_line_level_ocr_results_with_words_df.select(df_select_callback_dataframe_row_ocr_with_words, inputs=[all_page_line_level_ocr_results_with_words_df], outputs=[selected_entity_dataframe_row_redact, selected_entity_dataframe_row_text_redact]).\
         success(update_annotator_page_from_review_df, inputs=[review_file_df, images_pdf_state, page_sizes, all_image_annotations_state, annotator, selected_entity_dataframe_row_redact, input_folder_textbox, doc_full_file_name_textbox], outputs=[annotator, all_image_annotations_state, annotate_current_page, page_sizes, review_file_df, annotate_previous_page]).\
@@ -871,7 +905,7 @@ with app:
         ],
         outputs=[
             results_df_preview,
-            duplicate_files_out,            
+            duplicate_files_out, 
             full_duplicate_data_by_file
         ]
     )
@@ -896,6 +930,8 @@ with app:
         outputs=[review_file_df, all_image_annotations_state]).\
         success(update_annotator_page_from_review_df, inputs=[review_file_df, images_pdf_state, page_sizes, all_image_annotations_state, annotator, selected_entity_dataframe_row, input_folder_textbox, doc_full_file_name_textbox], outputs=[annotator, all_image_annotations_state, annotate_current_page, page_sizes, review_file_df, annotate_previous_page]).\
         success(update_annotator_object_and_filter_df, inputs=[all_image_annotations_state, annotate_current_page, recogniser_entity_dropdown, page_entity_dropdown, page_entity_dropdown_redaction, text_entity_dropdown, recogniser_entity_dataframe_base, annotator_zoom_number, review_file_df, page_sizes, doc_full_file_name_textbox, input_folder_textbox], outputs = [annotator, annotate_current_page, annotate_current_page_bottom, annotate_previous_page, recogniser_entity_dropdown, recogniser_entity_dataframe, recogniser_entity_dataframe_base, text_entity_dropdown, page_entity_dropdown, page_entity_dropdown_redaction, page_sizes, all_image_annotations_state])
+    
+    
 
     ###
     # SETTINGS PAGE INPUT / OUTPUT
@@ -910,6 +946,7 @@ with app:
     in_deny_list_state.input(update_dataframe, inputs=[in_deny_list_state], outputs=[in_deny_list_state])
     in_fully_redacted_list_state.input(update_dataframe, inputs=[in_fully_redacted_list_state], outputs=[in_fully_redacted_list_state])
 
+    # Apply whole page redactions from the provided whole page redaction csv file upload/list of specific page numbers given by user
     apply_fully_redacted_list_btn.click(
         fn=apply_whole_page_redactions_from_list,
         inputs=[in_fully_redacted_list_state, doc_file_name_with_extension_textbox, review_file_df, duplicate_files_out, pdf_doc_state, page_sizes, all_image_annotations_state],

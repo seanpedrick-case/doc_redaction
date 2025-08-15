@@ -404,6 +404,68 @@ def _generate_unique_ids(
             
     return list(newly_generated_ids)
 
+def _merge_horizontally_adjacent_boxes(
+    df: pd.DataFrame, 
+    x_merge_threshold: int = 0.02
+) -> pd.DataFrame:
+    """
+    Merges horizontally adjacent bounding boxes within the same line.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing annotation boxes with columns
+                           like 'page', 'line', 'xmin', 'xmax', etc.
+        x_merge_threshold (int): The maximum pixel gap on the x-axis to
+                                 consider two boxes as adjacent.
+
+    Returns:
+        pd.DataFrame: A new DataFrame with adjacent boxes merged.
+    """
+    if df.empty:
+        return df
+
+    # 1. Sort values to ensure we are comparing adjacent boxes
+    df_sorted = df.sort_values(by=['page', 'line', 'xmin']).copy()
+    
+    # 2. Identify groups of boxes to merge using shift() and cumsum()
+    # Get properties of the 'previous' box in the sorted list
+    prev_xmax = df_sorted['xmax'].shift(1)
+    prev_page = df_sorted['page'].shift(1)
+    prev_line = df_sorted['line'].shift(1)
+    
+    # A box should be merged with the previous one if it's on the same page/line
+    # and the horizontal gap is within the threshold.
+    is_adjacent = (
+        (df_sorted['page'] == prev_page) &
+        (df_sorted['line'] == prev_line) &
+        (df_sorted['xmin'] - prev_xmax <= x_merge_threshold)
+    )
+    
+    # A new group starts wherever a box is NOT adjacent to the previous one.
+    # cumsum() on this boolean series creates a unique ID for each group.
+    df_sorted['merge_group'] = (~is_adjacent).cumsum()
+    
+    # 3. Aggregate each group into a single bounding box
+    # Define how to aggregate each column
+    agg_funcs = {
+        'xmin': 'min',
+        'ymin': 'min', # To get the highest point of the combined box
+        'xmax': 'max',
+        'ymax': 'max', # To get the lowest point of the combined box
+        'text': lambda s: ' '.join(s.astype(str)), # Join the text
+        # Carry over the first value for columns that are constant within a group
+        'page': 'first',
+        'line': 'first',
+        'image': 'first',
+        'label': 'first',
+        'color': 'first',
+    }
+    
+    merged_df = df_sorted.groupby('merge_group').agg(agg_funcs).reset_index(drop=True)
+    
+    print(f"Merged {len(df)} annotations into {len(merged_df)}.")
+    
+    return merged_df
+
 def create_annotation_objects_from_filtered_ocr_results_with_words(
     filtered_ocr_results_with_words_df: pd.DataFrame, 
     ocr_results_with_words_df_base: pd.DataFrame,
@@ -411,54 +473,45 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     existing_annotations_df: pd.DataFrame,
     existing_annotations_list: List[Dict],
     existing_recogniser_entity_df: pd.DataFrame,
-    progress=gr.Progress(track_tqdm=True)
+    progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Creates and merges new annotations, using custom ID logic.
+    This function processes filtered OCR results with words to create new annotation objects. It merges these new annotations with existing ones, ensuring that horizontally adjacent boxes are combined for cleaner redactions. The function also updates the existing recogniser entity DataFrame and returns the updated annotations in both DataFrame and list-of-dicts formats.
+
+    Args:
+        filtered_ocr_results_with_words_df (pd.DataFrame): A DataFrame containing filtered OCR results with words.
+        ocr_results_with_words_df_base (pd.DataFrame): The base DataFrame of OCR results with words.
+        page_sizes (List[Dict]): A list of dictionaries containing page sizes.
+        existing_annotations_df (pd.DataFrame): A DataFrame of existing annotations.
+        existing_annotations_list (List[Dict]): A list of dictionaries representing existing annotations.
+        existing_recogniser_entity_df (pd.DataFrame): A DataFrame of existing recogniser entities.
+        progress (gr.Progress, optional): A progress tracker. Defaults to gr.Progress(track_tqdm=True).
+
+    Returns:
+        Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]: A tuple containing the updated annotations list, updated existing annotations list, updated annotations DataFrame, updated existing annotations DataFrame, updated recogniser entity DataFrame, and the original existing recogniser entity DataFrame.
     """
 
+    progress(0.2, "Identifying new redactions to add")  
     print("Identifying new redactions to add")
-    progress(0.1, "Identifying new redactions to add")
     if filtered_ocr_results_with_words_df.empty:
         print("No new annotations to add.")
         updated_annotations_df = existing_annotations_df.copy()
     else:
-        # join_keys = ['page', 'line', 'word_text', 'word_x0']
-        # new_annotations_df = pd.merge(
-        #     ocr_results_with_words_df_base,
-        #     filtered_ocr_results_with_words_df[join_keys],
-        #     on=join_keys,
-        #     how='inner'
-        # )
-
+        # Assuming index relationship holds for fast lookup
         filtered_ocr_results_with_words_df.index = filtered_ocr_results_with_words_df["index"]
-
         new_annotations_df = ocr_results_with_words_df_base.loc[filtered_ocr_results_with_words_df.index].copy()
 
         if new_annotations_df.empty:
              print("No new annotations to add.")
              updated_annotations_df = existing_annotations_df.copy()
         else:
-            # --- Custom ID Generation ---
-            progress(0.2, "Creating new redaction IDs")
-            # 1. Get all IDs that already exist to ensure we don't create duplicates.
-            existing_ids = set()
-            if 'id' in existing_annotations_df.columns:
-                existing_ids = set(existing_annotations_df['id'].dropna())
-            
-            # 2. Generate the exact number of new, unique IDs required.
-            num_new_ids = len(new_annotations_df)
-            new_id_list = _generate_unique_ids(num_new_ids, existing_ids)
-            
-            # 3. Assign the new IDs and other columns in a vectorized way.
             page_to_image_map = {item['page']: item['image_path'] for item in page_sizes}
             
-            progress(0.4, "Assigning new redaction details to dataframe")
+            # Prepare the initial new annotations DataFrame
             new_annotations_df = new_annotations_df.assign(
                 image=lambda df: df['page'].map(page_to_image_map),
                 label="Redaction",
-                color='(0, 0, 0)',
-                id=new_id_list  # Assign the pre-generated list of unique IDs
+                color='(0, 0, 0)'
             ).rename(columns={
                 'word_x0': 'xmin',
                 'word_y0': 'ymin',
@@ -466,6 +519,17 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
                 'word_y1': 'ymax',
                 'word_text': 'text'
             })
+
+            progress(0.3, "Checking for adjacent annotations to merge...")            
+            print("Checking for adjacent annotations to merge...")
+            new_annotations_df = _merge_horizontally_adjacent_boxes(new_annotations_df)
+
+            progress(0.4, "Creating new redaction IDs...")
+            print("Creating new redaction IDs...")
+            existing_ids = set(existing_annotations_df['id'].dropna()) if 'id' in existing_annotations_df.columns else set()
+            num_new_ids = len(new_annotations_df)
+            new_id_list = _generate_unique_ids(num_new_ids, existing_ids)
+            new_annotations_df['id'] = new_id_list
             
             annotation_cols = ['image', 'page', 'label', 'color', 'xmin', 'ymin', 'xmax', 'ymax', 'text', 'id']
             new_annotations_df = new_annotations_df[annotation_cols]
@@ -477,7 +541,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             if existing_annotations_df.empty or not all(col in existing_annotations_df.columns for col in key_cols):
                 unique_new_df = new_annotations_df
             else:
-                # I'm not doing checks on this anymore
+                # I'm not doing checks against existing as it is too compute intensive in large documents
                 # merged = pd.merge(
                 #     new_annotations_df,
                 #     existing_annotations_df[key_cols].drop_duplicates(),
@@ -508,16 +572,39 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
         merged_df = pd.merge(all_pages_df[['image']], updated_annotations_df, on='image', how='left')
     else:
         merged_df = all_pages_df[['image']]
-        
+
+    # 1. Get the list of image paths in the exact order they appear in page_sizes.
+    #    all_pages_df was created from page_sizes, so it preserves this order.
+    image_order = all_pages_df['image'].tolist()
+
+    # 2. Convert the 'image' column to a special 'Categorical' type.
+    #    This tells pandas that this column has a custom, non-alphabetical order.
+    merged_df['image'] = pd.Categorical(merged_df['image'], categories=image_order, ordered=True)
+
+    # 3. Sort the DataFrame based on this new custom order.
+    merged_df = merged_df.sort_values('image')
+    
+    # --- NEW CODE END ---
+    
     final_annotations_list = []
     box_cols = ['label', 'color', 'xmin', 'ymin', 'xmax', 'ymax', 'text', 'id']
     
-    for image_path, group in progress.tqdm(merged_df.groupby('image'), desc="Adding redaction boxes to annotation object"):
+    # Now, when we group, we use `sort=False`. This tells groupby to respect the
+    # DataFrame's current order, which we have just manually set. This is slightly
+    # more efficient than letting it sort again.
+    for image_path, group in merged_df.groupby('image', sort=False):
+        # The progress.tqdm wrapper can be added back around the groupby object as you had it.
+        # for image_path, group in progress.tqdm(merged_df.groupby('image', sort=False), ...):
+        
+        # Check if the group has actual annotations. iloc[0] is safe because even pages
+        # without annotations will have one row with NaN values from the merge.
         if pd.isna(group.iloc[0].get('id')):
             boxes = []
         else:
             valid_box_cols = [col for col in box_cols if col in group.columns]
-            boxes = group[valid_box_cols].to_dict('records')
+            # We should also sort the boxes within a page for consistency (e.g., left-to-right)
+            sorted_group = group.sort_values(by=['ymin', 'xmin'])
+            boxes = sorted_group[valid_box_cols].to_dict('records')
             
         final_annotations_list.append({
             "image": image_path,

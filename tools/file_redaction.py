@@ -104,7 +104,7 @@ def choose_and_run_redactor(file_paths:List[str],
  page_min:int=0,
  page_max:int=999,
  estimated_time_taken_state:float=0.0,
- handwrite_signature_checkbox:List[str]=["Extract handwriting", "Extract signatures"],
+ handwrite_signature_checkbox:List[str]=list(["Extract handwriting", "Extract signatures"]),
  all_request_metadata_str:str = "",
  annotations_all_pages:List[dict]=list(),
  all_page_line_level_ocr_results_df:pd.DataFrame=None,
@@ -132,7 +132,7 @@ def choose_and_run_redactor(file_paths:List[str],
  ocr_file_path:str="",
  all_page_line_level_ocr_results:list[dict] = list(),
  all_page_line_level_ocr_results_with_words:list[dict] = list(),
- all_page_line_level_ocr_results_with_words_df:pd.DataFrame=list(),
+ all_page_line_level_ocr_results_with_words_df:pd.DataFrame=None,
  prepare_images:bool=True,
  RETURN_PDF_END_OF_REDACTION:bool=RETURN_PDF_END_OF_REDACTION,
  progress=gr.Progress(track_tqdm=True)):
@@ -201,6 +201,11 @@ def choose_and_run_redactor(file_paths:List[str],
     blank_request_metadata = []
     all_textract_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
     review_out_file_paths = [prepared_pdf_file_paths[0]]
+
+    print("all_page_line_level_ocr_results_with_words at start of choose and run...:", all_page_line_level_ocr_results_with_words)
+
+    if all_page_line_level_ocr_results_with_words_df is None:
+         all_page_line_level_ocr_results_with_words_df = pd.DataFrame()
 
     # Create copies of out_file_path objects to avoid overwriting each other on append actions
     out_file_paths = out_file_paths.copy()
@@ -662,6 +667,9 @@ def choose_and_run_redactor(file_paths:List[str],
 
                 if all_page_line_level_ocr_results_with_words_df_file_path not in log_files_output_paths:
                     log_files_output_paths.append(all_page_line_level_ocr_results_with_words_df_file_path)
+
+                if all_page_line_level_ocr_results_with_words_df_file_path not in out_file_paths:
+                    out_file_paths.append(all_page_line_level_ocr_results_with_words_df_file_path)
 
             # Convert the gradio annotation boxes to relative coordinates
             progress(0.93, "Creating review file output")
@@ -1203,7 +1211,7 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
 # IMAGE-BASED OCR PDF TEXT DETECTION/REDACTION WITH TESSERACT OR AWS TEXTRACT
 ###
 
-def merge_img_bboxes(bboxes, combined_results: Dict, page_signature_recogniser_results=[], page_handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Extract handwriting", "Extract signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
+def merge_img_bboxes(bboxes:list, combined_results: Dict, page_signature_recogniser_results=[], page_handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Extract handwriting", "Extract signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
 
     all_bboxes = []
     merged_bboxes = []
@@ -1384,6 +1392,8 @@ def redact_image_pdf(file_path:str,
     '''
 
     tic = time.perf_counter()
+
+    print("all_page_line_level_ocr_results_with_words in redact_image_pdf:", all_page_line_level_ocr_results_with_words)
 
     file_name = get_file_name_without_type(file_path)    
     comprehend_query_number_new = 0
