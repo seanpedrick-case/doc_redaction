@@ -6,6 +6,7 @@ import time
 import boto3
 import botocore
 import pandas as pd
+import docx
 from openpyxl import Workbook
 from faker import Faker
 from gradio import Progress
@@ -203,7 +204,106 @@ def anon_consistent_names(df:pd.DataFrame) -> pd.DataFrame:
 
     return scrubbed_df_consistent_names
 
-def anonymise_data_files(file_paths: List[str], 
+def handle_docx_anonymisation(
+    file_path: str,
+    output_folder: str,
+    anon_strat: str,
+    language: str,
+    chosen_redact_entities: List[str],
+    in_allow_list: List[str],
+    in_deny_list: List[str],
+    max_fuzzy_spelling_mistakes_num: int,
+    pii_identification_method: str,
+    chosen_redact_comprehend_entities: List[str],
+    comprehend_query_number: int,
+    comprehend_client # Assuming botocore.client.BaseClient type
+):
+    """
+    Anonymises a .docx file by extracting text, processing it, and re-inserting it.
+
+    Returns:
+        A tuple containing the output file path and the log file path.
+    """
+    print(f"Processing DOCX file: {file_path}")
+    
+    # 1. Load the document and extract text elements
+    doc = docx.Document(file_path)
+    text_elements = []  # This will store the actual docx objects (paragraphs, cells)
+    original_texts = [] # This will store the text from those objects
+
+    # Extract from paragraphs
+    for para in doc.paragraphs:
+        if para.text.strip():  # Only process non-empty paragraphs
+            text_elements.append(para)
+            original_texts.append(para.text)
+
+    # Extract from tables
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                if cell.text.strip(): # Only process non-empty cells
+                    text_elements.append(cell)
+                    original_texts.append(cell.text)
+    
+    # If there's no text to process, return early
+    if not original_texts:
+        print(f"No text found in {file_path}. Skipping.")
+        return None, None
+
+    # 2. Convert to a DataFrame for the existing anonymisation script
+    df_to_anonymise = pd.DataFrame({'text_to_redact': original_texts})
+    
+    # 3. Call the core anonymisation script
+    anonymised_df, _, decision_log = anonymise_script(
+        df=df_to_anonymise,
+        anon_strat=anon_strat,
+        language=language,
+        chosen_redact_entities=chosen_redact_entities,
+        in_allow_list=in_allow_list,
+        in_deny_list=in_deny_list,
+        max_fuzzy_spelling_mistakes_num=max_fuzzy_spelling_mistakes_num,
+        pii_identification_method=pii_identification_method,
+        chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+        comprehend_query_number=comprehend_query_number,
+        comprehend_client=comprehend_client
+    )
+
+    anonymised_texts = anonymised_df['text_to_redact'].tolist()
+
+    # 4. Re-insert the anonymised text back into the document objects
+    # IMPORTANT: This approach replaces the entire paragraph/cell text and may lose
+    # complex intra-paragraph formatting (e.g., bolding a single word).
+    # It preserves the paragraph/cell structure.
+    for element, new_text in zip(text_elements, anonymised_texts):
+        if isinstance(element, docx.text.paragraph.Paragraph):
+            # Clear existing content (runs) and add the new text in a single new run
+            element.clear()
+            element.add_run(new_text)
+        elif isinstance(element, docx.table._Cell):
+            # For cells, setting .text works similarly
+            element.text = new_text
+
+    # 5. Save the redacted document and the log file
+    base_name = os.path.basename(file_path)
+    file_name_without_ext = os.path.splitext(base_name)[0]
+    
+    output_docx_path = os.path.join(output_folder, f"{file_name_without_ext}_redacted.docx")
+    log_file_path = os.path.join(output_folder, f"{file_name_without_ext}_redacted_log.txt")
+
+    output_xlsx_path = os.path.join(output_folder, f"{file_name_without_ext}_redacted.csv")
+
+    anonymised_df.to_csv(output_xlsx_path)    
+    doc.save(output_docx_path)
+    
+    with open(log_file_path, "w", encoding="utf-8-sig") as f:
+        f.write(decision_log)
+        
+    print(f"Saved redacted DOCX to: {output_docx_path}")
+    print(f"Saved decision log to: {log_file_path}")
+
+    return output_docx_path, log_file_path, output_xlsx_path
+
+def anonymise_files_with_open_text(file_paths: List[str], 
                          in_text: str, 
                          anon_strat: str, 
                          chosen_cols: List[str],
@@ -342,15 +442,37 @@ def anonymise_data_files(file_paths: List[str],
             sheet_name = ""
             file_type = ""
 
-            out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=OUTPUT_FOLDER)
+            out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=OUTPUT_FOLDER)
         else:
             # If file is an xlsx, we are going to run through all the Excel sheets to anonymise them separately.
             file_type = detect_file_type(anon_file)
             print("File type is:", file_type)
 
             out_file_part = get_file_name_without_type(anon_file.name)
+
+            if file_type == 'docx':
+                output_path, log_path, output_xlsx_path = handle_docx_anonymisation(
+                    file_path=anon_file.name, # .name if it's a temp file object
+                    output_folder=output_folder,
+                    anon_strat=anon_strat,
+                    language=language,
+                    chosen_redact_entities=chosen_redact_entities,
+                    in_allow_list=in_allow_list_flat,
+                    in_deny_list=in_deny_list,
+                    max_fuzzy_spelling_mistakes_num=max_fuzzy_spelling_mistakes_num,
+                    pii_identification_method=pii_identification_method,
+                    chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+                    comprehend_query_number=comprehend_query_number,
+                    comprehend_client=comprehend_client
+                )
+                if output_path:
+                    out_file_paths.append(output_path)
+                if output_xlsx_path:
+                    out_file_paths.append(output_xlsx_path)
+                if log_path:
+                    log_files_output_paths.append(log_path)
     
-            if file_type == 'xlsx':
+            elif file_type == 'xlsx':
                 print("Running through all xlsx sheets")
                 #anon_xlsx = pd.ExcelFile(anon_file)
                 if not in_excel_sheets:
@@ -371,14 +493,14 @@ def anonymise_data_files(file_paths: List[str],
 
                     anon_df = pd.read_excel(anon_file, sheet_name=sheet_name)
 
-                    out_file_paths, out_message, key_string, log_files_output_paths  = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+                    out_file_paths, out_message, key_string, log_files_output_paths  = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
 
             else:
                 sheet_name = ""
                 anon_df = read_file(anon_file)
                 out_file_part = get_file_name_without_type(anon_file.name)
 
-                out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+                out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
 
         # Increase latest file completed count unless we are at the last file
         if latest_file_completed != len(file_paths):
@@ -406,7 +528,7 @@ def anonymise_data_files(file_paths: List[str],
     
     return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, actual_time_taken_number
 
-def anon_wrapper_func(
+def tabular_anonymise_wrapper_func(
     anon_file: str, 
     anon_df: pd.DataFrame, 
     chosen_cols: List[str], 

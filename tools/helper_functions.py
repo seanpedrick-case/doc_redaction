@@ -113,7 +113,7 @@ def get_file_name_without_type(file_path):
     
     return filename_without_extension
 
-def detect_file_type(filename):
+def detect_file_type(filename:str):
     """Detect the file type based on its extension."""
     if (filename.endswith('.csv')) | (filename.endswith('.csv.gz')) | (filename.endswith('.zip')):
         return 'csv'
@@ -131,10 +131,12 @@ def detect_file_type(filename):
         return 'png'
     elif filename.endswith('.xfdf'):
         return 'xfdf'
+    elif filename.endswith('.docx'):
+        return 'docx'
     else:
         raise ValueError("Unsupported file type.")
 
-def read_file(filename):
+def read_file(filename:str):
     """Read the file based on its detected type."""
     file_type = detect_file_type(filename)
     
@@ -203,7 +205,7 @@ def put_columns_in_df(in_file:List[str]):
         file_type = detect_file_type(file_name)
         print("File type is:", file_type)
 
-        if file_type == 'xlsx':
+        if (file_type == 'xlsx') | (file_type == 'xls'):
             number_of_excel_files += 1
             new_choices = []
             print("Running through all xlsx sheets")
@@ -219,9 +221,12 @@ def put_columns_in_df(in_file:List[str]):
 
             all_sheet_names.extend(new_sheet_names)
 
-        else:
+        elif (file_type == "csv") | (file_type == "parquet"):
             df = read_file(file_name)
             new_choices = list(df.columns)
+
+        else:
+            new_choices = []
 
         concat_choices.extend(new_choices)
         

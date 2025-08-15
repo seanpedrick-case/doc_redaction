@@ -258,7 +258,7 @@ def get_input_file_names(file_input:List[str]):
         file_extension = os.path.splitext(file_path)[1].lower()
 
         # Check if the file is in acceptable types
-        if (file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet']) & ("review_file" not in file_path_without_ext) & ("ocr_output" not in file_path_without_ext) & ("ocr_results_with_words" not in file_path_without_ext):
+        if (file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet', '.docx']) & ("review_file" not in file_path_without_ext) & ("ocr_output" not in file_path_without_ext) & ("ocr_results_with_words" not in file_path_without_ext):
             all_relevant_files.append(file_path_without_ext)
             file_name_with_extension = file_path_without_ext + file_extension
             full_file_name = file_path

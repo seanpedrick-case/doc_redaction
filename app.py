@@ -8,7 +8,7 @@ from tools.aws_functions import download_file_from_s3, upload_log_file_to_s3
 from tools.file_redaction import choose_and_run_redactor
 from tools.file_conversion import prepare_image_or_pdf, get_input_file_names
 from tools.redaction_review import apply_redactions_to_review_df_and_files, update_all_page_annotation_object_based_on_previous_page, decrease_page, increase_page, update_annotator_object_and_filter_df, update_entities_df_recogniser_entities, update_entities_df_page, update_entities_df_text, df_select_callback_dataframe_row, convert_df_to_xfdf, convert_xfdf_to_dataframe, reset_dropdowns, exclude_selected_items_from_redaction, undo_last_removal, update_selected_review_df_row_colour, update_all_entity_df_dropdowns, df_select_callback_cost, update_other_annotator_number_from_current, update_annotator_page_from_review_df, df_select_callback_ocr, df_select_callback_textract_api, get_all_rows_with_same_text, increase_bottom_page_count_based_on_top, store_duplicate_selection, create_annotation_objects_from_filtered_ocr_results_with_words, df_select_callback_dataframe_row_ocr_with_words, update_redact_choice_df_from_page_dropdown, get_all_rows_with_same_text_redact
-from tools.data_anonymise import anonymise_data_files
+from tools.data_anonymise import anonymise_files_with_open_text
 from tools.auth import authenticate_user
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.custom_csvlogger import CSVLogger_custom
@@ -510,14 +510,14 @@ with app:
                     variant="secondary")
 
     ###
-    # TEXT / TABULAR DATA TAB
+    # WORD / TABULAR DATA TAB
     ###
-    with gr.Tab(label="Open text or Excel/csv files"):
-        gr.Markdown("""### Choose open text or a tabular data file (xlsx or csv) to redact.""")    
+    with gr.Tab(label="Word or Excel/csv files"):
+        gr.Markdown("""### Choose Word or a tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred.""")        
+        with gr.Accordion("Upload docx, xlsx, or csv files", open = True):
+            in_data_files = gr.File(label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.docx'], height=FILE_INPUT_HEIGHT)
         with gr.Accordion("Redact open text", open = False):
             in_text = gr.Textbox(label="Enter open text", lines=10)
-        with gr.Accordion("Upload xlsx or csv files", open = True):
-            in_data_files = gr.File(label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'], height=FILE_INPUT_HEIGHT)
         
         in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheets to anonymise"], multiselect = True, label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).", visible=False, allow_custom_value=True)
 
@@ -874,18 +874,18 @@ with app:
         success(fn=convert_xfdf_to_dataframe, inputs=[adobe_review_files_out, pdf_doc_state, images_pdf_state, output_folder_textbox], outputs=[output_review_files], scroll_to_output=True)
     
     ###
-    # TABULAR DATA REDACTION
+    # WORD/TABULAR DATA REDACTION
     ###
     in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets]).\
                   success(fn=get_input_file_names, inputs=[in_data_files], outputs=[data_file_name_no_extension_textbox, data_file_name_with_extension_textbox, data_full_file_name_textbox, data_file_name_textbox_list, total_pdf_page_count])
 
     tabular_data_redact_btn.click(reset_data_vars, outputs=[actual_time_taken_number, log_files_output_list_state, comprehend_query_number]).\
-    success(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list_state, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, first_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox, actual_time_taken_number], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state, actual_time_taken_number], api_name="redact_data").\
+    success(fn=anonymise_files_with_open_text, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list_state, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, first_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox, actual_time_taken_number], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state, actual_time_taken_number], api_name="redact_data").\
     success(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title])
 
     # Currently only supports redacting one data file at a time, following code block not used
     # If the output file count text box changes, keep going with redacting each data file until done
-    # text_tabular_files_done.change(fn=anonymise_data_files, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list_state, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, second_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox, actual_time_taken_number], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state, actual_time_taken_number]).\
+    # text_tabular_files_done.change(fn=anonymise_files_with_open_text, inputs=[in_data_files, in_text, anon_strat, in_colnames, in_redact_language, in_redact_entities, in_allow_list_state, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, second_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox, actual_time_taken_number], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state, actual_time_taken_number]).\
     # success(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title])
 
     ###

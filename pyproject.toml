@@ -34,7 +34,8 @@ dependencies = [
     "gradio_image_annotation @ https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.3/gradio_image_annotation-0.3.3-py3-none-any.whl",
     "rapidfuzz==3.13.0",
     "python-dotenv==1.0.1",
-    "awslambdaric==3.1.1"
+    "awslambdaric==3.1.1",
+    "python-docx==1.2.0"
 ]
 
 [project.urls]
