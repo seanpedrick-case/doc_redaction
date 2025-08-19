@@ -473,6 +473,8 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     existing_annotations_df: pd.DataFrame,
     existing_annotations_list: List[Dict],
     existing_recogniser_entity_df: pd.DataFrame,
+    redaction_label:str = "Redaction",
+    colour_label:str = '(0, 0, 0)',
     progress:gr.Progress=gr.Progress()) -> Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     This function processes filtered OCR results with words to create new annotation objects. It merges these new annotations with existing ones, ensuring that horizontally adjacent boxes are combined for cleaner redactions. The function also updates the existing recogniser entity DataFrame and returns the updated annotations in both DataFrame and list-of-dicts formats.
@@ -489,6 +491,28 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     Returns:
         Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]: A tuple containing the updated annotations list, updated existing annotations list, updated annotations DataFrame, updated existing annotations DataFrame, updated recogniser entity DataFrame, and the original existing recogniser entity DataFrame.
     """
+
+    # Validate colour_label: must be a 3-number tuple with each value in [0, 255]
+    # If invalid, fallback to '(0, 0, 0,)' as requested
+    fallback_colour = '(0, 0, 0,)'
+    try:
+        valid = False
+        if isinstance(colour_label, str):
+            label_str = colour_label.strip()
+            match = re.match(r"^\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,?\s*\)$", label_str)
+            if match:
+                r_val, g_val, b_val = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+                if 0 <= r_val <= 255 and 0 <= g_val <= 255 and 0 <= b_val <= 255:
+                    valid = True
+        elif isinstance(colour_label, (tuple, list)) and len(colour_label) == 3:
+            r_val, g_val, b_val = colour_label
+            if all(isinstance(v, int) for v in (r_val, g_val, b_val)) and all(0 <= v <= 255 for v in (r_val, g_val, b_val)):
+                colour_label = f'({r_val}, {g_val}, {b_val},)'
+                valid = True
+        if not valid:
+            colour_label = fallback_colour
+    except Exception:
+        colour_label = fallback_colour
 
     progress(0.2, desc="Identifying new redactions to add")  
     print("Identifying new redactions to add")
@@ -509,8 +533,8 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             # Prepare the initial new annotations DataFrame
             new_annotations_df = new_annotations_df.assign(
                 image=lambda df: df['page'].map(page_to_image_map),
-                label="Redaction",
-                color='(0, 0, 0)'
+                label= redaction_label,
+                color= colour_label
             ).rename(columns={
                 'word_x0': 'xmin',
                 'word_y0': 'ymin',
@@ -535,23 +559,24 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
 
             key_cols = ['page', 'label', 'xmin', 'ymin', 'xmax', 'ymax', 'text']
 
-            progress(0.5, desc="Checking suggested redactions against existing")
+            progress(0.5, desc="Checking for duplicate redactions")
             
             if existing_annotations_df.empty or not all(col in existing_annotations_df.columns for col in key_cols):
                 unique_new_df = new_annotations_df
             else:
-                # I'm not doing checks against existing as it is too compute intensive in large documents
-                # merged = pd.merge(
-                #     new_annotations_df,
-                #     existing_annotations_df[key_cols].drop_duplicates(),
-                #     on=key_cols,
-                #     how='left',
-                #     indicator=True
-                # )
-                # unique_new_df = merged[merged['_merge'] == 'left_only'].drop(columns=['_merge'])
-                unique_new_df = new_annotations_df
+                # Do not add duplicate redactions
+                merged = pd.merge(
+                    new_annotations_df,
+                    existing_annotations_df[key_cols].drop_duplicates(),
+                    on=key_cols,
+                    how='left',
+                    indicator=True
+                )
+                unique_new_df = merged[merged['_merge'] == 'left_only'].drop(columns=['_merge'])
+                #unique_new_df = new_annotations_df
 
             print(f"Found {len(unique_new_df)} new unique annotations to add.")
+            gr.Info(f"Found {len(unique_new_df)} new unique annotations to add.")
             updated_annotations_df = pd.concat([existing_annotations_df, unique_new_df], ignore_index=True)
 
     # --- Part 4: Convert final DataFrame to list-of-dicts ---

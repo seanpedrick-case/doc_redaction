@@ -494,16 +494,17 @@ def prepare_image_or_pdf(
     all_line_level_ocr_results_df:pd.DataFrame,
     all_page_line_level_ocr_results_with_words_df:pd.DataFrame,
     latest_file_completed: int = 0,
-    out_message: List[str] = [],
+    out_message: List[str] = list(),
     first_loop_state: bool = False,
     number_of_pages:int = 0,
-    all_annotations_object:List = [],
+    all_annotations_object:List = list(),
     prepare_for_review:bool = False,
-    in_fully_redacted_list:List[int]=[],
+    in_fully_redacted_list:List[int]=list(),
     output_folder:str=OUTPUT_FOLDER,
     input_folder:str=INPUT_FOLDER,
     prepare_images:bool=True,
-    page_sizes:list[dict]=[],
+    page_sizes:list[dict]=list(),
+    pymupdf_doc:Document = list(),
     textract_output_found:bool = False,
     relevant_ocr_output_with_words_found:bool = False,    
     progress: Progress = Progress(track_tqdm=True)
@@ -527,6 +528,7 @@ def prepare_image_or_pdf(
         output_folder (optional, str): The output folder for file save
         prepare_images (optional, bool): A boolean indicating whether to create images for each PDF page. Defaults to True.
         page_sizes(optional, List[dict]): A list of dicts containing information about page sizes in various formats.
+        pymupdf_doc(optional, Document): A pymupdf document object that indicates the existing PDF document object.
         textract_output_found (optional, bool): A boolean indicating whether Textract analysis output has already been found. Defaults to False.
         relevant_ocr_output_with_words_found (optional, bool): A boolean indicating whether local OCR analysis output has already been found. Defaults to False.
         progress (optional, Progress): Progress tracker for the operation
@@ -541,7 +543,7 @@ def prepare_image_or_pdf(
     original_cropboxes = []  # Store original CropBox values
     converted_file_paths = []
     image_file_paths = []
-    pymupdf_doc = []
+    # pymupdf_doc = []
     all_img_details = []    
     review_file_csv = pd.DataFrame()
     out_textract_path = ""

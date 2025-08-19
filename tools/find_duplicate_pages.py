@@ -1,9 +1,9 @@
 import pandas as pd
 import os
 import re
-import itertools # For getting file pairs
-import numpy as np # For efficient index finding
-from tools.helper_functions import OUTPUT_FOLDER
+import itertools
+import numpy as np
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Tuple, Optional, Dict, Union
@@ -11,7 +11,8 @@ from collections import defaultdict
 import gradio as gr
 from gradio import Progress
 from pathlib import Path
-from pymupdf import Document
+from typing import List
+from tools.helper_functions import OUTPUT_FOLDER
 from tools.file_conversion import redact_whole_pymupdf_page, convert_annotation_data_to_dataframe, fill_missing_box_ids_each_box
 import en_core_web_lg
 
@@ -20,6 +21,25 @@ nlp = en_core_web_lg.load()
 similarity_threshold = 0.95
 number_of_zeros_to_add_to_index = 7 # Number of zeroes to add between page number and line numbers to get a unique page/line index value
 ID_MULTIPLIER = 100000
+
+def split_text_with_punctuation(text: str) -> List[str]:
+    """
+    A more concise version of the tokenization function using a single
+    powerful regex with re.findall.
+    """
+    # This single regex pattern finds either:
+    # 1. A sequence of one or more punctuation marks `[.,?!:;]+`
+    # 2. OR a sequence of one or more characters that are NOT punctuation or whitespace `[^.,?!:;\s]+`
+    pattern = re.compile(r"([.,?!:;]+|[^.,?!:;\s]+)")
+    
+    final_list = []
+    # We first split by whitespace to handle sentences correctly
+    for word in text.split():
+        # Then, for each whitespace-separated word, we tokenize it further
+        final_list.extend(pattern.findall(word))
+        
+    return final_list
+
 
 def extract_indices_from_page_ranges(
     results_df: pd.DataFrame,
@@ -80,17 +100,17 @@ def run_full_search_and_analysis(
         raise Warning("Please use a search query with at less than 100 characters.")
 
     # Step 1: Process the user's search query string
-    search_query_data, query_word_length = create_dataframe_from_string(search_query_text, split_words=True)
+    search_query_data, query_word_length = create_dataframe_from_string(search_query_text, file_name="user_search_query", split_words=True)
     if not search_query_data:
         # Handle case where user submits an empty search string
         raise Warning("Could not convert search string to required format") 
 
-    if query_word_length > 10:
+    if query_word_length > 25:
         # Handle case where user submits an empty search string
-        raise Warning("Please use a query with less than 10 words") 
+        raise Warning("Please use a query with less than 25 words") 
 
     # Overwrite min_consecutive_pages with the search string length
-    min_consecutive_pages = query_word_length  
+    min_consecutive_pages = query_word_length
     
     # Create word index from reference table
     word_level_df_orig["index"] = word_level_df_orig.index
@@ -112,6 +132,8 @@ def run_full_search_and_analysis(
         remake_index=remake_index
     )
 
+    combined_df.to_csv("output/combined_df.csv")
+
     # Step 5: Run the final similarity analysis on the combined data
     results_df, duplicate_files, full_data = identify_similar_text_sequences(
         df_combined=combined_df,
@@ -122,6 +144,8 @@ def run_full_search_and_analysis(
         combine_pages=combine_pages,
         inter_file_only=True,
         do_text_clean=False,
+        file1_name="user_search_query",
+        file2_name="source_document",
         progress=progress
     )
 
@@ -229,17 +253,19 @@ def create_dataframe_from_string(
         return [], 0
 
     if split_words:
-        # --- MODE 2: Split string into words, one per row ---
-        words = text_string.split()
+        # --- Split string into words, one per row, based on similar punctuation split technique used to create ocr_results_with_words objects ---
+        words = split_text_with_punctuation(text_string)
+        
+        #words = text_string.split()
         len_words = len(words)
         data = {
             # Assign the same page number to every word
-            'page': [page_number] * len(words),
+            'page': [page_number] * len_words,
             # The list of words becomes the text column
             'text': words
         }
     else:
-        # --- MODE 1: Original behavior, entire string in one row ---
+        # --- Entire string in one row ---
         len_words = 1
         data = {
             'page': [page_number],
@@ -539,198 +565,79 @@ def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str,
             
     return output_paths
 
-# def identify_similar_text_sequences(
-#     df_combined: pd.DataFrame,
-#     similarity_threshold: float = 0.9,
-#     min_word_count: int = 10,
-#     min_consecutive_pages: int = 1,
-#     greedy_match: bool = False,
-#     combine_pages:bool=True,
-#     output_folder: str = OUTPUT_FOLDER,
-#     progress=Progress(track_tqdm=True)
-# ) -> Tuple[pd.DataFrame, List[str], pd.DataFrame]:
-#     """
-#     Identifies similar pages with three possible strategies:
-#     1. Single Page: If greedy_match=False and min_consecutive_pages=1.
-#     2. Fixed-Length Subdocument: If greedy_match=False and min_consecutive_pages > 1.
-#     3. Greedy Consecutive Match: If greedy_match=True.
-#     """
 
-#     output_paths = []
-#     progress(0.1, desc="Processing and filtering text")
-#     df = clean_and_stem_text_series(df_combined, 'text')
-#     df['word_count'] = df['text_clean'].str.split().str.len().fillna(0)
-#     original_row_count = len(df)
-#     df_filtered = df[df['word_count'] >= min_word_count].copy()
-#     df_filtered.reset_index(drop=True, inplace=True)
-    
-#     print(f"Filtered out {original_row_count - len(df_filtered)} pages with fewer than {min_word_count} words.")
-
-#     if len(df_filtered) < 2:
-#         return pd.DataFrame(), [], df_combined
-        
-#     vectorizer = TfidfVectorizer()
-#     tfidf_matrix = vectorizer.fit_transform(df_filtered['text_clean'])
-
-#     progress(0.3, desc="Calculating text similarity")
-#     similarity_matrix = cosine_similarity(tfidf_matrix, dense_output=False)
-#     coo_matrix = similarity_matrix.tocoo()
-    
-#     # Create a DataFrame of all individual page pairs above the threshold.
-#     # This is the base for all three matching strategies.
-#     similar_pages = [
-#         (r, c, v) for r, c, v in zip(coo_matrix.row, coo_matrix.col, coo_matrix.data)
-#         if r < c and v >= similarity_threshold
-#     ]
-
-#     if not similar_pages:
-#         return pd.DataFrame(), [], df_combined
-    
-#     base_similarity_df = pd.DataFrame(similar_pages, columns=['Page1_Index', 'Page2_Index', 'Similarity_Score'])
-
-#     progress(0.6, desc="Aggregating results based on matching strategy")
-    
-#     if greedy_match:
-#         print("Finding matches using greedy consecutive strategy.")
-        
-#         # A set of pairs for fast lookups of (page1_idx, page2_idx)
-#         valid_pairs_set = set(zip(base_similarity_df['Page1_Index'], base_similarity_df['Page2_Index']))
-        
-#         # Keep track of indices that have been used in a sequence
-#         consumed_indices_1 = set()
-#         consumed_indices_2 = set()
-        
-#         all_sequences = []
-
-#         # Iterate through all potential starting pairs, sorted for consistent results
-#         sorted_pairs = base_similarity_df.sort_values(['Page1_Index', 'Page2_Index'])
-
-#         for _, row in sorted_pairs.iterrows():
-#             start_idx1, start_idx2 = int(row['Page1_Index']), int(row['Page2_Index'])
-            
-#             # If this pair has already been consumed by a previous sequence, skip it
-#             if start_idx1 in consumed_indices_1 or start_idx2 in consumed_indices_2:
-#                 continue
-
-#             # This is a new sequence, start expanding it
-#             current_sequence = [(start_idx1, start_idx2)]
-#             k = 1
-#             while True:
-#                 next_idx1 = start_idx1 + k
-#                 next_idx2 = start_idx2 + k
-                
-#                 # Check if the next pair in the sequence is a valid match
-#                 if (next_idx1, next_idx2) in valid_pairs_set and \
-#                    next_idx1 not in consumed_indices_1 and \
-#                    next_idx2 not in consumed_indices_2:
-#                     current_sequence.append((next_idx1, next_idx2))
-#                     k += 1
-#                 else:
-#                     # The sequence has ended
-#                     break
-            
-#             # Record the found sequence and mark all its pages as consumed
-#             sequence_indices_1 = [p[0] for p in current_sequence]
-#             sequence_indices_2 = [p[1] for p in current_sequence]
-            
-#             all_sequences.append({
-#                 'Page1_Start_Index': sequence_indices_1[0], 'Page1_End_Index': sequence_indices_1[-1],
-#                 'Page2_Start_Index': sequence_indices_2[0], 'Page2_End_Index': sequence_indices_2[-1],
-#                 'Match_Length': len(current_sequence)
-#             })
-
-#             consumed_indices_1.update(sequence_indices_1)
-#             consumed_indices_2.update(sequence_indices_2)
-
-#         if not all_sequences:
-#             return pd.DataFrame(), [], df_combined
-
-#         subdocument_df = pd.DataFrame(all_sequences)
-
-#     elif min_consecutive_pages > 1:
-#         # --- STRATEGY 2: Fixed-Length Subdocument Matching ---
-#         print(f"Finding consecutive page matches (min_consecutive_pages > 1)")
-#         similarity_df = base_similarity_df.copy()
-#         similarity_df.sort_values(['Page1_Index', 'Page2_Index'], inplace=True)
-#         is_consecutive = (similarity_df['Page1_Index'].diff() == 1) & (similarity_df['Page2_Index'].diff() == 1)
-#         block_id = is_consecutive.eq(False).cumsum()
-#         grouped = similarity_df.groupby(block_id)
-#         agg_results = grouped.agg(
-#             Page1_Start_Index=('Page1_Index', 'first'), Page2_Start_Index=('Page2_Index', 'first'),
-#             Page1_End_Index=('Page1_Index', 'last'), Page2_End_Index=('Page2_Index', 'last'),
-#             Match_Length=('Page1_Index', 'size'), Avg_Similarity=('Similarity_Score', 'mean')
-#         ).reset_index(drop=True)
-#         subdocument_df = agg_results[agg_results['Match_Length'] >= min_consecutive_pages].copy()
-#         if subdocument_df.empty: return pd.DataFrame(), [], df_combined
-
-#     else:
-#         # --- STRATEGY 1: Single Page Matching ---
-#         print(f"Finding single page matches (min_consecutive_pages=1)")
-#         final_df = map_metadata_single_page(base_similarity_df, df_filtered)
-#         # The rest of the logic (saving files) is handled after this if/else block
-#         pass # The final_df is already prepared
-
-#     # --- Map metadata and format output ---
-#     # This block now handles the output for both subdocument strategies (2 and 3)
-#     if greedy_match or min_consecutive_pages > 1:
-#         final_df = map_metadata_subdocument(subdocument_df, df_filtered)
-    
-#     progress(0.8, desc="Saving output files")
-    
-#     output_paths = save_results_and_redaction_lists(final_df, output_folder, combine_pages)
-
-#     return final_df, output_paths, df_combined
-
-def _calculate_inter_file_similarity(df_filtered:pd.DataFrame, vectorizer, similarity_threshold:float, progress:gr.Progress):
+def find_consecutive_sequence_matches(
+    df_filtered: pd.DataFrame,
+    search_file_name: str,
+    reference_file_name: str
+) -> pd.DataFrame:
     """
-    Helper function to efficiently calculate similarity ONLY between different files.
+    Finds all occurrences of a consecutive sequence of tokens from a search file
+    within a larger reference file.
+
+    This function is designed for order-dependent matching, not "bag-of-words" similarity.
+
+    Args:
+        df_filtered: The DataFrame containing all tokens, with 'file' and 'text_clean' columns.
+        search_file_name: The name of the file containing the search query sequence.
+        reference_file_name: The name of the file to search within.
+
+    Returns:
+        A DataFrame with two columns ('Page1_Index', 'Page2_Index') mapping the
+        consecutive match, or an empty DataFrame if no match is found.
     """
-    print("Calculating inter-file similarity.")
+    print(f"Starting sequence search for '{search_file_name}' in '{reference_file_name}'...")
 
-    # Step 1: Fit the vectorizer on the ENTIRE corpus to create a shared vocabulary.
-    # This is crucial for comparing vectors from different files meaningfully.
-    progress(0.2, desc="Building vocabulary...")
-    vectorizer.fit(df_filtered['text_clean'])
+    # Step 1: Isolate the data for each file
+    search_df = df_filtered[df_filtered['file'] == search_file_name]
+    reference_df = df_filtered[df_filtered['file'] == reference_file_name]
 
-    # Step 2: Group the DataFrame by file.
-    file_groups = df_filtered.groupby('file')
-    unique_files = list(file_groups.groups.keys())
-    all_similar_pairs = []
+    if search_df.empty or reference_df.empty:
+        print("Error: One or both files not found or are empty.")
+        return pd.DataFrame(columns=['Page1_Index', 'Page2_Index'])
 
-    # Step 3: Iterate through all unique pairs of files.
-    file_combinations = list(itertools.combinations(unique_files, 2))
+    # Step 2: Convert the token data into lists for easy comparison.
+    # We need both the text tokens and their original global indices.
+    query_tokens = search_df['text_clean'].tolist()
+    query_indices = search_df.index.tolist()
     
-    for i, (file1_name, file2_name) in enumerate(progress.tqdm(file_combinations, desc="Comparing file pairs")):
-        group1_df = file_groups.get_group(file1_name)
-        group2_df = file_groups.get_group(file2_name)
+    reference_tokens = reference_df['text_clean'].tolist()
+    reference_indices = reference_df.index.tolist()
 
-        # Step 4: Use the pre-fitted vectorizer to TRANSFORM (not fit_transform) the text of each group.
-        tfidf1 = vectorizer.transform(group1_df['text_clean'])
-        tfidf2 = vectorizer.transform(group2_df['text_clean'])
+    query_len = len(query_tokens)
+    all_found_matches = []
 
-        # Step 5: Calculate similarity between the two groups.
-        # This is a much smaller matrix (pages_in_file1 x pages_in_file2).
-        similarity_matrix_subset = cosine_similarity(tfidf1, tfidf2)
+    print(f"Searching for a sequence of {query_len} tokens...")
 
-        # Step 6: Find pairs in this sub-matrix that exceed the threshold.
-        # `np.where` is highly efficient for this.
-        page1_indices, page2_indices = np.where(similarity_matrix_subset >= similarity_threshold)
+    # Step 3: Use a "sliding window" to search for the query sequence in the reference list.
+    for i in range(len(reference_tokens) - query_len + 1):
+        # The "window" is a slice of the reference list that is the same size as the query
+        window = reference_tokens[i : i + query_len]
 
-        # Step 7: Map the local indices back to the original global indices from `df_filtered`.
-        for p1_local_idx, p2_local_idx in zip(page1_indices, page2_indices):
-            global_idx1 = group1_df.index[p1_local_idx]
-            global_idx2 = group2_df.index[p2_local_idx]
-            score = similarity_matrix_subset[p1_local_idx, p2_local_idx]
+        # Step 4: If the window perfectly matches the query sequence...
+        if window == query_tokens:
+            print(f"Found a consecutive match starting at reference index: {reference_indices[i]}")
             
-            # Ensure r < c convention to match the original method
-            r, c = min(global_idx1, global_idx2), max(global_idx1, global_idx2)
-            all_similar_pairs.append((r, c, score))
-    
-    if not all_similar_pairs:
-        return pd.DataFrame()
+            # Get the global indices for this entire matching block
+            matching_reference_indices = reference_indices[i : i + query_len]
+            
+            # Create the mapping between query indices and the found reference indices
+            for j in range(query_len):
+                all_found_matches.append(
+                    (query_indices[j], matching_reference_indices[j], 1)
+                )
+            
+            # If you only want the *first* match, you can uncomment the next line:
+            # break 
 
-    # Create the final DataFrame, which is now pre-filtered.
-    return pd.DataFrame(all_similar_pairs, columns=['Page1_Index', 'Page2_Index', 'Similarity_Score'])
+    if not all_found_matches:
+        print("No matches found")
+        gr.Info("No matches found")
+        return pd.DataFrame(columns=['Page1_Index', 'Page2_Index', 'Similarity_Score'])
+
+    # Step 5: Create the final DataFrame in the desired format
+    result_df = pd.DataFrame(all_found_matches, columns=['Page1_Index', 'Page2_Index', 'Similarity_Score'])
+    return result_df
 
 
 def identify_similar_text_sequences(
@@ -742,6 +649,8 @@ def identify_similar_text_sequences(
     combine_pages: bool = False,
     inter_file_only: bool = False,
     do_text_clean:bool = True,
+    file1_name: str = '',
+    file2_name: str = '',
     output_folder: str = "output/",
     progress=Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, List[str], pd.DataFrame]:
@@ -754,13 +663,24 @@ def identify_similar_text_sequences(
         df = clean_and_stem_text_series(df_combined, 'text') # Will produce the column 'text_clean'
     else:
         df = df_combined.copy()
-        df['text_clean'] = df['text'].str.lower().str.replace(r'[^\w\s]', '', regex=True)
+        df['text_clean'] = df['text'].str.lower()#.str.replace(r'[^\w\s]', '', regex=True)
+
 
     df['word_count'] = df['text_clean'].str.split().str.len().fillna(0)
+    #df['word_count'] = pd.to_numeric(df['word_count'], errors='coerce').fillna(0).astype('int64')
+
+    # ensure min_word_count is an int (e.g., from Gradio/text input)
+    try:
+        min_word_count = int(min_word_count)
+    except (TypeError, ValueError):
+        min_word_count = 0  # or raise/log, depending on your preference
 
     original_row_count = len(df)
     df_filtered = df[df['word_count'] >= min_word_count].copy()
     df_filtered.reset_index(drop=True, inplace=True)
+    
+    df_filtered.to_csv("output/df_filtered.csv")
+    
     print(f"Filtered out {original_row_count - len(df_filtered)} pages with fewer than {min_word_count} words.")
     if len(df_filtered) < 2:
         return pd.DataFrame(), [], df_combined
@@ -769,10 +689,14 @@ def identify_similar_text_sequences(
     
     # Similarity calculated differently if comparing between files only (inter_file_only==True), or within the same file
     if inter_file_only:
-        # Use the new, highly efficient helper function.
-        base_similarity_df = _calculate_inter_file_similarity(df_filtered, vectorizer, similarity_threshold, progress)
+
+        progress(0.2, desc="Finding direct text matches...")
+        
+        #base_similarity_df = _debug_similarity_between_two_files(df_filtered, vectorizer, similarity_threshold, file1_name, file2_name)
+        base_similarity_df = find_consecutive_sequence_matches(df_filtered, file1_name, file2_name)
         if base_similarity_df.empty:
-            return pd.DataFrame(), [], df_combined
+            return pd.DataFrame(), [], df_combined       
+        
             
     else:
         # Use the original, simpler path for all-to-all comparisons (including intra-file).
@@ -794,7 +718,7 @@ def identify_similar_text_sequences(
         
         base_similarity_df = pd.DataFrame(similar_pages, columns=['Page1_Index', 'Page2_Index', 'Similarity_Score'])
 
-    progress(0.6, desc="Aggregating results based on matching strategy")
+    progress(0.7, desc="Aggregating results based on matching strategy")
 
     if greedy_match or min_consecutive_pages > 1:
         print("Finding all consecutive page matches of minimum length:", min_consecutive_pages)
@@ -839,15 +763,18 @@ def identify_similar_text_sequences(
         print(f"Finding single page matches, not greedy (min_consecutive_pages=1)")
         # This part of your code would handle the non-sequential case
         final_df = map_metadata_single_page(base_similarity_df, df_filtered)
-        subdocument_df = final_df # To align variable names for saving
+        #subdocument_df = final_df # To align variable names for saving
 
-        if subdocument_df.empty:
+        if final_df.empty:
             gr.Info("No matches found")
             return pd.DataFrame(), [], df_combined
 
-    progress(0.8, desc="Saving output files")
+    progress(0.9, desc="Saving output files")
     
     output_paths = save_results_and_redaction_lists(final_df, output_folder, combine_pages)
+
+    gr.Info(f"Found {final_df.shape[0]} match(es)")
+    print(f"Found {final_df.shape[0]} match(es)")
 
     return final_df, output_paths, df_combined
  
@@ -1037,12 +964,10 @@ def apply_whole_page_redactions_from_list(duplicate_page_numbers_df: pd.DataFram
     if new_annotations_with_bounding_boxes is None:
         new_annotations_with_bounding_boxes = []
 
-    print("new_annotations_with_bounding_boxes:", new_annotations_with_bounding_boxes)
-
     all_annotations = all_existing_annotations.copy()
 
     if not pymupdf_doc:
-        message = "No document file currently under review."
+        message = "No document file currently under review"
         print(f"Warning: {message}")
         raise Warning(message)
 

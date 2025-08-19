@@ -332,7 +332,7 @@ def choose_and_run_redactor(file_paths:List[str],
         out_message, prepared_pdf_file_paths, pdf_image_file_paths, annotate_max_pages, annotate_max_pages_bottom, pymupdf_doc, annotations_all_pages, review_file_state, document_cropboxes, page_sizes, textract_output_found, all_img_details_state, placeholder_ocr_results_df, local_ocr_output_found_checkbox, all_page_line_level_ocr_results_with_words_df = prepare_image_or_pdf(
             file_paths_loop, text_extraction_method, all_page_line_level_ocr_results_df, all_page_line_level_ocr_results_with_words_df, 0, out_message, True, 
             annotate_max_pages, annotations_all_pages, document_cropboxes, redact_whole_page_list, 
-            output_folder, prepare_images=prepare_images_flag, page_sizes=page_sizes, input_folder=input_folder 
+            output_folder=output_folder, prepare_images=prepare_images_flag, page_sizes=page_sizes, pymupdf_doc=pymupdf_doc, input_folder=input_folder 
         )   
     
     page_sizes_df = pd.DataFrame(page_sizes)
