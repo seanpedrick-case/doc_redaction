@@ -116,8 +116,8 @@ def anon_consistent_names(df:pd.DataFrame) -> pd.DataFrame:
     # ## Pick out common names and replace them with the same person value
     df_dict = df.to_dict(orient="list")
 
-    analyzer = AnalyzerEngine()
-    batch_analyzer = BatchAnalyzerEngine(analyzer_engine=analyzer)
+    #analyzer = AnalyzerEngine()
+    batch_analyzer = BatchAnalyzerEngine(analyzer_engine=nlp_analyser)
 
     analyzer_results = batch_analyzer.analyze_dict(df_dict, language="en")
     analyzer_results = list(analyzer_results)

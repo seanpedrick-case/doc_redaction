@@ -133,6 +133,7 @@ def choose_and_run_redactor(file_paths:List[str],
  all_page_line_level_ocr_results:list[dict] = list(),
  all_page_line_level_ocr_results_with_words:list[dict] = list(),
  all_page_line_level_ocr_results_with_words_df:pd.DataFrame=None,
+ chosen_local_model:str="tesseract",
  prepare_images:bool=True,
  RETURN_PDF_END_OF_REDACTION:bool=RETURN_PDF_END_OF_REDACTION,
  progress=gr.Progress(track_tqdm=True)):
@@ -186,6 +187,7 @@ def choose_and_run_redactor(file_paths:List[str],
     - all_page_line_level_ocr_results (list, optional): All line level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words (list, optional): All word level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words_df (pd.Dataframe, optional): All word level text on the page with bounding boxes as a dataframe.
+    - chosen_local_model (str): Which local model is being used for OCR on images - "tesseract", "paddle" for PaddleOCR, or "hybrid" to combine both.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - RETURN_PDF_END_OF_REDACTION (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
@@ -201,8 +203,6 @@ def choose_and_run_redactor(file_paths:List[str],
     blank_request_metadata = []
     all_textract_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
     review_out_file_paths = [prepared_pdf_file_paths[0]]
-
-    print("all_page_line_level_ocr_results_with_words at start of choose and run...:", all_page_line_level_ocr_results_with_words)
 
     if all_page_line_level_ocr_results_with_words_df is None:
          all_page_line_level_ocr_results_with_words_df = pd.DataFrame()
@@ -538,6 +538,7 @@ def choose_and_run_redactor(file_paths:List[str],
              text_extraction_only,
              all_page_line_level_ocr_results,
              all_page_line_level_ocr_results_with_words,
+             chosen_local_model,
              log_files_output_paths=log_files_output_paths,
              output_folder=output_folder)
             
@@ -1347,6 +1348,7 @@ def redact_image_pdf(file_path:str,
                      text_extraction_only:bool=False,
                      all_page_line_level_ocr_results = list(),
                      all_page_line_level_ocr_results_with_words = list(),
+                     chosen_local_model:str="tesseract",
                      page_break_val:int=int(PAGE_BREAK_VALUE),
                      log_files_output_paths:List=list(),
                      max_time:int=int(MAX_TIME_VALUE),
@@ -1354,7 +1356,7 @@ def redact_image_pdf(file_path:str,
                      progress=Progress(track_tqdm=True)):
 
     '''
-    This function redacts sensitive information from a PDF document. It takes the following parameters:
+    This function redacts sensitive information from a PDF document. It takes the following parameters in order:
 
     - file_path (str): The path to the PDF file to be redacted.
     - pdf_image_file_paths (List[str]): A list of paths to the PDF file pages converted to images.
@@ -1367,6 +1369,7 @@ def redact_image_pdf(file_path:str,
     - text_extraction_method (str, optional): The type of analysis to perform on the PDF. Defaults to TESSERACT_TEXT_EXTRACT_OPTION.
     - handwrite_signature_checkbox (List[str], optional): A list of options for redacting handwriting and signatures. Defaults to ["Extract handwriting", "Extract signatures"].
     - textract_request_metadata (list, optional): Metadata related to the redaction request. Defaults to an empty string.
+    - current_loop_page (int, optional): The current page being processed. Defaults to 0.
     - page_break_return (bool, optional): Indicates if the function should return after a page break. Defaults to False.
     - annotations_all_pages (List, optional): List of annotations on all pages that is used by the gradio_image_annotation object.
     - all_page_line_level_ocr_results_df (pd.DataFrame, optional): All line level OCR results for the document as a Pandas dataframe,
@@ -1382,7 +1385,10 @@ def redact_image_pdf(file_path:str,
     - match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
     - page_sizes_df (pd.DataFrame, optional): A pandas dataframe of PDF page sizes in PDF or image format.
     - text_extraction_only (bool, optional): Should the function only extract text, or also do redaction.
-    - page_break_val (int, optional): The value at which to trigger a page break. Defaults to 3.
+    - all_page_line_level_ocr_results (optional): List of all page line level OCR results.
+    - all_page_line_level_ocr_results_with_words (optional): List of all page line level OCR results with words.
+    - chosen_local_model (str, optional): The local model chosen for OCR. Defaults to "tesseract", other choices are "paddle" for PaddleOCR, or "hybrid" for a combination of both.
+    - page_break_val (int, optional): The value at which to trigger a page break. Defaults to PAGE_BREAK_VALUE.
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
     - output_folder (str, optional): The folder for file outputs.
@@ -1392,8 +1398,6 @@ def redact_image_pdf(file_path:str,
     '''
 
     tic = time.perf_counter()
-
-    print("all_page_line_level_ocr_results_with_words in redact_image_pdf:", all_page_line_level_ocr_results_with_words)
 
     file_name = get_file_name_without_type(file_path)    
     comprehend_query_number_new = 0
@@ -1408,7 +1412,11 @@ def redact_image_pdf(file_path:str,
         new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_recogniser_word_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
 
-    image_analyser = CustomImageAnalyzerEngine(nlp_analyser)    
+    # Only load in PaddleOCR models if not running Textract
+    if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+        image_analyser = CustomImageAnalyzerEngine(nlp_analyser, ocr_engine="tesseract") 
+    else:  
+        image_analyser = CustomImageAnalyzerEngine(nlp_analyser, ocr_engine=chosen_local_model) 
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         out_message = "Connection to AWS Comprehend service unsuccessful."
@@ -1418,7 +1426,8 @@ def redact_image_pdf(file_path:str,
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION and textract_client == "":
         out_message_warning = "Connection to AWS Textract service unsuccessful. Redaction will only continue if local AWS Textract results can be found."
         print(out_message_warning)
-        #raise Exception(out_message)   
+        #raise Exception(out_message)
+        
 
     number_of_pages = pymupdf_doc.page_count
     print("Number of pages:", str(number_of_pages))
@@ -1437,7 +1446,7 @@ def redact_image_pdf(file_path:str,
         textract_data, is_missing, log_files_output_paths = load_and_convert_textract_json(textract_json_file_path, log_files_output_paths, page_sizes_df)
         original_textract_data = textract_data.copy()
 
-        print("Successfully loaded in Textract analysis results from file")
+        #print("Successfully loaded in Textract analysis results from file")
 
     # If running local OCR option, check if file already exists. If it does, load in existing data
     if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:                
@@ -1445,7 +1454,7 @@ def redact_image_pdf(file_path:str,
         all_page_line_level_ocr_results_with_words, is_missing, log_files_output_paths = load_and_convert_ocr_results_with_words_json(all_page_line_level_ocr_results_with_words_json_file_path, log_files_output_paths, page_sizes_df)
         original_all_page_line_level_ocr_results_with_words = all_page_line_level_ocr_results_with_words.copy()
 
-        print("Loaded in local OCR analysis results from file")
+        #print("Loaded in local OCR analysis results from file")
 
     ###
     if current_loop_page == 0: page_loop_start = 0

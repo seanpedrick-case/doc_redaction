@@ -1677,7 +1677,7 @@ def convert_annotation_json_to_review_df(
     if 'color' in review_file_df.columns:
          # Check if the column actually contains lists before applying lambda
          if review_file_df['color'].apply(lambda x: isinstance(x, list)).any():
-            review_file_df["color"] = review_file_df["color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
+            review_file_df.loc[:, "color"] = review_file_df.loc[:, "color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
 
     # Sort the results
     # Ensure sort columns exist before sorting

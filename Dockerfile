@@ -17,7 +17,7 @@ WORKDIR /src
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir --target=/install -r requirements.txt && rm requirements.txt
+RUN pip install --no-cache-dir --verbose --target=/install -r requirements.txt && rm requirements.txt
 
 # Add lambda entrypoint and script
 COPY lambda_entrypoint.py .
@@ -81,13 +81,19 @@ RUN mkdir -p \
     ${APP_HOME}/app/logs \
     ${APP_HOME}/app/usage \
     ${APP_HOME}/app/feedback \
-    ${APP_HOME}/app/config
+    ${APP_HOME}/app/config 
 
 # Now handle the /tmp and /var/tmp directories and their subdirectories
 RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_CACHE_HOME} \
     && chown user:user /tmp /var/tmp /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache ${XDG_CACHE_HOME} \
     && chmod 1777 /tmp /var/tmp /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache \
     && chmod 700 ${XDG_CACHE_HOME}
+
+RUN mkdir -p ${APP_HOME}/.paddlex/official_models \
+    && chown user:user \
+    ${APP_HOME}/.paddlex/official_models \
+    && chmod 755 \
+    ${APP_HOME}/.paddlex/official_models
 
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
@@ -115,6 +121,7 @@ VOLUME ["/home/user/app/logs"]
 VOLUME ["/home/user/app/usage"]
 VOLUME ["/home/user/app/feedback"]
 VOLUME ["/home/user/app/config"]
+VOLUME ["/home/user/.paddlex/official_models"]
 VOLUME ["/tmp"]
 VOLUME ["/var/tmp"]
 

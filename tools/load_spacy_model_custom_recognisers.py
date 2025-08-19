@@ -1,6 +1,7 @@
 from typing import List
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, EntityRecognizer, Pattern, RecognizerResult
-from presidio_analyzer.nlp_engine import SpacyNlpEngine, NlpArtifacts
+from presidio_analyzer.nlp_engine import SpacyNlpEngine, NlpArtifacts, NerModelConfiguration
+
 import spacy
 from spacy.matcher import Matcher, PhraseMatcher
 from spaczz.matcher import FuzzyMatcher
@@ -24,6 +25,22 @@ except:
 	download(model_name)
 	nlp = spacy.load(model_name)
 	print("Successfully downloaded and imported spaCy model", model_name)
+
+# Create a class inheriting from SpacyNlpEngine
+class LoadedSpacyNlpEngine(SpacyNlpEngine):
+    def __init__(self, loaded_spacy_model):
+        super().__init__(ner_model_configuration=NerModelConfiguration(labels_to_ignore=["CARDINAL", "ORDINAL"])) # Ignore non-relevant labels
+        self.nlp = {"en": loaded_spacy_model}
+
+# Pass the loaded model to the new LoadedSpacyNlpEngine
+loaded_nlp_engine = LoadedSpacyNlpEngine(loaded_spacy_model = nlp)
+
+
+nlp_analyser = AnalyzerEngine(nlp_engine=loaded_nlp_engine,
+                default_score_threshold=score_threshold,
+                supported_languages=["en"],
+                log_decision_process=False,
+                ) # New custom recognisers based on the following functions are added at the end of this script
 
 # #### Custom recognisers
 def custom_word_list_recogniser(custom_list:List[str]=[]):
@@ -314,21 +331,6 @@ class CustomWordFuzzyRecognizer(EntityRecognizer):
 custom_list_default = []
 custom_word_fuzzy_recognizer = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_list_default)
 
-# Create a class inheriting from SpacyNlpEngine
-class LoadedSpacyNlpEngine(SpacyNlpEngine):
-    def __init__(self, loaded_spacy_model):
-        super().__init__()
-        self.nlp = {"en": loaded_spacy_model}
-
-# Pass the loaded model to the new LoadedSpacyNlpEngine
-loaded_nlp_engine = LoadedSpacyNlpEngine(loaded_spacy_model = nlp)
-
-
-nlp_analyser = AnalyzerEngine(nlp_engine=loaded_nlp_engine,
-                default_score_threshold=score_threshold,
-                supported_languages=["en"],
-                log_decision_process=False,
-                )
 
 # Add custom recognisers to nlp_analyser
 nlp_analyser.registry.add_recognizer(street_recogniser)
