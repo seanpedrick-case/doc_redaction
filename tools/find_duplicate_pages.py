@@ -40,7 +40,6 @@ def split_text_with_punctuation(text: str) -> List[str]:
         
     return final_list
 
-
 def extract_indices_from_page_ranges(
     results_df: pd.DataFrame,
     start_col: str = 'Page2_Start_Page',
@@ -62,6 +61,43 @@ def extract_indices_from_page_ranges(
 
             all_indices.add(original_index)
     return sorted(list(all_indices))
+
+def punctuation_at_word_text_end(word_level_df_orig: pd.DataFrame) -> bool:
+    """
+    Check the first 1000 rows of word_level_df_orig to see if any of the strings 
+    in 'word_text' end with a full stop '.', exclamation mark '!', or question mark '?',
+    for strings that do not contain these characters alone.
+    
+    Args:
+        word_level_df_orig (pd.DataFrame): DataFrame containing word-level OCR data with 'word_text' column
+        
+    Returns:
+        bool: True if any strings end with punctuation marks, False otherwise
+    """
+    # Get the first 1000 rows or all rows if less than 1000
+    sample_df = word_level_df_orig.head(1000)
+    
+    # Check if 'word_text' column exists
+    if 'word_text' not in sample_df.columns:
+        return False
+    
+    # Define punctuation marks to check for
+    punctuation_marks = ['.', '!', '?']
+    
+    # Check each word_text string
+    for word_text in sample_df['word_text']:
+        if pd.isna(word_text) or not isinstance(word_text, str):
+            continue
+            
+        # Skip strings that contain only punctuation marks
+        if word_text.strip() in punctuation_marks:
+            continue
+            
+        # Check if the string ends with any of the punctuation marks
+        if any(word_text.rstrip().endswith(punct) for punct in punctuation_marks):
+            return True
+    
+    return False
 
 def run_full_search_and_analysis(
     search_query_text: str,
@@ -99,8 +135,11 @@ def run_full_search_and_analysis(
     if len(search_query_text) > 100:
         raise Warning("Please use a search query with at less than 100 characters.")
 
+    if punctuation_at_word_text_end(word_level_df_orig) == True: do_punctuation_split = False
+    else: do_punctuation_split = True
+
     # Step 1: Process the user's search query string
-    search_query_data, query_word_length = create_dataframe_from_string(search_query_text, file_name="user_search_query", split_words=True)
+    search_query_data, query_word_length = create_dataframe_from_string(search_query_text, file_name="user_search_query", split_words=True, split_punctuation=do_punctuation_split)
     if not search_query_data:
         # Handle case where user submits an empty search string
         raise Warning("Could not convert search string to required format") 
@@ -131,8 +170,6 @@ def run_full_search_and_analysis(
         output_folder=None, # No need to save this intermediate file
         remake_index=remake_index
     )
-
-    combined_df.to_csv("output/combined_df.csv")
 
     # Step 5: Run the final similarity analysis on the combined data
     results_df, duplicate_files, full_data = identify_similar_text_sequences(
@@ -222,7 +259,8 @@ def create_dataframe_from_string(
     text_string: str,
     file_name: str = "user_search_query",
     page_number: int = 1,
-    split_words: bool = False
+    split_words: bool = False,
+    split_punctuation: bool = True,
 ) -> Tuple[List[Tuple[str, pd.DataFrame]], int]:
     """
     Converts a string into a DataFrame compatible with combine_ocr_dataframes.
@@ -240,6 +278,8 @@ def create_dataframe_from_string(
                                       whitespace and creates a row for each word.
                                       If False (default), the entire string is
                                       treated as a single text entry.
+        split_punctuation (bool, optional): If True, splits the 'end of sentence' punctuation off the end
+                                      of the search query to match the reference data.
 
     Returns:
         Tuple[List[Tuple[str, pd.DataFrame]], int]:
@@ -254,15 +294,16 @@ def create_dataframe_from_string(
 
     if split_words:
         # --- Split string into words, one per row, based on similar punctuation split technique used to create ocr_results_with_words objects ---
-        words = split_text_with_punctuation(text_string)
+        if split_punctuation == True:
+            words = split_text_with_punctuation(text_string)
+        else:
+            words = text_string.split()
         
         #words = text_string.split()
         len_words = len(words)
-        data = {
-            # Assign the same page number to every word
-            'page': [page_number] * len_words,
-            # The list of words becomes the text column
-            'text': words
+        data = {            
+            'page': [page_number] * len_words, # Assign the same page number to every word           
+            'text': words # The list of words becomes the text column
         }
     else:
         # --- Entire string in one row ---
@@ -528,7 +569,7 @@ def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str,
 
     # 1. Save the main results DataFrame
     similarity_file_output_path = output_folder_path / 'page_similarity_results.csv'
-    final_df.to_csv(similarity_file_output_path, index=False)
+    final_df.to_csv(similarity_file_output_path, index=False, encoding="utf-8-sig")
 
     output_paths.append(str(similarity_file_output_path))
     print(f"Main results saved to {similarity_file_output_path}")
@@ -564,6 +605,44 @@ def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str,
                 print(f"Redaction list for {redact_file} saved to {output_file_path}")
             
     return output_paths
+
+# Define the set of punctuation characters for efficient lookup
+PUNCTUATION_TO_STRIP = {'.', ',', '?', '!', ':', ';'}
+
+def _sequences_match(query_seq: List[str], ref_seq: List[str]) -> bool:
+    """
+    Helper function to compare two sequences of tokens with punctuation flexibility.
+
+    Returns True if the sequences match according to the rules:
+    1. An exact match is a match.
+    2. A reference token also matches a query token if it is the query token
+       followed by a single character from PUNCTUATION_TO_STRIP. This rule does not
+       apply if the reference token consists only of punctuation.
+    """
+    if len(query_seq) != len(ref_seq):
+        return False
+
+    for query_token, ref_token in zip(query_seq, ref_seq):
+        # Rule 1: Check for a direct, exact match first (most common case)
+        if query_token == ref_token:
+            continue
+
+        # Rule 2: Check for the flexible punctuation match
+        # - The reference token must be longer than 1 character
+        # - Its last character must be in our punctuation set
+        # - The token without its last character must match the query token
+        if (
+            len(ref_token) > 1 and
+            ref_token[-1] in PUNCTUATION_TO_STRIP and
+            ref_token[:-1] == query_token
+        ):
+            continue
+
+        # If neither rule applies, the tokens don't match, so the sequence doesn't match.
+        return False
+
+    # If the loop completes, every token has matched.
+    return True
 
 
 def find_consecutive_sequence_matches(
@@ -614,8 +693,8 @@ def find_consecutive_sequence_matches(
         # The "window" is a slice of the reference list that is the same size as the query
         window = reference_tokens[i : i + query_len]
 
-        # Step 4: If the window perfectly matches the query sequence...
-        if window == query_tokens:
+        # Step 4: If the window matches the query with or without punctuation on end
+        if _sequences_match(query_tokens, window):
             print(f"Found a consecutive match starting at reference index: {reference_indices[i]}")
             
             # Get the global indices for this entire matching block
@@ -638,7 +717,6 @@ def find_consecutive_sequence_matches(
     # Step 5: Create the final DataFrame in the desired format
     result_df = pd.DataFrame(all_found_matches, columns=['Page1_Index', 'Page2_Index', 'Similarity_Score'])
     return result_df
-
 
 def identify_similar_text_sequences(
     df_combined: pd.DataFrame,
@@ -679,13 +757,11 @@ def identify_similar_text_sequences(
     df_filtered = df[df['word_count'] >= min_word_count].copy()
     df_filtered.reset_index(drop=True, inplace=True)
     
-    df_filtered.to_csv("output/df_filtered.csv")
-    
     print(f"Filtered out {original_row_count - len(df_filtered)} pages with fewer than {min_word_count} words.")
     if len(df_filtered) < 2:
         return pd.DataFrame(), [], df_combined
 
-    vectorizer = TfidfVectorizer()
+    
     
     # Similarity calculated differently if comparing between files only (inter_file_only==True), or within the same file
     if inter_file_only:
@@ -695,11 +771,11 @@ def identify_similar_text_sequences(
         #base_similarity_df = _debug_similarity_between_two_files(df_filtered, vectorizer, similarity_threshold, file1_name, file2_name)
         base_similarity_df = find_consecutive_sequence_matches(df_filtered, file1_name, file2_name)
         if base_similarity_df.empty:
-            return pd.DataFrame(), [], df_combined       
-        
+            return pd.DataFrame(), [], df_combined        
             
     else:
         # Use the original, simpler path for all-to-all comparisons (including intra-file).
+        vectorizer = TfidfVectorizer()
         print("Standard Path: Calculating all-to-all similarity.")
         progress(0.2, desc="Vectorizing text...")
         tfidf_matrix = vectorizer.fit_transform(df_filtered['text_clean'])

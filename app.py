@@ -184,13 +184,9 @@ with app:
     default_cost_code_textbox = gr.Textbox(label = "Default cost code textbox", value=DEFAULT_COST_CODE, visible=False)
 
     # Base tables that are not modified subsequent to load
-    # recogniser_entity_dataframe_base = gr.Dataframe(pd.DataFrame(data={"page":[], "label":[], "text":[], "id":[]}), col_count=4, type="pandas", visible=False, label="recogniser_entity_dataframe_base", show_search="filter", headers=["page", "label", "text", "id"], show_fullscreen_button=True, wrap=True, static_columns=[0,1,2,3])
-    # all_page_line_level_ocr_results_df_base = gr.Dataframe(value=pd.DataFrame(), headers=["page","text", "left","top","width","height"], row_count = (0, "dynamic"),  label="all_page_line_level_ocr_results_df_base", type="pandas", wrap=True, show_fullscreen_button=True, show_search='filter',  show_copy_button=True, visible=False)
-    # all_line_level_ocr_results_df_placeholder = gr.Dataframe(visible=False)
-
     recogniser_entity_dataframe_base = gr.State(pd.DataFrame(columns=["page", "label", "text", "id"]))
-    all_page_line_level_ocr_results_df_base = gr.State(pd.DataFrame(columns=["page","text", "left","top","width","height"]))
-    all_line_level_ocr_results_df_placeholder = gr.State(pd.DataFrame(columns=["page","text", "left","top","width","height"]))
+    all_page_line_level_ocr_results_df_base = gr.State(pd.DataFrame(columns=["page", "text", "left", "top", "width", "height", "line"]))
+    all_line_level_ocr_results_df_placeholder = gr.State(pd.DataFrame(columns=["page", "text", "left", "top", "width", "height", "line"]))
 
     # Placeholder for selected entity dataframe row
     selected_entity_id = gr.Textbox(value="", label="selected_entity_id", visible=False)
@@ -440,10 +436,10 @@ with app:
                             
                         undo_last_redact_btn = gr.Button(value="Undo latest redaction", variant="primary")
 
-                with gr.Accordion("Search all extracted text", open=True):                    
-                    all_page_line_level_ocr_results_df = gr.Dataframe(value=pd.DataFrame(), headers=["page", "text"], col_count=(2, 'fixed'), row_count = (0, "dynamic"),  label="All OCR results", visible=True, type="pandas", wrap=True, show_fullscreen_button=True, show_search='filter', show_label=False, show_copy_button=True, max_height=400)
+                with gr.Accordion("Search extracted text", open=True):               
+                    all_page_line_level_ocr_results_df = gr.Dataframe(value=pd.DataFrame(), headers=["page", "line", "text"], col_count=(3, 'fixed'), row_count = (0, "dynamic"),  label="All OCR results", visible=True, type="pandas", wrap=True, show_fullscreen_button=True, show_search='filter', show_label=False, show_copy_button=True, max_height=400)
                     reset_all_ocr_results_btn = gr.Button(value="Reset OCR output table filter")
-                    selected_ocr_dataframe_row = gr.Dataframe(pd.DataFrame(data={"page":[], "text":[]}), col_count=2, type="pandas", visible=False, headers=["page", "text"], wrap=True)
+                    selected_ocr_dataframe_row = gr.Dataframe(pd.DataFrame(data={"page":[], "line":[], "text":[]}), col_count=3, type="pandas", visible=False, headers=["page", "line", "text"], wrap=True)
         
         with gr.Accordion("Convert review files loaded above to Adobe format, or convert from Adobe format to review file", open = False):
             convert_review_file_to_adobe_btn = gr.Button("Convert review file to Adobe comment format", variant="primary")

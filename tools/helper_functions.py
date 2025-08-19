@@ -328,10 +328,8 @@ def merge_csv_files(file_list:List[str], output_folder:str=OUTPUT_FOLDER):
     merged_csv_path = output_folder + file_out_name + "_merged.csv"
 
     # Save the merged DataFrame to a CSV file
-    #merged_csv = StringIO()
-    merged_df.to_csv(merged_csv_path, index=False)
+    merged_df.to_csv(merged_csv_path, index=False, encoding="utf-8-sig")
     output_files.append(merged_csv_path)
-    #merged_csv.seek(0)  # Move to the beginning of the StringIO object
 
     return output_files
 
@@ -579,9 +577,9 @@ def reset_base_dataframe(df:pd.DataFrame):
 
 def reset_ocr_base_dataframe(df:pd.DataFrame):
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["page", "line", "text"])
     else:
-        return df.loc[:, ["page", "text"]]
+        return df.loc[:, ["page", "line", "text"]]
 
 def reset_ocr_with_words_base_dataframe(df:pd.DataFrame, page_entity_dropdown_redaction_value:str):
     

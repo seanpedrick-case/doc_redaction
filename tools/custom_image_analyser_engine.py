@@ -34,7 +34,7 @@ class OCRResult:
     width: int
     height: int
     conf: float = None
-    line_number: int = None
+    line: int = None
 
 @dataclass
 class CustomImageRecognizerResult:
@@ -340,6 +340,7 @@ class CustomImageAnalyzerEngine:
                 line_top = int(min(y_coords))
                 line_width = int(max(x_coords) - line_left)
                 line_height = int(max(y_coords) - line_top)
+                #line_y_center = (max(y_coords) + min(y_coords)) / 2
 
                  # 2. Split the line into words
                 words = line_text.split()
@@ -370,127 +371,6 @@ class CustomImageAnalyzerEngine:
             
         return output
     
-    # def _perform_hybrid_ocr(
-    #     self, 
-    #     image: Image.Image, 
-    #     confidence_threshold: int = 65, 
-    #     padding: int = 5,
-    #     ocr: Optional[Any] = None
-    # ) -> List[OCRResult]:
-    #     """
-    #     Performs OCR using Tesseract for bounding boxes and PaddleOCR for low-confidence text.
-    #     """
-    #     if ocr is None:
-    #         if hasattr(self, 'paddle_ocr') and self.paddle_ocr is not None:
-    #             ocr = self.paddle_ocr
-    #         else:
-    #             raise ValueError("No OCR object provided and 'paddle_ocr' is not initialized.")
-    #     """
-    #     Performs OCR using Tesseract for bounding boxes and PaddleOCR for low-confidence text.
-    #     """
-    #     print("Starting hybrid OCR process...")
-        
-    #     # 1. Get initial word-level results from Tesseract
-    #     tesseract_data = pytesseract.image_to_data(
-    #         image,
-    #         output_type=pytesseract.Output.DICT,
-    #         config=self.tesseract_config
-    #     )
-        
-    #     final_results = []
-    #     num_words = len(tesseract_data['text'])
-        
-    #     for i in range(num_words):
-    #         text = tesseract_data['text'][i]
-    #         conf = int(tesseract_data['conf'][i])
-            
-    #         # Skip empty text boxes or non-word elements
-    #         if not text.strip() or conf == -1:
-    #             continue
-
-    #         left = tesseract_data['left'][i]
-    #         top = tesseract_data['top'][i]
-    #         width = tesseract_data['width'][i]
-    #         height = tesseract_data['height'][i]
-            
-    #         # 2. If confidence is low, use PaddleOCR for a second opinion
-    #         if conf < confidence_threshold:         
-
-    #             # 3. Crop the sub-image with padding
-    #             img_width, img_height = image.size
-                
-    #             # Add padding but ensure it doesn't go out of bounds
-    #             crop_left = max(0, left - padding - 15)
-    #             crop_top = max(0, top - padding)
-    #             crop_right = min(img_width, left + width + padding + 15)
-    #             crop_bottom = min(img_height, top + height + padding)
-                
-    #             cropped_image = image.crop((crop_left, crop_top, crop_right, crop_bottom))
-    #             cropped_image_np = np.array(cropped_image)                
-
-    #             # PaddleOCR may need an RGB image. Ensure it has 3 channels.
-    #             if len(cropped_image_np.shape) == 2:
-    #                 cropped_image_np = np.stack([cropped_image_np] * 3, axis=-1)
-
-    #             # 4. Run PaddleOCR on the small crop
-                
-    #             paddle_results = ocr.predict(cropped_image_np)
-                
-    #             if paddle_results[0]:                    
-    #                 # Extract text recognition results from the new format
-    #                 rec_texts = paddle_results[0].get('rec_texts', [])
-    #                 rec_scores = paddle_results[0].get('rec_scores', [])
-    #                 rec_polys = paddle_results[0].get('rec_polys', [])
-                    
-    #                 new_text = " ".join([line_text for line_text in rec_texts])                    
-                
-    #                 # 5. Process and replace the text                
-    #                 # Concatenate results if Paddle splits the word into multiple parts
-    #                 #new_text = " ".join([line[1][0] for line in paddle_result[0]])
-    #                 new_conf = pd.Series(rec_scores).median() * 100
-
-    #                 if new_conf > confidence_threshold:
-                        
-    #                     print(f"  Re-OCR'd word: '{text}' (conf: {conf}) -> '{new_text}' (conf: {new_conf})")
-
-    #                     # For exporting example image comparisons, not used here
-    #                     # safe_text = self._sanitize_filename(text, max_length=20)
-    #                     # new_safe_text = self._sanitize_filename(new_text, max_length=20)
-    #                     # output_image_path = f"examples/tess_vs_paddle_examples/{conf}_conf_{safe_text}_to_{new_safe_text}.png"
-    #                     # cropped_image.save(output_image_path)
-
-    #                     text = new_text
-    #                     conf = new_conf
-
-    #                 elif new_text:
-    #                     text = new_text
-    #                     print(f"  '{text}' (conf: {conf}) -> '{new_text}' (conf: {new_conf}) had too low confidence, keeping original")
-    #                 else:
-    #                     print(f"  '{text}' (conf: {conf}) -> No text found by Paddle, returning nothing.")
-
-    #                     # For exporting example image comparisons, not used here
-    #                     # safe_text = self._sanitize_filename(text, max_length=20)
-    #                     # output_image_path = f"examples/tess_vs_paddle_examples/{conf}_conf_{safe_text}_to_blank.png"
-    #                     # cropped_image.save(output_image_path)
-
-    #                     text = ''
-
-    #             else:
-    #                 print(f"  '{text}' (conf: {conf}) -> No text found by Paddle, keeping original.")
-    #                 text = ''
-
-    #         # 6. Append the final result (either original or replaced)
-    #         if text:
-    #             final_results.append(OCRResult(
-    #                 text=clean_unicode_text(text),
-    #                 left=left,
-    #                 top=top,
-    #                 width=width,
-    #                 height=height
-    #             ))
-            
-    #     return final_results
-    
     def _perform_hybrid_ocr(
     self,
     image: Image.Image,
@@ -516,6 +396,8 @@ class CustomImageAnalyzerEngine:
             output_type=pytesseract.Output.DICT,
             config=self.tesseract_config
         )
+
+        #tesseract_data['abs_line_id'] = tesseract_data.groupby(['block_num', 'par_num', 'line_num']).ngroup()
         
         final_data = {'text': [], 'left': [], 'top': [], 'width': [], 'height': [], 'conf': []}
         
@@ -535,6 +417,7 @@ class CustomImageAnalyzerEngine:
             top = tesseract_data['top'][i]
             width = tesseract_data['width'][i]
             height = tesseract_data['height'][i]
+            #line_number = tesseract_data['abs_line_id'][i]
             
             # If confidence is low, use PaddleOCR for a second opinion
             if conf < confidence_threshold:
@@ -596,6 +479,7 @@ class CustomImageAnalyzerEngine:
                 final_data['width'].append(width)
                 final_data['height'].append(height)
                 final_data['conf'].append(int(conf))
+                #final_data['line_number'].append(int(line_number))
                 
         return final_data
     
@@ -628,6 +512,8 @@ class CustomImageAnalyzerEngine:
                 output_type=pytesseract.Output.DICT,
                 config=self.tesseract_config
             )
+
+            #ocr_data['abs_line_id'] = ocr_data.groupby(['block_num', 'par_num', 'line_num']).ngroup()
 
         elif self.ocr_engine == "paddle":
 
@@ -669,11 +555,11 @@ class CustomImageAnalyzerEngine:
                 left=ocr_result['left'][i],
                 top=ocr_result['top'][i],
                 width=ocr_result['width'][i],
-                height=ocr_result['height'][i]
+                height=ocr_result['height'][i]#,
+                #line_number=ocr_result['abs_line_id'][i]
             )
             for i in valid_indices
         ]
-
 
     def analyze_text(
         self, 
@@ -1357,14 +1243,17 @@ def recreate_page_line_level_ocr_results_with_page(page_line_level_ocr_results_w
     for line_data in page_line_level_ocr_results_with_words["results"].values():
         bbox = line_data["bounding_box"]
         text = line_data["text"]
+        if line_data["line"]:
+            line_number = line_data["line"]
 
-        # Recreate the OCRResult (you'll need the OCRResult class imported)
+        # Recreate the OCRResult
         line_result = OCRResult(
             text=text,
             left=bbox[0],
             top=bbox[1],
             width=bbox[2] - bbox[0],
             height=bbox[3] - bbox[1],
+            line=line_number
         )
         reconstructed_results.append(line_result)
     
@@ -1500,13 +1389,14 @@ def combine_ocr_results(ocr_results: List[OCRResult], x_threshold: float = 50.0,
             left=line_left,
             top=line_top,
             width=line_right - line_left,
-            height=line_bottom - line_top
+            height=line_bottom - line_top,
+            line=line_counter
         )
         
         page_line_level_ocr_results.append(final_line_bbox)
         
-        # Use the PROCESSED line to create the children
-        create_ocr_result_with_children(
+        # Use the PROCESSED line to create the children. Creates a result within page_line_level_ocr_results_with_words
+        page_line_level_ocr_results_with_words["text_line_" + str(line_counter)] = create_ocr_result_with_children(
             page_line_level_ocr_results_with_words, 
             line_counter, 
             final_line_bbox, 
@@ -1518,4 +1408,3 @@ def combine_ocr_results(ocr_results: List[OCRResult], x_threshold: float = 50.0,
     page_level_results_with_words = {"page": page, "results": page_line_level_ocr_results_with_words}
 
     return page_level_results_with_page, page_level_results_with_words
-
