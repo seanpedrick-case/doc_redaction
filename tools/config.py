@@ -195,7 +195,7 @@ FEEDBACK_LOG_FILE_NAME = get_or_create_env_var('FEEDBACK_LOG_FILE_NAME', LOG_FIL
 ###
 
 # Create Tesseract and Poppler folders if you have installed them locally
-TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "/usr/bin") #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
+TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "") #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
 TESSERACT_DATA_FOLDER = get_or_create_env_var('TESSERACT_DATA_FOLDER', "/usr/share/tessdata")
 POPPLER_FOLDER = get_or_create_env_var('POPPLER_FOLDER', "") # If installing on Windows,install Poppler from here https://github.com/oschwartz10612/poppler-windows. This variable needs to point to the poppler bin folder e.g. poppler/poppler-24.02.0/Library/bin/
 

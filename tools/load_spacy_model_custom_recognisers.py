@@ -11,7 +11,7 @@ import re
 import os
 import requests
 import gradio as gr
-from tools.config import DEFAULT_LANGUAGE, TESSERACT_FOLDER
+from tools.config import DEFAULT_LANGUAGE, TESSERACT_DATA_FOLDER
 
 score_threshold = 0.001
 custom_entities = ["TITLES", "UKPOSTCODE", "STREETNAME", "CUSTOM"]
@@ -202,7 +202,7 @@ def get_tesseract_lang_code(short_code:str):
 
     return lang_map.get(short_code)
 
-def download_tesseract_lang_pack(short_lang_code:str, tessdata_dir=TESSERACT_FOLDER + "/tessdata"):
+def download_tesseract_lang_pack(short_lang_code:str, tessdata_dir=TESSERACT_DATA_FOLDER):
     """
     Downloads a Tesseract language pack to a local directory.
 
