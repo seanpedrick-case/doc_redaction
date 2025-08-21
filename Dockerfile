@@ -54,7 +54,9 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     ACCESS_LOGS_FOLDER=$APP_HOME/app/logs/ \
     USAGE_LOGS_FOLDER=$APP_HOME/app/usage/ \
     CONFIG_FOLDER=$APP_HOME/app/config/ \
-    XDG_CACHE_HOME=/tmp/xdg_cache/user_1000
+    XDG_CACHE_HOME=/tmp/xdg_cache/user_1000 \
+    TESSERACT_FOLDER=/usr/bin/tesseract \
+    TESSERACT_DATA_FOLDER=/usr/share/tessdata
 
 # Create the base application directory and set its ownership
 RUN mkdir -p ${APP_HOME}/app && chown user:user ${APP_HOME}/app
@@ -83,17 +85,23 @@ RUN mkdir -p \
     ${APP_HOME}/app/feedback \
     ${APP_HOME}/app/config 
 
-# Now handle the /tmp and /var/tmp directories and their subdirectories
+# Now handle the /tmp and /var/tmp directories and their subdirectories, paddle, spacy, tessdata
 RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_CACHE_HOME} \
     && chown user:user /tmp /var/tmp /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache ${XDG_CACHE_HOME} \
     && chmod 1777 /tmp /var/tmp /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache \
-    && chmod 700 ${XDG_CACHE_HOME}
-
-RUN mkdir -p ${APP_HOME}/.paddlex/official_models \
+    && chmod 700 ${XDG_CACHE_HOME} \
+    && mkdir -p ${APP_HOME}/.paddlex/official_models \
     && chown user:user \
     ${APP_HOME}/.paddlex/official_models \
     && chmod 755 \
     ${APP_HOME}/.paddlex/official_models
+    && mkdir -p ${APP_HOME}/.local/share/spacy/data \
+    && chown user:user \
+    ${APP_HOME}/.local/share/spacy/data \
+    && chmod 755 \
+    ${APP_HOME}/.local/share/spacy/data \ 
+    mkdir -p /usr/share/tessdata && \
+    chmod 755 /usr/share/tessdata # Create tessdata directory and set permissions
 
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
@@ -122,6 +130,8 @@ VOLUME ["/home/user/app/usage"]
 VOLUME ["/home/user/app/feedback"]
 VOLUME ["/home/user/app/config"]
 VOLUME ["/home/user/.paddlex/official_models"]
+VOLUME ["/home/user/.local/share/spacy/data"]
+VOLUME ["/usr/share/tessdata"]
 VOLUME ["/tmp"]
 VOLUME ["/var/tmp"]
 
@@ -134,7 +144,8 @@ ENV PATH=$APP_HOME/.local/bin:$PATH \
     GRADIO_NUM_PORTS=1 \
     GRADIO_SERVER_NAME=0.0.0.0 \
     GRADIO_SERVER_PORT=7860 \
-    GRADIO_ANALYTICS_ENABLED=False
+    GRADIO_ANALYTICS_ENABLED=False \    
+
 
 ENTRYPOINT ["/entrypoint.sh"]
 

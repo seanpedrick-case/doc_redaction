@@ -278,7 +278,6 @@ def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_
 
     return all_ocr_results_with_page, signature_or_handwriting_recogniser_results, signature_recogniser_results, handwriting_recogniser_results, ocr_results_with_words_with_page
 
-
 def load_and_convert_textract_json(textract_json_file_path:str, log_files_output_paths:str, page_sizes_df:pd.DataFrame):
     """
     Loads Textract JSON from a file, detects if conversion is needed, and converts if necessary.

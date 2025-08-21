@@ -673,7 +673,11 @@ def prepare_image_or_pdf(
                 all_annotations_object = convert_review_df_to_annotation_json(review_file_csv, image_file_paths, page_sizes)
                 json_from_csv = True                
             elif '_ocr_output' in file_path_without_ext:
-                all_line_level_ocr_results_df = read_file(file_path)                
+                all_line_level_ocr_results_df = read_file(file_path)
+
+                if "line" not in all_line_level_ocr_results_df.columns:
+                    all_line_level_ocr_results_df["line"] = ""
+                    
                 json_from_csv = False
             elif '_ocr_results_with_words' in file_path_without_ext:
                 all_page_line_level_ocr_results_with_words_df = read_file(file_path)

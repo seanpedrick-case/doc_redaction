@@ -14,9 +14,7 @@ from pathlib import Path
 from typing import List
 from tools.helper_functions import OUTPUT_FOLDER
 from tools.file_conversion import redact_whole_pymupdf_page, convert_annotation_data_to_dataframe, fill_missing_box_ids_each_box
-import en_core_web_lg
-
-nlp = en_core_web_lg.load()
+from tools.load_spacy_model_custom_recognisers import nlp
 
 similarity_threshold = 0.95
 number_of_zeros_to_add_to_index = 7 # Number of zeroes to add between page number and line numbers to get a unique page/line index value

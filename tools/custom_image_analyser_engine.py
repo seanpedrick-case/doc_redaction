@@ -16,7 +16,7 @@ from typing import Optional, Tuple, Union
 from tools.helper_functions import clean_unicode_text
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.load_spacy_model_custom_recognisers import custom_entities
-from tools.config import PREPROCESS_LOCAL_OCR_IMAGES
+from tools.config import PREPROCESS_LOCAL_OCR_IMAGES, DEFAULT_LANGUAGE
 
 if PREPROCESS_LOCAL_OCR_IMAGES == "True": PREPROCESS_LOCAL_OCR_IMAGES = True 
 else: PREPROCESS_LOCAL_OCR_IMAGES = False
@@ -25,6 +25,86 @@ try:
     from paddleocr import PaddleOCR
 except ImportError:
     PaddleOCR = None
+
+# --- Language utilities ---
+def _normalize_lang(language: str) -> str:
+    return language.strip().lower().replace("-", "_") if language else "en"
+
+
+def _tesseract_lang_code(language: str) -> str:
+    """Map a user language input to a Tesseract traineddata code."""
+    lang = _normalize_lang(language)
+
+    mapping = {
+        # Common
+        "en": "eng", "eng": "eng",
+        "fr": "fra", "fre": "fra", "fra": "fra",
+        "de": "deu", "ger": "deu", "deu": "deu",
+        "es": "spa", "spa": "spa",
+        "it": "ita", "ita": "ita",
+        "nl": "nld", "dut": "nld", "nld": "nld",
+        "pt": "por", "por": "por",
+        "ru": "rus", "rus": "rus",
+        "ar": "ara", "ara": "ara",
+        # Nordics
+        "sv": "swe", "swe": "swe",
+        "no": "nor", "nb": "nor", "nn": "nor", "nor": "nor",
+        "fi": "fin", "fin": "fin",
+        "da": "dan", "dan": "dan",
+        # Eastern/Central
+        "pl": "pol", "pol": "pol",
+        "cs": "ces", "cz": "ces", "ces": "ces",
+        "hu": "hun", "hun": "hun",
+        "ro": "ron", "rum": "ron", "ron": "ron",
+        "bg": "bul", "bul": "bul",
+        "el": "ell", "gre": "ell", "ell": "ell",
+        # Asian
+        "ja": "jpn", "jp": "jpn", "jpn": "jpn",
+        "zh": "chi_sim", "zh_cn": "chi_sim", "zh_hans": "chi_sim", "chi_sim": "chi_sim",
+        "zh_tw": "chi_tra", "zh_hk": "chi_tra", "zh_tr": "chi_tra", "chi_tra": "chi_tra",
+        "hi": "hin", "hin": "hin",
+        "bn": "ben", "ben": "ben",
+        "ur": "urd", "urd": "urd",
+        "fa": "fas", "per": "fas", "fas": "fas",
+    }
+
+    return mapping.get(lang, "eng")
+
+
+def _paddle_lang_code(language: str) -> str:
+    """Map a user language input to a PaddleOCR language code.
+
+    PaddleOCR supports codes like: 'en', 'ch', 'chinese_cht', 'korean', 'japan', 'german', 'fr', 'it', 'es',
+    as well as script packs like 'arabic', 'cyrillic', 'latin'.
+    """
+    lang = _normalize_lang(language)
+
+    mapping = {
+        "en": "en",
+        "fr": "fr",
+        "de": "german",
+        "es": "es",
+        "it": "it",
+        "pt": "pt",
+        "nl": "nl",
+        "ru": "cyrillic",  # Russian is covered by cyrillic models
+        "uk": "cyrillic",
+        "bg": "cyrillic",
+        "sr": "cyrillic",
+        "ar": "arabic",
+        "tr": "tr",
+        "fa": "arabic",  # fallback to arabic script pack
+        "zh": "ch",
+        "zh_cn": "ch",
+        "zh_tw": "chinese_cht",
+        "zh_hk": "chinese_cht",
+        "ja": "japan",
+        "jp": "japan",
+        "ko": "korean",
+        "hi": "latin",  # fallback; dedicated Hindi not always available
+    }
+
+    return mapping.get(lang, "en")
 
 @dataclass
 class OCRResult:
@@ -234,6 +314,7 @@ def rescale_ocr_data(ocr_data, scale_factor:float):
             ocr_data['height'][i] = h_orig
     
     return ocr_data
+
 class CustomImageAnalyzerEngine:
     def __init__(
         self,
@@ -241,28 +322,38 @@ class CustomImageAnalyzerEngine:
         ocr_engine: str = "tesseract",        
         tesseract_config: Optional[str] = None,
         paddle_kwargs: Optional[Dict[str, Any]] = None,
-        image_preprocessor: Optional[ImagePreprocessor] = None
+        image_preprocessor: Optional[ImagePreprocessor] = None,
+        language: Optional[str] = None
     ):
         """
         Initializes the CustomImageAnalyzerEngine.
 
-        :param ocr_engine: The OCR engine to use ("tesseract" or "paddle").
+        :param ocr_engine: The OCR engine to use ("tesseract", "hybrid", or "paddle").
         :param analyzer_engine: The Presidio AnalyzerEngine instance.
         :param tesseract_config: Configuration string for Tesseract.
         :param paddle_kwargs: Dictionary of keyword arguments for PaddleOCR constructor.
         :param image_preprocessor: Optional image preprocessor.
+        :param language: Preferred OCR language (e.g., "en", "fr", "de"). Defaults to DEFAULT_LANGUAGE.
         """
         if ocr_engine not in ["tesseract", "paddle", "hybrid"]:
             raise ValueError("ocr_engine must be either 'tesseract', 'hybrid', or 'paddle'")
 
         self.ocr_engine = ocr_engine
+
+        # Language setup
+        self.language = language or DEFAULT_LANGUAGE or "en"
+        self.tesseract_lang = _tesseract_lang_code(self.language)
+        self.paddle_lang = _paddle_lang_code(self.language)
         
         if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid":
             if PaddleOCR is None:
                 raise ImportError("paddleocr is not installed. Please run 'pip install paddleocr paddlepaddle'")
             # Default paddle configuration if none provided
             if paddle_kwargs is None:
-                paddle_kwargs = {'use_textline_orientation': True, 'lang': 'en'}
+                paddle_kwargs = {'use_textline_orientation': True, 'lang': self.paddle_lang}
+            else:
+                # Enforce language if not explicitly provided
+                paddle_kwargs.setdefault('lang', self.paddle_lang)
             self.paddle_ocr = PaddleOCR(**paddle_kwargs)
 
         if not analyzer_engine:
@@ -394,7 +485,8 @@ class CustomImageAnalyzerEngine:
         tesseract_data = pytesseract.image_to_data(
             image,
             output_type=pytesseract.Output.DICT,
-            config=self.tesseract_config
+            config=self.tesseract_config,
+            lang=self.tesseract_lang
         )
 
         #tesseract_data['abs_line_id'] = tesseract_data.groupby(['block_num', 'par_num', 'line_num']).ngroup()
@@ -510,7 +602,8 @@ class CustomImageAnalyzerEngine:
             ocr_data = pytesseract.image_to_data(
                 image,
                 output_type=pytesseract.Output.DICT,
-                config=self.tesseract_config
+                config=self.tesseract_config,
+                lang=self.tesseract_lang # Ensure the Tesseract language data (e.g., fra.traineddata) is installed on your system.
             )
 
             #ocr_data['abs_line_id'] = ocr_data.groupby(['block_num', 'par_num', 'line_num']).ngroup()
@@ -569,6 +662,7 @@ class CustomImageAnalyzerEngine:
         pii_identification_method: str = "Local",
         comprehend_client = "",
         custom_entities:List[str]=custom_entities,   
+        language: Optional[str] = None,
         **text_analyzer_kwargs
     ) -> List[CustomImageRecognizerResult]:
 
@@ -586,10 +680,14 @@ class CustomImageAnalyzerEngine:
             # Note: We're not passing line_characters here since it's not needed for this use case
             page_text_mapping.append((start_pos, i, line_level_ocr_result, None))
 
+        # Determine language for downstream services
+        aws_language = language or getattr(self, 'language', None) or 'en'
+
         # Process using either Local or AWS Comprehend
         if pii_identification_method == "Local":
             analyzer_result = self.analyzer_engine.analyze(
                 text=page_text,
+                language=language,
                 **text_analyzer_kwargs
             )
             all_text_line_results = map_back_entity_results(
@@ -609,6 +707,7 @@ class CustomImageAnalyzerEngine:
                     text_analyzer_kwargs["entities"] = custom_redact_entities
                     page_analyser_result = self.analyzer_engine.analyze(
                         text=page_text,
+                        language=language,
                         **text_analyzer_kwargs
                     )
                     all_text_line_results = map_back_entity_results(
@@ -641,7 +740,7 @@ class CustomImageAnalyzerEngine:
                             current_batch,
                             current_batch_mapping,
                             comprehend_client,
-                            text_analyzer_kwargs["language"],
+                            aws_language,
                             text_analyzer_kwargs.get('allow_list', []),
                             chosen_redact_comprehend_entities,
                             all_text_line_results
@@ -676,7 +775,7 @@ class CustomImageAnalyzerEngine:
                     current_batch,
                     current_batch_mapping,
                     comprehend_client,
-                    text_analyzer_kwargs["language"],
+                    aws_language,
                     text_analyzer_kwargs.get('allow_list', []),
                     chosen_redact_comprehend_entities,
                     all_text_line_results
@@ -988,7 +1087,7 @@ def run_page_text_redaction(
     comprehend_client = None,
     allow_list: List[str] = None,
     pii_identification_method: str = "Local",
-    nlp_analyser = None,
+    nlp_analyser: AnalyzerEngine = None,
     score_threshold: float = 0.0,
     custom_entities: List[str] = None,
     comprehend_query_number:int = 0#,

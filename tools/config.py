@@ -195,7 +195,8 @@ FEEDBACK_LOG_FILE_NAME = get_or_create_env_var('FEEDBACK_LOG_FILE_NAME', LOG_FIL
 ###
 
 # Create Tesseract and Poppler folders if you have installed them locally
-TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "") #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
+TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "/usr/bin/tesseract") #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
+TESSERACT_DATA_FOLDER = get_or_create_env_var('TESSERACT_DATA_FOLDER', "/usr/share/tessdata")
 POPPLER_FOLDER = get_or_create_env_var('POPPLER_FOLDER', "") # If installing on Windows,install Poppler from here https://github.com/oschwartz10612/poppler-windows. This variable needs to point to the poppler bin folder e.g. poppler/poppler-24.02.0/Library/bin/
 
 if TESSERACT_FOLDER: add_folder_to_path(TESSERACT_FOLDER)
@@ -288,7 +289,26 @@ MAX_TIME_VALUE = get_or_create_env_var('MAX_TIME_VALUE', '999999')
 
 CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "") # only "grey" is currently supported as a custom box colour
 
-REDACTION_LANGUAGE = get_or_create_env_var("REDACTION_LANGUAGE", "en") # Currently only English is supported by the app
+### Language selection options
+
+SHOW_LANGUAGE_SELECTION = get_or_create_env_var("SHOW_LANGUAGE_SELECTION", "False")
+
+DEFAULT_LANGUAGE_FULL_NAME = get_or_create_env_var("DEFAULT_LANGUAGE_FULL_NAME", "english")
+DEFAULT_LANGUAGE = get_or_create_env_var("DEFAULT_LANGUAGE", "en") # For tesseract, ensure the Tesseract language data (e.g., fra.traineddata) is installed on your system. You can find the relevant language packs here: https://github.com/tesseract-ocr/tessdata.
+# For paddle, ensure the paddle language data (e.g., fra.traineddata) is installed on your system. You can find information on supported languages here: https://www.paddleocr.ai/main/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5_multi_languages.html
+# For AWS Comprehend, ensure the language data is installed on your system. You can find the relevant language packs here: https://docs.aws.amazon.com/comprehend/latest/dg/supported-languages.html: ('en'|'es'|'fr'|'de'|'it'|'pt'|'ar'|'hi'|'ja'|'ko'|'zh'|'zh-TW')
+# AWS Textract automatically detects the language of the document and supports the following languages: https://aws.amazon.com/textract/faqs/#topic-0. 'English, Spanish, Italian, Portuguese, French, German. Handwriting, Invoices and Receipts, Identity documents and Queries processing are in English only'
+
+textract_language_choices = get_or_create_env_var("textract_language_choices", "['en', 'es', 'fr', 'de', 'it', 'pt']")
+aws_comprehend_language_choices = get_or_create_env_var("aws_comprehend_language_choices", "['en', 'es', 'fr', 'de', 'it', 'pt', 'ar', 'hi', 'ja', 'ko', 'zh', 'zh-TW']")
+
+# The choices that the user sees
+MAPPED_LANGUAGE_CHOICES = get_or_create_env_var("MAPPED_LANGUAGE_CHOICES", "['english', 'french', 'german', 'spanish', 'italian', 'dutch', 'portuguese', 'chinese', 'japanese', 'korean', 'lithuanian', 'macedonian', 'norwegian_bokmaal', 'polish', 'romanian', 'russian', 'slovenian', 'swedish', 'catalan', 'ukrainian']")
+LANGUAGE_CHOICES = get_or_create_env_var("LANGUAGE_CHOICES", "['en', 'fr', 'de', 'es', 'it', 'nl', 'pt', 'zh', 'ja', 'ko', 'lt', 'mk', 'nb', 'pl', 'ro', 'ru', 'sl', 'sv', 'ca', 'uk']")
+
+
+
+### File output options
 
 RETURN_PDF_END_OF_REDACTION = get_or_create_env_var("RETURN_PDF_END_OF_REDACTION", "True") # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
 

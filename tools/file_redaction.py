@@ -15,14 +15,15 @@ from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer, LTChar, LTTextLine, LTTextLineHorizontal, LTAnno
 from pikepdf import Pdf, Dictionary, Name
 from pymupdf import Rect, Page, Document
+from presidio_analyzer import AnalyzerEngine
 import gradio as gr
 from gradio import Progress
 from collections import defaultdict  # For efficient grouping
 
-from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER, RETURN_PDF_END_OF_REDACTION, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, LOCAL_PII_OPTION, AWS_PII_OPTION, NO_REDACTION_PII_OPTION
+from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER, RETURN_PDF_END_OF_REDACTION, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, LOCAL_PII_OPTION, AWS_PII_OPTION, NO_REDACTION_PII_OPTION, DEFAULT_LANGUAGE, textract_language_choices, aws_comprehend_language_choices
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction,  recreate_page_line_level_ocr_results_with_page
 from tools.file_conversion import convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, is_pdf, is_pdf_or_image, prepare_image_or_pdf, divide_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, divide_coordinates_by_page_sizes, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, fill_missing_box_ids, load_and_convert_ocr_results_with_words_json, save_pdf_with_or_without_compression, word_level_ocr_output_to_dataframe
-from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer
+from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer, load_spacy_model, download_tesseract_lang_pack, create_nlp_analyser
 from tools.helper_functions import get_file_name_without_type, clean_unicode_text
 from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult, load_and_convert_textract_json
 
@@ -84,12 +85,9 @@ def merge_page_results(data:list):
 
     return list(merged.values())
 
-
-
 def choose_and_run_redactor(file_paths:List[str],
  prepared_pdf_file_paths:List[str],
- pdf_image_file_paths:List[str],
- language:str,
+ pdf_image_file_paths:List[str], 
  chosen_redact_entities:List[str],
  chosen_redact_comprehend_entities:List[str],
  text_extraction_method:str,
@@ -112,7 +110,7 @@ def choose_and_run_redactor(file_paths:List[str],
  pymupdf_doc=list(),
  current_loop_page:int=0,
  page_break_return:bool=False,
- pii_identification_method:str="Local",
+ pii_identification_method:str="Local", 
  comprehend_query_number:int=0,
  max_fuzzy_spelling_mistakes_num:int=1,
  match_fuzzy_whole_phrase_bool:bool=True,
@@ -134,7 +132,8 @@ def choose_and_run_redactor(file_paths:List[str],
  all_page_line_level_ocr_results_with_words:list[dict] = list(),
  all_page_line_level_ocr_results_with_words_df:pd.DataFrame=None,
  chosen_local_model:str="tesseract",
- prepare_images:bool=True,
+ language:str=DEFAULT_LANGUAGE,
+ prepare_images:bool=True, 
  RETURN_PDF_END_OF_REDACTION:bool=RETURN_PDF_END_OF_REDACTION,
  progress=gr.Progress(track_tqdm=True)):
     '''
@@ -143,7 +142,7 @@ def choose_and_run_redactor(file_paths:List[str],
     - file_paths (List[str]): A list of paths to the files to be redacted.
     - prepared_pdf_file_paths (List[str]): A list of paths to the PDF files prepared for redaction.
     - pdf_image_file_paths (List[str]): A list of paths to the PDF files converted to images for redaction.
-    - language (str): The language of the text in the files.
+    
     - chosen_redact_entities (List[str]): A list of entity types to redact from the files using the local model (spacy) with Microsoft Presidio.
     - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service.
     - text_extraction_method (str): The method to use to extract text from documents.
@@ -188,7 +187,9 @@ def choose_and_run_redactor(file_paths:List[str],
     - all_page_line_level_ocr_results_with_words (list, optional): All word level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words_df (pd.Dataframe, optional): All word level text on the page with bounding boxes as a dataframe.
     - chosen_local_model (str): Which local model is being used for OCR on images - "tesseract", "paddle" for PaddleOCR, or "hybrid" to combine both.
-    - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
+    - language (str, optional): The language of the text in the files. Defaults to English.
+    - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
+    - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.    
     - RETURN_PDF_END_OF_REDACTION (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
@@ -203,6 +204,18 @@ def choose_and_run_redactor(file_paths:List[str],
     blank_request_metadata = []
     all_textract_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
     review_out_file_paths = [prepared_pdf_file_paths[0]]
+    
+    # Use provided language or default
+    effective_language = language or DEFAULT_LANGUAGE
+
+    if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+        if effective_language not in textract_language_choices:
+            out_message = f"Language '{effective_language}' is not supported by AWS Textract. Please select a different language."
+            raise Warning(out_message)
+    elif pii_identification_method == AWS_PII_OPTION:
+        if effective_language not in aws_comprehend_language_choices:
+            out_message = f"Language '{effective_language}' is not supported by AWS Comprehend. Please select a different language."
+            raise Warning(out_message)
 
     if all_page_line_level_ocr_results_with_words_df is None:
          all_page_line_level_ocr_results_with_words_df = pd.DataFrame()
@@ -452,6 +465,19 @@ def choose_and_run_redactor(file_paths:List[str],
     else: 
         textract_client = ""
 
+    ### Language check - check if selected language packs exist
+    try:
+        if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_model == "tesseract":
+            progress(0.1, desc=f"Downloading Tesseract language pack for {effective_language}")
+            download_tesseract_lang_pack(effective_language)
+
+        progress(0.1, desc=f"Loading SpaCy model for {effective_language}")
+        load_spacy_model(effective_language)
+        
+    except Exception as e:
+        print(f"Error downloading language packs for {effective_language}: {e}")
+        raise Exception(f"Error downloading language packs for {effective_language}: {e}")
+
     # Check if output_folder exists, create it if it doesn't
     if not os.path.exists(output_folder): os.makedirs(output_folder)
    
@@ -511,7 +537,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
             pymupdf_doc, all_pages_decision_process_table, out_file_paths, new_textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_page_line_level_ocr_results_df, comprehend_query_number, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words = redact_image_pdf(file_path,
              pdf_image_file_paths,
-             language,
+             effective_language,
              chosen_redact_entities,
              chosen_redact_comprehend_entities,
              in_allow_list_flat,
@@ -538,7 +564,7 @@ def choose_and_run_redactor(file_paths:List[str],
              text_extraction_only,
              all_page_line_level_ocr_results,
              all_page_line_level_ocr_results_with_words,
-             chosen_local_model,
+             chosen_local_model,             
              log_files_output_paths=log_files_output_paths,
              output_folder=output_folder)
             
@@ -560,7 +586,7 @@ def choose_and_run_redactor(file_paths:List[str],
             
             pymupdf_doc, all_pages_decision_process_table, all_page_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, all_page_line_level_ocr_results_with_words = redact_text_pdf(
             file_path,
-            language,
+            effective_language,
             chosen_redact_entities,
             chosen_redact_comprehend_entities,
             in_allow_list_flat,
@@ -1352,6 +1378,7 @@ def redact_image_pdf(file_path:str,
                      log_files_output_paths:List=list(),
                      max_time:int=int(MAX_TIME_VALUE),
                      output_folder:str=OUTPUT_FOLDER,
+                     nlp_analyser: AnalyzerEngine = nlp_analyser,
                      progress=Progress(track_tqdm=True)):
 
     '''
@@ -1391,6 +1418,7 @@ def redact_image_pdf(file_path:str,
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
     - output_folder (str, optional): The folder for file outputs.
+    - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
     - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
     The function returns a redacted PDF document along with processing output objects.
@@ -1400,6 +1428,20 @@ def redact_image_pdf(file_path:str,
 
     file_name = get_file_name_without_type(file_path)    
     comprehend_query_number_new = 0
+    
+    # Use provided comprehend language or fall back to main language
+    effective_language = language or language
+
+    # Try updating the supported languages for the spacy analyser
+    try:
+        nlp_analyser = create_nlp_analyser(language, existing_nlp_analyser=nlp_analyser)
+        # Check list of nlp_analyser recognisers and languages
+        if language != "en":
+            gr.Info(f"Language: {language} only supports the following entity detection: {str(nlp_analyser.registry.get_supported_entities(languages=[language]))}")
+
+    except Exception as e:
+        print(f"Error creating nlp_analyser for {language}: {e}")
+        raise Exception(f"Error creating nlp_analyser for {language}: {e}")
 
     # Update custom word list analyser object with any new words that have been added to the custom deny list
     if custom_recogniser_word_list:        
@@ -1413,9 +1455,9 @@ def redact_image_pdf(file_path:str,
 
     # Only load in PaddleOCR models if not running Textract
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
-        image_analyser = CustomImageAnalyzerEngine(nlp_analyser, ocr_engine="tesseract") 
+        image_analyser = CustomImageAnalyzerEngine(analyzer_engine=nlp_analyser, ocr_engine="tesseract", language=language) 
     else:  
-        image_analyser = CustomImageAnalyzerEngine(nlp_analyser, ocr_engine=chosen_local_model) 
+        image_analyser = CustomImageAnalyzerEngine(analyzer_engine=nlp_analyser, ocr_engine=chosen_local_model, language=language) 
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         out_message = "Connection to AWS Comprehend service unsuccessful."
@@ -1635,7 +1677,7 @@ def redact_image_pdf(file_path:str,
                         chosen_redact_comprehend_entities = chosen_redact_comprehend_entities,
                         pii_identification_method = pii_identification_method,
                         comprehend_client=comprehend_client,                 
-                        language=language,
+                        language=effective_language,
                         entities=chosen_redact_entities,
                         allow_list=allow_list,
                         score_threshold=score_threshold
@@ -2155,7 +2197,7 @@ def redact_text_pdf(
     all_pages_decision_process_table:pd.DataFrame = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "text", "id"]),  # DataFrame for decision process table
     pymupdf_doc: List = list(),  # List of PyMuPDF documents
     all_page_line_level_ocr_results_with_words: List = list(), 
-    pii_identification_method: str = "Local",
+    pii_identification_method: str = "Local",    
     comprehend_query_number:int = 0,
     comprehend_client="",
     custom_recogniser_word_list:List[str]=list(),
@@ -2167,10 +2209,10 @@ def redact_text_pdf(
     text_extraction_only:bool=False,
     output_folder:str=OUTPUT_FOLDER,
     page_break_val: int = int(PAGE_BREAK_VALUE),  # Value for page break
-    max_time: int = int(MAX_TIME_VALUE),    
+    max_time: int = int(MAX_TIME_VALUE),
+    nlp_analyser: AnalyzerEngine = nlp_analyser,
     progress: Progress = Progress(track_tqdm=True)  # Progress tracking object
-):
-    
+):    
     '''
     Redact chosen entities from a PDF that is made up of multiple pages that are not images.
     
@@ -2199,13 +2241,15 @@ def redact_text_pdf(
     - page_sizes_df (pd.DataFrame, optional): A pandas dataframe containing page size information.
     - original_cropboxes (List[dict], optional): A list of dictionaries containing pymupdf cropbox information.
     - text_extraction_only (bool, optional): Should the function only extract text, or also do redaction.
+    - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
     - output_folder (str, optional): The output folder for the function
     - page_break_val: Value for page break
-    - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.    
+    - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
+    - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
     - progress: Progress tracking object
     '''
 
-    tic = time.perf_counter()
+    tic = time.perf_counter()       
 
     if isinstance(all_line_level_ocr_results_df, pd.DataFrame):
         all_line_level_ocr_results_list = [all_line_level_ocr_results_df]
@@ -2218,6 +2262,20 @@ def redact_text_pdf(
         out_message = "Connection to AWS Comprehend service not found."
         raise Exception(out_message)
     
+    # Use provided comprehend language or fall back to main language
+    effective_language = language or language
+
+    # Try updating the supported languages for the spacy analyser
+    try:
+        nlp_analyser = create_nlp_analyser(language, existing_nlp_analyser=nlp_analyser)
+        # Check list of nlp_analyser recognisers and languages
+        if language != "en":
+            gr.Info(f"Language: {language} only supports the following entity detection: {str(nlp_analyser.registry.get_supported_entities(languages=[language]))}")
+
+    except Exception as e:
+        print(f"Error creating nlp_analyser for {language}: {e}")
+        raise Exception(f"Error creating nlp_analyser for {language}: {e}")
+    
     # Update custom word list analyser object with any new words that have been added to the custom deny list
     if custom_recogniser_word_list:        
         nlp_analyser.registry.remove_recognizer("CUSTOM")
@@ -2227,6 +2285,8 @@ def redact_text_pdf(
         nlp_analyser.registry.remove_recognizer("CustomWordFuzzyRecognizer")
         new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_recogniser_word_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
+
+    
 
     # Open with Pikepdf to get text lines
     pikepdf_pdf = Pdf.open(file_path)
@@ -2323,7 +2383,7 @@ def redact_text_pdf(
 
                     if chosen_redact_entities or chosen_redact_comprehend_entities:
                         page_redaction_bounding_boxes = run_page_text_redaction(
-                            language,
+                            effective_language,
                             chosen_redact_entities,
                             chosen_redact_comprehend_entities,
                             all_page_line_level_text_extraction_results_list,

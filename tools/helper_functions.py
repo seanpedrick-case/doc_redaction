@@ -9,7 +9,24 @@ import unicodedata
 from typing import List
 from math import ceil
 from gradio_image_annotation import image_annotator
-from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, SELECTABLE_TEXT_EXTRACT_OPTION, TESSERACT_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, AWS_PII_OPTION
+from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, SELECTABLE_TEXT_EXTRACT_OPTION, TESSERACT_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, AWS_PII_OPTION, MAPPED_LANGUAGE_CHOICES, LANGUAGE_CHOICES, textract_language_choices, aws_comprehend_language_choices, DEFAULT_LANGUAGE
+# from tools.load_spacy_model_custom_recognisers import nlp_analyser
+
+def _get_env_list(env_var_name: str) -> List[str]:
+    """Parses a comma-separated environment variable into a list of strings."""
+    value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
+    if not value:
+        return []
+    # Split by comma and filter out any empty strings that might result from extra commas
+    return [s.strip() for s in value.split(',') if s.strip()]
+
+if textract_language_choices: textract_language_choices = _get_env_list(textract_language_choices)
+if aws_comprehend_language_choices: aws_comprehend_language_choices = _get_env_list(aws_comprehend_language_choices)
+
+if MAPPED_LANGUAGE_CHOICES: MAPPED_LANGUAGE_CHOICES = _get_env_list(MAPPED_LANGUAGE_CHOICES)
+if LANGUAGE_CHOICES: LANGUAGE_CHOICES = _get_env_list(LANGUAGE_CHOICES)
+
+LANGUAGE_MAP = dict(zip(MAPPED_LANGUAGE_CHOICES, LANGUAGE_CHOICES))
 
 def reset_state_vars():
     return [], pd.DataFrame(), pd.DataFrame(), 0, "", image_annotator(
@@ -157,13 +174,7 @@ def ensure_output_folder_exists(output_folder:str):
     else:
         print(f"The {output_folder} folder already exists.")
 
-def _get_env_list(env_var_name: str) -> List[str]:
-    """Parses a comma-separated environment variable into a list of strings."""
-    value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
-    if not value:
-        return []
-    # Split by comma and filter out any empty strings that might result from extra commas
-    return [s.strip() for s in value.split(',') if s.strip()]
+
 
 def custom_regex_load(in_file:List[str], file_type:str = "allow_list"):
     '''
@@ -189,7 +200,7 @@ def custom_regex_load(in_file:List[str], file_type:str = "allow_list"):
             print(output_text)
     else:
         output_text = "No file provided."
-        print(output_text)
+        #print(output_text)
         return output_text, custom_regex_df
        
     return output_text, custom_regex_df
@@ -590,4 +601,25 @@ def reset_ocr_with_words_base_dataframe(df:pd.DataFrame, page_entity_dropdown_re
 
     output_df_filtered = df.loc[df["page"]==str(page_entity_dropdown_redaction_value), ["page", "line", "word_text", "word_x0", "word_y0", "word_x1", "word_y1", "index"]]
     return output_df_filtered, output_df
+
+def update_language_dropdown(chosen_language_full_name_drop, textract_language_choices=textract_language_choices, aws_comprehend_language_choices=aws_comprehend_language_choices, LANGUAGE_MAP=LANGUAGE_MAP):
+
+    try:
+        full_language_name = chosen_language_full_name_drop.lower()
+        matched_language = LANGUAGE_MAP[full_language_name]
+
+        chosen_language_drop = gr.Dropdown(value = matched_language, choices = LANGUAGE_CHOICES, label="Chosen language short code", multiselect=False, visible=True)
+        
+        if matched_language not in aws_comprehend_language_choices and matched_language not in textract_language_choices:
+            gr.Info(f"Note that {full_language_name} is not supported by AWS Comprehend or AWS Textract")
+        elif matched_language not in aws_comprehend_language_choices:
+            gr.Info(f"Note that {full_language_name} is not supported by AWS Comprehend")
+        elif matched_language not in textract_language_choices:
+            gr.Info(f"Note that {full_language_name} is not supported by AWS Textract")
+    except Exception as e:
+        print(e)
+        gr.Info("Could not find language in list")
+        chosen_language_drop = gr.Dropdown(value = DEFAULT_LANGUAGE, choices = LANGUAGE_CHOICES, label="Chosen language short code", multiselect=False)
+
+    return chosen_language_drop
     
