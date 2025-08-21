@@ -99,8 +99,8 @@ def get_filtered_recogniser_dataframe_and_dropdowns(page_image_annotator_object:
                                  recogniser_dropdown_value:str,
                                  text_dropdown_value:str,
                                  page_dropdown_value:str,
-                                 review_df:pd.DataFrame=[],
-                                 page_sizes:List[str]=[]):
+                                 review_df:pd.DataFrame=list(),
+                                 page_sizes:List[str]=list()):
     '''
     Create a filtered recogniser dataframe and associated dropdowns based on current information in the image annotator and review data frame.
     '''
@@ -147,7 +147,7 @@ def get_filtered_recogniser_dataframe_and_dropdowns(page_image_annotator_object:
 
     return recogniser_dataframe_out_gr, recogniser_dataframe_out, recogniser_entities_drop, recogniser_entities_list, text_entities_drop, page_entities_drop
 
-def update_recogniser_dataframes(page_image_annotator_object:AnnotatedImageData, recogniser_dataframe_base:pd.DataFrame, recogniser_entities_dropdown_value:str="ALL", text_dropdown_value:str="ALL", page_dropdown_value:str="ALL", review_df:pd.DataFrame=[], page_sizes:list[str]=[]):
+def update_recogniser_dataframes(page_image_annotator_object:AnnotatedImageData, recogniser_dataframe_base:pd.DataFrame, recogniser_entities_dropdown_value:str="ALL", text_dropdown_value:str="ALL", page_dropdown_value:str="ALL", review_df:pd.DataFrame=list(), page_sizes:list[str]=list()):
     '''
     Update recogniser dataframe information that appears alongside the pdf pages on the review screen.
     '''
@@ -265,7 +265,7 @@ def update_annotator_page_from_review_df(
         if not current_page_review_df.empty:
             # Convert the current page's review data to annotation list format for *this page*
 
-            current_page_annotations_list = []
+            current_page_annotations_list = list()
             # Define expected annotation dict keys, including 'image', 'page', coords, 'label', 'text', 'color' etc.
             # Assuming review_df has compatible columns
             expected_annotation_keys = ['label', 'color', 'xmin', 'ymin', 'xmax', 'ymax', 'text', 'id'] # Add/remove as needed
@@ -340,7 +340,7 @@ def update_annotator_page_from_review_df(
     if not page_sizes_df.empty:
         page_sizes = page_sizes_df.to_dict(orient='records')
     else:
-        page_sizes = [] # Ensure page_sizes is a list if df is empty
+        page_sizes = list() # Ensure page_sizes is a list if df is empty
 
     # --- Re-evaluate Coordinate Multiplication and Duplicate Removal ---
     # Let's assume remove_duplicate_images_with_blank_boxes expects the raw list of dicts state format:
@@ -609,7 +609,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     merged_df = merged_df.sort_values('image')
     
     
-    final_annotations_list = []
+    final_annotations_list = list()
     box_cols = ['label', 'color', 'xmin', 'ymin', 'xmax', 'ymax', 'text', 'id']
     
     # Now, when we group, we use `sort=False`. This tells groupby to respect the
@@ -622,7 +622,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
         # Check if the group has actual annotations. iloc[0] is safe because even pages
         # without annotations will have one row with NaN values from the merge.
         if pd.isna(group.iloc[0].get('id')):
-            boxes = []
+            boxes = list()
         else:
             valid_box_cols = [col for col in box_cols if col in group.columns]
             # We should also sort the boxes within a page for consistency (e.g., left-to-right)
@@ -751,7 +751,7 @@ def update_annotator_object_and_filter_df(
     recogniser_dataframe_base:pd.DataFrame=None, # Simplified default
     zoom:int=100,
     review_df:pd.DataFrame=None, # Use None for default empty DataFrame
-    page_sizes:List[dict]=[],
+    page_sizes:List[dict]=list(),
     doc_full_file_name_textbox:str='',
     input_folder:str=INPUT_FOLDER
 ) -> Tuple[image_annotator, gr.Number, gr.Number, int, str, gr.Dataframe, pd.DataFrame, List[str], List[str], List[dict], List[AnnotatedImageData]]:
@@ -775,7 +775,7 @@ def update_annotator_object_and_filter_df(
         # Return blank/default outputs
         
         blank_annotator = image_annotator(
-            value = None, boxes_alpha=0.1, box_thickness=1, label_list=[], label_colors=[],
+            value = None, boxes_alpha=0.1, box_thickness=1, label_list=list(), label_colors=list(),
             show_label=False, height=zoom_str, width=zoom_str, box_min_size=1,
             box_selected_thickness=2, handle_size=4, sources=None,
             show_clear_button=False, show_share_button=False, show_remove_button=False,
@@ -851,7 +851,7 @@ def update_annotator_object_and_filter_df(
     if not page_sizes_df.empty:
         page_sizes = page_sizes_df.to_dict(orient='records')
     else:
-        page_sizes = [] # Ensure page_sizes is a list if df is empty
+        page_sizes = list() # Ensure page_sizes is a list if df is empty
 
     # --- OPTIMIZATION: Prepare data *only* for the current page for display ---
     current_page_image_annotator_object = None
@@ -907,12 +907,12 @@ def update_annotator_object_and_filter_df(
 
     except Exception as e:
         print(f"Error calling update_recogniser_dataframes: {e}. Returning empty/default filter data.")
-        recogniser_entities_list = []
-        recogniser_colour_list = []
+        recogniser_entities_list = list()
+        recogniser_colour_list = list()
         recogniser_dataframe_out_gr = gr.Dataframe(pd.DataFrame(columns=["page", "label", "text", "id"]))
         recogniser_dataframe_modified = pd.DataFrame(columns=["page", "label", "text", "id"])
-        text_entities_drop = []
-        page_entities_drop = []
+        text_entities_drop = list()
+        page_entities_drop = list()
 
 
     # --- Final Output Components ---
@@ -946,7 +946,7 @@ def update_annotator_object_and_filter_df(
             interactive=True # Keep interactive if data is present
         )
 
-    page_entities_drop_redaction_list = []
+    page_entities_drop_redaction_list = list()
     all_pages_in_doc_list = [str(i) for i in range(1, len(page_sizes) + 1)]
     page_entities_drop_redaction_list.extend(all_pages_in_doc_list)
 
@@ -970,7 +970,7 @@ def update_all_page_annotation_object_based_on_previous_page(
                                     current_page:int,
                                     previous_page:int,
                                     all_image_annotations:List[AnnotatedImageData],
-                                    page_sizes:List[dict]=[],
+                                    page_sizes:List[dict]=list(),
                                     clear_all:bool=False
                                     ):
     '''
@@ -991,7 +991,7 @@ def update_all_page_annotation_object_based_on_previous_page(
     page_image_annotator_object, all_image_annotations = replace_annotator_object_img_np_array_with_page_sizes_image_path(all_image_annotations, page_image_annotator_object, page_sizes, previous_page)
 
     if clear_all == False: all_image_annotations[previous_page_zero_index] = page_image_annotator_object
-    else: all_image_annotations[previous_page_zero_index]["boxes"] = []
+    else: all_image_annotations[previous_page_zero_index]["boxes"] = list()
 
     return all_image_annotations, current_page, current_page
 
@@ -1003,16 +1003,16 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                      review_file_state:pd.DataFrame,
                      output_folder:str = OUTPUT_FOLDER,
                      save_pdf:bool=True,
-                     page_sizes:List[dict]=[],
+                     page_sizes:List[dict]=list(),
                      COMPRESS_REDACTED_PDF:bool=COMPRESS_REDACTED_PDF,
                      progress=gr.Progress(track_tqdm=True)):
     '''
     Apply modified redactions to a pymupdf and export review files.
     '''
 
-    output_files = []
-    output_log_files = []
-    pdf_doc = []
+    output_files = list()
+    output_log_files = list()
+    pdf_doc = list()
     review_df = review_file_state
 
     page_image_annotator_object = all_image_annotations[current_page - 1]   
@@ -1078,7 +1078,7 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                 doc = [image]
 
             elif file_extension in '.csv':
-                pdf_doc = []
+                pdf_doc = list()
 
             # If working with pdfs
             elif is_pdf(file_path) == True:
@@ -1088,7 +1088,7 @@ def apply_redactions_to_review_df_and_files(page_image_annotator_object:Annotate
                 output_files.append(orig_pdf_file_path)
 
                 number_of_pages = pdf_doc.page_count
-                original_cropboxes = []
+                original_cropboxes = list()
 
                 page_sizes_df = pd.DataFrame(page_sizes)
                 page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(pd.to_numeric, errors="coerce")
@@ -1619,7 +1619,7 @@ def convert_pymupdf_coords_to_adobe(x1: float, y1: float, x2: float, y2: float, 
     
     return x1, adobe_y1, x2, adobe_y2
 
-def create_xfdf(review_file_df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:List[str]=[], document_cropboxes:List=[], page_sizes:List[dict]=[]):
+def create_xfdf(review_file_df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, image_paths:List[str]=list(), document_cropboxes:List=list(), page_sizes:List[dict]=list()):
     '''
     Create an xfdf file from a review csv file and a pdf
     '''
@@ -1711,11 +1711,11 @@ def create_xfdf(review_file_df:pd.DataFrame, pdf_path:str, pymupdf_doc:object, i
     reparsed = minidom.parseString(rough_string)
     return reparsed.toxml() #.toprettyxml(indent="  ")
 
-def convert_df_to_xfdf(input_files:List[str], pdf_doc:Document, image_paths:List[str], output_folder:str = OUTPUT_FOLDER, document_cropboxes:List=[], page_sizes:List[dict]=[]):
+def convert_df_to_xfdf(input_files:List[str], pdf_doc:Document, image_paths:List[str], output_folder:str = OUTPUT_FOLDER, document_cropboxes:List=list(), page_sizes:List[dict]=list()):
     '''
     Load in files to convert a review file into an Adobe comment file format
     '''
-    output_paths = []
+    output_paths = list()
     pdf_name = ""
     file_path_name = ""
 
@@ -1814,7 +1814,7 @@ def parse_xfdf(xfdf_path:str):
     # Define the namespace
     namespace = {'xfdf': 'http://ns.adobe.com/xfdf/'}
     
-    redactions = []
+    redactions = list()
     
     # Find all redact elements using the namespace
     for redact in root.findall('.//xfdf:redact', namespaces=namespace):
@@ -1846,8 +1846,8 @@ def convert_xfdf_to_dataframe(file_paths_list:List[str], pymupdf_doc, image_path
     Returns:
     - DataFrame containing redaction information
     '''
-    output_paths = []
-    xfdf_paths = []
+    output_paths = list()
+    xfdf_paths = list()
     df = pd.DataFrame()
 
     # Sort the file paths so that the pdfs come first

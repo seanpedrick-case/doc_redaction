@@ -696,8 +696,8 @@ class CustomImageAnalyzerEngine:
     ) -> List[CustomImageRecognizerResult]:
 
         page_text = ""
-        page_text_mapping = []
-        all_text_line_results = []
+        page_text_mapping = list()
+        all_text_line_results = list()
         comprehend_query_number = 0
         print("custom_entities:", custom_entities)
 
@@ -774,13 +774,13 @@ class CustomImageAnalyzerEngine:
 
             # Process text in batches for AWS Comprehend
             current_batch = ""
-            current_batch_mapping = []
+            current_batch_mapping = list()
             batch_char_count = 0
             batch_word_count = 0
 
             for i, text_line in enumerate(line_level_ocr_results):
                 words = text_line.text.split()
-                word_start_positions = []
+                word_start_positions = list()
                 current_pos = 0
                 
                 for word in words:
@@ -839,7 +839,7 @@ class CustomImageAnalyzerEngine:
                 comprehend_query_number += 1        
 
         # Process results and create bounding boxes
-        combined_results = []
+        combined_results = list()
         for i, text_line in enumerate(line_level_ocr_results):
             line_results = next((results for idx, results in all_text_line_results if idx == i), [])
             if line_results and i < len(ocr_results_with_words):
@@ -872,7 +872,7 @@ class CustomImageAnalyzerEngine:
     allow_list: List[str],
     ocr_results_with_words_child_info: Dict[str, Dict]
 ) -> List[CustomImageRecognizerResult]:
-        redaction_bboxes = []
+        redaction_bboxes = list()
 
         for redaction_relevant_ocr_result in redaction_relevant_ocr_results:
             #print("ocr_results_with_words_child_info:", ocr_results_with_words_child_info)
@@ -895,7 +895,7 @@ class CustomImageAnalyzerEngine:
                     matched_words = matched_text.split()
                     
                     # Find the corresponding words in the OCR results
-                    matching_word_boxes = []
+                    matching_word_boxes = list()
 
                     current_position = 0
 
@@ -1236,13 +1236,13 @@ def run_page_text_redaction(
                 )
 
         current_batch = ""
-        current_batch_mapping = []
+        current_batch_mapping = list()
         batch_char_count = 0
         batch_word_count = 0
 
         for i, text_line in enumerate(line_level_text_results_list):
             words = text_line.text.split()
-            word_start_positions = []
+            word_start_positions = list()
             
             # Calculate word start positions within the line
             current_pos = 0
@@ -1320,12 +1320,12 @@ def merge_text_bounding_boxes(analyser_results:dict, characters: List[LTChar], c
     '''
     Merge identified bounding boxes containing PII that are very close to one another
     '''
-    analysed_bounding_boxes = []
-    original_bounding_boxes = []  # List to hold original bounding boxes
+    analysed_bounding_boxes = list()
+    original_bounding_boxes = list()  # List to hold original bounding boxes
 
     if len(analyser_results) > 0 and len(characters) > 0:
         # Extract bounding box coordinates for sorting
-        bounding_boxes = []
+        bounding_boxes = list()
         for result in analyser_results:
             #print("Result:", result)
             char_boxes = [char.bbox for char in characters[result.start:result.end] if isinstance(char, LTChar)]
@@ -1346,11 +1346,11 @@ def merge_text_bounding_boxes(analyser_results:dict, characters: List[LTChar], c
         # Sort the results by y-coordinate and then by x-coordinate
         bounding_boxes.sort()
 
-        merged_bounding_boxes = []
+        merged_bounding_boxes = list()
         current_box = None
         current_y = None
         current_result = None
-        current_text = []
+        current_text = list()
 
         for y, x, result, next_box, text in bounding_boxes:
             if current_y is None or current_box is None:
@@ -1406,7 +1406,7 @@ def merge_text_bounding_boxes(analyser_results:dict, characters: List[LTChar], c
     return analysed_bounding_boxes
 
 def recreate_page_line_level_ocr_results_with_page(page_line_level_ocr_results_with_words: dict):
-    reconstructed_results = []
+    reconstructed_results = list()
     
     # Assume all lines belong to the same page, so we can just read it from one item
     #page = next(iter(page_line_level_ocr_results_with_words.values()))["page"]
@@ -1445,7 +1445,7 @@ def split_words_and_punctuation_from_line(line_of_words: List[OCRResult]) -> Lis
     # Punctuation that will be split off. Hyphen is not included.
     PUNCTUATION_TO_SPLIT = {'.', ',', '?', '!', ':', ';', '(', ')', '[', ']', '{', '}'}
     
-    new_word_list = []
+    new_word_list = list()
     
     for word_result in line_of_words:
         word_text = word_result.text
@@ -1528,8 +1528,8 @@ def combine_ocr_results(ocr_results: List[OCRResult], x_threshold: float = 50.0,
     if not ocr_results:
         return {"page": page, "results": []}, {"page": page, "results": {}}
 
-    lines = []
-    current_line = []
+    lines = list()
+    current_line = list()
     for result in sorted(ocr_results, key=lambda x: (x.top, x.left)):
         if not current_line or abs(result.top - current_line[0].top) <= y_threshold:
             current_line.append(result)
@@ -1539,7 +1539,7 @@ def combine_ocr_results(ocr_results: List[OCRResult], x_threshold: float = 50.0,
     if current_line:
         lines.append(sorted(current_line, key=lambda x: x.left))
 
-    page_line_level_ocr_results = []
+    page_line_level_ocr_results = list()
     page_line_level_ocr_results_with_words = {}
     line_counter = 1
 

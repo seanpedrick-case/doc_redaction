@@ -1,0 +1,11 @@
+python cli_redact.py --help
+
+python cli_redact.py \
+    --input_file "documents/confidential-report.pdf" \
+    --output_dir "output/redacted_reports/" \
+    --ocr_method "Local OCR model - PDFs without selectable text" \
+    --pii_detector "Local" \
+    --page_min 2 \
+    --page_max 10 \
+    --allow_list "config/project_allowlist.csv"
+

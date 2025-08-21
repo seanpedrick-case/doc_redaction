@@ -201,7 +201,7 @@ def choose_and_run_redactor(file_paths:List[str],
     pdf_file_name_with_ext = ""
     pdf_file_name_without_ext = ""
     page_break_return = False  
-    blank_request_metadata = []
+    blank_request_metadata = list()
     all_textract_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
     review_out_file_paths = [prepared_pdf_file_paths[0]]
     
@@ -387,7 +387,7 @@ def choose_and_run_redactor(file_paths:List[str],
     if not in_allow_list.empty:
         in_allow_list_flat = in_allow_list.iloc[:,0].tolist()
     else:
-        in_allow_list_flat = []
+        in_allow_list_flat = list()
 
     # If string, assume file path
     if isinstance(custom_recogniser_word_list, str):
@@ -396,7 +396,7 @@ def choose_and_run_redactor(file_paths:List[str],
         if not custom_recogniser_word_list.empty:
             custom_recogniser_word_list_flat = custom_recogniser_word_list.iloc[:, 0].tolist()
         else:
-            custom_recogniser_word_list_flat = []
+            custom_recogniser_word_list_flat = list()
 
         # Sort the strings in order from the longest string to the shortest
         custom_recogniser_word_list_flat = sorted(custom_recogniser_word_list_flat, key=len, reverse=True)
@@ -412,7 +412,7 @@ def choose_and_run_redactor(file_paths:List[str],
                 print("Could not convert whole page redaction data to number list due to:", e)
                 redact_whole_page_list_flat = redact_whole_page_list.iloc[:,0].tolist()
         else:
-            redact_whole_page_list_flat = []  
+            redact_whole_page_list_flat = list()  
 
     
 
@@ -1100,7 +1100,7 @@ def set_cropbox_safely(page: Page, original_cropbox: Optional[Rect]):
     else:
         page.set_cropbox(original_cropbox)
 
-def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None, custom_colours:bool=False, redact_whole_page:bool=False, convert_pikepdf_to_pymupdf_coords:bool=True, original_cropbox:List[Rect]=[], page_sizes_df:pd.DataFrame=pd.DataFrame()):
+def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None, custom_colours:bool=False, redact_whole_page:bool=False, convert_pikepdf_to_pymupdf_coords:bool=True, original_cropbox:List[Rect]= list(), page_sizes_df:pd.DataFrame=pd.DataFrame()):
 
     rect_height = page.rect.height
     rect_width = page.rect.width
@@ -1127,7 +1127,7 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
             image_dimensions = {}
 
     out_annotation_boxes = {}
-    all_image_annotation_boxes = []
+    all_image_annotation_boxes = list()
 
     if isinstance(image, Image.Image):
         image_path = move_page_info(str(page))
@@ -1238,10 +1238,25 @@ def redact_page_with_pymupdf(page:Page, page_annotations:dict, image:Image=None,
 # IMAGE-BASED OCR PDF TEXT DETECTION/REDACTION WITH TESSERACT OR AWS TEXTRACT
 ###
 
-def merge_img_bboxes(bboxes:list, combined_results: Dict, page_signature_recogniser_results=[], page_handwriting_recogniser_results=[], handwrite_signature_checkbox: List[str]=["Extract handwriting", "Extract signatures"], horizontal_threshold:int=50, vertical_threshold:int=12):
+def merge_img_bboxes(bboxes: list, combined_results: Dict, page_signature_recogniser_results: list = list(), page_handwriting_recogniser_results: list = list(), handwrite_signature_checkbox: List[str] = ["Extract handwriting", "Extract signatures"], horizontal_threshold: int = 50, vertical_threshold: int = 12):
+    """
+    Merges bounding boxes for image annotations based on the provided results from signature and handwriting recognizers.
 
-    all_bboxes = []
-    merged_bboxes = []
+    Args:
+        bboxes (list): A list of bounding boxes to be merged.
+        combined_results (Dict): A dictionary containing combined results with line text and their corresponding bounding boxes.
+        page_signature_recogniser_results (list, optional): A list of results from the signature recognizer. Defaults to an empty list.
+        page_handwriting_recogniser_results (list, optional): A list of results from the handwriting recognizer. Defaults to an empty list.
+        handwrite_signature_checkbox (List[str], optional): A list of options indicating whether to extract handwriting and signatures. Defaults to ["Extract handwriting", "Extract signatures"].
+        horizontal_threshold (int, optional): The threshold for merging bounding boxes horizontally. Defaults to 50.
+        vertical_threshold (int, optional): The threshold for merging bounding boxes vertically. Defaults to 12.
+
+    Returns:
+        None: This function modifies the bounding boxes in place and does not return a value.
+    """
+
+    all_bboxes = list()
+    merged_bboxes = list()
     grouped_bboxes = defaultdict(list)
 
     # Deep copy original bounding boxes to retain them
@@ -1256,7 +1271,7 @@ def merge_img_bboxes(bboxes:list, combined_results: Dict, page_signature_recogni
             merged_bboxes.extend(copy.deepcopy(page_signature_recogniser_results))
 
     # Reconstruct bounding boxes for substrings of interest
-    reconstructed_bboxes = []
+    reconstructed_bboxes = list()
     for bbox in bboxes:
         bbox_box = (bbox.left, bbox.top, bbox.left + bbox.width, bbox.top + bbox.height)
         for line_text, line_info in combined_results.items():
@@ -1266,7 +1281,7 @@ def merge_img_bboxes(bboxes:list, combined_results: Dict, page_signature_recogni
                     start_char = line_text.index(bbox.text)
                     end_char = start_char + len(bbox.text)
 
-                    relevant_words = []
+                    relevant_words = list()
                     current_char = 0
                     for word in line_info['words']:
                         word_end = current_char + len(word['text'])
@@ -1501,8 +1516,8 @@ def redact_image_pdf(file_path:str,
     progress_bar = tqdm(range(page_loop_start, number_of_pages), unit="pages remaining", desc="Redacting pages")
 
     # If there's data from a previous run (passed in via the DataFrame parameters), add it
-    all_line_level_ocr_results_list = []
-    all_pages_decision_process_list = []
+    all_line_level_ocr_results_list = list()
+    all_pages_decision_process_list = list()
 
     if not all_page_line_level_ocr_results_df.empty:
         all_line_level_ocr_results_list.extend(all_page_line_level_ocr_results_df.to_dict('records'))
@@ -1513,10 +1528,10 @@ def redact_image_pdf(file_path:str,
     # Go through each page
     for page_no in progress_bar:
 
-        handwriting_or_signature_boxes = []
-        page_signature_recogniser_results = []
-        page_handwriting_recogniser_results = []
-        page_line_level_ocr_results_with_words = []
+        handwriting_or_signature_boxes = list()
+        page_signature_recogniser_results = list()
+        page_handwriting_recogniser_results = list()
+        page_line_level_ocr_results_with_words = list()
         page_break_return = False
         reported_page_number = str(page_no + 1)
         
@@ -1567,7 +1582,7 @@ def redact_image_pdf(file_path:str,
                     )
 
                     page_line_level_ocr_results_with_words = matching_page if matching_page else []
-                else: page_line_level_ocr_results_with_words = []
+                else: page_line_level_ocr_results_with_words = list()
 
                 if page_line_level_ocr_results_with_words:
                     print("Found OCR results for page in existing OCR with words object")
@@ -1581,7 +1596,7 @@ def redact_image_pdf(file_path:str,
     
             # Check if page exists in existing textract data. If not, send to service to analyse
             if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
-                text_blocks = []
+                text_blocks = list()
 
                 if not textract_data:
                     try:
@@ -1619,7 +1634,7 @@ def redact_image_pdf(file_path:str,
                             text_blocks, new_textract_request_metadata = analyse_page_with_textract(pdf_page_as_bytes, reported_page_number, textract_client, handwrite_signature_checkbox)  # Analyse page with Textract
 
                             # Check if "pages" key exists, if not, initialise it as an empty list
-                            if "pages" not in textract_data: textract_data["pages"] = []
+                            if "pages" not in textract_data: textract_data["pages"] = list()
 
                             # Append the new page data
                             textract_data["pages"].append(text_blocks)
@@ -1627,11 +1642,11 @@ def redact_image_pdf(file_path:str,
                         except Exception as e:
                             out_message = "Textract extraction for page " + reported_page_number + " failed due to:" + str(e)
                             print(out_message)                            
-                            text_blocks = []
+                            text_blocks = list()
                             new_textract_request_metadata = "Failed Textract API call"                          
 
                             # Check if "pages" key exists, if not, initialise it as an empty list
-                            if "pages" not in textract_data: textract_data["pages"] = []
+                            if "pages" not in textract_data: textract_data["pages"] = list()
 
                             raise Exception(out_message)
                         
@@ -1678,12 +1693,12 @@ def redact_image_pdf(file_path:str,
 
                     comprehend_query_number = comprehend_query_number + comprehend_query_number_new
                     
-                else: page_redaction_bounding_boxes = []
+                else: page_redaction_bounding_boxes = list()
 
                 # Merge redaction bounding boxes that are close together
                 page_merged_redaction_bboxes = merge_img_bboxes(page_redaction_bounding_boxes, page_line_level_ocr_results_with_words['results'], page_signature_recogniser_results, page_handwriting_recogniser_results, handwrite_signature_checkbox)
 
-            else: page_merged_redaction_bboxes = []           
+            else: page_merged_redaction_bboxes = list()           
             
             # 3. Draw the merged boxes
             ## Apply annotations to pdf with pymupdf            
@@ -1710,7 +1725,7 @@ def redact_image_pdf(file_path:str,
                 fill = (0, 0, 0)   # Fill colour for redactions
                 draw = ImageDraw.Draw(image)
 
-                all_image_annotations_boxes = []
+                all_image_annotations_boxes = list()
 
                 for box in page_merged_redaction_bboxes:
 
@@ -1914,9 +1929,9 @@ def create_line_level_ocr_results_from_characters(char_objects:List, line_number
     Create OCRResult objects based on a list of pdfminer LTChar objects.
     This version is corrected to use the specified OCRResult class definition.
     """
-    line_level_results_out = []
-    line_level_characters_out = []
-    character_objects_out = []
+    line_level_results_out = list()
+    line_level_characters_out = list()
+    character_objects_out = list()
 
     full_text = ""
     # [x0, y0, x1, y1]
@@ -1943,7 +1958,7 @@ def create_line_level_ocr_results_from_characters(char_objects:List, line_number
                     line_level_characters_out.append(character_objects_out)
 
                 # Reset for the next line
-                character_objects_out = []
+                character_objects_out = list()
                 full_text = ""
                 overall_bbox = [float('inf'), float('inf'), float('-inf'), float('-inf')]
                 line_number += 1
@@ -2003,7 +2018,7 @@ def generate_words_for_line(line_chars: List) -> List[Dict[str, Any]]:
     # The hyphen '-' is intentionally excluded to keep words like 'high-tech' together.
     PUNCTUATION_TO_SPLIT = {'.', ',', '?', '!', ':', ';', '(', ')', '[', ']', '{', '}'}
 
-    line_words = []
+    line_words = list()
     current_word_text = ""
     current_word_bbox = [float('inf'), float('inf'), -1, -1]  # [x0, y0, x1, y1]
     prev_char = None
@@ -2152,7 +2167,7 @@ def create_text_redaction_process_results(analyser_results, analysed_bounding_bo
     return decision_process_table
 
 def create_pikepdf_annotations_for_bounding_boxes(analysed_bounding_boxes):
-    pikepdf_redaction_annotations_on_page = []
+    pikepdf_redaction_annotations_on_page = list()
     for analysed_bounding_box in analysed_bounding_boxes:
 
         bounding_box = analysed_bounding_box["boundingBox"]
@@ -2282,7 +2297,7 @@ def redact_text_pdf(
 
     #file_name = get_file_name_without_type(file_path) 
 
-    if not all_page_line_level_ocr_results_with_words: all_page_line_level_ocr_results_with_words = []
+    if not all_page_line_level_ocr_results_with_words: all_page_line_level_ocr_results_with_words = list()
 
     # Check that page_min and page_max are within expected ranges
     if page_max > number_of_pages or page_max == 0: page_max = number_of_pages
@@ -2315,20 +2330,20 @@ def redact_text_pdf(
             # Go page by page
             for page_layout in extract_pages(file_path, page_numbers = [page_no], maxpages=1):
                 
-                all_page_line_text_extraction_characters = []
-                all_page_line_level_text_extraction_results_list = []
-                page_analyser_results = []
-                page_redaction_bounding_boxes = []            
+                all_page_line_text_extraction_characters = list()
+                all_page_line_level_text_extraction_results_list = list()
+                page_analyser_results = list()
+                page_redaction_bounding_boxes = list()            
                 
-                characters = []
-                pikepdf_redaction_annotations_on_page = []
+                characters = list()
+                pikepdf_redaction_annotations_on_page = list()
                 page_decision_process_table = pd.DataFrame(columns=["image_path", "page", "label", "xmin", "xmax", "ymin", "ymax", "text", "id"])    
                 page_text_ocr_outputs = pd.DataFrame(columns=["page", "text", "left", "top", "width", "height", "line"])  
-                page_text_ocr_outputs_list = []
+                page_text_ocr_outputs_list = list()
 
                 text_line_no = 1
                 for n, text_container in enumerate(page_layout):                    
-                    characters = []
+                    characters = list()
 
                     if isinstance(text_container, LTTextContainer) or isinstance(text_container, LTAnno):
                         characters = get_text_container_characters(text_container)
@@ -2390,7 +2405,7 @@ def redact_text_pdf(
                         # Annotate redactions on page
                         pikepdf_redaction_annotations_on_page = create_pikepdf_annotations_for_bounding_boxes(page_redaction_bounding_boxes)
 
-                    else: pikepdf_redaction_annotations_on_page = []
+                    else: pikepdf_redaction_annotations_on_page = list()
 
                     # Make pymupdf page redactions
                     if redact_whole_page_list:

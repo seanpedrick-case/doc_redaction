@@ -101,7 +101,7 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
     && chmod 755 \
     ${APP_HOME}/.local/share/spacy/data \ 
     mkdir -p /usr/share/tessdata && \
-    chmod 755 /usr/share/tessdata # Create tessdata directory and set permissions
+    chmod 755 /usr/share/tessdata
 
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/

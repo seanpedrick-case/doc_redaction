@@ -327,7 +327,7 @@ def anonymise_files_with_open_text(file_paths: List[str],
     This function anonymises data files based on the provided parameters.
 
     Parameters:
-    - file_paths (List[str]): A list of file paths to anonymise.
+    - file_paths (List[str]): A list of file paths to anonymise: '.xlsx', '.xls', '.csv', '.parquet', or '.docx'.
     - in_text (str): The text to anonymise if file_paths is 'open_text'.
     - anon_strat (str): The anonymisation strategy to use.
     - chosen_cols (List[str]): A list of column names to anonymise.
