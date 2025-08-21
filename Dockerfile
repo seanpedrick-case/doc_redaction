@@ -55,7 +55,6 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     USAGE_LOGS_FOLDER=$APP_HOME/app/usage/ \
     CONFIG_FOLDER=$APP_HOME/app/config/ \
     XDG_CACHE_HOME=/tmp/xdg_cache/user_1000 \
-    TESSERACT_FOLDER=/usr/bin/tesseract \
     TESSERACT_DATA_FOLDER=/usr/share/tessdata
 
 # Create the base application directory and set its ownership
