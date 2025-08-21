@@ -91,17 +91,13 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
     && chmod 1777 /tmp /var/tmp /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache \
     && chmod 700 ${XDG_CACHE_HOME} \
     && mkdir -p ${APP_HOME}/.paddlex/official_models \
-    && chown user:user \
-    ${APP_HOME}/.paddlex/official_models \
-    && chmod 755 \
-    ${APP_HOME}/.paddlex/official_models \
+    && chown user:user ${APP_HOME}/.paddlex/official_models \
+    && chmod 755 ${APP_HOME}/.paddlex/official_models \
     && mkdir -p ${APP_HOME}/.local/share/spacy/data \
-    && chown user:user \
-    ${APP_HOME}/.local/share/spacy/data \
-    && chmod 755 \
-    ${APP_HOME}/.local/share/spacy/data \ 
-    mkdir -p /usr/share/tessdata && \
-    chmod 755 /usr/share/tessdata
+    && chown user:user ${APP_HOME}/.local/share/spacy/data \
+    && chmod 755 ${APP_HOME}/.local/share/spacy/data \
+    && mkdir -p /usr/share/tessdata \
+    && chmod 755 /usr/share/tessdata
 
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
