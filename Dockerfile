@@ -96,6 +96,7 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
     && chown user:user ${APP_HOME}/.local/share/spacy/data \
     && chmod 755 ${APP_HOME}/.local/share/spacy/data \
     && mkdir -p /usr/share/tessdata \
+    && chown user:user /usr/share/tessdata \
     && chmod 755 /usr/share/tessdata
 
 # Copy installed packages from builder stage
