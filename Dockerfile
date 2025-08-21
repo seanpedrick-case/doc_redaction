@@ -17,7 +17,7 @@ WORKDIR /src
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir --verbose --target=/install -r requirements.txt && rm requirements.txt
+RUN pip install --verbose --no-cache-dir --target=/install -r requirements.txt && rm requirements.txt
 
 # Add lambda entrypoint and script
 COPY lambda_entrypoint.py .
@@ -90,9 +90,9 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
     && chown user:user /tmp /var/tmp /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache ${XDG_CACHE_HOME} \
     && chmod 1777 /tmp /var/tmp /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache \
     && chmod 700 ${XDG_CACHE_HOME} \
-    && mkdir -p ${APP_HOME}/.paddlex/official_models \
-    && chown user:user ${APP_HOME}/.paddlex/official_models \
-    && chmod 755 ${APP_HOME}/.paddlex/official_models \
+    && mkdir -p ${APP_HOME}/.paddlex \
+    && chown user:user ${APP_HOME}/.paddlex \
+    && chmod 755 ${APP_HOME}/.paddlex \
     && mkdir -p ${APP_HOME}/.local/share/spacy/data \
     && chown user:user ${APP_HOME}/.local/share/spacy/data \
     && chmod 755 ${APP_HOME}/.local/share/spacy/data \
@@ -125,7 +125,7 @@ VOLUME ["/home/user/app/logs"]
 VOLUME ["/home/user/app/usage"]
 VOLUME ["/home/user/app/feedback"]
 VOLUME ["/home/user/app/config"]
-VOLUME ["/home/user/.paddlex/official_models"]
+VOLUME ["/home/user/.paddlex"]
 VOLUME ["/home/user/.local/share/spacy/data"]
 VOLUME ["/usr/share/tessdata"]
 VOLUME ["/tmp"]
