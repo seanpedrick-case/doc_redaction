@@ -94,7 +94,7 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
     && chown user:user \
     ${APP_HOME}/.paddlex/official_models \
     && chmod 755 \
-    ${APP_HOME}/.paddlex/official_models
+    ${APP_HOME}/.paddlex/official_models \
     && mkdir -p ${APP_HOME}/.local/share/spacy/data \
     && chown user:user \
     ${APP_HOME}/.local/share/spacy/data \
