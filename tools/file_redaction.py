@@ -468,10 +468,12 @@ def choose_and_run_redactor(file_paths:List[str],
     ### Language check - check if selected language packs exist
     try:
         if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_model == "tesseract":
-            progress(0.1, desc=f"Downloading Tesseract language pack for {language}")
-            download_tesseract_lang_pack(language)
+            if language != "en":
+                progress(0.1, desc=f"Downloading Tesseract language pack for {language}")
+                download_tesseract_lang_pack(language)
 
-        progress(0.1, desc=f"Loading SpaCy model for {language}")
+        if language != "en":
+            progress(0.1, desc=f"Loading SpaCy model for {language}")
         load_spacy_model(language)
 
     except Exception as e:

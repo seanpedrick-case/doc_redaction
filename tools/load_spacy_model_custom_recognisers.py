@@ -396,7 +396,119 @@ def custom_fuzzy_word_list_regex(text:str, custom_list:List[str]=[]):
 
     return start_positions, end_positions
 
-def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mistakes_max:int = 1, search_whole_phrase:bool=True, nlp=nlp, progress=gr.Progress(track_tqdm=True)):
+
+class CustomWordFuzzyRecognizer(EntityRecognizer):
+    def __init__(self, supported_entities: List[str], custom_list: List[str] = [], spelling_mistakes_max: int = 1, search_whole_phrase: bool = True):
+        super().__init__(supported_entities=supported_entities)
+        self.custom_list = custom_list  # Store the custom_list as an instance attribute
+        self.spelling_mistakes_max = spelling_mistakes_max  # Store the max spelling mistakes
+        self.search_whole_phrase = search_whole_phrase  # Store the search whole phrase flag
+
+    def load(self) -> None:
+        """No loading is required."""
+        pass
+
+    def analyze(self, text: str, entities: List[str], nlp_artifacts: NlpArtifacts) -> List[RecognizerResult]:
+        """
+        Logic for detecting a specific PII
+        """
+        start_pos, end_pos = spacy_fuzzy_search(text, self.custom_list, self.spelling_mistakes_max, self.search_whole_phrase)  # Pass new parameters
+
+        results = []
+
+        for i in range(0, len(start_pos)):
+            result = RecognizerResult(
+                entity_type="CUSTOM_FUZZY",
+                start=start_pos[i],
+                end=end_pos[i],
+                score=1
+            )
+            results.append(result)
+
+        return results
+    
+custom_list_default = []
+custom_word_fuzzy_recognizer = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_list_default)
+
+# Pass the loaded model to the new LoadedSpacyNlpEngine
+loaded_nlp_engine = LoadedSpacyNlpEngine(loaded_spacy_model = nlp, language_code = ACTIVE_LANGUAGE_CODE)
+
+def create_nlp_analyser(language: str = DEFAULT_LANGUAGE, custom_list: List[str] = None, 
+                       spelling_mistakes_max: int = 1, search_whole_phrase: bool = True, existing_nlp_analyser: AnalyzerEngine = None, return_also_model: bool = False):
+    """
+    Create an nlp_analyser object based on the specified language input.
+    
+    Args:
+        language (str): Language code (e.g., "en", "de", "fr", "es", etc.)
+        custom_list (List[str], optional): List of custom words to recognize. Defaults to None.
+        spelling_mistakes_max (int, optional): Maximum number of spelling mistakes for fuzzy matching. Defaults to 1.
+        search_whole_phrase (bool, optional): Whether to search for whole phrases or individual words. Defaults to True.
+        existing_nlp_analyser (AnalyzerEngine, optional): Existing nlp_analyser object to use. Defaults to None.
+        return_also_model (bool, optional): Whether to return the nlp_model object as well. Defaults to False.
+    
+    Returns:
+        AnalyzerEngine: Configured nlp_analyser object with custom recognizers
+    """
+
+    if existing_nlp_analyser is None:   
+        pass
+    else:
+        if existing_nlp_analyser.supported_languages[0] == language:
+            nlp_analyser = existing_nlp_analyser
+            print(f"Using existing nlp_analyser for {language}")
+            return nlp_analyser
+
+    # Load spaCy model for the specified language
+    nlp_model = load_spacy_model(language)
+    
+    # Get base language code
+    base_lang_code = _base_language_code(language)
+    
+    # Create custom recognizers
+    if custom_list is None:
+        custom_list = []
+    
+    custom_recogniser = custom_word_list_recogniser(custom_list)
+    custom_word_fuzzy_recognizer = CustomWordFuzzyRecognizer(
+        supported_entities=["CUSTOM_FUZZY"], 
+        custom_list=custom_list,
+        spelling_mistakes_max=spelling_mistakes_max,
+        search_whole_phrase=search_whole_phrase
+    )
+    
+    # Create NLP engine with loaded model
+    loaded_nlp_engine = LoadedSpacyNlpEngine(
+        loaded_spacy_model=nlp_model, 
+        language_code=base_lang_code
+    )
+    
+    # Create analyzer engine
+    nlp_analyser = AnalyzerEngine(
+        nlp_engine=loaded_nlp_engine,
+        default_score_threshold=score_threshold,
+        supported_languages=[base_lang_code],
+        log_decision_process=False,
+    )
+    
+    # Add custom recognizers to nlp_analyser
+    nlp_analyser.registry.add_recognizer(custom_recogniser)
+    nlp_analyser.registry.add_recognizer(custom_word_fuzzy_recognizer)
+    
+    # Add language-specific recognizers for English
+    if base_lang_code == "en":
+        nlp_analyser.registry.add_recognizer(street_recogniser)
+        nlp_analyser.registry.add_recognizer(ukpostcode_recogniser)
+        nlp_analyser.registry.add_recognizer(titles_recogniser)
+
+    if return_also_model:
+        return nlp_analyser, nlp_model
+    
+    return nlp_analyser
+
+# Create the default nlp_analyser using the new function
+nlp_analyser, nlp_model = create_nlp_analyser(DEFAULT_LANGUAGE, return_also_model=True)
+
+def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mistakes_max:int = 1, search_whole_phrase:bool=True, nlp=nlp_model, progress=gr.Progress(track_tqdm=True)):
     ''' Conduct fuzzy match on a list of text data.'''
 
     all_matches = []
@@ -413,9 +525,6 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
 
     for string_query in custom_query_list:
 
-        #print("text:", text)
-        #print("string_query:", string_query)
-
         query = nlp(string_query)
 
         if search_whole_phrase == False:
@@ -423,8 +532,6 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
             token_query = [token.text for token in query if not token.is_space and not token.is_stop and not token.is_punct]
 
             spelling_mistakes_fuzzy_pattern = "FUZZY" + str(spelling_mistakes_max)
-
-            #print("token_query:", token_query)
 
             if len(token_query) > 1:
                 #pattern_lemma = [{"LEMMA": {"IN": query}}]
@@ -504,112 +611,5 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
 
     return all_start_positions, all_end_positions
 
-class CustomWordFuzzyRecognizer(EntityRecognizer):
-    def __init__(self, supported_entities: List[str], custom_list: List[str] = [], spelling_mistakes_max: int = 1, search_whole_phrase: bool = True):
-        super().__init__(supported_entities=supported_entities)
-        self.custom_list = custom_list  # Store the custom_list as an instance attribute
-        self.spelling_mistakes_max = spelling_mistakes_max  # Store the max spelling mistakes
-        self.search_whole_phrase = search_whole_phrase  # Store the search whole phrase flag
-
-    def load(self) -> None:
-        """No loading is required."""
-        pass
-
-    def analyze(self, text: str, entities: List[str], nlp_artifacts: NlpArtifacts) -> List[RecognizerResult]:
-        """
-        Logic for detecting a specific PII
-        """
-        start_pos, end_pos = spacy_fuzzy_search(text, self.custom_list, self.spelling_mistakes_max, self.search_whole_phrase)  # Pass new parameters
-
-        results = []
-
-        for i in range(0, len(start_pos)):
-            result = RecognizerResult(
-                entity_type="CUSTOM_FUZZY",
-                start=start_pos[i],
-                end=end_pos[i],
-                score=1
-            )
-            results.append(result)
-
-        return results
-    
-custom_list_default = []
-custom_word_fuzzy_recognizer = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_list_default)
-
-
-# Pass the loaded model to the new LoadedSpacyNlpEngine
-loaded_nlp_engine = LoadedSpacyNlpEngine(loaded_spacy_model = nlp, language_code = ACTIVE_LANGUAGE_CODE)
-
-
-def create_nlp_analyser(language: str = DEFAULT_LANGUAGE, custom_list: List[str] = None, 
-                       spelling_mistakes_max: int = 1, search_whole_phrase: bool = True, existing_nlp_analyser: AnalyzerEngine = None):
-    """
-    Create an nlp_analyser object based on the specified language input.
-    
-    Args:
-        language (str): Language code (e.g., "en", "de", "fr", "es", etc.)
-        custom_list (List[str], optional): List of custom words to recognize. Defaults to None.
-        spelling_mistakes_max (int, optional): Maximum number of spelling mistakes for fuzzy matching. Defaults to 1.
-        search_whole_phrase (bool, optional): Whether to search for whole phrases or individual words. Defaults to True.
-    
-    Returns:
-        AnalyzerEngine: Configured nlp_analyser object with custom recognizers
-    """
-
-    if existing_nlp_analyser is None:   
-        pass
-    else:
-        if existing_nlp_analyser.supported_languages[0] == language:
-            nlp_analyser = existing_nlp_analyser
-            print(f"Using existing nlp_analyser for {language}")
-            return nlp_analyser
-
-    # Load spaCy model for the specified language
-    nlp_model = load_spacy_model(language)
-    
-    # Get base language code
-    base_lang_code = _base_language_code(language)
-    
-    # Create custom recognizers
-    if custom_list is None:
-        custom_list = []
-    
-    custom_recogniser = custom_word_list_recogniser(custom_list)
-    custom_word_fuzzy_recognizer = CustomWordFuzzyRecognizer(
-        supported_entities=["CUSTOM_FUZZY"], 
-        custom_list=custom_list,
-        spelling_mistakes_max=spelling_mistakes_max,
-        search_whole_phrase=search_whole_phrase
-    )
-    
-    # Create NLP engine with loaded model
-    loaded_nlp_engine = LoadedSpacyNlpEngine(
-        loaded_spacy_model=nlp_model, 
-        language_code=base_lang_code
-    )
-    
-    # Create analyzer engine
-    nlp_analyser = AnalyzerEngine(
-        nlp_engine=loaded_nlp_engine,
-        default_score_threshold=score_threshold,
-        supported_languages=[base_lang_code],
-        log_decision_process=False,
-    )
-    
-    # Add custom recognizers to nlp_analyser
-    nlp_analyser.registry.add_recognizer(custom_recogniser)
-    nlp_analyser.registry.add_recognizer(custom_word_fuzzy_recognizer)
-    
-    # Add language-specific recognizers for English
-    if base_lang_code == "en":
-        nlp_analyser.registry.add_recognizer(street_recogniser)
-        nlp_analyser.registry.add_recognizer(ukpostcode_recogniser)
-        nlp_analyser.registry.add_recognizer(titles_recogniser)
-    
-    return nlp_analyser
-
-# Create the default nlp_analyser using the new function
-nlp_analyser = create_nlp_analyser(DEFAULT_LANGUAGE)
 
 
