@@ -206,15 +206,15 @@ def choose_and_run_redactor(file_paths:List[str],
     review_out_file_paths = [prepared_pdf_file_paths[0]]
     
     # Use provided language or default
-    effective_language = language or DEFAULT_LANGUAGE
+    language = language or DEFAULT_LANGUAGE
 
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
-        if effective_language not in textract_language_choices:
-            out_message = f"Language '{effective_language}' is not supported by AWS Textract. Please select a different language."
+        if language not in textract_language_choices:
+            out_message = f"Language '{language}' is not supported by AWS Textract. Please select a different language."
             raise Warning(out_message)
     elif pii_identification_method == AWS_PII_OPTION:
-        if effective_language not in aws_comprehend_language_choices:
-            out_message = f"Language '{effective_language}' is not supported by AWS Comprehend. Please select a different language."
+        if language not in aws_comprehend_language_choices:
+            out_message = f"Language '{language}' is not supported by AWS Comprehend. Please select a different language."
             raise Warning(out_message)
 
     if all_page_line_level_ocr_results_with_words_df is None:
@@ -468,15 +468,15 @@ def choose_and_run_redactor(file_paths:List[str],
     ### Language check - check if selected language packs exist
     try:
         if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_model == "tesseract":
-            progress(0.1, desc=f"Downloading Tesseract language pack for {effective_language}")
-            download_tesseract_lang_pack(effective_language)
+            progress(0.1, desc=f"Downloading Tesseract language pack for {language}")
+            download_tesseract_lang_pack(language)
 
-        progress(0.1, desc=f"Loading SpaCy model for {effective_language}")
-        load_spacy_model(effective_language)
-        
+        progress(0.1, desc=f"Loading SpaCy model for {language}")
+        load_spacy_model(language)
+
     except Exception as e:
-        print(f"Error downloading language packs for {effective_language}: {e}")
-        raise Exception(f"Error downloading language packs for {effective_language}: {e}")
+        print(f"Error downloading language packs for {language}: {e}")
+        raise Exception(f"Error downloading language packs for {language}: {e}")
 
     # Check if output_folder exists, create it if it doesn't
     if not os.path.exists(output_folder): os.makedirs(output_folder)
@@ -537,7 +537,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
             pymupdf_doc, all_pages_decision_process_table, out_file_paths, new_textract_request_metadata, annotations_all_pages, current_loop_page, page_break_return, all_page_line_level_ocr_results_df, comprehend_query_number, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words = redact_image_pdf(file_path,
              pdf_image_file_paths,
-             effective_language,
+             language,
              chosen_redact_entities,
              chosen_redact_comprehend_entities,
              in_allow_list_flat,
@@ -566,6 +566,7 @@ def choose_and_run_redactor(file_paths:List[str],
              all_page_line_level_ocr_results_with_words,
              chosen_local_model,             
              log_files_output_paths=log_files_output_paths,
+             nlp_analyser=nlp_analyser,
              output_folder=output_folder)
             
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
@@ -586,7 +587,7 @@ def choose_and_run_redactor(file_paths:List[str],
             
             pymupdf_doc, all_pages_decision_process_table, all_page_line_level_ocr_results_df, annotations_all_pages, current_loop_page, page_break_return, comprehend_query_number, all_page_line_level_ocr_results_with_words = redact_text_pdf(
             file_path,
-            effective_language,
+            language,
             chosen_redact_entities,
             chosen_redact_comprehend_entities,
             in_allow_list_flat,
@@ -1377,8 +1378,8 @@ def redact_image_pdf(file_path:str,
                      page_break_val:int=int(PAGE_BREAK_VALUE),
                      log_files_output_paths:List=list(),
                      max_time:int=int(MAX_TIME_VALUE),
-                     output_folder:str=OUTPUT_FOLDER,
                      nlp_analyser: AnalyzerEngine = nlp_analyser,
+                     output_folder:str=OUTPUT_FOLDER,                     
                      progress=Progress(track_tqdm=True)):
 
     '''
@@ -1417,8 +1418,8 @@ def redact_image_pdf(file_path:str,
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to PAGE_BREAK_VALUE.
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
-    - output_folder (str, optional): The folder for file outputs.
     - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
+    - output_folder (str, optional): The folder for file outputs.    
     - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
 
     The function returns a redacted PDF document along with processing output objects.
@@ -1428,9 +1429,6 @@ def redact_image_pdf(file_path:str,
 
     file_name = get_file_name_without_type(file_path)    
     comprehend_query_number_new = 0
-    
-    # Use provided comprehend language or fall back to main language
-    effective_language = language or language
 
     # Try updating the supported languages for the spacy analyser
     try:
@@ -1467,8 +1465,7 @@ def redact_image_pdf(file_path:str,
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION and textract_client == "":
         out_message_warning = "Connection to AWS Textract service unsuccessful. Redaction will only continue if local AWS Textract results can be found."
         print(out_message_warning)
-        #raise Exception(out_message)
-        
+        #raise Exception(out_message)        
 
     number_of_pages = pymupdf_doc.page_count
     print("Number of pages:", str(number_of_pages))
@@ -1557,12 +1554,7 @@ def redact_image_pdf(file_path:str,
                 print("Can't find original cropbox details for page, using current PyMuPDF page cropbox")
                 original_cropbox =  pymupdf_page.cropbox.irect
 
-            # Possibility to use different languages
-            if language == 'en': ocr_lang = 'eng'
-            else: ocr_lang = language
-
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
-
             # If using Tesseract
             if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
 
@@ -1676,11 +1668,12 @@ def redact_image_pdf(file_path:str,
                         page_line_level_ocr_results_with_words['results'],
                         chosen_redact_comprehend_entities = chosen_redact_comprehend_entities,
                         pii_identification_method = pii_identification_method,
-                        comprehend_client=comprehend_client,                 
-                        language=effective_language,
-                        entities=chosen_redact_entities,
+                        comprehend_client=comprehend_client, 
+                        custom_entities=chosen_redact_entities,
+                        language=language,
                         allow_list=allow_list,
-                        score_threshold=score_threshold
+                        score_threshold=score_threshold,
+                        nlp_analyser=nlp_analyser
                     )               
 
                     comprehend_query_number = comprehend_query_number + comprehend_query_number_new
@@ -2238,7 +2231,7 @@ def redact_text_pdf(
     - redact_whole_page_list (optional, List[str]): A list of pages to fully redact.
     -  max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
     -  match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
-    - page_sizes_df (pd.DataFrame, optional): A pandas dataframe containing page size information.
+    - page_sizes_df (pd.DataFrame, optional): A pandas dataframe of PDF page sizes in PDF or image format.
     - original_cropboxes (List[dict], optional): A list of dictionaries containing pymupdf cropbox information.
     - text_extraction_only (bool, optional): Should the function only extract text, or also do redaction.
     - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
@@ -2261,9 +2254,6 @@ def redact_text_pdf(
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         out_message = "Connection to AWS Comprehend service not found."
         raise Exception(out_message)
-    
-    # Use provided comprehend language or fall back to main language
-    effective_language = language or language
 
     # Try updating the supported languages for the spacy analyser
     try:
@@ -2284,15 +2274,13 @@ def redact_text_pdf(
 
         nlp_analyser.registry.remove_recognizer("CustomWordFuzzyRecognizer")
         new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_recogniser_word_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
-        nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
-
-    
+        nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)    
 
     # Open with Pikepdf to get text lines
     pikepdf_pdf = Pdf.open(file_path)
     number_of_pages = len(pikepdf_pdf.pages)
 
-    file_name = get_file_name_without_type(file_path) 
+    #file_name = get_file_name_without_type(file_path) 
 
     if not all_page_line_level_ocr_results_with_words: all_page_line_level_ocr_results_with_words = []
 
@@ -2383,7 +2371,7 @@ def redact_text_pdf(
 
                     if chosen_redact_entities or chosen_redact_comprehend_entities:
                         page_redaction_bounding_boxes = run_page_text_redaction(
-                            effective_language,
+                            language,
                             chosen_redact_entities,
                             chosen_redact_comprehend_entities,
                             all_page_line_level_text_extraction_results_list,

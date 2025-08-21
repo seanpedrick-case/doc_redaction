@@ -556,7 +556,6 @@ def create_nlp_analyser(language: str = DEFAULT_LANGUAGE, custom_list: List[str]
     Returns:
         AnalyzerEngine: Configured nlp_analyser object with custom recognizers
     """
-    print("existing_nlp_analyser:", existing_nlp_analyser)
 
     if existing_nlp_analyser is None:   
         pass

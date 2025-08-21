@@ -7,16 +7,18 @@ import boto3
 import botocore
 import pandas as pd
 import docx
+import gradio as gr
 from openpyxl import Workbook
 from faker import Faker
 from gradio import Progress
 from typing import List, Dict, Any, Optional
+from botocore.client import BaseClient
 from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
 from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine, DictAnalyzerResult, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
 from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, OUTPUT_FOLDER, DEFAULT_LANGUAGE, aws_comprehend_language_choices
 from tools.helper_functions import get_file_name_without_type, read_file, detect_file_type
-from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_word_list_recogniser, CustomWordFuzzyRecognizer, custom_entities
+from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_word_list_recogniser, CustomWordFuzzyRecognizer, custom_entities, create_nlp_analyser, load_spacy_model
 # Use custom version of analyze_dict to be able to track progress
 from tools.presidio_analyzer_custom import analyze_dict
 
@@ -215,8 +217,9 @@ def handle_docx_anonymisation(
     pii_identification_method: str,
     chosen_redact_comprehend_entities: List[str],
     comprehend_query_number: int,
-    comprehend_client, # Assuming botocore.client.BaseClient type
-    language: Optional[str] = None
+    comprehend_client: BaseClient,
+    language: Optional[str] = DEFAULT_LANGUAGE,
+    nlp_analyser: AnalyzerEngine = nlp_analyser
 ):
     """
     Anonymises a .docx file by extracting text, processing it, and re-inserting it.
@@ -224,7 +227,6 @@ def handle_docx_anonymisation(
     Returns:
         A tuple containing the output file path and the log file path.
     """
-    print(f"Processing DOCX file: {file_path}")
     
     # 1. Load the document and extract text elements
     doc = docx.Document(file_path)
@@ -253,14 +255,11 @@ def handle_docx_anonymisation(
     # 2. Convert to a DataFrame for the existing anonymisation script
     df_to_anonymise = pd.DataFrame({'text_to_redact': original_texts})
     
-    # Use provided language or default
-    effective_language = language or DEFAULT_LANGUAGE
-    
     # 3. Call the core anonymisation script
     anonymised_df, _, decision_log = anonymise_script(
         df=df_to_anonymise,
         anon_strat=anon_strat,
-        language=effective_language,
+        language=language,
         chosen_redact_entities=chosen_redact_entities,
         in_allow_list=in_allow_list,
         in_deny_list=in_deny_list,
@@ -268,15 +267,13 @@ def handle_docx_anonymisation(
         pii_identification_method=pii_identification_method,
         chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
         comprehend_query_number=comprehend_query_number,
-        comprehend_client=comprehend_client
+        comprehend_client=comprehend_client,
+        nlp_analyser=nlp_analyser
     )
 
     anonymised_texts = anonymised_df['text_to_redact'].tolist()
 
     # 4. Re-insert the anonymised text back into the document objects
-    # IMPORTANT: This approach replaces the entire paragraph/cell text and may lose
-    # complex intra-paragraph formatting (e.g., bolding a single word).
-    # It preserves the paragraph/cell structure.
     for element, new_text in zip(text_elements, anonymised_texts):
         if isinstance(element, docx.text.paragraph.Paragraph):
             # Clear existing content (runs) and add the new text in a single new run
@@ -295,14 +292,11 @@ def handle_docx_anonymisation(
 
     output_xlsx_path = os.path.join(output_folder, f"{file_name_without_ext}_redacted.csv")
 
-    anonymised_df.to_csv(output_xlsx_path)    
+    anonymised_df.to_csv(output_xlsx_path, encoding="utf-8-sig")    
     doc.save(output_docx_path)
     
     with open(log_file_path, "w", encoding="utf-8-sig") as f:
         f.write(decision_log)
-        
-    print(f"Saved redacted DOCX to: {output_docx_path}")
-    print(f"Saved decision log to: {log_file_path}")
 
     return output_docx_path, log_file_path, output_xlsx_path
 
@@ -328,8 +322,7 @@ def anonymise_files_with_open_text(file_paths: List[str],
                          aws_secret_key_textbox:str='',
                          actual_time_taken_number:float=0,
                          language: Optional[str] = None,
-                         progress: Progress = Progress(track_tqdm=True),                         
-                         comprehend_language: Optional[str] = None):
+                         progress: Progress = Progress(track_tqdm=True)):
     """
     This function anonymises data files based on the provided parameters.
 
@@ -364,12 +357,11 @@ def anonymise_files_with_open_text(file_paths: List[str],
     comprehend_client = ""
     
     # Use provided language or default
-    effective_language = language or DEFAULT_LANGUAGE
-    effective_comprehend_language = comprehend_language or effective_language
+    language = language or DEFAULT_LANGUAGE
 
     if pii_identification_method == "AWS Comprehend":
-        if effective_comprehend_language not in aws_comprehend_language_choices:
-            out_message = f"Please note that this language is not supported by AWS Comprehend: {effective_comprehend_language}"
+        if language not in aws_comprehend_language_choices:
+            out_message = f"Please note that this language is not supported by AWS Comprehend: {language}"
             raise Warning(out_message)
 
     # If this is the first time around, set variables to 0/blank
@@ -477,7 +469,7 @@ def anonymise_files_with_open_text(file_paths: List[str],
                     chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
                     comprehend_query_number=comprehend_query_number,
                     comprehend_client=comprehend_client,
-                    language=effective_language
+                    language=language
                 )
                 if output_path:
                     out_file_paths.append(output_path)
@@ -507,14 +499,14 @@ def anonymise_files_with_open_text(file_paths: List[str],
 
                     anon_df = pd.read_excel(anon_file, sheet_name=sheet_name)
 
-                    out_file_paths, out_message, key_string, log_files_output_paths  = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, effective_language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, effective_comprehend_language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+                    out_file_paths, out_message, key_string, log_files_output_paths  = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
 
             else:
                 sheet_name = ""
                 anon_df = read_file(anon_file)
                 out_file_part = get_file_name_without_type(anon_file.name)
 
-                out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, effective_language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, effective_comprehend_language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+                out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
 
         # Increase latest file completed count unless we are at the last file
         if latest_file_completed != len(file_paths):
@@ -564,6 +556,7 @@ def tabular_anonymise_wrapper_func(
     chosen_redact_comprehend_entities:List[str]=[], 
     comprehend_query_number:int=0,
     comprehend_client:botocore.client.BaseClient="",
+    nlp_analyser: AnalyzerEngine = nlp_analyser,
     output_folder: str = OUTPUT_FOLDER
 ):
     """
@@ -632,11 +625,9 @@ def tabular_anonymise_wrapper_func(
     anon_df_part = anon_df[chosen_cols_in_anon_df]
     anon_df_remain = anon_df.drop(chosen_cols_in_anon_df, axis = 1)
 
-    # Use provided comprehend language or fall back to main language
-    effective_comprehend_language = comprehend_language or language
-    
+        
     # Anonymise the selected columns
-    anon_df_part_out, key_string, decision_process_output_str = anonymise_script(anon_df_part, anon_strat, language, chosen_redact_entities, in_allow_list, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, effective_comprehend_language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client)
+    anon_df_part_out, key_string, decision_process_output_str = anonymise_script(anon_df_part, anon_strat, language, chosen_redact_entities, in_allow_list, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, nlp_analyser=nlp_analyser)
 
     anon_df_part_out.replace("^nan$", "", regex=True, inplace=True)
 
@@ -699,11 +690,11 @@ def anonymise_script(df:pd.DataFrame,
                      in_deny_list:List[str]=[],
                      max_fuzzy_spelling_mistakes_num:int=0,
                      pii_identification_method:str="Local",
-                     comprehend_language:Optional[str]=None,
                      chosen_redact_comprehend_entities:List[str]=[],
                      comprehend_query_number:int=0,
-                     comprehend_client:botocore.client.BaseClient="",
+                     comprehend_client:botocore.client.BaseClient="",                     
                      custom_entities:List[str]=custom_entities,
+                     nlp_analyser: AnalyzerEngine = nlp_analyser,
                      progress:Progress=Progress(track_tqdm=False)):
     '''
     Conduct anonymisation of a dataframe using Presidio and/or AWS Comprehend if chosen.
@@ -732,6 +723,26 @@ def anonymise_script(df:pd.DataFrame,
     else:
         in_allow_list_flat = []
 
+    ### Language check - check if selected language packs exist
+    try:
+        progress(0.1, desc=f"Loading SpaCy model for {language}")
+        load_spacy_model(language)
+        
+    except Exception as e:
+        print(f"Error downloading language packs for {language}: {e}")
+        raise Exception(f"Error downloading language packs for {language}: {e}")
+    
+    # Try updating the supported languages for the spacy analyser
+    try:
+        nlp_analyser = create_nlp_analyser(language, existing_nlp_analyser=nlp_analyser)
+        # Check list of nlp_analyser recognisers and languages
+        if language != "en":
+            gr.Info(f"Language: {language} only supports the following entity detection: {str(nlp_analyser.registry.get_supported_entities(languages=[language]))}")
+
+    except Exception as e:
+        print(f"Error creating nlp_analyser for {language}: {e}")
+        raise Exception(f"Error creating nlp_analyser for {language}: {e}")
+
     if isinstance(in_deny_list, pd.DataFrame):
         if not in_deny_list.empty:
             in_deny_list = in_deny_list.iloc[:, 0].tolist()
@@ -758,7 +769,7 @@ def anonymise_script(df:pd.DataFrame,
     analyzer_results = []
 
     # Use provided comprehend language or fall back to main language
-    effective_comprehend_language = comprehend_language or language
+    language = language
 
     if pii_identification_method == "Local":
 
@@ -823,7 +834,7 @@ def anonymise_script(df:pd.DataFrame,
                     try:
                         response = comprehend_client.detect_pii_entities(
                             Text=str(text),
-                            LanguageCode=effective_comprehend_language
+                            LanguageCode=language
                         )
 
                         comprehend_query_number += 1

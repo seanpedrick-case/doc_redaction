@@ -1,6 +1,7 @@
 import pytesseract
 import numpy as np
 import pandas as pd
+import gradio as gr
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from typing import List, Dict, Optional, Union, Tuple, Any
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from typing import Optional, Tuple, Union
 from tools.helper_functions import clean_unicode_text
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.load_spacy_model_custom_recognisers import custom_entities
-from tools.config import PREPROCESS_LOCAL_OCR_IMAGES, DEFAULT_LANGUAGE
+from tools.config import PREPROCESS_LOCAL_OCR_IMAGES, DEFAULT_LANGUAGE, LOCAL_PII_OPTION, AWS_PII_OPTION
 
 if PREPROCESS_LOCAL_OCR_IMAGES == "True": PREPROCESS_LOCAL_OCR_IMAGES = True 
 else: PREPROCESS_LOCAL_OCR_IMAGES = False
@@ -315,6 +316,33 @@ def rescale_ocr_data(ocr_data, scale_factor:float):
     
     return ocr_data
 
+def filter_entities_for_language(entities: List[str], valid_language_entities: List[str], language: str) -> List[str]:
+
+    if not valid_language_entities:
+        print(f"No valid entities supported for language: {language}")
+        #raise Warning(f"No valid entities supported for language: {language}")
+    if not entities:
+        print(f"No entities provided for language: {language}")
+        #raise Warning(f"No entities provided for language: {language}")
+    
+    #print("entities:", entities)
+    #print("valid_language_entities:", valid_language_entities)
+   # print("language:", language)
+
+    filtered_entities = [
+        entity for entity in entities 
+        if entity in valid_language_entities
+    ]
+
+    if not filtered_entities:
+        print(f"No relevant entities supported for language: {language}")
+        #raise Warning(f"No relevant entities supported for language: {language}")
+
+    if language != "en":
+        gr.Info(f"Using {str(filtered_entities)} entities for local model analysis for language: {language}") 
+
+    return filtered_entities
+
 class CustomImageAnalyzerEngine:
     def __init__(
         self,
@@ -323,7 +351,7 @@ class CustomImageAnalyzerEngine:
         tesseract_config: Optional[str] = None,
         paddle_kwargs: Optional[Dict[str, Any]] = None,
         image_preprocessor: Optional[ImagePreprocessor] = None,
-        language: Optional[str] = None
+        language: Optional[str] = DEFAULT_LANGUAGE
     ):
         """
         Initializes the CustomImageAnalyzerEngine.
@@ -659,10 +687,11 @@ class CustomImageAnalyzerEngine:
         line_level_ocr_results: List[OCRResult], 
         ocr_results_with_words: Dict[str, Dict],
         chosen_redact_comprehend_entities: List[str],
-        pii_identification_method: str = "Local",
+        pii_identification_method: str = LOCAL_PII_OPTION,
         comprehend_client = "",
         custom_entities:List[str]=custom_entities,   
-        language: Optional[str] = None,
+        language: Optional[str] = DEFAULT_LANGUAGE,
+        nlp_analyser: AnalyzerEngine = None,
         **text_analyzer_kwargs
     ) -> List[CustomImageRecognizerResult]:
 
@@ -670,6 +699,10 @@ class CustomImageAnalyzerEngine:
         page_text_mapping = []
         all_text_line_results = []
         comprehend_query_number = 0
+        print("custom_entities:", custom_entities)
+
+        if not nlp_analyser:
+            nlp_analyser = self.analyzer_engine
 
         # Collect all text and create mapping
         for i, line_level_ocr_result in enumerate(line_level_ocr_results):
@@ -683,9 +716,25 @@ class CustomImageAnalyzerEngine:
         # Determine language for downstream services
         aws_language = language or getattr(self, 'language', None) or 'en'
 
+        valid_language_entities = nlp_analyser.registry.get_supported_entities(languages=[language])
+        valid_language_entities.append("CUSTOM")
+        valid_language_entities.append("CUSTOM_FUZZY")
+
         # Process using either Local or AWS Comprehend
-        if pii_identification_method == "Local":
-            analyzer_result = self.analyzer_engine.analyze(
+        if pii_identification_method == LOCAL_PII_OPTION:
+
+            language_supported_entities = filter_entities_for_language(custom_entities, valid_language_entities, language)
+            
+            if language_supported_entities:
+                text_analyzer_kwargs["entities"] = language_supported_entities
+
+                #if language != "en":
+                #    gr.Info(f"Using {str(language_supported_entities)} entities for local model analysis for language: {language}")
+            else:
+                print(f"No relevant entities supported for language: {language}")
+                raise Warning(f"No relevant entities supported for language: {language}")
+
+            analyzer_result = nlp_analyser.analyze(
                 text=page_text,
                 language=language,
                 **text_analyzer_kwargs
@@ -696,16 +745,23 @@ class CustomImageAnalyzerEngine:
                 all_text_line_results
             )
 
-        elif pii_identification_method == "AWS Comprehend":
+        elif pii_identification_method == AWS_PII_OPTION:            
+
             # Handle custom entities first
             if custom_entities:
                 custom_redact_entities = [
                     entity for entity in chosen_redact_comprehend_entities 
                     if entity in custom_entities
                 ]
+
                 if custom_redact_entities:
-                    text_analyzer_kwargs["entities"] = custom_redact_entities
-                    page_analyser_result = self.analyzer_engine.analyze(
+                    # Filter entities to only include those supported by the language
+                    language_supported_entities = filter_entities_for_language(custom_redact_entities, valid_language_entities, language)
+
+                    if language_supported_entities:
+                        text_analyzer_kwargs["entities"] = language_supported_entities
+
+                    page_analyser_result = nlp_analyser.analyze(
                         text=page_text,
                         language=language,
                         **text_analyzer_kwargs
@@ -1082,31 +1138,45 @@ def run_page_text_redaction(
     chosen_redact_comprehend_entities: List[str],
     line_level_text_results_list: List[str],
     line_characters: List,
-    page_analyser_results: List = [],
-    page_analysed_bounding_boxes: List = [],
+    page_analyser_results: List = list(),
+    page_analysed_bounding_boxes: List = list(),
     comprehend_client = None,
     allow_list: List[str] = None,
-    pii_identification_method: str = "Local",
+    pii_identification_method: str = LOCAL_PII_OPTION,
     nlp_analyser: AnalyzerEngine = None,
     score_threshold: float = 0.0,
     custom_entities: List[str] = None,
-    comprehend_query_number:int = 0#,
-    #merge_text_bounding_boxes_fn = merge_text_bounding_boxes
+    comprehend_query_number:int = 0
 ):
-    #if not merge_text_bounding_boxes_fn:
-    #    raise ValueError("merge_text_bounding_boxes_fn is required")
+    """
+    This function performs text redaction on a page based on the specified language and chosen entities.
+
+    Args:
+        language (str): The language code for the text being processed.
+        chosen_redact_entities (List[str]): A list of entities to be redacted from the text.
+        chosen_redact_comprehend_entities (List[str]): A list of entities identified by AWS Comprehend for redaction.
+        line_level_text_results_list (List[str]): A list of text lines extracted from the page.
+        line_characters (List): A list of character-level information for each line of text.
+        page_analyser_results (List, optional): Results from previous page analysis. Defaults to an empty list.
+        page_analysed_bounding_boxes (List, optional): Bounding boxes for the analysed page. Defaults to an empty list.
+        comprehend_client: The AWS Comprehend client for making API calls. Defaults to None.
+        allow_list (List[str], optional): A list of allowed entities that should not be redacted. Defaults to None.
+        pii_identification_method (str, optional): The method used for PII identification. Defaults to LOCAL_PII_OPTION.
+        nlp_analyser (AnalyzerEngine, optional): The NLP analyzer engine used for local analysis. Defaults to None.
+        score_threshold (float, optional): The threshold score for entity detection. Defaults to 0.0.
+        custom_entities (List[str], optional): A list of custom entities for redaction. Defaults to None.
+        comprehend_query_number (int, optional): A counter for the number of Comprehend queries made. Defaults to 0.
+    """
     
     page_text = ""
-    page_text_mapping = []
-    all_text_line_results = []
+    page_text_mapping = list()
+    all_text_line_results = list()
     comprehend_query_number = 0
 
     # Collect all text from the page
     for i, text_line in enumerate(line_level_text_results_list):
-        #print("line_level_text_results_list:", line_level_text_results_list)
         if chosen_redact_entities:
             if page_text:
-                #page_text += " | "
                 page_text += " "
             
             start_pos = len(page_text)
@@ -1114,16 +1184,18 @@ def run_page_text_redaction(
             page_text_mapping.append((start_pos, i, text_line, line_characters[i]))
 
     # Process based on identification method
-    if pii_identification_method == "Local":
+    if pii_identification_method == LOCAL_PII_OPTION:
         if not nlp_analyser:
             raise ValueError("nlp_analyser is required for Local identification method")
         
-        #print("page text:", page_text)
+        valid_language_entities = nlp_analyser.registry.get_supported_entities(languages=[language])
+        
+        language_supported_entities = filter_entities_for_language(chosen_redact_entities, valid_language_entities, language)
 
         page_analyser_result = nlp_analyser.analyze(
             text=page_text,
             language=language,
-            entities=chosen_redact_entities,
+            entities=language_supported_entities,
             score_threshold=score_threshold,
             return_decision_process=True,
             allow_list=allow_list
@@ -1136,8 +1208,7 @@ def run_page_text_redaction(
             all_text_line_results
         )
 
-
-    elif pii_identification_method == "AWS Comprehend":
+    elif pii_identification_method == AWS_PII_OPTION:
 
         # Process custom entities if any
         if custom_entities:
@@ -1145,11 +1216,14 @@ def run_page_text_redaction(
                 entity for entity in chosen_redact_comprehend_entities 
                 if entity in custom_entities
             ]
-            if custom_redact_entities:
+
+            language_supported_entities = filter_entities_for_language(custom_redact_entities, valid_language_entities, language)
+
+            if language_supported_entities:
                 page_analyser_result = nlp_analyser.analyze(
                     text=page_text,
                     language=language,
-                    entities=custom_redact_entities,
+                    entities=language_supported_entities,
                     score_threshold=score_threshold,
                     return_decision_process=True,
                     allow_list=allow_list

@@ -296,11 +296,11 @@ SHOW_LANGUAGE_SELECTION = get_or_create_env_var("SHOW_LANGUAGE_SELECTION", "Fals
 DEFAULT_LANGUAGE_FULL_NAME = get_or_create_env_var("DEFAULT_LANGUAGE_FULL_NAME", "english")
 DEFAULT_LANGUAGE = get_or_create_env_var("DEFAULT_LANGUAGE", "en") # For tesseract, ensure the Tesseract language data (e.g., fra.traineddata) is installed on your system. You can find the relevant language packs here: https://github.com/tesseract-ocr/tessdata.
 # For paddle, ensure the paddle language data (e.g., fra.traineddata) is installed on your system. You can find information on supported languages here: https://www.paddleocr.ai/main/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5_multi_languages.html
-# For AWS Comprehend, ensure the language data is installed on your system. You can find the relevant language packs here: https://docs.aws.amazon.com/comprehend/latest/dg/supported-languages.html: ('en'|'es'|'fr'|'de'|'it'|'pt'|'ar'|'hi'|'ja'|'ko'|'zh'|'zh-TW')
+# For AWS Comprehend, only English and Spanish are supported https://docs.aws.amazon.com/comprehend/latest/dg/how-pii.html ['en', 'es']
 # AWS Textract automatically detects the language of the document and supports the following languages: https://aws.amazon.com/textract/faqs/#topic-0. 'English, Spanish, Italian, Portuguese, French, German. Handwriting, Invoices and Receipts, Identity documents and Queries processing are in English only'
 
 textract_language_choices = get_or_create_env_var("textract_language_choices", "['en', 'es', 'fr', 'de', 'it', 'pt']")
-aws_comprehend_language_choices = get_or_create_env_var("aws_comprehend_language_choices", "['en', 'es', 'fr', 'de', 'it', 'pt', 'ar', 'hi', 'ja', 'ko', 'zh', 'zh-TW']")
+aws_comprehend_language_choices = get_or_create_env_var("aws_comprehend_language_choices", "['en', 'es']")
 
 # The choices that the user sees
 MAPPED_LANGUAGE_CHOICES = get_or_create_env_var("MAPPED_LANGUAGE_CHOICES", "['english', 'french', 'german', 'spanish', 'italian', 'dutch', 'portuguese', 'chinese', 'japanese', 'korean', 'lithuanian', 'macedonian', 'norwegian_bokmaal', 'polish', 'romanian', 'russian', 'slovenian', 'swedish', 'catalan', 'ukrainian']")

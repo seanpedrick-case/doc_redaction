@@ -524,7 +524,7 @@ with app:
     # WORD / TABULAR DATA TAB
     ###
     with gr.Tab(label="Word or Excel/csv files"):
-        gr.Markdown("""### Choose Word or a tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred.""")        
+        gr.Markdown("""Choose Word or a tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred.""")        
         with gr.Accordion("Upload docx, xlsx, or csv files", open = True):
             in_data_files = gr.File(label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.docx'], height=FILE_INPUT_HEIGHT)
         with gr.Accordion("Redact open text", open = False):
@@ -537,7 +537,7 @@ with app:
         pii_identification_method_drop_tabular = gr.Radio(label = "Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.", value = DEFAULT_PII_DETECTION_MODEL, choices=TABULAR_PII_DETECTION_MODELS)
 
         with gr.Accordion("Anonymisation output format", open = False):
-            anon_strat = gr.Radio(choices=["replace with 'REDACTED'", "replace with <ENTITY_NAME>", "redact completely", "hash", "mask"], label="Select an anonymisation method.", value = "replace with 'REDACTED'") # , "encrypt", "fake_first_name" are also available, but are not currently included as not that useful in current form
+            anon_strat = gr.Radio(choices=["replace with 'REDACTED'", "replace with <ENTITY_NAME>", "redact completely", "hash", "mask"], label="Select an anonymisation method.", value = "redact completely") # , "encrypt", "fake_first_name" are also available, but are not currently included as not that useful in current form
         
         tabular_data_redact_btn = gr.Button("Redact text/data files", variant="primary")
         
@@ -591,16 +591,16 @@ with app:
 
         with gr.Accordion("Redact only selected pages", open = False):
             with gr.Row():
-                page_min = gr.Number(value=0, precision=0,minimum=0,maximum=9999, label="Lowest page to redact")
-                page_max = gr.Number(value=0, precision=0,minimum=0,maximum=9999, label="Highest page to redact")
+                page_min = gr.Number(value=0, precision=0, minimum=0, maximum=9999, label="Lowest page to redact")
+                page_max = gr.Number(value=0, precision=0, minimum=0, maximum=9999, label="Highest page to redact")
 
         if SHOW_LANGUAGE_SELECTION:
             with gr.Accordion("Language selection", open=False):
-                gr.Markdown("""Note that AWS Textract is only compatible with English, Spanish, Italian, Portuguese, French, and German, and handwriting detection is only available in English. AWS Comprehend is additionally compatible with Arabic, Hindi, Japanese, Korean, Chinese, and Chinese (Traditional).
+                gr.Markdown("""Note that AWS Textract is compatible with English, Spanish, Italian, Portuguese, French, and German, and handwriting detection is only available in English. AWS Comprehend for detecting PII is only compatible with English and Spanish.
                 The local models (Tesseract and SpaCy) are compatible with the other languages in the list below. However, the language packs for these models need to be installed on your system. When you first run a document through the app, the language packs will be downloaded automatically, but please expect a delay as the models are large.""")
                 with gr.Row():                    
                     chosen_language_full_name_drop = gr.Dropdown(value = DEFAULT_LANGUAGE_FULL_NAME, choices = MAPPED_LANGUAGE_CHOICES, label="Chosen language", multiselect=False, visible=True)
-                    chosen_language_drop = gr.Dropdown(value = DEFAULT_LANGUAGE, choices = LANGUAGE_CHOICES, label="Chosen language short code", multiselect=False, visible=True)                    
+                    chosen_language_drop = gr.Dropdown(value = DEFAULT_LANGUAGE, choices = LANGUAGE_CHOICES, label="Chosen language short code", multiselect=False, visible=True, interactive=False)                    
         else:
             chosen_language_full_name_drop = gr.Dropdown(value = DEFAULT_LANGUAGE_FULL_NAME, choices = MAPPED_LANGUAGE_CHOICES, label="Chosen language", multiselect=False, visible=False)
             chosen_language_drop = gr.Dropdown(value = DEFAULT_LANGUAGE, choices = LANGUAGE_CHOICES, label="Chosen language short code", multiselect=False, visible=False)
@@ -902,7 +902,7 @@ with app:
     success(fn=anonymise_files_with_open_text, inputs=[in_data_files, in_text, anon_strat, in_colnames,  in_redact_entities, in_allow_list_state, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, first_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox, actual_time_taken_number, chosen_language_drop], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state, actual_time_taken_number], api_name="redact_data")
 
     # If the output file count text box changes, keep going with redacting each data file until done
-    text_tabular_files_done.change(fn=anonymise_files_with_open_text, inputs=[in_data_files, in_text, anon_strat, in_colnames, chosen_language_drop, in_redact_entities, in_allow_list_state, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, second_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox, actual_time_taken_number, chosen_language_drop], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state, actual_time_taken_number]).\
+    text_tabular_files_done.change(fn=anonymise_files_with_open_text, inputs=[in_data_files, in_text, anon_strat, in_colnames,  in_redact_entities, in_allow_list_state, text_tabular_files_done, text_output_summary, text_output_file_list_state, log_files_output_list_state, in_excel_sheets, second_loop_state, output_folder_textbox, in_deny_list_state, max_fuzzy_spelling_mistakes_num, pii_identification_method_drop_tabular, in_redact_comprehend_entities, comprehend_query_number, aws_access_key_textbox, aws_secret_key_textbox, actual_time_taken_number, chosen_language_drop], outputs=[text_output_summary, text_output_file, text_output_file_list_state, text_tabular_files_done, log_files_output, log_files_output_list_state, actual_time_taken_number]).\
     success(fn = reveal_feedback_buttons, outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title])
 
     ###
