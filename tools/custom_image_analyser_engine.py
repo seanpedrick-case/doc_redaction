@@ -717,8 +717,10 @@ class CustomImageAnalyzerEngine:
         aws_language = language or getattr(self, 'language', None) or 'en'
 
         valid_language_entities = nlp_analyser.registry.get_supported_entities(languages=[language])
-        valid_language_entities.append("CUSTOM")
-        valid_language_entities.append("CUSTOM_FUZZY")
+        if "CUSTOM" not in valid_language_entities:
+            valid_language_entities.append("CUSTOM")
+        if "CUSTOM_FUZZY" not in valid_language_entities:
+            valid_language_entities.append("CUSTOM_FUZZY")
 
         # Process using either Local or AWS Comprehend
         if pii_identification_method == LOCAL_PII_OPTION:
@@ -1183,12 +1185,17 @@ def run_page_text_redaction(
             page_text += text_line.text
             page_text_mapping.append((start_pos, i, text_line, line_characters[i]))
 
+
+    valid_language_entities = nlp_analyser.registry.get_supported_entities(languages=[language])
+    if "CUSTOM" not in valid_language_entities:
+        valid_language_entities.append("CUSTOM")
+    if "CUSTOM_FUZZY" not in valid_language_entities:
+        valid_language_entities.append("CUSTOM_FUZZY")
+
     # Process based on identification method
     if pii_identification_method == LOCAL_PII_OPTION:
         if not nlp_analyser:
             raise ValueError("nlp_analyser is required for Local identification method")
-        
-        valid_language_entities = nlp_analyser.registry.get_supported_entities(languages=[language])
         
         language_supported_entities = filter_entities_for_language(chosen_redact_entities, valid_language_entities, language)
 

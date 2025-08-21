@@ -275,7 +275,7 @@ with app:
             text_extract_method_radio = gr.Radio(label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £2.66 ($3.50) per 1,000 pages with signature detection (default), £1.14 ($1.50) without. Change the settings in the tab below (AWS Textract signature detection) to change this.""", value = DEFAULT_TEXT_EXTRACTION_MODEL, choices=TEXT_EXTRACTION_MODELS)
 
             with gr.Accordion("Enable AWS Textract signature detection (default is off)", open = False):
-                handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract extraction settings", choices=["Extract handwriting", "Extract signatures"], value=["Extract handwriting", "Extract signatures"])
+                handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract extraction settings", choices=["Extract handwriting", "Extract signatures"], value=["Extract handwriting"])
 
             with gr.Row(equal_height=True):
                 pii_identification_method_drop = gr.Radio(label = """Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""", value = DEFAULT_PII_DETECTION_MODEL, choices=PII_DETECTION_MODELS)
@@ -302,7 +302,7 @@ with app:
                             cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible=True)
 
             if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
-                with gr.Accordion("Submit whole document to AWS Textract API (quicker, max 3,000 pages per document)", open = False, visible=True):
+                with gr.Accordion("Submit whole document to AWS Textract API (quickest text extraction for large documents)", open = False, visible=True):
                     with gr.Row(equal_height=True):
                         gr.Markdown("""Document will be submitted to AWS Textract API service to extract all text in the document. Processing will take place on (secure) AWS servers, and outputs will be stored on S3 for up to 7 days. To download the results, click 'Check status' below and they will be downloaded if ready.""")
                     with gr.Row(equal_height=True):
