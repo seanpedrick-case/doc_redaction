@@ -536,7 +536,7 @@ with app:
 
         pii_identification_method_drop_tabular = gr.Radio(label = "Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.", value = DEFAULT_PII_DETECTION_MODEL, choices=TABULAR_PII_DETECTION_MODELS)
 
-        with gr.Accordion("Anonymisation output format", open = False):
+        with gr.Accordion("Anonymisation output format - by default will replace PII with a blank space", open = False):
             anon_strat = gr.Radio(choices=["replace with 'REDACTED'", "replace with <ENTITY_NAME>", "redact completely", "hash", "mask"], label="Select an anonymisation method.", value = "redact completely") # , "encrypt", "fake_first_name" are also available, but are not currently included as not that useful in current form
         
         tabular_data_redact_btn = gr.Button("Redact text/data files", variant="primary")

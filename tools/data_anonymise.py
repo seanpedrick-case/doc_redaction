@@ -49,7 +49,7 @@ def initial_clean(text:str) -> str:
     return text
 
 def process_recognizer_result(result:RecognizerResult, recognizer_result:RecognizerResult, data_row:int, dictionary_key:int, df_dict:Dict[str, List[Any]], keys_to_keep:List[str]) -> List[str]:
-        output = []
+        output = list()
 
         if hasattr(result, 'value'):
             text = result.value[data_row]
@@ -89,7 +89,7 @@ def generate_decision_process_output(analyzer_results: List[DictAnalyzerResult],
     Returns:
         str: A string containing the detailed decision process output.
     """
-    decision_process_output = []
+    decision_process_output = list()
     keys_to_keep = ['entity_type', 'start', 'end']
 
     # Run through each column to analyse for PII
@@ -124,16 +124,10 @@ def anon_consistent_names(df:pd.DataFrame) -> pd.DataFrame:
     analyzer_results = batch_analyzer.analyze_dict(df_dict, language=DEFAULT_LANGUAGE)
     analyzer_results = list(analyzer_results)
 
-    # + tags=[]
     text = analyzer_results[3].value
 
-    # + tags=[]
     recognizer_result = str(analyzer_results[3].recognizer_results)
 
-    # + tags=[]
-    recognizer_result
-
-    # + tags=[]
     data_str = recognizer_result  # abbreviated for brevity
 
     # Adjusting the parse_dict function to handle trailing ']'
@@ -156,7 +150,7 @@ def anon_consistent_names(df:pd.DataFrame) -> pd.DataFrame:
 
     # Re-running the improved processing code
 
-    result = []
+    result = list()
 
     for lst_str in list_strs:
         # Splitting each list string into individual dictionary strings
@@ -167,41 +161,30 @@ def anon_consistent_names(df:pd.DataFrame) -> pd.DataFrame:
         dicts = [parse_dict(d) for d in dict_strs]
         result.append(dicts)
 
-    #result
-
-    # + tags=[]
-    names = []
+    names = list()
 
     for idx, paragraph in enumerate(text):
-        paragraph_texts = []
+        paragraph_texts = list()
         for dictionary in result[idx]:
             if dictionary['type'] == 'PERSON':
                 paragraph_texts.append(paragraph[dictionary['start']:dictionary['end']])
         names.append(paragraph_texts)
 
-    # + tags=[]
     # Flatten the list of lists and extract unique names
     unique_names = list(set(name for sublist in names for name in sublist))
     
-    # + tags=[]
     fake_names = pd.Series(unique_names).apply(fake_first_name)
 
-    # + tags=[]
     mapping_df = pd.DataFrame(data={"Unique names":unique_names,
                     "Fake names": fake_names})
 
-    # + tags=[]
-    # Convert mapping dataframe to dictionary
     # Convert mapping dataframe to dictionary, adding word boundaries for full-word match
     name_map = {r'\b' + k + r'\b': v for k, v in zip(mapping_df['Unique names'], mapping_df['Fake names'])}
 
-    # + tags=[]
     name_map
 
-    # + tags=[]
     scrubbed_df_consistent_names = df.replace(name_map, regex = True)
 
-    # + tags=[]
     scrubbed_df_consistent_names
 
     return scrubbed_df_consistent_names
@@ -230,8 +213,8 @@ def handle_docx_anonymisation(
     
     # 1. Load the document and extract text elements
     doc = docx.Document(file_path)
-    text_elements = []  # This will store the actual docx objects (paragraphs, cells)
-    original_texts = [] # This will store the text from those objects
+    text_elements = list()  # This will store the actual docx objects (paragraphs, cells)
+    original_texts = list() # This will store the text from those objects
 
     # Extract from paragraphs
     for para in doc.paragraphs:
@@ -307,16 +290,16 @@ def anonymise_files_with_open_text(file_paths: List[str],
                          chosen_redact_entities: List[str], 
                          in_allow_list: List[str] = None, 
                          latest_file_completed: int = 0, 
-                         out_message: list = [], 
-                         out_file_paths: list = [], 
-                         log_files_output_paths: list = [],
-                         in_excel_sheets: list = [],
+                         out_message: list = list(), 
+                         out_file_paths: list = list(), 
+                         log_files_output_paths: list = list(),
+                         in_excel_sheets: list = list(),
                          first_loop_state: bool = False,
                          output_folder: str = OUTPUT_FOLDER,
-                         in_deny_list:list[str]=[],
+                         in_deny_list:list[str]=list(),
                          max_fuzzy_spelling_mistakes_num:int=0,
                          pii_identification_method:str="Local",
-                         chosen_redact_comprehend_entities:List[str]=[],
+                         chosen_redact_comprehend_entities:List[str]=list(),
                          comprehend_query_number:int=0,
                          aws_access_key_textbox:str='',
                          aws_secret_key_textbox:str='',
@@ -367,8 +350,8 @@ def anonymise_files_with_open_text(file_paths: List[str],
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
         latest_file_completed = 0
-        out_message = []
-        out_file_paths = []
+        out_message = list()
+        out_file_paths = list()
 
     # Load file
     # If out message or out_file_paths are blank, change to a list so it can be appended to
@@ -378,23 +361,23 @@ def anonymise_files_with_open_text(file_paths: List[str],
     #print("log_files_output_paths:",log_files_output_paths)
 
     if isinstance(log_files_output_paths, str):
-        log_files_output_paths = []
+        log_files_output_paths = list()
 
     if not out_file_paths:
-        out_file_paths = []  
+        out_file_paths = list()  
     
     if isinstance(in_allow_list, list):
         if in_allow_list:
             in_allow_list_flat = in_allow_list
         else:
-            in_allow_list_flat = []
+            in_allow_list_flat = list()
     elif isinstance(in_allow_list, pd.DataFrame):
         if not in_allow_list.empty:
             in_allow_list_flat = list(in_allow_list.iloc[:, 0].unique())
         else:
-            in_allow_list_flat = []
+            in_allow_list_flat = list()
     else:
-        in_allow_list_flat = []
+        in_allow_list_flat = list()
     
     anon_df = pd.DataFrame()
 
@@ -520,6 +503,9 @@ def anonymise_files_with_open_text(file_paths: List[str],
 
         actual_time_taken_number += out_time_float
 
+        if isinstance(out_message, str):
+            out_message = [out_message]
+        
         out_message.append("Anonymisation of file '" + out_file_part + "' successfully completed in")
 
         out_message_out = '\n'.join(out_message)
@@ -549,11 +535,11 @@ def tabular_anonymise_wrapper_func(
     file_type: str, 
     anon_xlsx_export_file_name: str, 
     log_files_output_paths: List[str],
-    in_deny_list: List[str]=[],
+    in_deny_list: List[str]=list(),
     max_fuzzy_spelling_mistakes_num:int=0,
     pii_identification_method:str="Local",
     comprehend_language: Optional[str] = None,
-    chosen_redact_comprehend_entities:List[str]=[], 
+    chosen_redact_comprehend_entities:List[str]=list(), 
     comprehend_query_number:int=0,
     comprehend_client:botocore.client.BaseClient="",
     nlp_analyser: AnalyzerEngine = nlp_analyser,
@@ -599,7 +585,7 @@ def tabular_anonymise_wrapper_func(
         Returns:
             A list containing the common strings.
         """
-        common_strings = []
+        common_strings = list()
         for string in list1:
             if string in list2:
                 common_strings.append(string)
@@ -615,7 +601,9 @@ def tabular_anonymise_wrapper_func(
 
     if any_cols_found == False:
         out_message = "No chosen columns found in dataframe: " + out_file_part
+        key_string = ""
         print(out_message)
+        return out_file_paths, out_message, key_string, log_files_output_paths
     else:
         chosen_cols_in_anon_df = get_common_strings(chosen_cols, all_cols_original_order)
 
@@ -686,11 +674,11 @@ def anonymise_script(df:pd.DataFrame,
                      anon_strat:str,
                      language:str,
                      chosen_redact_entities:List[str],
-                     in_allow_list:List[str]=[],
-                     in_deny_list:List[str]=[],
+                     in_allow_list:List[str]=list(),
+                     in_deny_list:List[str]=list(),
                      max_fuzzy_spelling_mistakes_num:int=0,
                      pii_identification_method:str="Local",
-                     chosen_redact_comprehend_entities:List[str]=[],
+                     chosen_redact_comprehend_entities:List[str]=list(),
                      comprehend_query_number:int=0,
                      comprehend_client:botocore.client.BaseClient="",                     
                      custom_entities:List[str]=custom_entities,
@@ -714,18 +702,20 @@ def anonymise_script(df:pd.DataFrame,
         if in_allow_list:
             in_allow_list_flat = in_allow_list
         else:
-            in_allow_list_flat = []
+            in_allow_list_flat = list()
     elif isinstance(in_allow_list, pd.DataFrame):
         if not in_allow_list.empty:
             in_allow_list_flat = list(in_allow_list.iloc[:, 0].unique())
         else:
-            in_allow_list_flat = []
+            in_allow_list_flat = list()
     else:
-        in_allow_list_flat = []
+        in_allow_list_flat = list()
 
     ### Language check - check if selected language packs exist
     try:
-        progress(0.1, desc=f"Loading SpaCy model for {language}")
+        if language != "en":
+            progress(0.1, desc=f"Loading SpaCy model for {language}")
+            
         load_spacy_model(language)
         
     except Exception as e:
@@ -748,7 +738,7 @@ def anonymise_script(df:pd.DataFrame,
             in_deny_list = in_deny_list.iloc[:, 0].tolist()
         else:
             # Handle the case where the DataFrame is empty
-            in_deny_list = []  # or some default value
+            in_deny_list = list()  # or some default value
 
         # Sort the strings in order from the longest string to the shortest
         in_deny_list = sorted(in_deny_list, key=len, reverse=True)
@@ -766,7 +756,7 @@ def anonymise_script(df:pd.DataFrame,
     batch_analyzer = BatchAnalyzerEngine(analyzer_engine=nlp_analyser)
     anonymizer = AnonymizerEngine()#conflict_resolution=ConflictResolutionStrategy.MERGE_SIMILAR_OR_CONTAINED)
     batch_anonymizer = BatchAnonymizerEngine(anonymizer_engine = anonymizer)    
-    analyzer_results = []
+    analyzer_results = list()
 
     # Use provided comprehend language or fall back to main language
     language = language

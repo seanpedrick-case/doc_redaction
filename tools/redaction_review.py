@@ -615,7 +615,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     # Now, when we group, we use `sort=False`. This tells groupby to respect the
     # DataFrame's current order, which we have just manually set. This is slightly
     # more efficient than letting it sort again.
-    for image_path, group in merged_df.groupby('image', sort=False):
+    for image_path, group in merged_df.groupby('image', sort=False, observed=False):
         # The progress.tqdm wrapper can be added back around the groupby object as you had it.
         # for image_path, group in progress.tqdm(merged_df.groupby('image', sort=False), ...):
         

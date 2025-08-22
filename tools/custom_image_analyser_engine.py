@@ -699,7 +699,6 @@ class CustomImageAnalyzerEngine:
         page_text_mapping = list()
         all_text_line_results = list()
         comprehend_query_number = 0
-        print("custom_entities:", custom_entities)
 
         if not nlp_analyser:
             nlp_analyser = self.analyzer_engine
