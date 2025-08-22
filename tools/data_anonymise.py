@@ -6,16 +6,19 @@ import time
 import boto3
 import botocore
 import pandas as pd
+import docx
+import gradio as gr
 from openpyxl import Workbook
 from faker import Faker
 from gradio import Progress
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from botocore.client import BaseClient
 from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
 from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine, DictAnalyzerResult, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
-from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, OUTPUT_FOLDER
+from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, OUTPUT_FOLDER, DEFAULT_LANGUAGE, aws_comprehend_language_choices
 from tools.helper_functions import get_file_name_without_type, read_file, detect_file_type
-from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_word_list_recogniser, CustomWordFuzzyRecognizer, custom_entities
+from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_word_list_recogniser, CustomWordFuzzyRecognizer, custom_entities, create_nlp_analyser, load_spacy_model
 # Use custom version of analyze_dict to be able to track progress
 from tools.presidio_analyzer_custom import analyze_dict
 
@@ -46,7 +49,7 @@ def initial_clean(text:str) -> str:
     return text
 
 def process_recognizer_result(result:RecognizerResult, recognizer_result:RecognizerResult, data_row:int, dictionary_key:int, df_dict:Dict[str, List[Any]], keys_to_keep:List[str]) -> List[str]:
-        output = []
+        output = list()
 
         if hasattr(result, 'value'):
             text = result.value[data_row]
@@ -86,7 +89,7 @@ def generate_decision_process_output(analyzer_results: List[DictAnalyzerResult],
     Returns:
         str: A string containing the detailed decision process output.
     """
-    decision_process_output = []
+    decision_process_output = list()
     keys_to_keep = ['entity_type', 'start', 'end']
 
     # Run through each column to analyse for PII
@@ -115,22 +118,16 @@ def anon_consistent_names(df:pd.DataFrame) -> pd.DataFrame:
     # ## Pick out common names and replace them with the same person value
     df_dict = df.to_dict(orient="list")
 
-    analyzer = AnalyzerEngine()
-    batch_analyzer = BatchAnalyzerEngine(analyzer_engine=analyzer)
+    #analyzer = AnalyzerEngine()
+    batch_analyzer = BatchAnalyzerEngine(analyzer_engine=nlp_analyser)
 
-    analyzer_results = batch_analyzer.analyze_dict(df_dict, language="en")
+    analyzer_results = batch_analyzer.analyze_dict(df_dict, language=DEFAULT_LANGUAGE)
     analyzer_results = list(analyzer_results)
 
-    # + tags=[]
     text = analyzer_results[3].value
 
-    # + tags=[]
     recognizer_result = str(analyzer_results[3].recognizer_results)
 
-    # + tags=[]
-    recognizer_result
-
-    # + tags=[]
     data_str = recognizer_result  # abbreviated for brevity
 
     # Adjusting the parse_dict function to handle trailing ']'
@@ -153,7 +150,7 @@ def anon_consistent_names(df:pd.DataFrame) -> pd.DataFrame:
 
     # Re-running the improved processing code
 
-    result = []
+    result = list()
 
     for lst_str in list_strs:
         # Splitting each list string into individual dictionary strings
@@ -164,73 +161,156 @@ def anon_consistent_names(df:pd.DataFrame) -> pd.DataFrame:
         dicts = [parse_dict(d) for d in dict_strs]
         result.append(dicts)
 
-    #result
-
-    # + tags=[]
-    names = []
+    names = list()
 
     for idx, paragraph in enumerate(text):
-        paragraph_texts = []
+        paragraph_texts = list()
         for dictionary in result[idx]:
             if dictionary['type'] == 'PERSON':
                 paragraph_texts.append(paragraph[dictionary['start']:dictionary['end']])
         names.append(paragraph_texts)
 
-    # + tags=[]
     # Flatten the list of lists and extract unique names
     unique_names = list(set(name for sublist in names for name in sublist))
     
-    # + tags=[]
     fake_names = pd.Series(unique_names).apply(fake_first_name)
 
-    # + tags=[]
     mapping_df = pd.DataFrame(data={"Unique names":unique_names,
                     "Fake names": fake_names})
 
-    # + tags=[]
-    # Convert mapping dataframe to dictionary
     # Convert mapping dataframe to dictionary, adding word boundaries for full-word match
     name_map = {r'\b' + k + r'\b': v for k, v in zip(mapping_df['Unique names'], mapping_df['Fake names'])}
 
-    # + tags=[]
     name_map
 
-    # + tags=[]
     scrubbed_df_consistent_names = df.replace(name_map, regex = True)
 
-    # + tags=[]
     scrubbed_df_consistent_names
 
     return scrubbed_df_consistent_names
 
-def anonymise_data_files(file_paths: List[str], 
+def handle_docx_anonymisation(
+    file_path: str,
+    output_folder: str,
+    anon_strat: str,
+    chosen_redact_entities: List[str],
+    in_allow_list: List[str],
+    in_deny_list: List[str],
+    max_fuzzy_spelling_mistakes_num: int,
+    pii_identification_method: str,
+    chosen_redact_comprehend_entities: List[str],
+    comprehend_query_number: int,
+    comprehend_client: BaseClient,
+    language: Optional[str] = DEFAULT_LANGUAGE,
+    nlp_analyser: AnalyzerEngine = nlp_analyser
+):
+    """
+    Anonymises a .docx file by extracting text, processing it, and re-inserting it.
+
+    Returns:
+        A tuple containing the output file path and the log file path.
+    """
+    
+    # 1. Load the document and extract text elements
+    doc = docx.Document(file_path)
+    text_elements = list()  # This will store the actual docx objects (paragraphs, cells)
+    original_texts = list() # This will store the text from those objects
+
+    # Extract from paragraphs
+    for para in doc.paragraphs:
+        if para.text.strip():  # Only process non-empty paragraphs
+            text_elements.append(para)
+            original_texts.append(para.text)
+
+    # Extract from tables
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                if cell.text.strip(): # Only process non-empty cells
+                    text_elements.append(cell)
+                    original_texts.append(cell.text)
+    
+    # If there's no text to process, return early
+    if not original_texts:
+        print(f"No text found in {file_path}. Skipping.")
+        return None, None
+
+    # 2. Convert to a DataFrame for the existing anonymisation script
+    df_to_anonymise = pd.DataFrame({'text_to_redact': original_texts})
+    
+    # 3. Call the core anonymisation script
+    anonymised_df, _, decision_log = anonymise_script(
+        df=df_to_anonymise,
+        anon_strat=anon_strat,
+        language=language,
+        chosen_redact_entities=chosen_redact_entities,
+        in_allow_list=in_allow_list,
+        in_deny_list=in_deny_list,
+        max_fuzzy_spelling_mistakes_num=max_fuzzy_spelling_mistakes_num,
+        pii_identification_method=pii_identification_method,
+        chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+        comprehend_query_number=comprehend_query_number,
+        comprehend_client=comprehend_client,
+        nlp_analyser=nlp_analyser
+    )
+
+    anonymised_texts = anonymised_df['text_to_redact'].tolist()
+
+    # 4. Re-insert the anonymised text back into the document objects
+    for element, new_text in zip(text_elements, anonymised_texts):
+        if isinstance(element, docx.text.paragraph.Paragraph):
+            # Clear existing content (runs) and add the new text in a single new run
+            element.clear()
+            element.add_run(new_text)
+        elif isinstance(element, docx.table._Cell):
+            # For cells, setting .text works similarly
+            element.text = new_text
+
+    # 5. Save the redacted document and the log file
+    base_name = os.path.basename(file_path)
+    file_name_without_ext = os.path.splitext(base_name)[0]
+    
+    output_docx_path = os.path.join(output_folder, f"{file_name_without_ext}_redacted.docx")
+    log_file_path = os.path.join(output_folder, f"{file_name_without_ext}_redacted_log.txt")
+
+    output_xlsx_path = os.path.join(output_folder, f"{file_name_without_ext}_redacted.csv")
+
+    anonymised_df.to_csv(output_xlsx_path, encoding="utf-8-sig")    
+    doc.save(output_docx_path)
+    
+    with open(log_file_path, "w", encoding="utf-8-sig") as f:
+        f.write(decision_log)
+
+    return output_docx_path, log_file_path, output_xlsx_path
+
+def anonymise_files_with_open_text(file_paths: List[str], 
                          in_text: str, 
                          anon_strat: str, 
                          chosen_cols: List[str],
-                         language: str, 
                          chosen_redact_entities: List[str], 
                          in_allow_list: List[str] = None, 
                          latest_file_completed: int = 0, 
-                         out_message: list = [], 
-                         out_file_paths: list = [], 
-                         log_files_output_paths: list = [],
-                         in_excel_sheets: list = [],
+                         out_message: list = list(), 
+                         out_file_paths: list = list(), 
+                         log_files_output_paths: list = list(),
+                         in_excel_sheets: list = list(),
                          first_loop_state: bool = False,
                          output_folder: str = OUTPUT_FOLDER,
-                         in_deny_list:list[str]=[],
+                         in_deny_list:list[str]=list(),
                          max_fuzzy_spelling_mistakes_num:int=0,
                          pii_identification_method:str="Local",
-                         chosen_redact_comprehend_entities:List[str]=[],
+                         chosen_redact_comprehend_entities:List[str]=list(),
                          comprehend_query_number:int=0,
                          aws_access_key_textbox:str='',
                          aws_secret_key_textbox:str='',
                          actual_time_taken_number:float=0,
+                         language: Optional[str] = None,
                          progress: Progress = Progress(track_tqdm=True)):
     """
     This function anonymises data files based on the provided parameters.
 
     Parameters:
-    - file_paths (List[str]): A list of file paths to anonymise.
+    - file_paths (List[str]): A list of file paths to anonymise: '.xlsx', '.xls', '.csv', '.parquet', or '.docx'.
     - in_text (str): The text to anonymise if file_paths is 'open_text'.
     - anon_strat (str): The anonymisation strategy to use.
     - chosen_cols (List[str]): A list of column names to anonymise.
@@ -252,17 +332,26 @@ def anonymise_data_files(file_paths: List[str],
     - aws_access_key_textbox (str, optional): AWS access key for account with Textract and Comprehend permissions.
     - aws_secret_key_textbox (str, optional): AWS secret key for account with Textract and Comprehend permissions.
     - actual_time_taken_number (float, optional): Time taken to do the redaction.
+    - language (str, optional): The language of the text to anonymise.
     - progress (Progress, optional): A Progress object to track progress. Defaults to a Progress object with track_tqdm=True.
     """
     
     tic = time.perf_counter()
     comprehend_client = ""
+    
+    # Use provided language or default
+    language = language or DEFAULT_LANGUAGE
+
+    if pii_identification_method == "AWS Comprehend":
+        if language not in aws_comprehend_language_choices:
+            out_message = f"Please note that this language is not supported by AWS Comprehend: {language}"
+            raise Warning(out_message)
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
         latest_file_completed = 0
-        out_message = []
-        out_file_paths = []
+        out_message = list()
+        out_file_paths = list()
 
     # Load file
     # If out message or out_file_paths are blank, change to a list so it can be appended to
@@ -272,23 +361,23 @@ def anonymise_data_files(file_paths: List[str],
     #print("log_files_output_paths:",log_files_output_paths)
 
     if isinstance(log_files_output_paths, str):
-        log_files_output_paths = []
+        log_files_output_paths = list()
 
     if not out_file_paths:
-        out_file_paths = []  
+        out_file_paths = list()  
     
     if isinstance(in_allow_list, list):
         if in_allow_list:
             in_allow_list_flat = in_allow_list
         else:
-            in_allow_list_flat = []
+            in_allow_list_flat = list()
     elif isinstance(in_allow_list, pd.DataFrame):
         if not in_allow_list.empty:
             in_allow_list_flat = list(in_allow_list.iloc[:, 0].unique())
         else:
-            in_allow_list_flat = []
+            in_allow_list_flat = list()
     else:
-        in_allow_list_flat = []
+        in_allow_list_flat = list()
     
     anon_df = pd.DataFrame()
 
@@ -342,15 +431,37 @@ def anonymise_data_files(file_paths: List[str],
             sheet_name = ""
             file_type = ""
 
-            out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=OUTPUT_FOLDER)
+            out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=OUTPUT_FOLDER)
         else:
             # If file is an xlsx, we are going to run through all the Excel sheets to anonymise them separately.
             file_type = detect_file_type(anon_file)
             print("File type is:", file_type)
 
             out_file_part = get_file_name_without_type(anon_file.name)
+
+            if file_type == 'docx':
+                output_path, log_path, output_xlsx_path = handle_docx_anonymisation(
+                    file_path=anon_file.name, # .name if it's a temp file object
+                    output_folder=output_folder,
+                    anon_strat=anon_strat,
+                    chosen_redact_entities=chosen_redact_entities,
+                    in_allow_list=in_allow_list_flat,
+                    in_deny_list=in_deny_list,
+                    max_fuzzy_spelling_mistakes_num=max_fuzzy_spelling_mistakes_num,
+                    pii_identification_method=pii_identification_method,
+                    chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+                    comprehend_query_number=comprehend_query_number,
+                    comprehend_client=comprehend_client,
+                    language=language
+                )
+                if output_path:
+                    out_file_paths.append(output_path)
+                if output_xlsx_path:
+                    out_file_paths.append(output_xlsx_path)
+                if log_path:
+                    log_files_output_paths.append(log_path)
     
-            if file_type == 'xlsx':
+            elif file_type == 'xlsx':
                 print("Running through all xlsx sheets")
                 #anon_xlsx = pd.ExcelFile(anon_file)
                 if not in_excel_sheets:
@@ -371,14 +482,14 @@ def anonymise_data_files(file_paths: List[str],
 
                     anon_df = pd.read_excel(anon_file, sheet_name=sheet_name)
 
-                    out_file_paths, out_message, key_string, log_files_output_paths  = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+                    out_file_paths, out_message, key_string, log_files_output_paths  = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
 
             else:
                 sheet_name = ""
                 anon_df = read_file(anon_file)
                 out_file_part = get_file_name_without_type(anon_file.name)
 
-                out_file_paths, out_message, key_string, log_files_output_paths = anon_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+                out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
 
         # Increase latest file completed count unless we are at the last file
         if latest_file_completed != len(file_paths):
@@ -392,6 +503,9 @@ def anonymise_data_files(file_paths: List[str],
 
         actual_time_taken_number += out_time_float
 
+        if isinstance(out_message, str):
+            out_message = [out_message]
+        
         out_message.append("Anonymisation of file '" + out_file_part + "' successfully completed in")
 
         out_message_out = '\n'.join(out_message)
@@ -406,7 +520,7 @@ def anonymise_data_files(file_paths: List[str],
     
     return out_message_out, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, actual_time_taken_number
 
-def anon_wrapper_func(
+def tabular_anonymise_wrapper_func(
     anon_file: str, 
     anon_df: pd.DataFrame, 
     chosen_cols: List[str], 
@@ -415,18 +529,20 @@ def anon_wrapper_func(
     out_message: str, 
     excel_sheet_name: str, 
     anon_strat: str, 
-    language: str, 
+    language: str,
     chosen_redact_entities: List[str], 
     in_allow_list: List[str], 
     file_type: str, 
     anon_xlsx_export_file_name: str, 
     log_files_output_paths: List[str],
-    in_deny_list: List[str]=[],
+    in_deny_list: List[str]=list(),
     max_fuzzy_spelling_mistakes_num:int=0,
     pii_identification_method:str="Local",
-    chosen_redact_comprehend_entities:List[str]=[], 
+    comprehend_language: Optional[str] = None,
+    chosen_redact_comprehend_entities:List[str]=list(), 
     comprehend_query_number:int=0,
     comprehend_client:botocore.client.BaseClient="",
+    nlp_analyser: AnalyzerEngine = nlp_analyser,
     output_folder: str = OUTPUT_FOLDER
 ):
     """
@@ -469,7 +585,7 @@ def anon_wrapper_func(
         Returns:
             A list containing the common strings.
         """
-        common_strings = []
+        common_strings = list()
         for string in list1:
             if string in list2:
                 common_strings.append(string)
@@ -485,7 +601,9 @@ def anon_wrapper_func(
 
     if any_cols_found == False:
         out_message = "No chosen columns found in dataframe: " + out_file_part
+        key_string = ""
         print(out_message)
+        return out_file_paths, out_message, key_string, log_files_output_paths
     else:
         chosen_cols_in_anon_df = get_common_strings(chosen_cols, all_cols_original_order)
 
@@ -495,9 +613,12 @@ def anon_wrapper_func(
     anon_df_part = anon_df[chosen_cols_in_anon_df]
     anon_df_remain = anon_df.drop(chosen_cols_in_anon_df, axis = 1)
 
-    # Anonymise the selected columns
-    anon_df_part_out, key_string, decision_process_output_str = anonymise_script(anon_df_part, anon_strat, language, chosen_redact_entities, in_allow_list, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client)
         
+    # Anonymise the selected columns
+    anon_df_part_out, key_string, decision_process_output_str = anonymise_script(anon_df_part, anon_strat, language, chosen_redact_entities, in_allow_list, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, nlp_analyser=nlp_analyser)
+
+    anon_df_part_out.replace("^nan$", "", regex=True, inplace=True)
+
     # Rejoin the dataframe together
     anon_df_out = pd.concat([anon_df_part_out, anon_df_remain], axis = 1)
     anon_df_out = anon_df_out[all_cols_original_order]
@@ -531,7 +652,7 @@ def anon_wrapper_func(
 
     else:
         anon_export_file_name = output_folder + out_file_part + "_anon_" + anon_strat_txt + ".csv"
-        anon_df_out.to_csv(anon_export_file_name, index = None)
+        anon_df_out.to_csv(anon_export_file_name, index = None, encoding="utf-8-sig")
 
         decision_process_log_output_file = anon_export_file_name + "_decision_process_output.txt"
         with open(decision_process_log_output_file, "w") as f:
@@ -553,14 +674,15 @@ def anonymise_script(df:pd.DataFrame,
                      anon_strat:str,
                      language:str,
                      chosen_redact_entities:List[str],
-                     in_allow_list:List[str]=[],
-                     in_deny_list:List[str]=[],
+                     in_allow_list:List[str]=list(),
+                     in_deny_list:List[str]=list(),
                      max_fuzzy_spelling_mistakes_num:int=0,
                      pii_identification_method:str="Local",
-                     chosen_redact_comprehend_entities:List[str]=[],
+                     chosen_redact_comprehend_entities:List[str]=list(),
                      comprehend_query_number:int=0,
-                     comprehend_client:botocore.client.BaseClient="",
+                     comprehend_client:botocore.client.BaseClient="",                     
                      custom_entities:List[str]=custom_entities,
+                     nlp_analyser: AnalyzerEngine = nlp_analyser,
                      progress:Progress=Progress(track_tqdm=False)):
     '''
     Conduct anonymisation of a dataframe using Presidio and/or AWS Comprehend if chosen.
@@ -580,21 +702,43 @@ def anonymise_script(df:pd.DataFrame,
         if in_allow_list:
             in_allow_list_flat = in_allow_list
         else:
-            in_allow_list_flat = []
+            in_allow_list_flat = list()
     elif isinstance(in_allow_list, pd.DataFrame):
         if not in_allow_list.empty:
             in_allow_list_flat = list(in_allow_list.iloc[:, 0].unique())
         else:
-            in_allow_list_flat = []
+            in_allow_list_flat = list()
     else:
-        in_allow_list_flat = []
+        in_allow_list_flat = list()
+
+    ### Language check - check if selected language packs exist
+    try:
+        if language != "en":
+            progress(0.1, desc=f"Loading SpaCy model for {language}")
+            
+        load_spacy_model(language)
+        
+    except Exception as e:
+        print(f"Error downloading language packs for {language}: {e}")
+        raise Exception(f"Error downloading language packs for {language}: {e}")
+    
+    # Try updating the supported languages for the spacy analyser
+    try:
+        nlp_analyser = create_nlp_analyser(language, existing_nlp_analyser=nlp_analyser)
+        # Check list of nlp_analyser recognisers and languages
+        if language != "en":
+            gr.Info(f"Language: {language} only supports the following entity detection: {str(nlp_analyser.registry.get_supported_entities(languages=[language]))}")
+
+    except Exception as e:
+        print(f"Error creating nlp_analyser for {language}: {e}")
+        raise Exception(f"Error creating nlp_analyser for {language}: {e}")
 
     if isinstance(in_deny_list, pd.DataFrame):
         if not in_deny_list.empty:
             in_deny_list = in_deny_list.iloc[:, 0].tolist()
         else:
             # Handle the case where the DataFrame is empty
-            in_deny_list = []  # or some default value
+            in_deny_list = list()  # or some default value
 
         # Sort the strings in order from the longest string to the shortest
         in_deny_list = sorted(in_deny_list, key=len, reverse=True)
@@ -612,7 +756,7 @@ def anonymise_script(df:pd.DataFrame,
     batch_analyzer = BatchAnalyzerEngine(analyzer_engine=nlp_analyser)
     anonymizer = AnonymizerEngine()#conflict_resolution=ConflictResolutionStrategy.MERGE_SIMILAR_OR_CONTAINED)
     batch_anonymizer = BatchAnonymizerEngine(anonymizer_engine = anonymizer)    
-    analyzer_results = []
+    analyzer_results = list()
 
     if pii_identification_method == "Local":
 

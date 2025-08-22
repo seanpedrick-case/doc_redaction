@@ -4,6 +4,7 @@ import os
 import re
 import time
 import json
+import gradio as gr
 import numpy as np
 import pymupdf
 from pymupdf import Document, Page, Rect
@@ -71,7 +72,7 @@ def check_image_size_and_reduce(out_path:str, image:Image):
     Check if a given image size is above around 4.5mb, and reduce size if necessary. 5mb is the maximum possible to submit to AWS Textract.
     '''
 
-    all_img_details = []
+    all_img_details = list()
     page_num = 0
 
     # Check file size and resize if necessary
@@ -133,6 +134,8 @@ def process_single_page_for_image_conversion(pdf_path:str, page_num:int, image_d
             elif pdf_path.lower().endswith(".jpg") or pdf_path.lower().endswith(".png") or pdf_path.lower().endswith(".jpeg"):
                 image = Image.open(pdf_path)
                 image.save(out_path, format="PNG")
+            else:
+                raise Warning("Could not create image.")
 
             width, height = image.size
 
@@ -143,6 +146,7 @@ def process_single_page_for_image_conversion(pdf_path:str, page_num:int, image_d
             return page_num, out_path, width, height
 
         except Exception as e:
+            
             print(f"Error processing page {page_num + 1}: {e}")
             return page_num,  out_path_placeholder, pd.NA, pd.NA
     else:
@@ -159,14 +163,14 @@ def convert_pdf_to_images(pdf_path: str, prepare_for_review:bool=False, page_min
     else:
         page_count = pdfinfo_from_path(pdf_path)['Pages']
 
-    print(f"Number of pages in PDF: {page_count}")
+    print(f"Creating images. Number of pages in PDF: {page_count}")
 
     # Set page max to length of pdf if not specified
     if page_max == 0: page_max = page_count
 
-    results = []
+    results = list()
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = []
+        futures = list()
         for page_num in range(page_min, page_max):
             futures.append(executor.submit(process_single_page_for_image_conversion, pdf_path, page_num, image_dpi, create_images=create_images, input_folder=input_folder))
         
@@ -218,10 +222,10 @@ def process_file_for_image_creation(file_path:str, prepare_for_review:bool=False
 
     else:
         print(f"{file_path} is not an image or PDF file.")
-        img_path = []
-        image_sizes_width = []
-        image_sizes_height = []
-        all_img_details = []
+        img_path = list()
+        image_sizes_width = list()
+        image_sizes_height = list()
+        all_img_details = list()
 
     return img_path, image_sizes_width, image_sizes_height, all_img_details
 
@@ -230,7 +234,7 @@ def get_input_file_names(file_input:List[str]):
     Get list of input files to report to logs.
     '''
 
-    all_relevant_files = []
+    all_relevant_files = list()
     file_name_with_extension = ""
     full_file_name = ""
     total_pdf_page_count = 0
@@ -254,7 +258,7 @@ def get_input_file_names(file_input:List[str]):
         file_extension = os.path.splitext(file_path)[1].lower()
 
         # Check if the file is in acceptable types
-        if (file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet']) & ("review_file" not in file_path_without_ext) & ("ocr_output" not in file_path_without_ext):
+        if (file_extension in ['.jpg', '.jpeg', '.png', '.pdf', '.xlsx', '.csv', '.parquet', '.docx']) & ("review_file" not in file_path_without_ext) & ("ocr_output" not in file_path_without_ext) & ("ocr_results_with_words" not in file_path_without_ext):
             all_relevant_files.append(file_path_without_ext)
             file_name_with_extension = file_path_without_ext + file_extension
             full_file_name = file_path
@@ -415,8 +419,8 @@ def redact_whole_pymupdf_page(rect_height:float, rect_width:float, page:Page, cu
     return whole_page_img_annotation_box
 
 def create_page_size_objects(pymupdf_doc:Document, image_sizes_width:List[float], image_sizes_height:List[float], image_file_paths:List[str]):
-    page_sizes = []
-    original_cropboxes = []
+    page_sizes = list()
+    original_cropboxes = list()
 
     for page_no, page in enumerate(pymupdf_doc):
         reported_page_no = page_no + 1
@@ -439,9 +443,6 @@ def create_page_size_objects(pymupdf_doc:Document, image_sizes_width:List[float]
         out_page_image_sizes['cropbox_x_offset'] = pymupdf_page.cropbox.x0 - pymupdf_page.mediabox.x0
 
         # cropbox_y_offset_from_top: Distance from MediaBox top edge to CropBox top edge
-        # MediaBox top y = mediabox.y1
-        # CropBox top y = cropbox.y1
-        # The difference is mediabox.y1 - cropbox.y1
         out_page_image_sizes['cropbox_y_offset_from_top'] = pymupdf_page.mediabox.y1 - pymupdf_page.cropbox.y1
         
         if image_sizes_width and image_sizes_height:
@@ -452,23 +453,57 @@ def create_page_size_objects(pymupdf_doc:Document, image_sizes_width:List[float]
 
     return page_sizes, original_cropboxes
 
+def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
+    '''
+    Convert a json of ocr results to a dataframe
+    '''
+    rows = list()
+    ocr_result_page = ocr_results[0]
+
+    for ocr_result in ocr_results:
+
+        page_number = int(ocr_result['page'])
+
+        for line_key, line_data in ocr_result['results'].items():
+            
+            line_number = int(line_data['line'])
+            for word in line_data['words']:
+                rows.append({
+                    'page': page_number,
+                    'line': line_number,
+                    'word_text': word['text'],
+                    'word_x0': word['bounding_box'][0],
+                    'word_y0': word['bounding_box'][1],
+                    'word_x1': word['bounding_box'][2],
+                    'word_y1': word['bounding_box'][3],
+                    'line_text': "", #line_data['text'], # This data is too large to include
+                    'line_x0': line_data['bounding_box'][0],
+                    'line_y0': line_data['bounding_box'][1],
+                    'line_x1': line_data['bounding_box'][2],
+                    'line_y1': line_data['bounding_box'][3],
+                })
+
+    return pd.DataFrame(rows)
+
 def prepare_image_or_pdf(
     file_paths: List[str],
     text_extract_method: str,
     all_line_level_ocr_results_df:pd.DataFrame,
+    all_page_line_level_ocr_results_with_words_df:pd.DataFrame,
     latest_file_completed: int = 0,
-    out_message: List[str] = [],
+    out_message: List[str] = list(),
     first_loop_state: bool = False,
     number_of_pages:int = 0,
-    all_annotations_object:List = [],
+    all_annotations_object:List = list(),
     prepare_for_review:bool = False,
-    in_fully_redacted_list:List[int]=[],
+    in_fully_redacted_list:List[int]=list(),
     output_folder:str=OUTPUT_FOLDER,
     input_folder:str=INPUT_FOLDER,
     prepare_images:bool=True,
-    page_sizes:list[dict]=[],
+    page_sizes:list[dict]=list(),
+    pymupdf_doc:Document = list(),
     textract_output_found:bool = False,
-    relevant_ocr_output_with_words_found:bool = False,   
+    relevant_ocr_output_with_words_found:bool = False,    
     progress: Progress = Progress(track_tqdm=True)
 ) -> tuple[List[str], List[str]]:
     """
@@ -490,6 +525,7 @@ def prepare_image_or_pdf(
         output_folder (optional, str): The output folder for file save
         prepare_images (optional, bool): A boolean indicating whether to create images for each PDF page. Defaults to True.
         page_sizes(optional, List[dict]): A list of dicts containing information about page sizes in various formats.
+        pymupdf_doc(optional, Document): A pymupdf document object that indicates the existing PDF document object.
         textract_output_found (optional, bool): A boolean indicating whether Textract analysis output has already been found. Defaults to False.
         relevant_ocr_output_with_words_found (optional, bool): A boolean indicating whether local OCR analysis output has already been found. Defaults to False.
         progress (optional, Progress): Progress tracker for the operation
@@ -501,11 +537,11 @@ def prepare_image_or_pdf(
 
     tic = time.perf_counter()
     json_from_csv = False
-    original_cropboxes = []  # Store original CropBox values
-    converted_file_paths = []
-    image_file_paths = []
-    pymupdf_doc = []
-    all_img_details = []    
+    original_cropboxes = list()  # Store original CropBox values
+    converted_file_paths = list()
+    image_file_paths = list()
+    # pymupdf_doc = list()
+    all_img_details = list()    
     review_file_csv = pd.DataFrame()
     out_textract_path = ""
     combined_out_message = ""
@@ -518,15 +554,15 @@ def prepare_image_or_pdf(
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
         latest_file_completed = 0
-        out_message = []
-        all_annotations_object = []
+        out_message = list()
+        all_annotations_object = list()
     else:
         print("Now redacting file", str(latest_file_completed))
   
     # If combined out message or converted_file_paths are blank, change to a list so it can be appended to
     if isinstance(out_message, str): out_message = [out_message]
 
-    if not file_paths: file_paths = []
+    if not file_paths: file_paths = list()
 
     if isinstance(file_paths, dict): file_paths = os.path.abspath(file_paths["name"])
 
@@ -542,7 +578,8 @@ def prepare_image_or_pdf(
             final_out_message = '\n'.join(out_message)
         else:
             final_out_message = out_message
-        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, relevant_ocr_output_with_words_found
+
+        return final_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, relevant_ocr_output_with_words_found, all_page_line_level_ocr_results_with_words_df
 
     progress(0.1, desc='Preparing file')
 
@@ -555,8 +592,8 @@ def prepare_image_or_pdf(
         
     # Loop through files to load in
     for file in file_paths_loop:
-        converted_file_path = []
-        image_file_path = []
+        converted_file_path = list()
+        image_file_path = list()
 
         if isinstance(file, str):
             file_path = file
@@ -565,15 +602,18 @@ def prepare_image_or_pdf(
         file_path_without_ext = get_file_name_without_type(file_path)
         file_name_with_ext = os.path.basename(file_path)
 
+        print("Loading file:", file_name_with_ext)
+
         if not file_path:
-            out_message = "Please select a file."
+            out_message = "Please select at least one file."
             print(out_message)
-            raise Exception(out_message)
+            raise Warning(out_message)
             
         file_extension = os.path.splitext(file_path)[1].lower()
 
         # If a pdf, load as a pymupdf document
         if is_pdf(file_path):
+            print(f"File {file_name_with_ext} is a PDF")
             pymupdf_doc = pymupdf.open(file_path)
             pymupdf_pages = pymupdf_doc.page_count
 
@@ -588,16 +628,17 @@ def prepare_image_or_pdf(
 
             #Create base version of the annotation object that doesn't have any annotations in it
             if (not all_annotations_object) & (prepare_for_review == True):
-                all_annotations_object = []
+                all_annotations_object = list()
 
                 for image_path in image_file_paths:
                     annotation = {}
                     annotation["image"] = image_path
-                    annotation["boxes"] = []
+                    annotation["boxes"] = list()
 
                     all_annotations_object.append(annotation)
             
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
+            print(f"File {file_name_with_ext} is an image")
             # Check if the file is an image type and the user selected text ocr option
             if file_extension in ['.jpg', '.jpeg', '.png'] and text_extract_method == SELECTABLE_TEXT_EXTRACT_OPTION:
                 text_extract_method = TESSERACT_TEXT_EXTRACT_OPTION
@@ -622,18 +663,25 @@ def prepare_image_or_pdf(
 
             pymupdf_doc.save(converted_file_path, garbage=4, deflate=True, clean=True)
 
+        # Loading in review files, ocr_outputs, or ocr_outputs_with_words
         elif file_extension in ['.csv']:
             if '_review_file' in file_path_without_ext:
                 review_file_csv = read_file(file_path)                
                 all_annotations_object = convert_review_df_to_annotation_json(review_file_csv, image_file_paths, page_sizes)
-                json_from_csv = True
-                #print("Converted CSV review file to image annotation object")
+                json_from_csv = True                
             elif '_ocr_output' in file_path_without_ext:
-                all_line_level_ocr_results_df = read_file(file_path)                
+                all_line_level_ocr_results_df = read_file(file_path)
+
+                if "line" not in all_line_level_ocr_results_df.columns:
+                    all_line_level_ocr_results_df["line"] = ""
+                    
+                json_from_csv = False
+            elif '_ocr_results_with_words' in file_path_without_ext:
+                all_page_line_level_ocr_results_with_words_df = read_file(file_path)
                 json_from_csv = False
 
         # NEW IF STATEMENT
-        # If the file name ends with .json, check if we are loading for review. If yes, assume it is an annoations object, overwrite the current annotations object. If false, assume this is a Textract object, load in to Textract
+        # If the file name ends with .json, check if we are loading for review. If yes, assume it is an annotations object, overwrite the current annotations object. If false, assume this is a Textract object, load in to Textract
 
         if (file_extension in ['.json']) | (json_from_csv == True):
 
@@ -661,7 +709,7 @@ def prepare_image_or_pdf(
                 continue
 
             elif (file_extension in ['.json']) and '_ocr_results_with_words' in file_path_without_ext: #(prepare_for_review != True):
-                print("Saving local OCR output")
+                print("Saving local OCR output with words")
                 # Copy it to the output folder so it can be used later.
                 output_ocr_results_with_words_json_file_name = file_path_without_ext + ".json"
                 # if not file_path.endswith("_ocr_results_with_words.json"): output_ocr_results_with_words_json_file_name = file_path_without_ext + "_ocr_results_with_words.json"
@@ -671,6 +719,15 @@ def prepare_image_or_pdf(
 
                 # Use shutil to copy the file directly
                 shutil.copy2(file_path, out_ocr_results_with_words_path)  # Preserves metadata
+
+                if prepare_for_review == True:
+                    print("Converting local OCR output with words to csv")
+                    page_sizes_df = pd.DataFrame(page_sizes)
+                    all_page_line_level_ocr_results_with_words, is_missing, log_files_output_paths = load_and_convert_ocr_results_with_words_json(out_ocr_results_with_words_path, log_files_output_paths, page_sizes_df)
+                    all_page_line_level_ocr_results_with_words_df = word_level_ocr_output_to_dataframe(all_page_line_level_ocr_results_with_words)
+
+                    all_page_line_level_ocr_results_with_words_df = divide_coordinates_by_page_sizes(all_page_line_level_ocr_results_with_words_df, page_sizes_df, xmin="word_x0", xmax="word_x1", ymin="word_y0", ymax="word_y1")
+                    all_page_line_level_ocr_results_with_words_df = divide_coordinates_by_page_sizes(all_page_line_level_ocr_results_with_words_df, page_sizes_df, xmin="line_x0", xmax="line_x1", ymin="line_y0", ymax="line_y1")
 
                 if text_extract_method == SELECTABLE_TEXT_EXTRACT_OPTION and file_path.endswith("_ocr_results_with_words_local_text.json"): relevant_ocr_output_with_words_found = True
                 if text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION and file_path.endswith("_ocr_results_with_words_local_ocr.json"): relevant_ocr_output_with_words_found = True
@@ -742,7 +799,7 @@ def prepare_image_or_pdf(
                 continue
 
         # If it's a zip, it could be extract from a Textract bulk API call. Check it's this, and load in json if found
-        elif file_extension in ['.zip']:
+        if file_extension in ['.zip']:
 
             # Assume it's a Textract response object. Copy it to the output folder so it can be used later.
             out_folder = os.path.join(output_folder, file_path_without_ext + "_textract.json")
@@ -766,37 +823,25 @@ def prepare_image_or_pdf(
                 else:
                     print(f"Skipping {file_path}: Expected 1 JSON file, found {len(json_files)}")
 
-        elif file_extension in ['.csv'] and "ocr_output" in file_path:
-            continue
-
-        # Must be something else, return with error message
-        else:
-            if text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION or text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION:
-                if is_pdf_or_image(file_path) == False:
-                    out_message = "Please upload a PDF file or image file (JPG, PNG) for image analysis."
-                    print(out_message)
-                    raise Exception(out_message)
-
-            elif text_extract_method == SELECTABLE_TEXT_EXTRACT_OPTION:
-                if is_pdf(file_path) == False:
-                    out_message = "Please upload a PDF file for text analysis."
-                    print(out_message)
-                    raise Exception(out_message)
-
         converted_file_paths.append(converted_file_path)
         image_file_paths.extend(image_file_path)        
 
         toc = time.perf_counter()
-        out_time = f"File '{file_path_without_ext}' prepared in {toc - tic:0.1f} seconds."
+        out_time = f"File '{file_name_with_ext}' prepared in {toc - tic:0.1f} seconds."
 
         print(out_time)
 
         out_message.append(out_time)
         combined_out_message = '\n'.join(out_message)
 
-    number_of_pages = len(page_sizes)#len(image_file_paths)
+    if not page_sizes:
+        number_of_pages = 1
+    else:
+        number_of_pages = len(page_sizes)
+
+    print("Finished loading in files")
         
-    return combined_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, relevant_ocr_output_with_words_found
+    return combined_out_message, converted_file_paths, image_file_paths, number_of_pages, number_of_pages, pymupdf_doc, all_annotations_object, review_file_csv, original_cropboxes, page_sizes, textract_output_found, all_img_details, all_line_level_ocr_results_df, relevant_ocr_output_with_words_found, all_page_line_level_ocr_results_with_words_df
 
 def load_and_convert_ocr_results_with_words_json(ocr_results_with_words_json_file_path:str, log_files_output_paths:str, page_sizes_df:pd.DataFrame):
     """
@@ -833,6 +878,8 @@ def load_and_convert_ocr_results_with_words_json(ocr_results_with_words_json_fil
 
 def convert_text_pdf_to_img_pdf(in_file_path:str, out_text_file_path:List[str], image_dpi:float=image_dpi, output_folder:str=OUTPUT_FOLDER, input_folder:str=INPUT_FOLDER):
     file_path_without_ext = get_file_name_without_type(in_file_path)
+
+    print("In convert_text_pdf_to_img_pdf function, file_path_without_ext:", file_path_without_ext)
 
     out_file_paths = out_text_file_path
 
@@ -896,7 +943,7 @@ def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
         image_groups[item['image']].append(item)
 
     # Process each group to prioritize items with non-empty boxes
-    result = []
+    result = list()
     for image, items in image_groups.items():
         # Filter items with non-empty boxes
         non_empty_boxes = [item for item in items if item.get('boxes')]
@@ -1035,7 +1082,6 @@ def divide_coordinates_by_page_sizes(
         else:
              print("Skipping coordinate division due to missing or non-numeric dimension columns.")
 
-
     # --- Combine Relative and Processed Absolute DataFrames ---
     dfs_to_concat = [df for df in [df_rel, df_abs] if not df.empty]
 
@@ -1045,7 +1091,6 @@ def divide_coordinates_by_page_sizes(
         # If both splits were empty, return an empty DF with original columns
         print("Warning: Both relative and absolute splits resulted in empty DataFrames.")
         final_df = pd.DataFrame(columns=review_file_df.columns)
-
 
     # --- Final Sort ---
     required_sort_columns = {"page", xmin, ymin}
@@ -1428,7 +1473,7 @@ def create_annotation_dicts_from_annotation_df(
 def convert_annotation_json_to_review_df(
     all_annotations: List[dict],
     redaction_decision_output: pd.DataFrame = pd.DataFrame(),
-    page_sizes: List[dict] = [],
+    page_sizes: List[dict] = list(),
     do_proximity_match: bool = True
 ) -> pd.DataFrame:
     '''
@@ -1615,7 +1660,7 @@ def convert_annotation_json_to_review_df(
     if 'color' in review_file_df.columns:
          # Check if the column actually contains lists before applying lambda
          if review_file_df['color'].apply(lambda x: isinstance(x, list)).any():
-            review_file_df["color"] = review_file_df["color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
+            review_file_df.loc[:, "color"] = review_file_df.loc[:, "color"].apply(lambda x: tuple(x) if isinstance(x, list) else x)
 
     # Sort the results
     # Ensure sort columns exist before sorting
@@ -1641,6 +1686,86 @@ def convert_annotation_json_to_review_df(
     review_file_df = review_file_df.dropna(subset=base_cols, how="all")
 
     return review_file_df
+
+def fill_missing_ids_in_list(data_list: list) -> list:
+    """
+    Generates unique alphanumeric IDs for dictionaries in a list where the 'id' is 
+    missing, blank, or not a 12-character string.
+
+    Args:
+        data_list (list): A list of dictionaries, each potentially with an 'id' key.
+
+    Returns:
+        list: The input list with missing/invalid IDs filled.
+              Note: The function modifies the input list in place.
+    """
+
+    # --- Input Validation ---
+    if not isinstance(data_list, list):
+        raise TypeError("Input 'data_list' must be a list.")
+    
+    if not data_list:
+        return data_list  # Return empty list as-is
+
+    id_length = 12
+    character_set = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
+
+    # --- Get Existing IDs to Ensure Uniqueness ---
+    # Collect all valid existing IDs first
+    existing_ids = set()
+    for item in data_list:
+        if not isinstance(item, dict):
+            continue  # Skip non-dictionary items
+        item_id = item.get('id')
+        if isinstance(item_id, str) and len(item_id) == id_length:
+            existing_ids.add(item_id)
+
+    # --- Identify and Fill Items Needing IDs ---
+    generated_ids_set = set()  # Keep track of IDs generated *in this run*
+    num_filled = 0
+
+    for item in data_list:
+        if not isinstance(item, dict):
+            continue  # Skip non-dictionary items
+            
+        item_id = item.get('id')
+
+        # Check if ID needs to be generated
+        # Needs ID if: key is missing, value is None, value is not a string,
+        # value is an empty string after stripping whitespace, or value is a string
+        # but not of the correct length.
+        needs_new_id = (
+            item_id is None or
+            not isinstance(item_id, str) or
+            item_id.strip() == "" or
+            len(item_id) != id_length
+        )
+
+        if needs_new_id:
+            # Generate a unique ID
+            attempts = 0
+            while True:
+                candidate_id = ''.join(random.choices(character_set, k=id_length))
+                # Check against *all* existing valid IDs and *newly* generated ones in this run
+                if candidate_id not in existing_ids and candidate_id not in generated_ids_set:
+                    generated_ids_set.add(candidate_id)
+                    item['id'] = candidate_id  # Assign the new ID directly to the item dict
+                    num_filled += 1
+                    break  # Found a unique ID
+                attempts += 1
+                # Safety break for unlikely infinite loop (though highly improbable with 12 chars)
+                if attempts > len(data_list) * 100 + 1000:
+                    raise RuntimeError(f"Failed to generate a unique ID after {attempts} attempts. Check ID length or existing IDs.")
+
+    if num_filled > 0:
+        pass
+        #print(f"Successfully filled {num_filled} missing or invalid IDs.")
+    else:
+        pass
+        #print("No missing or invalid IDs found.")
+
+    # The input list 'data_list' has been modified in place
+    return data_list
 
 def fill_missing_box_ids(data_input: dict) -> dict:
     """
@@ -1873,7 +1998,7 @@ def fill_missing_ids(df: pd.DataFrame, column_name: str = 'id', length: int = 12
     # --- Generate Unique IDs ---
     character_set = string.ascii_letters + string.digits # a-z, A-Z, 0-9
     generated_ids_set = set() # Keep track of IDs generated *in this run*
-    new_ids_list = []      # Store the generated IDs in order
+    new_ids_list = list()      # Store the generated IDs in order
 
     max_possible_ids = len(character_set) ** length
     if num_needed > max_possible_ids:
@@ -2080,14 +2205,14 @@ def convert_review_df_to_annotation_json(
 
 
     # --- Build JSON Structure ---
-    json_data = []
+    json_data = list()
     output_cols_for_boxes = [col for col in ["label", "color", xmin, ymin, xmax, ymax, "id", "text"] if col in review_file_df.columns]
 
     # Iterate through page_sizes_df to define the structure (one entry per image path)
     for _, row in page_sizes_df.iterrows():
         page_num = row['page'] # Already Int64
         pdf_image_path = row['image_path']
-        annotation_boxes = [] # Default to empty list
+        annotation_boxes = list() # Default to empty list
 
         # Check if the page exists in the grouped annotations (using the faster set lookup)
         # Check pd.notna because page_num could be <NA> if conversion failed
@@ -2106,7 +2231,7 @@ def convert_review_df_to_annotation_json(
 
             except KeyError:
                  print(f"Warning: Group key {page_num} not found despite being in group_keys (should not happen).")
-                 annotation_boxes = [] # Keep empty
+                 annotation_boxes = list() # Keep empty
 
         # Append the structured data for this image/page
         json_data.append({

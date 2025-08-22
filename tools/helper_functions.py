@@ -9,7 +9,24 @@ import unicodedata
 from typing import List
 from math import ceil
 from gradio_image_annotation import image_annotator
-from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, SELECTABLE_TEXT_EXTRACT_OPTION, TESSERACT_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, AWS_PII_OPTION
+from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, SELECTABLE_TEXT_EXTRACT_OPTION, TESSERACT_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, AWS_PII_OPTION, MAPPED_LANGUAGE_CHOICES, LANGUAGE_CHOICES, textract_language_choices, aws_comprehend_language_choices, DEFAULT_LANGUAGE
+# from tools.load_spacy_model_custom_recognisers import nlp_analyser
+
+def _get_env_list(env_var_name: str) -> List[str]:
+    """Parses a comma-separated environment variable into a list of strings."""
+    value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
+    if not value:
+        return []
+    # Split by comma and filter out any empty strings that might result from extra commas
+    return [s.strip() for s in value.split(',') if s.strip()]
+
+if textract_language_choices: textract_language_choices = _get_env_list(textract_language_choices)
+if aws_comprehend_language_choices: aws_comprehend_language_choices = _get_env_list(aws_comprehend_language_choices)
+
+if MAPPED_LANGUAGE_CHOICES: MAPPED_LANGUAGE_CHOICES = _get_env_list(MAPPED_LANGUAGE_CHOICES)
+if LANGUAGE_CHOICES: LANGUAGE_CHOICES = _get_env_list(LANGUAGE_CHOICES)
+
+LANGUAGE_MAP = dict(zip(MAPPED_LANGUAGE_CHOICES, LANGUAGE_CHOICES))
 
 def reset_state_vars():
     return [], pd.DataFrame(), pd.DataFrame(), 0, "", image_annotator(
@@ -22,7 +39,7 @@ def reset_state_vars():
             show_share_button=False,
             show_remove_button=False,
             interactive=False
-        ), [], [], pd.DataFrame(), pd.DataFrame(), [], [], "", False, 0
+        ), [], [], pd.DataFrame(), pd.DataFrame(), [], [], "", False, 0, []
 
 def reset_ocr_results_state():
     return pd.DataFrame(), pd.DataFrame(), []
@@ -85,8 +102,7 @@ def enforce_cost_codes(enforce_cost_code_textbox:str, cost_code_choice:str, cost
     return
 
 def update_cost_code_dataframe_from_dropdown_select(cost_dropdown_selection:str, cost_code_df:pd.DataFrame):
-    cost_code_df = cost_code_df.loc[cost_code_df.iloc[:,0] == cost_dropdown_selection, :
-                                    ]
+    cost_code_df = cost_code_df.loc[cost_code_df.iloc[:,0] == cost_dropdown_selection, :]
     return cost_code_df
 
 def ensure_folder_exists(output_folder:str):
@@ -114,7 +130,7 @@ def get_file_name_without_type(file_path):
     
     return filename_without_extension
 
-def detect_file_type(filename):
+def detect_file_type(filename:str):
     """Detect the file type based on its extension."""
     if (filename.endswith('.csv')) | (filename.endswith('.csv.gz')) | (filename.endswith('.zip')):
         return 'csv'
@@ -132,10 +148,12 @@ def detect_file_type(filename):
         return 'png'
     elif filename.endswith('.xfdf'):
         return 'xfdf'
+    elif filename.endswith('.docx'):
+        return 'docx'
     else:
         raise ValueError("Unsupported file type.")
 
-def read_file(filename):
+def read_file(filename:str):
     """Read the file based on its detected type."""
     file_type = detect_file_type(filename)
     
@@ -156,13 +174,7 @@ def ensure_output_folder_exists(output_folder:str):
     else:
         print(f"The {output_folder} folder already exists.")
 
-def _get_env_list(env_var_name: str) -> List[str]:
-    """Parses a comma-separated environment variable into a list of strings."""
-    value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
-    if not value:
-        return []
-    # Split by comma and filter out any empty strings that might result from extra commas
-    return [s.strip() for s in value.split(',') if s.strip()]
+
 
 def custom_regex_load(in_file:List[str], file_type:str = "allow_list"):
     '''
@@ -188,7 +200,7 @@ def custom_regex_load(in_file:List[str], file_type:str = "allow_list"):
             print(output_text)
     else:
         output_text = "No file provided."
-        print(output_text)
+        #print(output_text)
         return output_text, custom_regex_df
        
     return output_text, custom_regex_df
@@ -204,7 +216,7 @@ def put_columns_in_df(in_file:List[str]):
         file_type = detect_file_type(file_name)
         print("File type is:", file_type)
 
-        if file_type == 'xlsx':
+        if (file_type == 'xlsx') | (file_type == 'xls'):
             number_of_excel_files += 1
             new_choices = []
             print("Running through all xlsx sheets")
@@ -220,9 +232,12 @@ def put_columns_in_df(in_file:List[str]):
 
             all_sheet_names.extend(new_sheet_names)
 
-        else:
+        elif (file_type == "csv") | (file_type == "parquet"):
             df = read_file(file_name)
             new_choices = list(df.columns)
+
+        else:
+            new_choices = []
 
         concat_choices.extend(new_choices)
         
@@ -262,7 +277,6 @@ def check_for_relevant_ocr_output_with_words(doc_file_name_no_extension_textbox:
     else:
         return False
 
-# 
 def add_folder_to_path(folder_path: str):
     '''
     Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist. Function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
@@ -325,10 +339,8 @@ def merge_csv_files(file_list:List[str], output_folder:str=OUTPUT_FOLDER):
     merged_csv_path = output_folder + file_out_name + "_merged.csv"
 
     # Save the merged DataFrame to a CSV file
-    #merged_csv = StringIO()
-    merged_df.to_csv(merged_csv_path, index=False)
+    merged_df.to_csv(merged_csv_path, index=False, encoding="utf-8-sig")
     output_files.append(merged_csv_path)
-    #merged_csv.seek(0)  # Move to the beginning of the StringIO object
 
     return output_files
 
@@ -575,5 +587,39 @@ def reset_base_dataframe(df:pd.DataFrame):
     return df
 
 def reset_ocr_base_dataframe(df:pd.DataFrame):
-    return df.iloc[:, [0,1]]
+    if df.empty:
+        return pd.DataFrame(columns=["page", "line", "text"])
+    else:
+        return df.loc[:, ["page", "line", "text"]]
+
+def reset_ocr_with_words_base_dataframe(df:pd.DataFrame, page_entity_dropdown_redaction_value:str):
+    
+    df["index"] = df.index
+    output_df = df.copy()
+
+    df["page"]=df["page"].astype(str)
+
+    output_df_filtered = df.loc[df["page"]==str(page_entity_dropdown_redaction_value), ["page", "line", "word_text", "word_x0", "word_y0", "word_x1", "word_y1", "index"]]
+    return output_df_filtered, output_df
+
+def update_language_dropdown(chosen_language_full_name_drop, textract_language_choices=textract_language_choices, aws_comprehend_language_choices=aws_comprehend_language_choices, LANGUAGE_MAP=LANGUAGE_MAP):
+
+    try:
+        full_language_name = chosen_language_full_name_drop.lower()
+        matched_language = LANGUAGE_MAP[full_language_name]
+
+        chosen_language_drop = gr.Dropdown(value = matched_language, choices = LANGUAGE_CHOICES, label="Chosen language short code", multiselect=False, visible=True)
+        
+        if matched_language not in aws_comprehend_language_choices and matched_language not in textract_language_choices:
+            gr.Info(f"Note that {full_language_name} is not supported by AWS Comprehend or AWS Textract")
+        elif matched_language not in aws_comprehend_language_choices:
+            gr.Info(f"Note that {full_language_name} is not supported by AWS Comprehend")
+        elif matched_language not in textract_language_choices:
+            gr.Info(f"Note that {full_language_name} is not supported by AWS Textract")
+    except Exception as e:
+        print(e)
+        gr.Info("Could not find language in list")
+        chosen_language_drop = gr.Dropdown(value = DEFAULT_LANGUAGE, choices = LANGUAGE_CHOICES, label="Chosen language short code", multiselect=False)
+
+    return chosen_language_drop
     

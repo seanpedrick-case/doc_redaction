@@ -115,6 +115,16 @@ Configuration for input and output file handling.
     *   **Default Value:** `'input/'`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
+*   **`GRADIO_TEMP_DIR`**
+    *   **Description:** Defines the path for Gradio's temporary file storage.
+    *   **Default Value:** `'tmp/gradio_tmp/'`
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
+*   **`MPLCONFIGDIR`**
+    *   **Description:** Specifies the cache directory for the Matplotlib library, which is used for plotting and image handling.
+    *   **Default Value:** `'tmp/matplotlib_cache/'`
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
 ## Logging Options
 
 Settings for configuring application logging, including log formats and storage locations.
@@ -161,7 +171,7 @@ Settings for configuring application logging, including log formats and storage 
 
 *   **`CSV_USAGE_LOG_HEADERS`**
     *   **Description:** Defines custom headers for CSV usage logs.
-    *   **Default Value:** A predefined list of header names. Refer to `tools/config.py` for the complete list.
+    *   **Default Value:** A predefined list of header names. Refer to `config.py` for the complete list.
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
 *   **`SAVE_LOGS_TO_DYNAMODB`**
@@ -214,12 +224,17 @@ Settings for configuring application logging, including log formats and storage 
 Configurations related to the text redaction process, including PII detection models and external tool paths.
 
 *   **`TESSERACT_FOLDER`**
-    *   **Description:** Path to the local Tesseract OCR installation folder. Only required if Tesseract is not in path, or you are running a version of the app as an .exe installed with Pyinstaller. Gives the path to the local Tesseract OCR model for text extraction.
+    *   **Description:** Path to the local Tesseract OCR installation folder. Only required if Tesseract is not in the system's PATH, or when running a packaged executable (e.g., via PyInstaller).
     *   **Default Value:** `""` (empty string)
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
+*   **`TESSERACT_DATA_FOLDER`**
+    *   **Description:** Path to the Tesseract trained data files (e.g., `tessdata`).
+    *   **Default Value:** `"/usr/share/tessdata"`
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
 *   **`POPPLER_FOLDER`**
-    *   **Description:** Path to the local Poppler installation's `bin` folder. Only required if Tesseract is not in path, or you are running a version of the app as an .exe installed with Pyinstaller. Poppler is used for PDF processing.
+    *   **Description:** Path to the local Poppler installation's `bin` folder. Poppler is used for PDF processing. Only required if Poppler is not in the system's PATH.
     *   **Default Value:** `""` (empty string)
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
@@ -283,24 +298,34 @@ Configurations related to the text redaction process, including PII detection mo
     *   **Default Value:** Value of `AWS_PII_OPTION` if `SHOW_AWS_PII_DETECTION_OPTIONS` is True, else value of `LOCAL_PII_OPTION`.
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`. Provide one of the PII detection option display names.
 
+*   **`CHOSEN_LOCAL_OCR_MODEL`**
+    *   **Description:** Choose the engine for local OCR: `"tesseract"`, `"paddle"`, or `"hybrid"`. "paddle" is effective for line extraction but not word-level redaction. "hybrid" uses Tesseract first, then PaddleOCR for low-confidence words.
+    *   **Default Value:** `"tesseract"`
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
+*   **`PREPROCESS_LOCAL_OCR_IMAGES`**
+    *   **Description:** If set to `"True"`, images will be preprocessed (e.g., deskewed, contrast adjusted) before being sent to the local OCR engine. This can sometimes yield worse results on clean scans.
+    *   **Default Value:** `"False"`
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
 *   **`CHOSEN_COMPREHEND_ENTITIES`**
     *   **Description:** A list of AWS Comprehend PII entity types to be redacted when using AWS Comprehend.
-    *   **Default Value:** A predefined list of entity types. Refer to `tools/config.py` for the complete list.
+    *   **Default Value:** A predefined list of entity types. Refer to `config.py` for the complete list.
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`. This should be a string representation of a Python list.
 
 *   **`FULL_COMPREHEND_ENTITY_LIST`**
     *   **Description:** The complete list of PII entity types supported by AWS Comprehend that can be selected for redaction.
-    *   **Default Value:** A predefined list of entity types. Refer to `tools/config.py` for the complete list.
+    *   **Default Value:** A predefined list of entity types. Refer to `config.py` for the complete list.
     *   **Configuration:** This is typically an informational variable reflecting the capabilities of AWS Comprehend and is not meant to be changed by users directly affecting redaction behavior (use `CHOSEN_COMPREHEND_ENTITIES` for that). Set as an environment variable directly, or include in `config/app_config.env`.
 
 *   **`CHOSEN_REDACT_ENTITIES`**
     *   **Description:** A list of local PII entity types to be redacted when using the local PII detection model.
-    *   **Default Value:** A predefined list of entity types. Refer to `tools/config.py` for the complete list.
+    *   **Default Value:** A predefined list of entity types. Refer to `config.py` for the complete list.
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`. This should be a string representation of a Python list.
 
 *   **`FULL_ENTITY_LIST`**
     *   **Description:** The complete list of PII entity types supported by the local PII detection model that can be selected for redaction.
-    *   **Default Value:** A predefined list of entity types. Refer to `tools/config.py` for the complete list.
+    *   **Default Value:** A predefined list of entity types. Refer to `config.py` for the complete list.
     *   **Configuration:** This is typically an informational variable reflecting the capabilities of the local model and is not meant to be changed by users directly affecting redaction behavior (use `CHOSEN_REDACT_ENTITIES` for that). Set as an environment variable directly, or include in `config/app_config.env`.
 
 *   **`PAGE_BREAK_VALUE`**
@@ -309,18 +334,13 @@ Configurations related to the text redaction process, including PII detection mo
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
 *   **`MAX_TIME_VALUE`**
-    *   **Description:** Specifies the maximum time (in arbitrary units, likely seconds or milliseconds depending on implementation) for a process before it might be timed out.
+    *   **Description:** Specifies a maximum time value for long-running processes.
     *   **Default Value:** `'999999'`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
 *   **`CUSTOM_BOX_COLOUR`**
-    *   **Description:** Allows specifying a custom color for the redaction boxes drawn on documents (e.g., "grey", "red", "#FF0000"). If empty, a default color is used.
+    *   **Description:** Allows specifying a custom color for the redaction boxes drawn on documents. Only `"grey"` is currently supported as a custom value. If empty, a default color is used.
     *   **Default Value:** `""` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
-
-*   **`REDACTION_LANGUAGE`**
-    *   **Description:** Specifies the language for redaction processing. Currently, only "en" (English) is supported.
-    *   **Default Value:** `"en"`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
 *   **`RETURN_PDF_END_OF_REDACTION`**
@@ -333,13 +353,42 @@ Configurations related to the text redaction process, including PII detection mo
     *   **Default Value:** `"False"`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
+## Language Options
+
+Settings for multi-language support in OCR and PII detection.
+
+*   **`SHOW_LANGUAGE_SELECTION`**
+    *   **Description:** If set to `"True"`, a dropdown menu for language selection will be visible in the user interface.
+    *   **Default Value:** `"False"`
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
+*   **`DEFAULT_LANGUAGE_FULL_NAME`**
+    *   **Description:** The default language's full name (e.g., "english") to be displayed in the UI.
+    *   **Default Value:** `"english"`
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
+*   **`DEFAULT_LANGUAGE`**
+    *   **Description:** The default language's short code (e.g., "en") used by the backend engines. Ensure the corresponding Tesseract/PaddleOCR language packs are installed.
+    *   **Default Value:** `"en"`
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
+*   **`MAPPED_LANGUAGE_CHOICES`**
+    *   **Description:** A string list of full language names (e.g., 'english', 'french') presented to the user in the language dropdown.
+    *   **Default Value:** A predefined list. See `config.py`.
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
+*   **`LANGUAGE_CHOICES`**
+    *   **Description:** A string list of short language codes (e.g., 'en', 'fr') that correspond to `MAPPED_LANGUAGE_CHOICES`. This is what the backend uses.
+    *   **Default Value:** A predefined list. See `config.py`.
+    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+
 ## App Run Options
 
 General runtime configurations for the application.
 
 *   **`TLDEXTRACT_CACHE`**
-    *   **Description:** Path to the cache file used by the `tldextract` library, which helps in accurately extracting top-level domains (TLDs) from URLs.
-    *   **Default Value:** `'tld/.tld_set_snapshot'`
+    *   **Description:** Path to the cache directory used by the `tldextract` library, which helps in accurately extracting top-level domains (TLDs) from URLs.
+    *   **Default Value:** `'tmp/tld/'`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
 *   **`COGNITO_AUTH`**
@@ -436,7 +485,7 @@ Settings related to tracking and applying cost codes for application usage.
 Configurations for features related to processing whole documents via APIs, particularly AWS Textract for large documents.
 
 *   **`SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS`**
-    *   **Description:** Controls whether UI options for whole document Textract calls are displayed. (Note: Mentioned as not currently implemented in the source).
+    *   **Description:** Controls whether UI options for whole document Textract calls are displayed.
     *   **Default Value:** `'False'`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
@@ -461,12 +510,12 @@ Configurations for features related to processing whole documents via APIs, part
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
 
 *   **`TEXTRACT_JOBS_S3_LOC`**
-    *   **Description:** The S3 subfolder (within `TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET`) where Textract job data (output) is stored.
+    *   **Description:** The S3 subfolder (within the main redaction bucket) where Textract job data (output) is stored.
     *   **Default Value:** `'output'`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
 
 *   **`TEXTRACT_JOBS_S3_INPUT_LOC`**
-    *   **Description:** The S3 subfolder (within `TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET`) where Textract job input is stored.
+    *   **Description:** The S3 subfolder (within the main redaction bucket) where Textract job input is stored.
     *   **Default Value:** `'input'`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
 
