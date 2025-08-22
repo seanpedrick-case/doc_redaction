@@ -154,10 +154,9 @@ if USE_LOG_SUBFOLDERS == "True":
     ACCESS_LOGS_FOLDER = ACCESS_LOGS_FOLDER + full_log_subfolder
     USAGE_LOGS_FOLDER = USAGE_LOGS_FOLDER + full_log_subfolder
 
-
-S3_FEEDBACK_LOGS_FOLDER = get_or_create_env_var('S3_FEEDBACK_LOGS_FOLDER', FEEDBACK_LOGS_FOLDER)
-S3_ACCESS_LOGS_FOLDER = get_or_create_env_var('S3_ACCESS_LOGS_FOLDER', ACCESS_LOGS_FOLDER)
-S3_USAGE_LOGS_FOLDER = get_or_create_env_var('S3_USAGE_LOGS_FOLDER', USAGE_LOGS_FOLDER)
+S3_FEEDBACK_LOGS_FOLDER = get_or_create_env_var('S3_FEEDBACK_LOGS_FOLDER', 'feedback/' + full_log_subfolder)
+S3_ACCESS_LOGS_FOLDER = get_or_create_env_var('S3_ACCESS_LOGS_FOLDER', 'logs/' + full_log_subfolder)
+S3_USAGE_LOGS_FOLDER = get_or_create_env_var('S3_USAGE_LOGS_FOLDER', 'usage/' + full_log_subfolder)
 
 # Should the redacted file name be included in the logs? In some instances, the names of the files themselves could be sensitive, and should not be disclosed beyond the app. So, by default this is false.
 DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS', 'False')
@@ -197,6 +196,7 @@ FEEDBACK_LOG_FILE_NAME = get_or_create_env_var('FEEDBACK_LOG_FILE_NAME', LOG_FIL
 
 # Create Tesseract and Poppler folders if you have installed them locally
 TESSERACT_FOLDER = get_or_create_env_var('TESSERACT_FOLDER', "") #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
+TESSERACT_DATA_FOLDER = get_or_create_env_var('TESSERACT_DATA_FOLDER', "/usr/share/tessdata")
 POPPLER_FOLDER = get_or_create_env_var('POPPLER_FOLDER', "") # If installing on Windows,install Poppler from here https://github.com/oschwartz10612/poppler-windows. This variable needs to point to the poppler bin folder e.g. poppler/poppler-24.02.0/Library/bin/
 
 if TESSERACT_FOLDER: add_folder_to_path(TESSERACT_FOLDER)
@@ -266,6 +266,11 @@ TABULAR_PII_DETECTION_MODELS = PII_DETECTION_MODELS.copy()
 if NO_REDACTION_PII_OPTION in TABULAR_PII_DETECTION_MODELS:
     TABULAR_PII_DETECTION_MODELS.remove(NO_REDACTION_PII_OPTION)
 
+### Local OCR model - Tesseract vs PaddleOCR
+CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var('CHOSEN_LOCAL_OCR_MODEL', "tesseract") # Choose between "tesseract", "hybrid", and "paddle". "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.
+
+PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var('PREPROCESS_LOCAL_OCR_IMAGES', "False") # Whether to try and preprocess images before extracting text. NOTE: I have found in testing that this often results in WORSE results for scanned pages, so it is default False
+
 # Entities for redaction
 CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var('CHOSEN_COMPREHEND_ENTITIES', "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD', 'IP_ADDRESS','MAC_ADDRESS', 'LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER', 'INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER']")
 
@@ -284,7 +289,26 @@ MAX_TIME_VALUE = get_or_create_env_var('MAX_TIME_VALUE', '999999')
 
 CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "") # only "grey" is currently supported as a custom box colour
 
-REDACTION_LANGUAGE = get_or_create_env_var("REDACTION_LANGUAGE", "en") # Currently only English is supported by the app
+### Language selection options
+
+SHOW_LANGUAGE_SELECTION = get_or_create_env_var("SHOW_LANGUAGE_SELECTION", "False")
+
+DEFAULT_LANGUAGE_FULL_NAME = get_or_create_env_var("DEFAULT_LANGUAGE_FULL_NAME", "english")
+DEFAULT_LANGUAGE = get_or_create_env_var("DEFAULT_LANGUAGE", "en") # For tesseract, ensure the Tesseract language data (e.g., fra.traineddata) is installed on your system. You can find the relevant language packs here: https://github.com/tesseract-ocr/tessdata.
+# For paddle, ensure the paddle language data (e.g., fra.traineddata) is installed on your system. You can find information on supported languages here: https://www.paddleocr.ai/main/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5_multi_languages.html
+# For AWS Comprehend, only English and Spanish are supported https://docs.aws.amazon.com/comprehend/latest/dg/how-pii.html ['en', 'es']
+# AWS Textract automatically detects the language of the document and supports the following languages: https://aws.amazon.com/textract/faqs/#topic-0. 'English, Spanish, Italian, Portuguese, French, German. Handwriting, Invoices and Receipts, Identity documents and Queries processing are in English only'
+
+textract_language_choices = get_or_create_env_var("textract_language_choices", "['en', 'es', 'fr', 'de', 'it', 'pt']")
+aws_comprehend_language_choices = get_or_create_env_var("aws_comprehend_language_choices", "['en', 'es']")
+
+# The choices that the user sees
+MAPPED_LANGUAGE_CHOICES = get_or_create_env_var("MAPPED_LANGUAGE_CHOICES", "['english', 'french', 'german', 'spanish', 'italian', 'dutch', 'portuguese', 'chinese', 'japanese', 'korean', 'lithuanian', 'macedonian', 'norwegian_bokmaal', 'polish', 'romanian', 'russian', 'slovenian', 'swedish', 'catalan', 'ukrainian']")
+LANGUAGE_CHOICES = get_or_create_env_var("LANGUAGE_CHOICES", "['en', 'fr', 'de', 'es', 'it', 'nl', 'pt', 'zh', 'ja', 'ko', 'lt', 'mk', 'nb', 'pl', 'ro', 'ru', 'sl', 'sv', 'ca', 'uk']")
+
+
+
+### File output options
 
 RETURN_PDF_END_OF_REDACTION = get_or_create_env_var("RETURN_PDF_END_OF_REDACTION", "True") # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
 

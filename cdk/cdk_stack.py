@@ -990,6 +990,21 @@ class CdkStack(Stack):
                         "sourceVolume": epheremal_storage_volume_name,
                         "containerPath": "/tmp/gradio_tmp",
                         "readOnly": False
+                    },
+                    {
+                        "sourceVolume": epheremal_storage_volume_name,
+                        "containerPath": "/home/user/.paddlex",
+                        "readOnly": False
+                    },
+                    {
+                        "sourceVolume": epheremal_storage_volume_name,
+                        "containerPath": "/home/user/.local/share/spacy/data",
+                        "readOnly": False
+                    },
+                    {
+                        "sourceVolume": epheremal_storage_volume_name,
+                        "containerPath": "/usr/share/tessdata",
+                        "readOnly": False
                     }
                 ],
                 "readonlyRootFilesystem": read_only_file_system,

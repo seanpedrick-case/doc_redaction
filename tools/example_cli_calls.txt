@@ -1,0 +1,24 @@
+python cli_redact.py --help
+
+python cli_redact.py \
+    --input_file "documents/confidential-report.pdf" \
+    --output_dir "output/redacted_reports/" \
+    --ocr_method "Local OCR model - PDFs without selectable text" \
+    --pii_detector "Local" \
+    --page_min 2 \
+    --page_max 10 \
+    --allow_list "config/project_allowlist.csv"
+
+python your_cli_script.py \
+    --input_file "data/customer_data.xlsx" \
+    --output_dir "output/anonymised_data/" \
+    --anon_strat "redact" \
+    --columns "Customer Name" "Email" \
+    --excel_sheets "Q3-Data"
+
+python your_cli_script.py \
+    --input_file "legal_docs/legal_agreement.docx" \
+    --output_dir "output/anonymised_docs/" \
+    --anon_strat "encrypt" \
+    --deny_list "config/codenames.csv" \
+    --language "en"

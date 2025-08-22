@@ -213,9 +213,9 @@ SAVE_LOGS_TO_CSV = get_or_create_env_var('SAVE_LOGS_TO_CSV', 'True')
 
 ### DYNAMODB logs. Whether to save to DynamoDB, and the headers of the table
 SAVE_LOGS_TO_DYNAMODB = get_or_create_env_var('SAVE_LOGS_TO_DYNAMODB', 'True')
-ACCESS_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('ACCESS_LOG_DYNAMODB_TABLE_NAME', f"{CDK_PREFIX}dynamodb-access-log".lower())
-FEEDBACK_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('FEEDBACK_LOG_DYNAMODB_TABLE_NAME', f"{CDK_PREFIX}dynamodb-feedback".lower())
-USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('USAGE_LOG_DYNAMODB_TABLE_NAME', f"{CDK_PREFIX}dynamodb-usage".lower())
+ACCESS_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('ACCESS_LOG_DYNAMODB_TABLE_NAME', f"{CDK_PREFIX}dynamodb-access-logs".lower())
+FEEDBACK_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('FEEDBACK_LOG_DYNAMODB_TABLE_NAME', f"{CDK_PREFIX}dynamodb-feedback-logs".lower())
+USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('USAGE_LOG_DYNAMODB_TABLE_NAME', f"{CDK_PREFIX}dynamodb-usage-logs".lower())
 
 ###
 # REDACTION OPTIONS
