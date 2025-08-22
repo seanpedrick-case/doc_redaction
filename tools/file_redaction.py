@@ -1594,6 +1594,9 @@ def redact_image_pdf(file_path:str,
 
                     page_line_level_ocr_results, page_line_level_ocr_results_with_words = combine_ocr_results(page_word_level_ocr_results, page=reported_page_number)
 
+                    if all_page_line_level_ocr_results_with_words is None:
+                        all_page_line_level_ocr_results_with_words = list()
+
                     all_page_line_level_ocr_results_with_words.append(page_line_level_ocr_results_with_words)
     
             # Check if page exists in existing textract data. If not, send to service to analyse
@@ -1659,6 +1662,9 @@ def redact_image_pdf(file_path:str,
                         text_blocks = next(page['data'] for page in textract_data["pages"] if page['page_no'] == reported_page_number)
                 
                 page_line_level_ocr_results, handwriting_or_signature_boxes, page_signature_recogniser_results, page_handwriting_recogniser_results, page_line_level_ocr_results_with_words = json_to_ocrresult(text_blocks, page_width, page_height, reported_page_number)
+
+                if all_page_line_level_ocr_results_with_words is None:
+                    all_page_line_level_ocr_results_with_words = list()
 
                 all_page_line_level_ocr_results_with_words.append(page_line_level_ocr_results_with_words)
 
