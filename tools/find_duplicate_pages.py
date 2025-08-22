@@ -1209,7 +1209,7 @@ def create_annotation_objects_from_duplicates(
     if duplicates_df.empty:
         raise Warning("No duplicates found")
     if ocr_results_df.empty:
-        raise Warning("No OCR results found for file under review. Please upload relevant OCR_output file for the PDF file on the review tab.")
+        raise Warning("No OCR results found for file under review. Please upload relevant OCR_output file and original PDF document on the review tab.")
 
     if combine_pages == False:
         page_to_image_map = {item['page']: item['image_path'] for item in page_sizes}

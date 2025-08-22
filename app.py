@@ -257,7 +257,7 @@ with app:
     gr.Markdown(
     """# Document redaction
 
-    Redact personally identifiable information (PII) from documents (PDF, images), open text, or tabular data (XLSX/CSV/Parquet). Please see the [User Guide](https://github.com/seanpedrick-case/doc_redaction/blob/main/README.md) for a walkthrough on how to use the app. Below is a very brief overview.
+    Redact personally identifiable information (PII) from documents (PDF, images), Word files (.docx), or tabular data (XLSX/CSV/Parquet). Please see the [User Guide](https://github.com/seanpedrick-case/doc_redaction/blob/main/README.md) for a walkthrough on how to use the app. Below is a very brief overview.
     
     To identify text in documents, the 'Local' text/OCR image analysis uses spaCy/Tesseract, and works well only for documents with typed text. If available, choose 'AWS Textract' to redact more complex elements e.g. signatures or handwriting. Then, choose a method for PII identification. 'Local' is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
     
@@ -908,7 +908,6 @@ with app:
     ###
     # IDENTIFY DUPLICATE PAGES
     ###
-    #in_duplicate_pages.upload(fn = prepare_image_or_pdf, inputs=[in_duplicate_pages, text_extract_method_radio, all_page_line_level_ocr_results_df_base, all_page_line_level_ocr_results_with_words_df_base, latest_file_completed_num, redaction_output_summary_textbox, second_loop_state, annotate_max_pages, all_image_annotations_state, prepare_for_review_bool, in_fully_redacted_list_state, output_folder_textbox, input_folder_textbox, prepare_images_bool_false, page_sizes, pdf_doc_state], outputs=[redaction_output_summary_textbox, prepared_pdf_state, images_pdf_state, annotate_max_pages, annotate_max_pages_bottom, pdf_doc_state, all_image_annotations_state, review_file_df, document_cropboxes, page_sizes, textract_output_found_checkbox, all_img_details_state, all_page_line_level_ocr_results_df_base, relevant_ocr_output_with_words_found_checkbox, all_page_line_level_ocr_results_with_words_df_base])
 
     find_duplicate_pages_btn.click(
         fn=run_duplicate_analysis,
@@ -977,9 +976,7 @@ with app:
     all_output_files_btn.click(fn=load_all_output_files, inputs=output_folder_textbox, outputs=all_output_files)    
 
     # Language selection dropdown
-    chosen_language_full_name_drop.select(update_language_dropdown, inputs=[chosen_language_full_name_drop], outputs=[chosen_language_drop])#.\
-    #success(download_tesseract_lang_pack, inputs=[chosen_language_drop], outputs = [tesseract_lang_data_file_path]).\
-    #success(load_spacy_model, inputs=[chosen_language_drop], outputs=[updated_nlp_analyser_state])
+    chosen_language_full_name_drop.select(update_language_dropdown, inputs=[chosen_language_full_name_drop], outputs=[chosen_language_drop])
     
     ###
     # APP LOAD AND LOGGING

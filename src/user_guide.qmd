@@ -20,7 +20,7 @@ format:
     - [Redacting only specific pages](#redacting-only-specific-pages)
     - [Handwriting and signature redaction](#handwriting-and-signature-redaction)
 - [Reviewing and modifying suggested redactions](#reviewing-and-modifying-suggested-redactions)
-- [Redacting tabular data files (CSV/XLSX) or copy and pasted text](#redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text)
+- [Redacting Word, tabular data files (CSV/XLSX) or copy and pasted text](#redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text)
 
 See the [advanced user guide here](#advanced-user-guide):
 - [Merging redaction review files](#merging-redaction-review-files)
@@ -210,9 +210,11 @@ On the 'Review redactions' tab you have a visual interface that allows you to in
 
 ### Uploading documents for review
 
-The top area has a file upload area where you can upload original, unredacted PDFs, alongside the '..._review_file.csv' that is produced by the redaction process. Once you have uploaded these two files, click the '**Review redactions based on original PDF...**' button to load in the files for review. This will allow you to visualise and modify the suggested redactions using the interface below.
+The top area has a file upload area where you can upload files for review . In the left box, upload the original PDF file. Click '1. Upload original PDF'. In the right box, you can upload the '..._review_file.csv' that is produced by the redaction process.
 
-Optionally, you can also upload one of the '..._ocr_output.csv' files here that comes out of a redaction task, so that you can navigate the extracted text from the document.
+Optionally, you can upload a '..._ocr_result_with_words' file here, that will allow you to search through the text and easily [add new redactions based on word search](#searching-and-adding-custom-redactions). You can also upload one of the '..._ocr_output.csv' file here that comes out of a redaction task, so that you can navigate the extracted text from the document. Click the button '2. Upload Review or OCR csv files' load in these files.
+
+Now you can review and modify the suggested redactions using the interface described below.
 
 ![Search extracted text](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
 
@@ -300,6 +302,77 @@ Once you have filtered the table, or selected a row from the table, you have a f
 
 If you made a mistake, click the 'Undo last element removal' button to restore the Search suggested redactions table to its previous state (can only undo the last action).
 
+### Searching and Adding Custom Redactions
+
+After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The **"Search text to make new redactions"** tab gives you the power to find and redact any text within your document manually.
+
+#### How to Use the Search and Redact Feature
+
+The workflow is designed to be simple: **Search → Select → Redact**.
+
+---
+
+#### **Step 1: Search for Text**
+
+1.  Navigate to the **"Search text to make new redactions"** tab.
+2.  The main table will initially be populated with all the text extracted from the document, broken down by word.
+3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find.
+4.  Click the **"Search"** button or press Enter.
+5.  The table below will update to show only the rows containing text that matches your search query.
+
+> **Tip:** You can also filter the results by page number using the **"Page"** dropdown. To clear all filters and see the full text again, click the **"Reset table to original state"** button.
+
+---
+
+#### **Step 2: Select and Review a Match**
+
+When you click on any row in the search results table:
+
+*   The document preview on the left will automatically jump to that page, allowing you to see the word in its original context.
+*   The details of your selection will appear in the smaller **"Selected row"** table for confirmation.
+
+---
+
+#### **Step 3: Choose Your Redaction Method**
+
+You have several powerful options for redacting the text you've found:
+
+*   **Redact a Single, Specific Instance:**
+    *   Click on the exact row in the table you want to redact.
+    *   Click the **`Redact specific text row`** button.
+    *   Only that single instance will be redacted.
+
+*   **Redact All Instances of a Word/Phrase:**
+    *   Let's say you want to redact the project name "Project Alpha" everywhere it appears.
+    *   Find and select one instance of "Project Alpha" in the table.
+    *   Click the **`Redact all words with same text as selected row`** button.
+    *   The application will find and redact every single occurrence of "Project Alpha" throughout the entire document.
+
+*   **Redact All Current Search Results:**
+    *   Perform a search (e.g., for a specific person's name).
+    *   If you are confident that every result shown in the filtered table should be redacted, click the **`Redact all text in table`** button.
+    *   This will apply a redaction to all currently visible items in the table in one go.
+
+---
+
+#### **Customising Your New Redactions**
+
+Before you click one of the redact buttons, you can customize the appearance and label of the new redactions under the **"Search options"** accordion:
+
+*   **Label for new redactions:** Change the text that appears on the redaction box (default is "Redaction"). You could change this to "CONFIDENTIAL" or "CUSTOM".
+*   **Colour for labels:** Set a custom color for the redaction box by providing an RGB value. The format must be three numbers (0-255) in parentheses, for example:
+    *   ` (255, 0, 0) ` for Red
+    *   ` (0, 0, 0) ` for Black
+    *   ` (255, 255, 0) ` for Yellow
+
+#### **Undoing a Mistake**
+
+If you make a mistake, you can reverse the last redaction action you performed on this tab.
+
+*   Click the **`Undo latest redaction`** button. This will revert the last set of redactions you added (whether it was a single row, all of a certain text, or all search results).
+
+> **Important:** This undo button only works for the *most recent* action. It maintains a single backup state, so it cannot undo actions that are two or more steps in the past.
+
 ### Navigating through the document using the 'Search all extracted text' 
 
 The 'search all extracted text' table will contain text if you have just redacted a document, or if you have uploaded a '..._ocr_output.csv' file alongside a document file and review file on the Review redactions tab as [described above](#uploading-documents-for-review). 
@@ -312,11 +385,11 @@ You can search through the extracted text by using the search bar just above the
 
 ![Search suggested redaction area](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
 
-## Redacting tabular data files (XLSX/CSV) or copy and pasted text
+## Redacting Word, tabular data files (XLSX/CSV) or copy and pasted text
 
-### Tabular data files (XLSX/CSV)
+### Word or tabular data files (XLSX/CSV)
 
-The app can be used to redact tabular data files such as xlsx or csv files. For this to work properly, your data file needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.
+The app can be used to redact Word (.docx), or tabular data files such as xlsx or csv files. For this to work properly, your data file needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.
 
 To demonstrate this, we can use [the example csv file 'combined_case_notes.csv'](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv), which is a small dataset of dummy social care case notes. Go to the 'Open text or Excel/csv files' tab. Drop the file into the upload area. After the file is loaded, you should see the suggested columns for redaction in the box underneath. You can select and deselect columns to redact as you wish from this list.
 

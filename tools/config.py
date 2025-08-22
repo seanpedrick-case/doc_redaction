@@ -267,7 +267,7 @@ if NO_REDACTION_PII_OPTION in TABULAR_PII_DETECTION_MODELS:
     TABULAR_PII_DETECTION_MODELS.remove(NO_REDACTION_PII_OPTION)
 
 ### Local OCR model - Tesseract vs PaddleOCR
-CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var('CHOSEN_LOCAL_OCR_MODEL', "tesseract") # Choose between "tesseract", "hybrid", and "paddle"
+CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var('CHOSEN_LOCAL_OCR_MODEL', "tesseract") # Choose between "tesseract", "hybrid", and "paddle". "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.
 
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var('PREPROCESS_LOCAL_OCR_IMAGES', "False") # Whether to try and preprocess images before extracting text. NOTE: I have found in testing that this often results in WORSE results for scanned pages, so it is default False
 

@@ -834,7 +834,10 @@ def prepare_image_or_pdf(
         out_message.append(out_time)
         combined_out_message = '\n'.join(out_message)
 
-    number_of_pages = len(page_sizes)
+    if not page_sizes:
+        number_of_pages = 1
+    else:
+        number_of_pages = len(page_sizes)
 
     print("Finished loading in files")
         

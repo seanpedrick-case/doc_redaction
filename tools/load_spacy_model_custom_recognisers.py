@@ -506,9 +506,9 @@ def create_nlp_analyser(language: str = DEFAULT_LANGUAGE, custom_list: List[str]
     return nlp_analyser
 
 # Create the default nlp_analyser using the new function
-nlp_analyser, nlp_model = create_nlp_analyser(DEFAULT_LANGUAGE, return_also_model=True)
+nlp_analyser, nlp = create_nlp_analyser(DEFAULT_LANGUAGE, return_also_model=True)
 
-def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mistakes_max:int = 1, search_whole_phrase:bool=True, nlp=nlp_model, progress=gr.Progress(track_tqdm=True)):
+def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mistakes_max:int = 1, search_whole_phrase:bool=True, nlp=nlp, progress=gr.Progress(track_tqdm=True)):
     ''' Conduct fuzzy match on a list of text data.'''
 
     all_matches = []
@@ -546,7 +546,6 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
         
         else:
             # If matching a whole phrase, use Spacy PhraseMatcher, then consider similarity after using Levenshtein distance.
-            #tokenised_query = [string_query.lower()]
             # If you want to match the whole phrase, use phrase matcher
             matcher = FuzzyMatcher(nlp.vocab)
             patterns = [nlp.make_doc(string_query)]  # Convert query into a Doc object
@@ -567,9 +566,7 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
                 for match_id, start, end in matches:
                     span = str(doc[start:end]).strip()
                     query_search = str(query).strip()
-                    #print("doc:", doc)
-                    #print("span:", span)
-                    #print("query_search:", query_search)
+
                     
                     # Convert word positions to character positions
                     start_char = doc[start].idx  # Start character position
@@ -584,9 +581,6 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
                 for match_id, start, end, ratio, pattern in matches:
                     span = str(doc[start:end]).strip()
                     query_search = str(query).strip()
-                    #print("doc:", doc)
-                    #print("span:", span)
-                    #print("query_search:", query_search)
                     
                     # Calculate Levenshtein distance. Only keep matches with less than specified number of spelling mistakes
                     distance = Levenshtein.distance(query_search.lower(), span.lower())
@@ -599,9 +593,6 @@ def spacy_fuzzy_search(text: str, custom_query_list:List[str]=[], spelling_mista
                         # Convert word positions to character positions
                         start_char = doc[start].idx  # Start character position
                         end_char = doc[end - 1].idx + len(doc[end - 1])  # End character position
-
-                        #print("start_char:", start_char)
-                        #print("end_char:", end_char)
 
                         all_matches.append(match_count)
                         all_start_positions.append(start_char)

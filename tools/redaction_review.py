@@ -797,6 +797,10 @@ def update_annotator_object_and_filter_df(
     page_num_reported_zero_indexed = page_num_reported - 1
     annotate_previous_page = page_num_reported # Store the determined page number
 
+    if not page_sizes:
+        page_num_reported = 0
+        annotate_previous_page = 0
+
     # --- Process page sizes DataFrame ---
     page_sizes_df = pd.DataFrame(page_sizes)
     if not page_sizes_df.empty:
@@ -916,7 +920,10 @@ def update_annotator_object_and_filter_df(
 
 
     # --- Final Output Components ---
-    page_number_reported_gradio_comp = gr.Number(label = "Current page", value=page_num_reported, precision=0)
+    if page_sizes:
+        page_number_reported_gradio_comp = gr.Number(label = "Current page", value=page_num_reported, precision=0, maximum=len(page_sizes), minimum=1)
+    else:
+        page_number_reported_gradio_comp = gr.Number(label = "Current page", value=0, precision=0, maximum=9999, minimum=0)
 
     ### Present image_annotator outputs
     # Handle the case where current_page_image_annotator_object couldn't be prepared

@@ -12,7 +12,7 @@ license: agpl-3.0
 
 version: 1.0.0
 
-Redact personally identifiable information (PII) from documents (pdf, images), open text, or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a walkthrough on how to use the app. Below is a very brief overview.
+Redact personally identifiable information (PII) from documents (pdf, images), Word files (.docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a walkthrough on how to use the app. Below is a very brief overview.
     
 To identify text in documents, the 'local' text/OCR image analysis uses spacy/tesseract, and works quite well for documents with typed text. If available, choose 'AWS Textract service' to redact more complex elements e.g. signatures or handwriting. Then, choose a method for PII identification. 'Local' is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
 
@@ -20,7 +20,191 @@ After redaction, review suggested redactions on the 'Review redactions' tab. The
 
 NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.
 
-# USER GUIDE
+---
+
+## 🚀 Quick Start - Installation and first run
+
+Follow these instructions to get the document redaction application running on your local machine.
+
+### 1. Prerequisites: System Dependencies
+
+This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). Please install them on your system before proceeding.
+
+---
+
+
+#### **On Windows**
+
+Installation on Windows requires downloading installers and adding the programs to your system's PATH.
+
+1.  **Install Tesseract OCR:**
+    *   Download the installer from the official Tesseract at [UB Mannheim page](https://github.com/UB-Mannheim/tesseract/wiki) (e.g., `tesseract-ocr-w64-setup-v5.X.X...exe`).
+    *   Run the installer.
+    *   **IMPORTANT:** During installation, ensure you select the option to "Add Tesseract to system PATH for all users" or a similar option. This is crucial for the application to find the Tesseract executable.
+
+
+2.  **Install Poppler:**
+    *   Download the latest Poppler binary for Windows. A common source is the [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows) GitHub releases page. Download the `.zip` file (e.g., `poppler-24.02.0-win.zip`).
+    *   Extract the contents of the zip file to a permanent location on your computer, for example, `C:\Program Files\poppler\`.
+    *   You must add the `bin` folder from your Poppler installation to your system's PATH environment variable.
+        *   Search for "Edit the system environment variables" in the Windows Start Menu and open it.
+        *   Click the "Environment Variables..." button.
+        *   In the "System variables" section, find and select the `Path` variable, then click "Edit...".
+        *   Click "New" and add the full path to the `bin` directory inside your Poppler folder (e.g., `C:\Program Files\poppler\poppler-24.02.0\bin`).
+        *   Click OK on all windows to save the changes.
+
+    To verify, open a new Command Prompt and run `tesseract --version` and `pdftoppm -v`. If they both return version information, you have successfully installed the prerequisites.
+
+---
+
+#### **On Linux (Debian/Ubuntu)**
+
+Open your terminal and run the following command to install Tesseract and Poppler:
+
+```bash
+sudo apt-get update && sudo apt-get install -y tesseract-ocr poppler-utils
+```
+
+#### **On Linux (Fedora/CentOS/RHEL)**
+
+Open your terminal and use the `dnf` or `yum` package manager:
+
+```bash
+sudo dnf install -y tesseract poppler-utils
+```
+---
+
+
+### 2. Installation: Code and Python Packages
+
+Once the system prerequisites are installed, you can set up the Python environment.
+
+#### Step 1: Clone the Repository
+
+Open your terminal or Git Bash and clone this repository:
+```bash
+git clone https://github.com/seanpedrick-case/doc_redaction.git
+cd doc_redaction
+```
+
+#### Step 2: Create and Activate a Virtual Environment (Recommended)
+
+It is highly recommended to use a virtual environment to isolate project dependencies and avoid conflicts with other Python projects.
+
+```bash
+# Create the virtual environment
+python -m venv venv
+
+# Activate it
+# On Windows:
+.\venv\Scripts\activate
+
+# On macOS/Linux:
+source venv/bin/activate
+```
+
+#### Step 3: Install Python Dependencies
+
+This project uses `pyproject.toml` to manage dependencies. You can install everything with a single pip command. This process will also download the required Spacy models and other packages directly from their URLs.
+
+```bash
+pip install .
+```
+
+Alternatively, you can use the `requirements.txt` file:
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Run the Application
+
+With all dependencies installed, you can now start the Gradio application.
+
+```bash
+python app.py
+```
+
+After running the command, the application will start, and you will see a local URL in your terminal (usually `http://127.0.0.1:7860`).
+
+Open this URL in your web browser to use the document redaction tool
+
+---
+
+
+### 4. ⚙️ Configuration (Optional)
+
+You can customise the application's behavior by creating a configuration file. This allows you to change settings without modifying the source code, such as enabling AWS features, changing logging behavior, or pointing to local Tesseract/Poppler installations. A full overview of all the potential settings you can modify in the app_config.env file can be seen in tools/config.py, with explanation on the documentation website for [the github repo](https://seanpedrick-case.github.io/doc_redaction/)
+
+To get started:
+1.  Locate the `example_config.env` file in the root of the project.
+2.  Create a new file named `app_config.env` inside the `config/` directory (i.e., `config/app_config.env`).
+3.  Copy the contents from `example_config.env` into your new `config/app_config.env` file.
+4.  Modify the values in `config/app_config.env` to suit your needs. The application will automatically load these settings on startup.
+
+If you do not create this file, the application will run with default settings.
+
+#### Configuration Breakdown
+
+Here is an overview of the most important settings, separated by whether they are for local use or require AWS.
+
+---
+
+#### **Local & General Settings (No AWS Required)**
+
+These settings are useful for all users, regardless of whether you are using AWS.
+
+*   `TESSERACT_FOLDER` / `POPPLER_FOLDER`
+    *   Use these if you installed Tesseract or Poppler to a custom location on **Windows** and did not add them to the system PATH.
+    *   Provide the path to the respective installation folders (for Poppler, point to the `bin` sub-directory).
+    *   **Examples:** `POPPLER_FOLDER=C:/Program Files/poppler-24.02.0/bin/` `TESSERACT_FOLDER=tesseract/`
+
+*   `SHOW_LANGUAGE_SELECTION=True`
+    *   Set to `True` to display a language selection dropdown in the UI for OCR processing.
+
+*   `CHOSEN_LOCAL_OCR_MODEL=tesseract`"
+    *   Choose the backend for local OCR. Options are `tesseract`, `paddle`, or `hybrid`. "Tesseract" is the default, and is recommended. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence. "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. 
+
+*   `SESSION_OUTPUT_FOLDER=False`
+    *   If `True`, redacted files will be saved in unique subfolders within the `output/` directory for each session.
+
+*   `DISPLAY_FILE_NAMES_IN_LOGS=False`
+    *   For privacy, file names are not recorded in usage logs by default. Set to `True` to include them.
+
+---
+
+#### **AWS-Specific Settings**
+
+These settings are only relevant if you intend to use AWS services like Textract for OCR and Comprehend for PII detection.
+
+*   `RUN_AWS_FUNCTIONS=1`
+    *   **This is the master switch.** You must set this to `1` to enable any AWS functionality. If it is `0`, all other AWS settings will be ignored.
+
+*   **UI Options:**
+    *   `SHOW_AWS_TEXT_EXTRACTION_OPTIONS=True`: Adds "AWS Textract" as an option in the text extraction dropdown.
+    *   `SHOW_AWS_PII_DETECTION_OPTIONS=True`: Adds "AWS Comprehend" as an option in the PII detection dropdown.
+
+*   **Core AWS Configuration:**
+    *   `AWS_REGION=example-region`: Set your AWS region (e.g., `us-east-1`).
+    *   `DOCUMENT_REDACTION_BUCKET=example-bucket`: The name of the S3 bucket the application will use for temporary file storage and processing.
+
+*   **AWS Logging:**
+    *   `SAVE_LOGS_TO_DYNAMODB=True`: If enabled, usage and feedback logs will be saved to DynamoDB tables.
+    *   `ACCESS_LOG_DYNAMODB_TABLE_NAME`, `USAGE_LOG_DYNAMODB_TABLE_NAME`, etc.: Specify the names of your DynamoDB tables for logging.
+
+*   **Advanced AWS Textract Features:**
+    *   `SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS=True`: Enables UI components for large-scale, asynchronous document processing via Textract.
+    *   `TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET=example-bucket-output`: A separate S3 bucket for the final output of asynchronous Textract jobs.
+    *   `LOAD_PREVIOUS_TEXTRACT_JOBS_S3=True`: If enabled, the app will try to load the status of previously submitted asynchronous jobs from S3.
+
+*   **Cost Tracking (for internal accounting):**
+    *   `SHOW_COSTS=True`: Displays an estimated cost for AWS operations. Can be enabled even if AWS functions are off.
+    *   `GET_COST_CODES=True`: Enables a dropdown for users to select a cost code before running a job.
+    *   `COST_CODES_PATH=config/cost_codes.csv`: The local path to a CSV file containing your cost codes.
+    *   `ENFORCE_COST_CODES=True`: Makes selecting a cost code mandatory before starting a redaction.
+
+Now you have the app installed, what follows is a guide on how to use it for basic and advanced redaction.
+
+# User Guide
 
 ## Table of contents
 
@@ -35,7 +219,7 @@ NOTE: The app is not 100% accurate, and it will miss some personal information. 
     - [Redacting only specific pages](#redacting-only-specific-pages)
     - [Handwriting and signature redaction](#handwriting-and-signature-redaction)
 - [Reviewing and modifying suggested redactions](#reviewing-and-modifying-suggested-redactions)
-- [Redacting tabular data files (CSV/XLSX) or copy and pasted text](#redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text)
+- [Redacting Word, tabular data files (CSV/XLSX) or copy and pasted text](#redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text)
 
 See the [advanced user guide here](#advanced-user-guide):
 - [Merging redaction review files](#merging-redaction-review-files)
@@ -225,9 +409,11 @@ On the 'Review redactions' tab you have a visual interface that allows you to in
 
 ### Uploading documents for review
 
-The top area has a file upload area where you can upload original, unredacted PDFs, alongside the '..._review_file.csv' that is produced by the redaction process. Once you have uploaded these two files, click the '**Review redactions based on original PDF...**' button to load in the files for review. This will allow you to visualise and modify the suggested redactions using the interface below.
+The top area has a file upload area where you can upload files for review . In the left box, upload the original PDF file. Click '1. Upload original PDF'. In the right box, you can upload the '..._review_file.csv' that is produced by the redaction process.
 
-Optionally, you can also upload one of the '..._ocr_output.csv' files here that comes out of a redaction task, so that you can navigate the extracted text from the document.
+Optionally, you can upload a '..._ocr_result_with_words' file here, that will allow you to search through the text and easily [add new redactions based on word search](#searching-and-adding-custom-redactions). You can also upload one of the '..._ocr_output.csv' file here that comes out of a redaction task, so that you can navigate the extracted text from the document. Click the button '2. Upload Review or OCR csv files' load in these files.
+
+Now you can review and modify the suggested redactions using the interface described below.
 
 ![Search extracted text](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
 
@@ -315,6 +501,77 @@ Once you have filtered the table, or selected a row from the table, you have a f
 
 If you made a mistake, click the 'Undo last element removal' button to restore the Search suggested redactions table to its previous state (can only undo the last action).
 
+### Searching and Adding Custom Redactions
+
+After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The **"Search text to make new redactions"** tab gives you the power to find and redact any text within your document manually.
+
+#### How to Use the Search and Redact Feature
+
+The workflow is designed to be simple: **Search → Select → Redact**.
+
+---
+
+#### **Step 1: Search for Text**
+
+1.  Navigate to the **"Search text to make new redactions"** tab.
+2.  The main table will initially be populated with all the text extracted from the document, broken down by word.
+3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find.
+4.  Click the **"Search"** button or press Enter.
+5.  The table below will update to show only the rows containing text that matches your search query.
+
+> **Tip:** You can also filter the results by page number using the **"Page"** dropdown. To clear all filters and see the full text again, click the **"Reset table to original state"** button.
+
+---
+
+#### **Step 2: Select and Review a Match**
+
+When you click on any row in the search results table:
+
+*   The document preview on the left will automatically jump to that page, allowing you to see the word in its original context.
+*   The details of your selection will appear in the smaller **"Selected row"** table for confirmation.
+
+---
+
+#### **Step 3: Choose Your Redaction Method**
+
+You have several powerful options for redacting the text you've found:
+
+*   **Redact a Single, Specific Instance:**
+    *   Click on the exact row in the table you want to redact.
+    *   Click the **`Redact specific text row`** button.
+    *   Only that single instance will be redacted.
+
+*   **Redact All Instances of a Word/Phrase:**
+    *   Let's say you want to redact the project name "Project Alpha" everywhere it appears.
+    *   Find and select one instance of "Project Alpha" in the table.
+    *   Click the **`Redact all words with same text as selected row`** button.
+    *   The application will find and redact every single occurrence of "Project Alpha" throughout the entire document.
+
+*   **Redact All Current Search Results:**
+    *   Perform a search (e.g., for a specific person's name).
+    *   If you are confident that every result shown in the filtered table should be redacted, click the **`Redact all text in table`** button.
+    *   This will apply a redaction to all currently visible items in the table in one go.
+
+---
+
+#### **Customising Your New Redactions**
+
+Before you click one of the redact buttons, you can customize the appearance and label of the new redactions under the **"Search options"** accordion:
+
+*   **Label for new redactions:** Change the text that appears on the redaction box (default is "Redaction"). You could change this to "CONFIDENTIAL" or "CUSTOM".
+*   **Colour for labels:** Set a custom color for the redaction box by providing an RGB value. The format must be three numbers (0-255) in parentheses, for example:
+    *   ` (255, 0, 0) ` for Red
+    *   ` (0, 0, 0) ` for Black
+    *   ` (255, 255, 0) ` for Yellow
+
+#### **Undoing a Mistake**
+
+If you make a mistake, you can reverse the last redaction action you performed on this tab.
+
+*   Click the **`Undo latest redaction`** button. This will revert the last set of redactions you added (whether it was a single row, all of a certain text, or all search results).
+
+> **Important:** This undo button only works for the *most recent* action. It maintains a single backup state, so it cannot undo actions that are two or more steps in the past.
+
 ### Navigating through the document using the 'Search all extracted text' 
 
 The 'search all extracted text' table will contain text if you have just redacted a document, or if you have uploaded a '..._ocr_output.csv' file alongside a document file and review file on the Review redactions tab as [described above](#uploading-documents-for-review). 
@@ -327,11 +584,11 @@ You can search through the extracted text by using the search bar just above the
 
 ![Search suggested redaction area](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
 
-## Redacting tabular data files (XLSX/CSV) or copy and pasted text
+## Redacting Word, tabular data files (XLSX/CSV) or copy and pasted text
 
-### Tabular data files (XLSX/CSV)
+### Word or tabular data files (XLSX/CSV)
 
-The app can be used to redact tabular data files such as xlsx or csv files. For this to work properly, your data file needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.
+The app can be used to redact Word (.docx), or tabular data files such as xlsx or csv files. For this to work properly, your data file needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.
 
 To demonstrate this, we can use [the example csv file 'combined_case_notes.csv'](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv), which is a small dataset of dummy social care case notes. Go to the 'Open text or Excel/csv files' tab. Drop the file into the upload area. After the file is loaded, you should see the suggested columns for redaction in the box underneath. You can select and deselect columns to redact as you wish from this list.
 

@@ -758,9 +758,6 @@ def anonymise_script(df:pd.DataFrame,
     batch_anonymizer = BatchAnonymizerEngine(anonymizer_engine = anonymizer)    
     analyzer_results = list()
 
-    # Use provided comprehend language or fall back to main language
-    language = language
-
     if pii_identification_method == "Local":
 
         # Use custom analyzer to be able to track progress with Gradio
