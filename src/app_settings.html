@@ -131,6 +131,7 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#file-io-options" id="toc-file-io-options" class="nav-link" data-scroll-target="#file-io-options">File I/O Options</a></li>
   <li><a href="#logging-options" id="toc-logging-options" class="nav-link" data-scroll-target="#logging-options">Logging Options</a></li>
   <li><a href="#redaction-options" id="toc-redaction-options" class="nav-link" data-scroll-target="#redaction-options">Redaction Options</a></li>
+  <li><a href="#language-options" id="toc-language-options" class="nav-link" data-scroll-target="#language-options">Language Options</a></li>
   <li><a href="#app-run-options" id="toc-app-run-options" class="nav-link" data-scroll-target="#app-run-options">App Run Options</a></li>
   <li><a href="#cost-code-options" id="toc-cost-code-options" class="nav-link" data-scroll-target="#cost-code-options">Cost Code Options</a></li>
   <li><a href="#whole-document-api-options" id="toc-whole-document-api-options" class="nav-link" data-scroll-target="#whole-document-api-options">Whole Document API Options</a></li>
@@ -290,6 +291,18 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Default Value:</strong> <code>'input/'</code></li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
+<li><strong><code>GRADIO_TEMP_DIR</code></strong>
+<ul>
+<li><strong>Description:</strong> Defines the path for Gradio’s temporary file storage.</li>
+<li><strong>Default Value:</strong> <code>'tmp/gradio_tmp/'</code></li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
+<li><strong><code>MPLCONFIGDIR</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies the cache directory for the Matplotlib library, which is used for plotting and image handling.</li>
+<li><strong>Default Value:</strong> <code>'tmp/matplotlib_cache/'</code></li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
 </ul>
 </section>
 <section id="logging-options" class="level2">
@@ -347,7 +360,7 @@ ul.task-list li input[type="checkbox"] {
 <li><strong><code>CSV_USAGE_LOG_HEADERS</code></strong>
 <ul>
 <li><strong>Description:</strong> Defines custom headers for CSV usage logs.</li>
-<li><strong>Default Value:</strong> A predefined list of header names. Refer to <code>tools/config.py</code> for the complete list.</li>
+<li><strong>Default Value:</strong> A predefined list of header names. Refer to <code>config.py</code> for the complete list.</li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>SAVE_LOGS_TO_DYNAMODB</code></strong>
@@ -412,13 +425,19 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong><code>TESSERACT_FOLDER</code></strong>
 <ul>
-<li><strong>Description:</strong> Path to the local Tesseract OCR installation folder. Only required if Tesseract is not in path, or you are running a version of the app as an .exe installed with Pyinstaller. Gives the path to the local Tesseract OCR model for text extraction.</li>
+<li><strong>Description:</strong> Path to the local Tesseract OCR installation folder. Only required if Tesseract is not in the system’s PATH, or when running a packaged executable (e.g., via PyInstaller).</li>
 <li><strong>Default Value:</strong> <code>""</code> (empty string)</li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
+<li><strong><code>TESSERACT_DATA_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the Tesseract trained data files (e.g., <code>tessdata</code>).</li>
+<li><strong>Default Value:</strong> <code>"/usr/share/tessdata"</code></li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>POPPLER_FOLDER</code></strong>
 <ul>
-<li><strong>Description:</strong> Path to the local Poppler installation’s <code>bin</code> folder. Only required if Tesseract is not in path, or you are running a version of the app as an .exe installed with Pyinstaller. Poppler is used for PDF processing.</li>
+<li><strong>Description:</strong> Path to the local Poppler installation’s <code>bin</code> folder. Poppler is used for PDF processing. Only required if Poppler is not in the system’s PATH.</li>
 <li><strong>Default Value:</strong> <code>""</code> (empty string)</li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
@@ -494,28 +513,40 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Default Value:</strong> Value of <code>AWS_PII_OPTION</code> if <code>SHOW_AWS_PII_DETECTION_OPTIONS</code> is True, else value of <code>LOCAL_PII_OPTION</code>.</li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>. Provide one of the PII detection option display names.</li>
 </ul></li>
+<li><strong><code>CHOSEN_LOCAL_OCR_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, or <code>"hybrid"</code>. “paddle” is effective for line extraction but not word-level redaction. “hybrid” uses Tesseract first, then PaddleOCR for low-confidence words.</li>
+<li><strong>Default Value:</strong> <code>"tesseract"</code></li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
+<li><strong><code>PREPROCESS_LOCAL_OCR_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, images will be preprocessed (e.g., deskewed, contrast adjusted) before being sent to the local OCR engine. This can sometimes yield worse results on clean scans.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
 <li><strong><code>CHOSEN_COMPREHEND_ENTITIES</code></strong>
 <ul>
 <li><strong>Description:</strong> A list of AWS Comprehend PII entity types to be redacted when using AWS Comprehend.</li>
-<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>tools/config.py</code> for the complete list.</li>
+<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>config.py</code> for the complete list.</li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>. This should be a string representation of a Python list.</li>
 </ul></li>
 <li><strong><code>FULL_COMPREHEND_ENTITY_LIST</code></strong>
 <ul>
 <li><strong>Description:</strong> The complete list of PII entity types supported by AWS Comprehend that can be selected for redaction.</li>
-<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>tools/config.py</code> for the complete list.</li>
+<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>config.py</code> for the complete list.</li>
 <li><strong>Configuration:</strong> This is typically an informational variable reflecting the capabilities of AWS Comprehend and is not meant to be changed by users directly affecting redaction behavior (use <code>CHOSEN_COMPREHEND_ENTITIES</code> for that). Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>CHOSEN_REDACT_ENTITIES</code></strong>
 <ul>
 <li><strong>Description:</strong> A list of local PII entity types to be redacted when using the local PII detection model.</li>
-<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>tools/config.py</code> for the complete list.</li>
+<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>config.py</code> for the complete list.</li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>. This should be a string representation of a Python list.</li>
 </ul></li>
 <li><strong><code>FULL_ENTITY_LIST</code></strong>
 <ul>
 <li><strong>Description:</strong> The complete list of PII entity types supported by the local PII detection model that can be selected for redaction.</li>
-<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>tools/config.py</code> for the complete list.</li>
+<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>config.py</code> for the complete list.</li>
 <li><strong>Configuration:</strong> This is typically an informational variable reflecting the capabilities of the local model and is not meant to be changed by users directly affecting redaction behavior (use <code>CHOSEN_REDACT_ENTITIES</code> for that). Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>PAGE_BREAK_VALUE</code></strong>
@@ -526,20 +557,14 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>MAX_TIME_VALUE</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the maximum time (in arbitrary units, likely seconds or milliseconds depending on implementation) for a process before it might be timed out.</li>
+<li><strong>Description:</strong> Specifies a maximum time value for long-running processes.</li>
 <li><strong>Default Value:</strong> <code>'999999'</code></li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>CUSTOM_BOX_COLOUR</code></strong>
 <ul>
-<li><strong>Description:</strong> Allows specifying a custom color for the redaction boxes drawn on documents (e.g., “grey”, “red”, “#FF0000”). If empty, a default color is used.</li>
+<li><strong>Description:</strong> Allows specifying a custom color for the redaction boxes drawn on documents. Only <code>"grey"</code> is currently supported as a custom value. If empty, a default color is used.</li>
 <li><strong>Default Value:</strong> <code>""</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>REDACTION_LANGUAGE</code></strong>
-<ul>
-<li><strong>Description:</strong> Specifies the language for redaction processing. Currently, only “en” (English) is supported.</li>
-<li><strong>Default Value:</strong> <code>"en"</code></li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>RETURN_PDF_END_OF_REDACTION</code></strong>
@@ -556,14 +581,50 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 </ul>
 </section>
+<section id="language-options" class="level2">
+<h2 class="anchored" data-anchor-id="language-options">Language Options</h2>
+<p>Settings for multi-language support in OCR and PII detection.</p>
+<ul>
+<li><strong><code>SHOW_LANGUAGE_SELECTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, a dropdown menu for language selection will be visible in the user interface.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
+<li><strong><code>DEFAULT_LANGUAGE_FULL_NAME</code></strong>
+<ul>
+<li><strong>Description:</strong> The default language’s full name (e.g., “english”) to be displayed in the UI.</li>
+<li><strong>Default Value:</strong> <code>"english"</code></li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
+<li><strong><code>DEFAULT_LANGUAGE</code></strong>
+<ul>
+<li><strong>Description:</strong> The default language’s short code (e.g., “en”) used by the backend engines. Ensure the corresponding Tesseract/PaddleOCR language packs are installed.</li>
+<li><strong>Default Value:</strong> <code>"en"</code></li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
+<li><strong><code>MAPPED_LANGUAGE_CHOICES</code></strong>
+<ul>
+<li><strong>Description:</strong> A string list of full language names (e.g., ‘english’, ‘french’) presented to the user in the language dropdown.</li>
+<li><strong>Default Value:</strong> A predefined list. See <code>config.py</code>.</li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
+<li><strong><code>LANGUAGE_CHOICES</code></strong>
+<ul>
+<li><strong>Description:</strong> A string list of short language codes (e.g., ‘en’, ‘fr’) that correspond to <code>MAPPED_LANGUAGE_CHOICES</code>. This is what the backend uses.</li>
+<li><strong>Default Value:</strong> A predefined list. See <code>config.py</code>.</li>
+<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+</ul></li>
+</ul>
+</section>
 <section id="app-run-options" class="level2">
 <h2 class="anchored" data-anchor-id="app-run-options">App Run Options</h2>
 <p>General runtime configurations for the application.</p>
 <ul>
 <li><strong><code>TLDEXTRACT_CACHE</code></strong>
 <ul>
-<li><strong>Description:</strong> Path to the cache file used by the <code>tldextract</code> library, which helps in accurately extracting top-level domains (TLDs) from URLs.</li>
-<li><strong>Default Value:</strong> <code>'tld/.tld_set_snapshot'</code></li>
+<li><strong>Description:</strong> Path to the cache directory used by the <code>tldextract</code> library, which helps in accurately extracting top-level domains (TLDs) from URLs.</li>
+<li><strong>Default Value:</strong> <code>'tmp/tld/'</code></li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>COGNITO_AUTH</code></strong>
@@ -682,7 +743,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong><code>SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS</code></strong>
 <ul>
-<li><strong>Description:</strong> Controls whether UI options for whole document Textract calls are displayed. (Note: Mentioned as not currently implemented in the source).</li>
+<li><strong>Description:</strong> Controls whether UI options for whole document Textract calls are displayed.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
@@ -712,13 +773,13 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>TEXTRACT_JOBS_S3_LOC</code></strong>
 <ul>
-<li><strong>Description:</strong> The S3 subfolder (within <code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET</code>) where Textract job data (output) is stored.</li>
+<li><strong>Description:</strong> The S3 subfolder (within the main redaction bucket) where Textract job data (output) is stored.</li>
 <li><strong>Default Value:</strong> <code>'output'</code></li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
 <li><strong><code>TEXTRACT_JOBS_S3_INPUT_LOC</code></strong>
 <ul>
-<li><strong>Description:</strong> The S3 subfolder (within <code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET</code>) where Textract job input is stored.</li>
+<li><strong>Description:</strong> The S3 subfolder (within the main redaction bucket) where Textract job input is stored.</li>
 <li><strong>Default Value:</strong> <code>'input'</code></li>
 <li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>

@@ -156,11 +156,12 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#the-document-viewer-pane" id="toc-the-document-viewer-pane" class="nav-link" data-scroll-target="#the-document-viewer-pane">The document viewer pane</a></li>
   <li><a href="#apply-redactions-to-pdf-and-save-changes-on-current-page" id="toc-apply-redactions-to-pdf-and-save-changes-on-current-page" class="nav-link" data-scroll-target="#apply-redactions-to-pdf-and-save-changes-on-current-page">Apply redactions to PDF and Save changes on current page</a></li>
   <li><a href="#selecting-and-removing-redaction-boxes-using-the-search-suggested-redactions-table" id="toc-selecting-and-removing-redaction-boxes-using-the-search-suggested-redactions-table" class="nav-link" data-scroll-target="#selecting-and-removing-redaction-boxes-using-the-search-suggested-redactions-table">Selecting and removing redaction boxes using the ‘Search suggested redactions’ table</a></li>
+  <li><a href="#searching-and-adding-custom-redactions" id="toc-searching-and-adding-custom-redactions" class="nav-link" data-scroll-target="#searching-and-adding-custom-redactions">Searching and Adding Custom Redactions</a></li>
   <li><a href="#navigating-through-the-document-using-the-search-all-extracted-text" id="toc-navigating-through-the-document-using-the-search-all-extracted-text" class="nav-link" data-scroll-target="#navigating-through-the-document-using-the-search-all-extracted-text">Navigating through the document using the ‘Search all extracted text’</a></li>
   </ul></li>
-  <li><a href="#redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text" id="toc-redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text" class="nav-link" data-scroll-target="#redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting tabular data files (XLSX/CSV) or copy and pasted text</a>
+  <li><a href="#redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text" id="toc-redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text" class="nav-link" data-scroll-target="#redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting Word, tabular data files (XLSX/CSV) or copy and pasted text</a>
   <ul class="collapse">
-  <li><a href="#tabular-data-files-xlsxcsv" id="toc-tabular-data-files-xlsxcsv" class="nav-link" data-scroll-target="#tabular-data-files-xlsxcsv">Tabular data files (XLSX/CSV)</a></li>
+  <li><a href="#word-or-tabular-data-files-xlsxcsv" id="toc-word-or-tabular-data-files-xlsxcsv" class="nav-link" data-scroll-target="#word-or-tabular-data-files-xlsxcsv">Word or tabular data files (XLSX/CSV)</a></li>
   <li><a href="#choosing-output-anonymisation-format" id="toc-choosing-output-anonymisation-format" class="nav-link" data-scroll-target="#choosing-output-anonymisation-format">Choosing output anonymisation format</a></li>
   <li><a href="#redacting-copy-and-pasted-text" id="toc-redacting-copy-and-pasted-text" class="nav-link" data-scroll-target="#redacting-copy-and-pasted-text">Redacting copy and pasted text</a></li>
   <li><a href="#redaction-log-outputs" id="toc-redaction-log-outputs" class="nav-link" data-scroll-target="#redaction-log-outputs">Redaction log outputs</a></li>
@@ -231,7 +232,7 @@ ul.task-list li input[type="checkbox"] {
 <li><a href="#handwriting-and-signature-redaction">Handwriting and signature redaction</a></li>
 </ul></li>
 <li><a href="#reviewing-and-modifying-suggested-redactions">Reviewing and modifying suggested redactions</a></li>
-<li><a href="#redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting tabular data files (CSV/XLSX) or copy and pasted text</a></li>
+<li><a href="#redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting Word, tabular data files (CSV/XLSX) or copy and pasted text</a></li>
 </ul>
 <p>See the <a href="#advanced-user-guide">advanced user guide here</a>: - <a href="#merging-redaction-review-files">Merging redaction review files</a> - <a href="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a> - <a href="#fuzzy-search-and-redaction">Fuzzy search and redaction</a> - <a href="#export-to-and-import-from-adobe">Export redactions to and import from Adobe Acrobat</a> - <a href="#exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</a> - <a href="#importing-from-adobe-acrobat">Importing from Adobe Acrobat</a> - <a href="#using-the-aws-textract-document-api">Using the AWS Textract document API</a> - <a href="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</a> - <a href="#modifying-existing-redaction-review-files">Modifying existing redaction review files</a></p>
 </section>
@@ -451,8 +452,9 @@ ul.task-list li input[type="checkbox"] {
 </div>
 <section id="uploading-documents-for-review" class="level3">
 <h3 class="anchored" data-anchor-id="uploading-documents-for-review">Uploading documents for review</h3>
-<p>The top area has a file upload area where you can upload original, unredacted PDFs, alongside the ’…_review_file.csv’ that is produced by the redaction process. Once you have uploaded these two files, click the ‘<strong>Review redactions based on original PDF…</strong>’ button to load in the files for review. This will allow you to visualise and modify the suggested redactions using the interface below.</p>
-<p>Optionally, you can also upload one of the ’…_ocr_output.csv’ files here that comes out of a redaction task, so that you can navigate the extracted text from the document.</p>
+<p>The top area has a file upload area where you can upload files for review . In the left box, upload the original PDF file. Click ‘1. Upload original PDF’. In the right box, you can upload the ’…_review_file.csv’ that is produced by the redaction process.</p>
+<p>Optionally, you can upload a ’…_ocr_result_with_words’ file here, that will allow you to search through the text and easily <a href="#searching-and-adding-custom-redactions">add new redactions based on word search</a>. You can also upload one of the ’…_ocr_output.csv’ file here that comes out of a redaction task, so that you can navigate the extracted text from the document. Click the button ‘2. Upload Review or OCR csv files’ load in these files.</p>
+<p>Now you can review and modify the suggested redactions using the interface described below.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG" class="img-fluid figure-img"></p>
@@ -568,6 +570,87 @@ ul.task-list li input[type="checkbox"] {
 <p><strong>NOTE</strong>: After excluding redactions using any of the above options, click the ‘Reset filters’ button below to ensure that the dropdowns and table return to seeing all remaining redactions in the document.</p>
 <p>If you made a mistake, click the ‘Undo last element removal’ button to restore the Search suggested redactions table to its previous state (can only undo the last action).</p>
 </section>
+<section id="searching-and-adding-custom-redactions" class="level3">
+<h3 class="anchored" data-anchor-id="searching-and-adding-custom-redactions">Searching and Adding Custom Redactions</h3>
+<p>After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The <strong>“Search text to make new redactions”</strong> tab gives you the power to find and redact any text within your document manually.</p>
+<section id="how-to-use-the-search-and-redact-feature" class="level4">
+<h4 class="anchored" data-anchor-id="how-to-use-the-search-and-redact-feature">How to Use the Search and Redact Feature</h4>
+<p>The workflow is designed to be simple: <strong>Search → Select → Redact</strong>.</p>
+<hr>
+</section>
+<section id="step-1-search-for-text" class="level4">
+<h4 class="anchored" data-anchor-id="step-1-search-for-text"><strong>Step 1: Search for Text</strong></h4>
+<ol type="1">
+<li>Navigate to the <strong>“Search text to make new redactions”</strong> tab.</li>
+<li>The main table will initially be populated with all the text extracted from the document, broken down by word.</li>
+<li>To narrow this down, use the <strong>“Multi-word text search”</strong> box to type the word or phrase you want to find.</li>
+<li>Click the <strong>“Search”</strong> button or press Enter.</li>
+<li>The table below will update to show only the rows containing text that matches your search query.</li>
+</ol>
+<blockquote class="blockquote">
+<p><strong>Tip:</strong> You can also filter the results by page number using the <strong>“Page”</strong> dropdown. To clear all filters and see the full text again, click the <strong>“Reset table to original state”</strong> button.</p>
+</blockquote>
+<hr>
+</section>
+<section id="step-2-select-and-review-a-match" class="level4">
+<h4 class="anchored" data-anchor-id="step-2-select-and-review-a-match"><strong>Step 2: Select and Review a Match</strong></h4>
+<p>When you click on any row in the search results table:</p>
+<ul>
+<li>The document preview on the left will automatically jump to that page, allowing you to see the word in its original context.</li>
+<li>The details of your selection will appear in the smaller <strong>“Selected row”</strong> table for confirmation.</li>
+</ul>
+<hr>
+</section>
+<section id="step-3-choose-your-redaction-method" class="level4">
+<h4 class="anchored" data-anchor-id="step-3-choose-your-redaction-method"><strong>Step 3: Choose Your Redaction Method</strong></h4>
+<p>You have several powerful options for redacting the text you’ve found:</p>
+<ul>
+<li><strong>Redact a Single, Specific Instance:</strong>
+<ul>
+<li>Click on the exact row in the table you want to redact.</li>
+<li>Click the <strong><code>Redact specific text row</code></strong> button.</li>
+<li>Only that single instance will be redacted.</li>
+</ul></li>
+<li><strong>Redact All Instances of a Word/Phrase:</strong>
+<ul>
+<li>Let’s say you want to redact the project name “Project Alpha” everywhere it appears.</li>
+<li>Find and select one instance of “Project Alpha” in the table.</li>
+<li>Click the <strong><code>Redact all words with same text as selected row</code></strong> button.</li>
+<li>The application will find and redact every single occurrence of “Project Alpha” throughout the entire document.</li>
+</ul></li>
+<li><strong>Redact All Current Search Results:</strong>
+<ul>
+<li>Perform a search (e.g., for a specific person’s name).</li>
+<li>If you are confident that every result shown in the filtered table should be redacted, click the <strong><code>Redact all text in table</code></strong> button.</li>
+<li>This will apply a redaction to all currently visible items in the table in one go.</li>
+</ul></li>
+</ul>
+<hr>
+</section>
+<section id="customising-your-new-redactions" class="level4">
+<h4 class="anchored" data-anchor-id="customising-your-new-redactions"><strong>Customising Your New Redactions</strong></h4>
+<p>Before you click one of the redact buttons, you can customize the appearance and label of the new redactions under the <strong>“Search options”</strong> accordion:</p>
+<ul>
+<li><strong>Label for new redactions:</strong> Change the text that appears on the redaction box (default is “Redaction”). You could change this to “CONFIDENTIAL” or “CUSTOM”.</li>
+<li><strong>Colour for labels:</strong> Set a custom color for the redaction box by providing an RGB value. The format must be three numbers (0-255) in parentheses, for example:
+<ul>
+<li><code>(255, 0, 0)</code> for Red</li>
+<li><code>(0, 0, 0)</code> for Black</li>
+<li><code>(255, 255, 0)</code> for Yellow</li>
+</ul></li>
+</ul>
+</section>
+<section id="undoing-a-mistake" class="level4">
+<h4 class="anchored" data-anchor-id="undoing-a-mistake"><strong>Undoing a Mistake</strong></h4>
+<p>If you make a mistake, you can reverse the last redaction action you performed on this tab.</p>
+<ul>
+<li>Click the <strong><code>Undo latest redaction</code></strong> button. This will revert the last set of redactions you added (whether it was a single row, all of a certain text, or all search results).</li>
+</ul>
+<blockquote class="blockquote">
+<p><strong>Important:</strong> This undo button only works for the <em>most recent</em> action. It maintains a single backup state, so it cannot undo actions that are two or more steps in the past.</p>
+</blockquote>
+</section>
+</section>
 <section id="navigating-through-the-document-using-the-search-all-extracted-text" class="level3">
 <h3 class="anchored" data-anchor-id="navigating-through-the-document-using-the-search-all-extracted-text">Navigating through the document using the ‘Search all extracted text’</h3>
 <p>The ‘search all extracted text’ table will contain text if you have just redacted a document, or if you have uploaded a ’…_ocr_output.csv’ file alongside a document file and review file on the Review redactions tab as <a href="#uploading-documents-for-review">described above</a>.</p>
@@ -587,11 +670,11 @@ ul.task-list li input[type="checkbox"] {
 </div>
 </section>
 </section>
-<section id="redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text" class="level2">
-<h2 class="anchored" data-anchor-id="redacting-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting tabular data files (XLSX/CSV) or copy and pasted text</h2>
-<section id="tabular-data-files-xlsxcsv" class="level3">
-<h3 class="anchored" data-anchor-id="tabular-data-files-xlsxcsv">Tabular data files (XLSX/CSV)</h3>
-<p>The app can be used to redact tabular data files such as xlsx or csv files. For this to work properly, your data file needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.</p>
+<section id="redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text" class="level2">
+<h2 class="anchored" data-anchor-id="redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting Word, tabular data files (XLSX/CSV) or copy and pasted text</h2>
+<section id="word-or-tabular-data-files-xlsxcsv" class="level3">
+<h3 class="anchored" data-anchor-id="word-or-tabular-data-files-xlsxcsv">Word or tabular data files (XLSX/CSV)</h3>
+<p>The app can be used to redact Word (.docx), or tabular data files such as xlsx or csv files. For this to work properly, your data file needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.</p>
 <p>To demonstrate this, we can use <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv">the example csv file ‘combined_case_notes.csv’</a>, which is a small dataset of dummy social care case notes. Go to the ‘Open text or Excel/csv files’ tab. Drop the file into the upload area. After the file is loaded, you should see the suggested columns for redaction in the box underneath. You can select and deselect columns to redact as you wish from this list.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
