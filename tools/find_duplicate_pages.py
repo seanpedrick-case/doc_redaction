@@ -570,7 +570,7 @@ def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str,
     final_df.to_csv(similarity_file_output_path, index=False, encoding="utf-8-sig")
 
     output_paths.append(str(similarity_file_output_path))
-    print(f"Main results saved to {similarity_file_output_path}")
+    #print(f"Main results saved to {similarity_file_output_path}")
 
     # 2. Save per-file redaction lists
     # Use 'Page2_File' as the source of duplicate content
@@ -663,7 +663,7 @@ def find_consecutive_sequence_matches(
         A DataFrame with two columns ('Page1_Index', 'Page2_Index') mapping the
         consecutive match, or an empty DataFrame if no match is found.
     """
-    print(f"Starting sequence search for '{search_file_name}' in '{reference_file_name}'...")
+    #print(f"Starting sequence search for '{search_file_name}' in '{reference_file_name}'...")
 
     # Step 1: Isolate the data for each file
     search_df = df_filtered[df_filtered['file'] == search_file_name]
@@ -693,7 +693,7 @@ def find_consecutive_sequence_matches(
 
         # Step 4: If the window matches the query with or without punctuation on end
         if _sequences_match(query_tokens, window):
-            print(f"Found a consecutive match starting at reference index: {reference_indices[i]}")
+            #print(f"Found a consecutive match starting at reference index: {reference_indices[i]}")
             
             # Get the global indices for this entire matching block
             matching_reference_indices = reference_indices[i : i + query_len]
@@ -795,7 +795,7 @@ def identify_similar_text_sequences(
     progress(0.7, desc="Aggregating results based on matching strategy")
 
     if greedy_match or min_consecutive_pages > 1:
-        print("Finding all consecutive page matches of minimum length:", min_consecutive_pages)
+        #print("Finding all consecutive page matches of minimum length:", min_consecutive_pages)
         
         # Sort the dataframe to ensure consecutive pages are adjacent
         similarity_df = base_similarity_df #.sort_values(['Page1_Index', 'Page2_Index']).copy()
