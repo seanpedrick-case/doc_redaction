@@ -466,6 +466,33 @@ def _merge_horizontally_adjacent_boxes(
     
     return merged_df
 
+def get_and_merge_current_page_annotations(
+        page_sizes: List[Dict],
+        annotate_current_page: int,
+        existing_annotations_list: List[Dict],
+        existing_annotations_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        """
+        Function to extract and merge annotations for the current page
+        into the main existing_annotations_df.
+        """
+        current_page_image = page_sizes[annotate_current_page - 1]["image_path"]
+
+        existing_annotations_current_page = [
+            item for item in existing_annotations_list if item["image"] == current_page_image
+        ]
+
+        current_page_annotations_df = convert_annotation_data_to_dataframe(existing_annotations_current_page)
+
+        # Concatenate and clean, ensuring no duplicates and sorted order
+        updated_df = pd.concat(
+            [existing_annotations_df, current_page_annotations_df], ignore_index=True
+        ).sort_values(by=["page", "xmin", "ymin"]).drop_duplicates(
+            subset=["id"], keep="first"
+        )
+        
+        return updated_df
+
 def create_annotation_objects_from_filtered_ocr_results_with_words(
     filtered_ocr_results_with_words_df: pd.DataFrame, 
     ocr_results_with_words_df_base: pd.DataFrame,
@@ -475,6 +502,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     existing_recogniser_entity_df: pd.DataFrame,
     redaction_label:str = "Redaction",
     colour_label:str = '(0, 0, 0)',
+    annotate_current_page:int = 1,
     progress:gr.Progress=gr.Progress()) -> Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     This function processes filtered OCR results with words to create new annotation objects. It merges these new annotations with existing ones, ensuring that horizontally adjacent boxes are combined for cleaner redactions. The function also updates the existing recogniser entity DataFrame and returns the updated annotations in both DataFrame and list-of-dicts formats.
@@ -493,8 +521,17 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     """
 
     # Validate colour_label: must be a 3-number tuple with each value in [0, 255]
-    # If invalid, fallback to '(0, 0, 0,)' as requested
-    fallback_colour = '(0, 0, 0,)'
+    # If invalid, fallback to '(0, 0, 0)' as requested
+    fallback_colour = '(0, 0, 0)'
+ 
+
+    existing_annotations_df = get_and_merge_current_page_annotations(
+        page_sizes,
+        annotate_current_page,
+        existing_annotations_list,
+        existing_annotations_df
+    )
+
     try:
         valid = False
         if isinstance(colour_label, str):
@@ -507,7 +544,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
         elif isinstance(colour_label, (tuple, list)) and len(colour_label) == 3:
             r_val, g_val, b_val = colour_label
             if all(isinstance(v, int) for v in (r_val, g_val, b_val)) and all(0 <= v <= 255 for v in (r_val, g_val, b_val)):
-                colour_label = f'({r_val}, {g_val}, {b_val},)'
+                colour_label = f'({r_val}, {g_val}, {b_val})'
                 valid = True
         if not valid:
             colour_label = fallback_colour
@@ -573,7 +610,6 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
                     indicator=True
                 )
                 unique_new_df = merged[merged['_merge'] == 'left_only'].drop(columns=['_merge'])
-                #unique_new_df = new_annotations_df
 
             print(f"Found {len(unique_new_df)} new unique annotations to add.")
             gr.Info(f"Found {len(unique_new_df)} new unique annotations to add.")
@@ -606,8 +642,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     merged_df['image'] = pd.Categorical(merged_df['image'], categories=image_order, ordered=True)
 
     # 3. Sort the DataFrame based on this new custom order.
-    merged_df = merged_df.sort_values('image')
-    
+    merged_df = merged_df.sort_values('image')    
     
     final_annotations_list = list()
     box_cols = ['label', 'color', 'xmin', 'ymin', 'xmax', 'ymax', 'text', 'id']
@@ -616,11 +651,8 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     # DataFrame's current order, which we have just manually set. This is slightly
     # more efficient than letting it sort again.
     for image_path, group in merged_df.groupby('image', sort=False, observed=False):
-        # The progress.tqdm wrapper can be added back around the groupby object as you had it.
-        # for image_path, group in progress.tqdm(merged_df.groupby('image', sort=False), ...):
         
-        # Check if the group has actual annotations. iloc[0] is safe because even pages
-        # without annotations will have one row with NaN values from the merge.
+        # Check if the group has actual annotations.
         if pd.isna(group.iloc[0].get('id')):
             boxes = list()
         else:
@@ -635,6 +667,8 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
         })
     
     progress(1.0, desc="Completed annotation processing")
+
+    print("final_annotations_list:", final_annotations_list)
 
     return final_annotations_list, existing_annotations_list, updated_annotations_df, existing_annotations_df, updated_recogniser_entity_df, existing_recogniser_entity_df
 
@@ -844,7 +878,6 @@ def update_annotator_object_and_filter_df(
                      review_df['page'] = pd.to_numeric(review_df['page'], errors='coerce').fillna(-1).astype(int)
                      review_df.loc[review_df["page"]==page_num_reported, 'image'] = replaced_image_path
 
-
             except Exception as e:
                  print(f"Error during image path replacement for page {page_num_reported}: {e}")
     else:
@@ -857,7 +890,7 @@ def update_annotator_object_and_filter_df(
     else:
         page_sizes = list() # Ensure page_sizes is a list if df is empty
 
-    # --- OPTIMIZATION: Prepare data *only* for the current page for display ---
+    # --- Prepare data *only* for the current page for display ---
     current_page_image_annotator_object = None
     if len(all_image_annotations) > page_num_reported_zero_indexed:
         page_data_for_display = all_image_annotations[page_num_reported_zero_indexed]
@@ -984,11 +1017,11 @@ def update_all_page_annotation_object_based_on_previous_page(
     Overwrite image annotations on the page we are moving from with modifications.
     '''
 
-    if current_page > len(page_sizes):
-        raise Warning("Selected page is higher than last page number")
-    elif current_page <= 0:
-        raise Warning("Selected page is lower than first page")
+    if current_page > len(page_sizes): raise Warning("Selected page is higher than last page number")
+    elif current_page <= 0: raise Warning("Selected page is lower than first page")
     
+    #print("all_image_annotations:", all_image_annotations)
+    #print("page_image_annotator_object:", page_image_annotator_object)
 
     previous_page_zero_index = previous_page -1
  
@@ -999,6 +1032,8 @@ def update_all_page_annotation_object_based_on_previous_page(
 
     if clear_all == False: all_image_annotations[previous_page_zero_index] = page_image_annotator_object
     else: all_image_annotations[previous_page_zero_index]["boxes"] = list()
+
+    #print("all_image_annotations:", all_image_annotations)
 
     return all_image_annotations, current_page, current_page
 
@@ -1179,15 +1214,9 @@ def update_all_entity_df_dropdowns(df:pd.DataFrame, label_dropdown_value:str, pa
     
     filtered_df = df.copy()
 
-    # Apply filtering based on dropdown selections
-    # if not "ALL" in page_dropdown_value:
-    #     filtered_df = filtered_df[filtered_df["page"].astype(str).isin(page_dropdown_value)]
-    
-    # if not "ALL" in text_dropdown_value:
-    #     filtered_df = filtered_df[filtered_df["text"].astype(str).isin(text_dropdown_value)]
-
-    # if not "ALL" in label_dropdown_value:
-    #     filtered_df = filtered_df[filtered_df["label"].astype(str).isin(label_dropdown_value)]
+    if not label_dropdown_value[0]: label_dropdown_value[0] = "ALL"
+    if not text_dropdown_value[0]: text_dropdown_value[0] = "ALL"
+    if not page_dropdown_value[0]: page_dropdown_value[0] = "1"
 
     recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "label")
     recogniser_entities_drop = gr.Dropdown(value=label_dropdown_value[0], choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)    
@@ -1224,6 +1253,10 @@ def update_entities_df_recogniser_entities(choice:str, df:pd.DataFrame, page_dro
     if not "ALL" in choice:
         filtered_df = filtered_df[filtered_df["label"].astype(str).isin(choice)]
 
+    if not choice[0]: choice[0] = "ALL"
+    if not text_dropdown_value[0]: text_dropdown_value[0] = "ALL"
+    if not page_dropdown_value[0]: page_dropdown_value[0] = "1"
+    
     recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(filtered_df, "label")
     recogniser_entities_drop = gr.Dropdown(value=choice[0], choices=recogniser_entities_for_drop, allow_custom_value=True, interactive=True)    
 
