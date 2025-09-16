@@ -132,26 +132,20 @@ def get_file_name_without_type(file_path):
 
 def detect_file_type(filename:str):
     """Detect the file type based on its extension."""
-    if (filename.endswith('.csv')) | (filename.endswith('.csv.gz')) | (filename.endswith('.zip')):
-        return 'csv'
-    elif filename.endswith('.xlsx'):
-        return 'xlsx'
-    elif filename.endswith('.parquet'):
-        return 'parquet'
-    elif filename.endswith('.pdf'):
-        return 'pdf'
-    elif filename.endswith('.jpg'):
-        return 'jpg'
-    elif filename.endswith('.jpeg'):
-        return 'jpeg'
-    elif filename.endswith('.png'):
-        return 'png'
-    elif filename.endswith('.xfdf'):
-        return 'xfdf'
-    elif filename.endswith('.docx'):
-        return 'docx'
-    else:
-        raise ValueError("Unsupported file type.")
+    if not isinstance(filename, str):
+        filename = str(filename)
+
+    if (filename.endswith('.csv')) | (filename.endswith('.csv.gz')) | (filename.endswith('.zip')): return 'csv'
+    elif filename.endswith('.xlsx'): return 'xlsx'
+    elif filename.endswith('.xls'): return 'xls'
+    elif filename.endswith('.parquet'): return 'parquet'
+    elif filename.endswith('.pdf'): return 'pdf'
+    elif filename.endswith('.jpg'): return 'jpg'
+    elif filename.endswith('.jpeg'): return 'jpeg'
+    elif filename.endswith('.png'): return 'png'
+    elif filename.endswith('.xfdf'): return 'xfdf'
+    elif filename.endswith('.docx'): return 'docx'
+    else: raise ValueError("Unsupported file type.")
 
 def read_file(filename:str):
     """Read the file based on its detected type."""

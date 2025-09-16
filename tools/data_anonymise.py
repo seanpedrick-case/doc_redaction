@@ -6,6 +6,8 @@ import time
 import boto3
 import botocore
 import pandas as pd
+import polars as pl
+import unicodedata
 import docx
 import gradio as gr
 from openpyxl import Workbook
@@ -16,37 +18,76 @@ from botocore.client import BaseClient
 from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
 from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine, DictAnalyzerResult, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
-from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, OUTPUT_FOLDER, DEFAULT_LANGUAGE, aws_comprehend_language_choices
+from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, OUTPUT_FOLDER, DEFAULT_LANGUAGE, aws_comprehend_language_choices, DO_INITIAL_TABULAR_DATA_CLEAN
 from tools.helper_functions import get_file_name_without_type, read_file, detect_file_type
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_word_list_recogniser, CustomWordFuzzyRecognizer, custom_entities, create_nlp_analyser, load_spacy_model
 # Use custom version of analyze_dict to be able to track progress
 from tools.presidio_analyzer_custom import analyze_dict
 
+if DO_INITIAL_TABULAR_DATA_CLEAN == "True": DO_INITIAL_TABULAR_DATA_CLEAN = True 
+else: DO_INITIAL_TABULAR_DATA_CLEAN = False
 
 fake = Faker("en_UK")
 def fake_first_name(x):
     return fake.first_name()
 
-def initial_clean(text:str) -> str:
-    #### Some of my cleaning functions
-    html_pattern_regex = r'<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});|\xa0|&nbsp;'
-    html_start_pattern_end_dots_regex = r'<(.*?)\.\.'
-    non_ascii_pattern = r'[^\x00-\x7F]+'
-    multiple_spaces_regex = r'\s{2,}'
-        
+# #### Some of my cleaning functions
+url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+|(?:www\.)[a-zA-Z0-9._-]+\.[a-zA-Z]{2,}'
+html_pattern_regex = r'<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});|\xa0|&nbsp;'
+html_start_pattern_end_dots_regex = r'<(.*?)\.\.'
+non_ascii_pattern = r'[^\x00-\x7F]+'
+and_sign_regex = r'&'
+multiple_spaces_regex = r'\s{2,}'
+multiple_new_lines_regex = r'(\r\n|\n)+'
+multiple_punctuation_regex = r"(\p{P})\p{P}+"
+
+def initial_clean(texts:pd.Series) -> pd.Series:
+    '''
+    This function cleans the text by removing URLs, HTML tags, and non-ASCII characters.
+    '''
+    for text in texts:
+        if not text or pd.isnull(text):
+            text = ""
+
+        # Normalize unicode characters to decompose any special forms
+        normalized_text = unicodedata.normalize('NFKC', text)
+
+        # Replace smart quotes and special punctuation with standard ASCII equivalents
+        replacements = {
+            '‘': "'", '’': "'", '“': '"', '”': '"', 
+            '–': '-', '—': '-', '…': '...', '•': '*',
+        }
+
+        # Perform replacements
+        for old_char, new_char in replacements.items():
+            normalised_text = normalized_text.replace(old_char, new_char)
+
+        text = normalised_text
+
+    # Convert to polars Series
+    texts = pl.Series(texts).str.strip_chars()
+    
     # Define a list of patterns and their replacements
     patterns = [
+        (multiple_new_lines_regex, '  '),
+        (r'\r', ''),
+        (url_pattern, ' '),
         (html_pattern_regex, ' '),
         (html_start_pattern_end_dots_regex, ' '),
         (non_ascii_pattern, ' '),
-        (multiple_spaces_regex, ' ')
+        (multiple_spaces_regex, ' '),
+        (multiple_punctuation_regex, "${1}"),
+        (and_sign_regex, 'and')
     ]
     
     # Apply each regex replacement
     for pattern, replacement in patterns:
-        text = re.sub(pattern, replacement, text)
+        texts = texts.str.replace_all(pattern, replacement)
     
-    return text
+    # Convert the series back to a list
+    texts = texts.to_list()
+    
+    return texts
 
 def process_recognizer_result(result:RecognizerResult, recognizer_result:RecognizerResult, data_row:int, dictionary_key:int, df_dict:Dict[str, List[Any]], keys_to_keep:List[str]) -> List[str]:
         output = list()
@@ -275,7 +316,7 @@ def handle_docx_anonymisation(
 
     output_xlsx_path = os.path.join(output_folder, f"{file_name_without_ext}_redacted.csv")
 
-    anonymised_df.to_csv(output_xlsx_path, encoding="utf-8-sig")    
+    anonymised_df.to_csv(output_xlsx_path, encoding="utf-8-sig", index=None)    
     doc.save(output_docx_path)
     
     with open(log_file_path, "w", encoding="utf-8-sig") as f:
@@ -304,6 +345,7 @@ def anonymise_files_with_open_text(file_paths: List[str],
                          aws_access_key_textbox:str='',
                          aws_secret_key_textbox:str='',
                          actual_time_taken_number:float=0,
+                         do_initial_clean:bool=DO_INITIAL_TABULAR_DATA_CLEAN,
                          language: Optional[str] = None,
                          progress: Progress = Progress(track_tqdm=True)):
     """
@@ -334,6 +376,7 @@ def anonymise_files_with_open_text(file_paths: List[str],
     - actual_time_taken_number (float, optional): Time taken to do the redaction.
     - language (str, optional): The language of the text to anonymise.
     - progress (Progress, optional): A Progress object to track progress. Defaults to a Progress object with track_tqdm=True.
+    - do_initial_clean (bool, optional): Whether to perform an initial cleaning of the text. Defaults to True.
     """
     
     tic = time.perf_counter()
@@ -431,7 +474,7 @@ def anonymise_files_with_open_text(file_paths: List[str],
             sheet_name = ""
             file_type = ""
 
-            out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=OUTPUT_FOLDER)
+            out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=OUTPUT_FOLDER, do_initial_clean=do_initial_clean)
         else:
             # If file is an xlsx, we are going to run through all the Excel sheets to anonymise them separately.
             file_type = detect_file_type(anon_file)
@@ -482,14 +525,14 @@ def anonymise_files_with_open_text(file_paths: List[str],
 
                     anon_df = pd.read_excel(anon_file, sheet_name=sheet_name)
 
-                    out_file_paths, out_message, key_string, log_files_output_paths  = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+                    out_file_paths, out_message, key_string, log_files_output_paths  = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, anon_xlsx_export_file_name, log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder, do_initial_clean=do_initial_clean)
 
             else:
                 sheet_name = ""
                 anon_df = read_file(anon_file)
                 out_file_part = get_file_name_without_type(anon_file.name)
 
-                out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder)
+                out_file_paths, out_message, key_string, log_files_output_paths = tabular_anonymise_wrapper_func(anon_file, anon_df, chosen_cols, out_file_paths, out_file_part, out_message, sheet_name, anon_strat, language, chosen_redact_entities, in_allow_list, file_type, "", log_files_output_paths, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, language, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, output_folder=output_folder, do_initial_clean=do_initial_clean)
 
         # Increase latest file completed count unless we are at the last file
         if latest_file_completed != len(file_paths):
@@ -543,7 +586,8 @@ def tabular_anonymise_wrapper_func(
     comprehend_query_number:int=0,
     comprehend_client:botocore.client.BaseClient="",
     nlp_analyser: AnalyzerEngine = nlp_analyser,
-    output_folder: str = OUTPUT_FOLDER
+    output_folder: str = OUTPUT_FOLDER,
+    do_initial_clean:bool=DO_INITIAL_TABULAR_DATA_CLEAN
 ):
     """
     This function wraps the anonymisation process for a given dataframe. It filters the dataframe based on chosen columns, applies the specified anonymisation strategy using the anonymise_script function, and exports the anonymised data to a file.
@@ -570,6 +614,7 @@ def tabular_anonymise_wrapper_func(
     - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
     - comprehend_client (optional): The client object from AWS containing a client connection to AWS Comprehend if that option is chosen on the first tab. 
     - output_folder: The folder where the anonymized files will be saved. Defaults to the 'output_folder' variable.
+    - do_initial_clean (bool, optional): Whether to perform an initial cleaning of the text. Defaults to True.
     """
     def check_lists(list1, list2):
             return any(string in list2 for string in list1)
@@ -610,12 +655,15 @@ def tabular_anonymise_wrapper_func(
     # Split dataframe to keep only selected columns
     #print("Remaining columns to redact:", chosen_cols_in_anon_df)
     
+    if not anon_df.index.is_unique:
+        anon_df = anon_df.reset_index(drop=True)
+
     anon_df_part = anon_df[chosen_cols_in_anon_df]
     anon_df_remain = anon_df.drop(chosen_cols_in_anon_df, axis = 1)
 
         
     # Anonymise the selected columns
-    anon_df_part_out, key_string, decision_process_output_str = anonymise_script(anon_df_part, anon_strat, language, chosen_redact_entities, in_allow_list, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, nlp_analyser=nlp_analyser)
+    anon_df_part_out, key_string, decision_process_output_str = anonymise_script(anon_df_part, anon_strat, language, chosen_redact_entities, in_allow_list, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, nlp_analyser=nlp_analyser, do_initial_clean=do_initial_clean)
 
     anon_df_part_out.replace("^nan$", "", regex=True, inplace=True)
 
@@ -683,20 +731,35 @@ def anonymise_script(df:pd.DataFrame,
                      comprehend_client:botocore.client.BaseClient="",                     
                      custom_entities:List[str]=custom_entities,
                      nlp_analyser: AnalyzerEngine = nlp_analyser,
-                     progress:Progress=Progress(track_tqdm=False)):
+                     do_initial_clean:bool=DO_INITIAL_TABULAR_DATA_CLEAN,
+                     progress:Progress=Progress(track_tqdm=True)):
     '''
     Conduct anonymisation of a dataframe using Presidio and/or AWS Comprehend if chosen.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame containing text to be anonymised.
+        anon_strat (str): The anonymisation strategy to apply (e.g., "replace with 'REDACTED'", "replace with <ENTITY_NAME>", "redact completely").
+        language (str): The language of the text for analysis (e.g., "en", "es").
+        chosen_redact_entities (List[str]): A list of entity types to redact using the local (Presidio) method.
+        in_allow_list (List[str], optional): A list of terms to explicitly allow and not redact. Defaults to an empty list.
+        in_deny_list (List[str], optional): A list of terms to explicitly deny and always redact. Defaults to an empty list.
+        max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of fuzzy spelling mistakes to tolerate for custom recognizers. Defaults to 0.
+        pii_identification_method (str, optional): The method for PII identification ("Local", "AWS Comprehend", or "Both"). Defaults to "Local".
+        chosen_redact_comprehend_entities (List[str], optional): A list of entity types to redact using AWS Comprehend. Defaults to an empty list.
+        comprehend_query_number (int, optional): The number of queries to send to AWS Comprehend per batch. Defaults to 0.
+        comprehend_client (botocore.client.BaseClient, optional): An initialized AWS Comprehend client. Defaults to an empty string.
+        custom_entities (List[str], optional): A list of custom entities to be recognized. Defaults to `custom_entities`.
+        nlp_analyser (AnalyzerEngine, optional): The Presidio AnalyzerEngine instance to use. Defaults to `nlp_analyser`.
+        do_initial_clean (bool, optional): Whether to perform an initial cleaning of the text. Defaults to True.
+        progress (Progress, optional): Gradio Progress object for tracking progress. Defaults to Progress(track_tqdm=False).
     '''
 
     print("Identifying personal information")
     analyse_tic = time.perf_counter()
 
     # Initialize analyzer_results as an empty dictionary to store results by column
-    results_by_column = {}
-    key_string = ""
-
-    # DataFrame to dict
-    df_dict = df.to_dict(orient="list")
+    results_by_column = dict()
+    key_string = ""    
 
     if isinstance(in_allow_list, list):
         if in_allow_list:
@@ -714,13 +777,14 @@ def anonymise_script(df:pd.DataFrame,
     ### Language check - check if selected language packs exist
     try:
         if language != "en":
-            progress(0.1, desc=f"Loading SpaCy model for {language}")
+            progress(0.1, desc=f"Loading spaCy model for {language}")
             
         load_spacy_model(language)
         
     except Exception as e:
-        print(f"Error downloading language packs for {language}: {e}")
-        raise Exception(f"Error downloading language packs for {language}: {e}")
+        out_message = f"Error downloading language packs for {language}: {e}"
+        print(out_message)
+        raise Exception(out_message)
     
     # Try updating the supported languages for the spacy analyser
     try:
@@ -730,8 +794,9 @@ def anonymise_script(df:pd.DataFrame,
             gr.Info(f"Language: {language} only supports the following entity detection: {str(nlp_analyser.registry.get_supported_entities(languages=[language]))}")
 
     except Exception as e:
-        print(f"Error creating nlp_analyser for {language}: {e}")
-        raise Exception(f"Error creating nlp_analyser for {language}: {e}")
+        out_message = f"Error creating nlp_analyser for {language}: {e}"
+        print(out_message)
+        raise Exception(out_message)
 
     if isinstance(in_deny_list, pd.DataFrame):
         if not in_deny_list.empty:
@@ -757,6 +822,14 @@ def anonymise_script(df:pd.DataFrame,
     anonymizer = AnonymizerEngine()#conflict_resolution=ConflictResolutionStrategy.MERGE_SIMILAR_OR_CONTAINED)
     batch_anonymizer = BatchAnonymizerEngine(anonymizer_engine = anonymizer)    
     analyzer_results = list()
+
+    if do_initial_clean:
+        progress(0.2, desc="Cleaning text")
+        for col in progress.tqdm(df.columns, desc="Cleaning text", unit = "Columns"):            
+            df[col] = initial_clean(df[col])
+
+    # DataFrame to dict
+    df_dict = df.to_dict(orient="list")    
 
     if pii_identification_method == "Local":
 

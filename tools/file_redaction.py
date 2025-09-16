@@ -92,7 +92,7 @@ def choose_and_run_redactor(file_paths:List[str],
  chosen_redact_comprehend_entities:List[str],
  text_extraction_method:str,
  in_allow_list:List[List[str]]=list(),
- custom_recogniser_word_list:List[str]=list(), 
+ in_deny_list:List[str]=list(), 
  redact_whole_page_list:List[str]=list(),
  latest_file_completed:int=0,
  combined_out_message:List=list(),
@@ -147,8 +147,8 @@ def choose_and_run_redactor(file_paths:List[str],
     - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service.
     - text_extraction_method (str): The method to use to extract text from documents.
     - in_allow_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
-    - custom_recogniser_word_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
-    - redact_whole_page_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
+    - in_deny_list (List[List[str]], optional): A list of denied terms for redaction. Defaults to None.
+    - redact_whole_page_list (List[List[str]], optional): A list of whole page numbers for redaction. Defaults to None.
     - latest_file_completed (int, optional): The index of the last completed file. Defaults to 0.
     - combined_out_message (list, optional): A list to store output messages. Defaults to an empty list.
     - out_file_paths (list, optional): A list to store paths to the output files. Defaults to an empty list.
@@ -390,11 +390,11 @@ def choose_and_run_redactor(file_paths:List[str],
         in_allow_list_flat = list()
 
     # If string, assume file path
-    if isinstance(custom_recogniser_word_list, str):
-        custom_recogniser_word_list = pd.read_csv(custom_recogniser_word_list)
-    if isinstance(custom_recogniser_word_list, pd.DataFrame):
-        if not custom_recogniser_word_list.empty:
-            custom_recogniser_word_list_flat = custom_recogniser_word_list.iloc[:, 0].tolist()
+    if isinstance(in_deny_list, str):
+        in_deny_list = pd.read_csv(in_deny_list)
+    if isinstance(in_deny_list, pd.DataFrame):
+        if not in_deny_list.empty:
+            custom_recogniser_word_list_flat = in_deny_list.iloc[:, 0].tolist()
         else:
             custom_recogniser_word_list_flat = list()
 
@@ -1383,7 +1383,7 @@ def redact_image_pdf(file_path:str,
                      comprehend_query_number:int=0,
                      comprehend_client:str="",
                      textract_client:str="",
-                     custom_recogniser_word_list:List[str]=list(),
+                     in_deny_list:List[str]=list(),
                      redact_whole_page_list:List[str]=list(),
                      max_fuzzy_spelling_mistakes_num:int=1,
                      match_fuzzy_whole_phrase_bool:bool=True,
@@ -1423,7 +1423,7 @@ def redact_image_pdf(file_path:str,
     - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
     - comprehend_client (optional): A connection to the AWS Comprehend service via the boto3 package.
     - textract_client (optional): A connection to the AWS Textract service via the boto3 package.
-    - custom_recogniser_word_list (optional): A list of custom words that the user has chosen specifically to redact.
+    - in_deny_list (optional): A list of custom words that the user has chosen specifically to redact.
     - redact_whole_page_list (optional, List[str]): A list of pages to fully redact.
     - max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
     - match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
@@ -1459,13 +1459,13 @@ def redact_image_pdf(file_path:str,
         raise Exception(f"Error creating nlp_analyser for {language}: {e}")
 
     # Update custom word list analyser object with any new words that have been added to the custom deny list
-    if custom_recogniser_word_list:        
+    if in_deny_list:        
         nlp_analyser.registry.remove_recognizer("CUSTOM")
-        new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
+        new_custom_recogniser = custom_word_list_recogniser(in_deny_list)
         nlp_analyser.registry.add_recognizer(new_custom_recogniser)
 
         nlp_analyser.registry.remove_recognizer("CustomWordFuzzyRecognizer")
-        new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_recogniser_word_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
+        new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=in_deny_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
 
     # Only load in PaddleOCR models if not running Textract
@@ -2216,7 +2216,7 @@ def redact_text_pdf(
     pii_identification_method: str = "Local",    
     comprehend_query_number:int = 0,
     comprehend_client="",
-    custom_recogniser_word_list:List[str]=list(),
+    in_deny_list:List[str]=list(),
     redact_whole_page_list:List[str]=list(),
     max_fuzzy_spelling_mistakes_num:int=1,
     match_fuzzy_whole_phrase_bool:bool=True,
@@ -2250,7 +2250,7 @@ def redact_text_pdf(
     - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
     - comprehend_client (optional): A connection to the AWS Comprehend service via the boto3 package.
-    - custom_recogniser_word_list (optional, List[str]): A list of custom words that the user has chosen specifically to redact.
+    - in_deny_list (optional, List[str]): A list of custom words that the user has chosen specifically to redact.
     - redact_whole_page_list (optional, List[str]): A list of pages to fully redact.
     -  max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
     -  match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
@@ -2290,13 +2290,13 @@ def redact_text_pdf(
         raise Exception(f"Error creating nlp_analyser for {language}: {e}")
     
     # Update custom word list analyser object with any new words that have been added to the custom deny list
-    if custom_recogniser_word_list:        
+    if in_deny_list:        
         nlp_analyser.registry.remove_recognizer("CUSTOM")
-        new_custom_recogniser = custom_word_list_recogniser(custom_recogniser_word_list)
+        new_custom_recogniser = custom_word_list_recogniser(in_deny_list)
         nlp_analyser.registry.add_recognizer(new_custom_recogniser)
 
         nlp_analyser.registry.remove_recognizer("CustomWordFuzzyRecognizer")
-        new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=custom_recogniser_word_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
+        new_custom_fuzzy_recogniser = CustomWordFuzzyRecognizer(supported_entities=["CUSTOM_FUZZY"], custom_list=in_deny_list, spelling_mistakes_max=max_fuzzy_spelling_mistakes_num, search_whole_phrase=match_fuzzy_whole_phrase_bool)
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)    
 
     # Open with Pikepdf to get text lines
@@ -2385,9 +2385,7 @@ def redact_text_pdf(
                     all_page_line_text_extraction_characters.extend(line_characters)
                     all_page_line_level_ocr_results_with_words.append(line_level_ocr_results_with_words) 
 
-                #print("page_text_ocr_outputs_list:", page_text_ocr_outputs_list)
                 page_text_ocr_outputs = pd.concat(page_text_ocr_outputs_list)
-                #page_text_ocr_outputs.to_csv("output/page_text_ocr_outputs.csv")
 
                 ### REDACTION
                 if pii_identification_method != NO_REDACTION_PII_OPTION:

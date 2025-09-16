@@ -1,8 +1,6 @@
 import pandas as pd
 import os
 import re
-import itertools
-import numpy as np
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -16,9 +14,10 @@ from tools.helper_functions import OUTPUT_FOLDER
 from tools.file_conversion import redact_whole_pymupdf_page, convert_annotation_data_to_dataframe, fill_missing_box_ids_each_box
 from tools.load_spacy_model_custom_recognisers import nlp
 
-similarity_threshold = 0.95
 number_of_zeros_to_add_to_index = 7 # Number of zeroes to add between page number and line numbers to get a unique page/line index value
 ID_MULTIPLIER = 100000
+# Define the set of punctuation characters for efficient lookup
+PUNCTUATION_TO_STRIP = {'.', ',', '?', '!', ':', ';'}
 
 def split_text_with_punctuation(text: str) -> List[str]:
     """
@@ -604,8 +603,7 @@ def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str,
             
     return output_paths
 
-# Define the set of punctuation characters for efficient lookup
-PUNCTUATION_TO_STRIP = {'.', ',', '?', '!', ':', ';'}
+
 
 def _sequences_match(query_seq: List[str], ref_seq: List[str]) -> bool:
     """
