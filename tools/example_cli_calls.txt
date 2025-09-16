@@ -22,3 +22,9 @@ python your_cli_script.py \
     --anon_strat "encrypt" \
     --deny_list "config/codenames.csv" \
     --language "en"
+
+python cli_redact.py --task deduplicate --input_file ocr_output.csv --duplicate_type pages --similarity_threshold 0.95 --min_word_count 5
+
+python cli_redact.py --task deduplicate --input_file data.csv --duplicate_type tabular --text_columns "Name" "Email" "Description"
+
+python cli_redact.py --task deduplicate --input_file ocr_output.csv --duplicate_type pages --search_query "confidential information"

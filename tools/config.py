@@ -105,7 +105,7 @@ CUSTOM_HEADER_VALUE = get_or_create_env_var('CUSTOM_HEADER_VALUE', '')
 ###
 # Image options
 ###
-IMAGES_DPI = get_or_create_env_var('IMAGES_DPI', '300.0')
+IMAGES_DPI = float(get_or_create_env_var('IMAGES_DPI', '300.0'))
 LOAD_TRUNCATED_IMAGES = get_or_create_env_var('LOAD_TRUNCATED_IMAGES', 'True')
 MAX_IMAGE_PIXELS = get_or_create_env_var('MAX_IMAGE_PIXELS', '') # Changed to None if blank in file_conversion.py
 
@@ -232,6 +232,7 @@ if SHOW_AWS_TEXT_EXTRACTION_OPTIONS == 'True':
     aws_model_options.append(TEXTRACT_TEXT_EXTRACT_OPTION)
 
 TEXT_EXTRACTION_MODELS = local_model_options + aws_model_options
+DO_INITIAL_TABULAR_DATA_CLEAN = get_or_create_env_var('DO_INITIAL_TABULAR_DATA_CLEAN', 'True')
 
 SHOW_LOCAL_PII_DETECTION_OPTIONS = get_or_create_env_var('SHOW_LOCAL_PII_DETECTION_OPTIONS', 'True')
 SHOW_AWS_PII_DETECTION_OPTIONS = get_or_create_env_var('SHOW_AWS_PII_DETECTION_OPTIONS', 'True')
@@ -266,6 +267,11 @@ TABULAR_PII_DETECTION_MODELS = PII_DETECTION_MODELS.copy()
 if NO_REDACTION_PII_OPTION in TABULAR_PII_DETECTION_MODELS:
     TABULAR_PII_DETECTION_MODELS.remove(NO_REDACTION_PII_OPTION)
 
+DEFAULT_TEXT_COLUMNS = get_or_create_env_var('DEFAULT_TEXT_COLUMNS', "[]")
+DEFAULT_EXCEL_SHEETS = get_or_create_env_var('DEFAULT_EXCEL_SHEETS', "[]")
+
+DEFAULT_TABULAR_ANONYMISATION_STRATEGY = get_or_create_env_var('DEFAULT_TABULAR_ANONYMISATION_STRATEGY', "redact completely")
+
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var('CHOSEN_LOCAL_OCR_MODEL', "tesseract") # Choose between "tesseract", "hybrid", and "paddle". "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.
 
@@ -281,11 +287,20 @@ CHOSEN_REDACT_ENTITIES = get_or_create_env_var('CHOSEN_REDACT_ENTITIES', "['TITL
 
 FULL_ENTITY_LIST = get_or_create_env_var('FULL_ENTITY_LIST', "['TITLES', 'PERSON', 'PHONE_NUMBER', 'EMAIL_ADDRESS', 'STREETNAME', 'UKPOSTCODE', 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS', 'CUSTOM', 'CUSTOM_FUZZY']")
 
+DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = get_or_create_env_var('DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX', "['Extract handwriting']")
+
+DEFAULT_SEARCH_QUERY = get_or_create_env_var('DEFAULT_SEARCH_QUERY', '')
+DEFAULT_FUZZY_SPELLING_MISTAKES_NUM = int(get_or_create_env_var('DEFAULT_FUZZY_SPELLING_MISTAKES_NUM', '1'))
+
+DEFAULT_PAGE_MIN = int(get_or_create_env_var('DEFAULT_PAGE_MIN', '0'))
+
+DEFAULT_PAGE_MAX = int(get_or_create_env_var('DEFAULT_PAGE_MAX', '999'))
+
 
 # Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).
-PAGE_BREAK_VALUE = get_or_create_env_var('PAGE_BREAK_VALUE', '99999')
+PAGE_BREAK_VALUE = int(get_or_create_env_var('PAGE_BREAK_VALUE', '99999'))
 
-MAX_TIME_VALUE = get_or_create_env_var('MAX_TIME_VALUE', '999999')
+MAX_TIME_VALUE = int(get_or_create_env_var('MAX_TIME_VALUE', '999999'))
 
 CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "") # only "grey" is currently supported as a custom box colour
 
@@ -306,10 +321,19 @@ aws_comprehend_language_choices = get_or_create_env_var("aws_comprehend_language
 MAPPED_LANGUAGE_CHOICES = get_or_create_env_var("MAPPED_LANGUAGE_CHOICES", "['english', 'french', 'german', 'spanish', 'italian', 'dutch', 'portuguese', 'chinese', 'japanese', 'korean', 'lithuanian', 'macedonian', 'norwegian_bokmaal', 'polish', 'romanian', 'russian', 'slovenian', 'swedish', 'catalan', 'ukrainian']")
 LANGUAGE_CHOICES = get_or_create_env_var("LANGUAGE_CHOICES", "['en', 'fr', 'de', 'es', 'it', 'nl', 'pt', 'zh', 'ja', 'ko', 'lt', 'mk', 'nb', 'pl', 'ro', 'ru', 'sl', 'sv', 'ca', 'uk']")
 
+###
+# Duplicate detection settings
+###
+DEFAULT_DUPLICATE_DETECTION_THRESHOLD = float(get_or_create_env_var("DEFAULT_DUPLICATE_DETECTION_THRESHOLD", "0.95"))
+DEFAULT_MIN_CONSECUTIVE_PAGES = int(get_or_create_env_var("DEFAULT_MIN_CONSECUTIVE_PAGES", "1"))
+USE_GREEDY_DUPLICATE_DETECTION = get_or_create_env_var("USE_GREEDY_DUPLICATE_DETECTION", "True")
+DEFAULT_COMBINE_PAGES = get_or_create_env_var("DEFAULT_COMBINE_PAGES", "True")
+DEFAULT_MIN_WORD_COUNT = int(get_or_create_env_var("DEFAULT_MIN_WORD_COUNT", "10"))
 
 
-### File output options
-
+###
+# File output options
+###
 RETURN_PDF_END_OF_REDACTION = get_or_create_env_var("RETURN_PDF_END_OF_REDACTION", "True") # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
 
 COMPRESS_REDACTED_PDF = get_or_create_env_var("COMPRESS_REDACTED_PDF","False") # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
@@ -319,27 +343,35 @@ COMPRESS_REDACTED_PDF = get_or_create_env_var("COMPRESS_REDACTED_PDF","False") #
 ###
 
 TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tmp/tld/')
-try:
-    extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
-except:
-    extract = TLDExtract(cache_dir=None)
+try: extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
+except: extract = TLDExtract(cache_dir=None)
 
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
 
 RUN_DIRECT_MODE = get_or_create_env_var('RUN_DIRECT_MODE', '0')
 
+# Direct mode configuration options
+DIRECT_MODE_TASK = get_or_create_env_var('DIRECT_MODE_TASK', 'redact')  # 'redact' or 'deduplicate'
+DIRECT_MODE_INPUT_FILE = get_or_create_env_var('DIRECT_MODE_INPUT_FILE', '')  # Path to input file
+DIRECT_MODE_OUTPUT_DIR = get_or_create_env_var('DIRECT_MODE_OUTPUT_DIR', OUTPUT_FOLDER)  # Output directory
+DIRECT_MODE_DUPLICATE_TYPE = get_or_create_env_var('DIRECT_MODE_DUPLICATE_TYPE', 'pages')  # 'pages' or 'tabular'
+
 MAX_QUEUE_SIZE = int(get_or_create_env_var('MAX_QUEUE_SIZE', '5'))
 
-MAX_FILE_SIZE = get_or_create_env_var('MAX_FILE_SIZE', '250mb')
+MAX_FILE_SIZE = get_or_create_env_var('MAX_FILE_SIZE', '250mb').lower()
 
 GRADIO_SERVER_PORT = int(get_or_create_env_var('GRADIO_SERVER_PORT', '7860'))
 
 ROOT_PATH = get_or_create_env_var('ROOT_PATH', '')
 
-DEFAULT_CONCURRENCY_LIMIT = get_or_create_env_var('DEFAULT_CONCURRENCY_LIMIT', '3')
+DEFAULT_CONCURRENCY_LIMIT = int(get_or_create_env_var('DEFAULT_CONCURRENCY_LIMIT', '3'))
 
-GET_DEFAULT_ALLOW_LIST = get_or_create_env_var('GET_DEFAULT_ALLOW_LIST', '')
+FILE_INPUT_HEIGHT = get_or_create_env_var('FILE_INPUT_HEIGHT', '200')
+
+### ALLOW LIST
+
+GET_DEFAULT_ALLOW_LIST = get_or_create_env_var('GET_DEFAULT_ALLOW_LIST', 'False')
 
 ALLOW_LIST_PATH = get_or_create_env_var('ALLOW_LIST_PATH', '') # config/default_allow_list.csv
 
@@ -348,8 +380,27 @@ S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_a
 if ALLOW_LIST_PATH: OUTPUT_ALLOW_LIST_PATH = ALLOW_LIST_PATH
 else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
-FILE_INPUT_HEIGHT = get_or_create_env_var('FILE_INPUT_HEIGHT', '200')
+### DENY LIST
 
+GET_DEFAULT_DENY_LIST = get_or_create_env_var('GET_DEFAULT_DENY_LIST', 'False')
+
+S3_DENY_LIST_PATH = get_or_create_env_var('S3_DENY_LIST_PATH', '') # default_deny_list.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
+
+DENY_LIST_PATH = get_or_create_env_var('DENY_LIST_PATH', '') # config/default_deny_list.csv
+
+if DENY_LIST_PATH: OUTPUT_DENY_LIST_PATH = DENY_LIST_PATH
+else: OUTPUT_DENY_LIST_PATH = 'config/default_deny_list.csv'
+
+### WHOLE PAGE REDACTION LIST
+
+GET_DEFAULT_WHOLE_PAGE_REDACTION_LIST = get_or_create_env_var('GET_DEFAULT_WHOLE_PAGE_REDACTION_LIST', 'False')
+
+S3_WHOLE_PAGE_REDACTION_LIST_PATH = get_or_create_env_var('S3_WHOLE_PAGE_REDACTION_LIST_PATH', '') # default_whole_page_redaction_list.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
+
+WHOLE_PAGE_REDACTION_LIST_PATH = get_or_create_env_var('WHOLE_PAGE_REDACTION_LIST_PATH', '') # config/default_whole_page_redaction_list.csv
+
+if WHOLE_PAGE_REDACTION_LIST_PATH: OUTPUT_WHOLE_PAGE_REDACTION_LIST_PATH = WHOLE_PAGE_REDACTION_LIST_PATH
+else: OUTPUT_WHOLE_PAGE_REDACTION_LIST_PATH = 'config/default_whole_page_redaction_list.csv'
 
 ###
 # COST CODE OPTIONS
