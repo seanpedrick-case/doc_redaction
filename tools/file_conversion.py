@@ -488,8 +488,8 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
 def prepare_image_or_pdf(
     file_paths: List[str],
     text_extract_method: str,
-    all_line_level_ocr_results_df:pd.DataFrame,
-    all_page_line_level_ocr_results_with_words_df:pd.DataFrame,
+    all_line_level_ocr_results_df:pd.DataFrame=pd.DataFrame(),
+    all_page_line_level_ocr_results_with_words_df:pd.DataFrame=pd.DataFrame(),
     latest_file_completed: int = 0,
     out_message: List[str] = list(),
     first_loop_state: bool = False,

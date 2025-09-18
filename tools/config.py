@@ -34,7 +34,7 @@ def add_folder_to_path(folder_path: str):
     '''
 
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
-        print(folder_path, "folder exists.")
+        #print(folder_path, "folder exists.")
 
         # Resolve relative path to absolute path
         absolute_path = os.path.abspath(folder_path)
@@ -45,7 +45,8 @@ def add_folder_to_path(folder_path: str):
             os.environ['PATH'] = full_path_extension
             #print(f"Updated PATH with: ", full_path_extension)
         else:
-            print(f"Directory {folder_path} already exists in PATH.")
+            pass
+            #print(f"Directory {folder_path} already exists in PATH.")
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
 
@@ -88,12 +89,15 @@ AWS_CLIENT_SECRET = get_or_create_env_var('AWS_CLIENT_SECRET', '')
 AWS_USER_POOL_ID = get_or_create_env_var('AWS_USER_POOL_ID', '')
 
 AWS_ACCESS_KEY = get_or_create_env_var('AWS_ACCESS_KEY', '')
-if AWS_ACCESS_KEY: print(f'AWS_ACCESS_KEY found in environment variables')
+#if AWS_ACCESS_KEY: print(f'AWS_ACCESS_KEY found in environment variables')
 
 AWS_SECRET_KEY = get_or_create_env_var('AWS_SECRET_KEY', '')
-if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
+#if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
 
 DOCUMENT_REDACTION_BUCKET = get_or_create_env_var('DOCUMENT_REDACTION_BUCKET', '')
+
+# Should the app prioritise using AWS SSO over using API keys stored in environment variables/secrets (defaults to yes)
+PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS = get_or_create_env_var('PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS', '1')
 
 # Custom headers e.g. if routing traffic through Cloudfront
 # Retrieving or setting CUSTOM_HEADER
@@ -164,7 +168,7 @@ DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS',
 # Further customisation options for CSV logs
 CSV_ACCESS_LOG_HEADERS = get_or_create_env_var('CSV_ACCESS_LOG_HEADERS', '') # If blank, uses component labels
 CSV_FEEDBACK_LOG_HEADERS = get_or_create_env_var('CSV_FEEDBACK_LOG_HEADERS', '') # If blank, uses component labels
-CSV_USAGE_LOG_HEADERS = get_or_create_env_var('CSV_USAGE_LOG_HEADERS', '["session_hash_textbox", "doc_full_file_name_textbox", "data_full_file_name_textbox", "actual_time_taken_number",	"total_page_count",	"textract_query_number", "pii_detection_method", "comprehend_query_number",  "cost_code", "textract_handwriting_signature", "host_name_textbox", "text_extraction_method", "is_this_a_textract_api_call"]') # If blank, uses component labels
+CSV_USAGE_LOG_HEADERS = get_or_create_env_var('CSV_USAGE_LOG_HEADERS', '["session_hash_textbox", "doc_full_file_name_textbox", "data_full_file_name_textbox", "actual_time_taken_number",	"total_page_count",	"textract_query_number", "pii_detection_method", "comprehend_query_number",  "cost_code", "textract_handwriting_signature", "host_name_textbox", "text_extraction_method", "is_this_a_textract_api_call", "task"]') # If blank, uses component labels
 
 ### DYNAMODB logs. Whether to save to DynamoDB, and the headers of the table
 SAVE_LOGS_TO_DYNAMODB = get_or_create_env_var('SAVE_LOGS_TO_DYNAMODB', 'False')
@@ -275,7 +279,7 @@ DEFAULT_TABULAR_ANONYMISATION_STRATEGY = get_or_create_env_var('DEFAULT_TABULAR_
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var('CHOSEN_LOCAL_OCR_MODEL', "tesseract") # Choose between "tesseract", "hybrid", and "paddle". "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.
 
-PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var('PREPROCESS_LOCAL_OCR_IMAGES', "False") # Whether to try and preprocess images before extracting text. NOTE: I have found in testing that this often results in WORSE results for scanned pages, so it is default False
+PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var('PREPROCESS_LOCAL_OCR_IMAGES', "True") # Whether to try and preprocess images before extracting text. NOTE: I have found in testing that this often results in WORSE results for scanned pages, so it is default False
 
 # Entities for redaction
 CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var('CHOSEN_COMPREHEND_ENTITIES', "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD', 'IP_ADDRESS','MAC_ADDRESS', 'LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER', 'INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER']")
@@ -286,6 +290,10 @@ FULL_COMPREHEND_ENTITY_LIST = get_or_create_env_var('FULL_COMPREHEND_ENTITY_LIST
 CHOSEN_REDACT_ENTITIES = get_or_create_env_var('CHOSEN_REDACT_ENTITIES', "['TITLES', 'PERSON', 'PHONE_NUMBER', 'EMAIL_ADDRESS', 'STREETNAME', 'UKPOSTCODE', 'CUSTOM']")
 
 FULL_ENTITY_LIST = get_or_create_env_var('FULL_ENTITY_LIST', "['TITLES', 'PERSON', 'PHONE_NUMBER', 'EMAIL_ADDRESS', 'STREETNAME', 'UKPOSTCODE', 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS', 'CUSTOM', 'CUSTOM_FUZZY']")
+
+CUSTOM_ENTITIES = get_or_create_env_var('CUSTOM_ENTITIES', "['TITLES', 'UKPOSTCODE', 'STREETNAME', 'CUSTOM']")
+
+
 
 DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = get_or_create_env_var('DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX', "['Extract handwriting']")
 
@@ -327,8 +335,9 @@ LANGUAGE_CHOICES = get_or_create_env_var("LANGUAGE_CHOICES", "['en', 'fr', 'de',
 DEFAULT_DUPLICATE_DETECTION_THRESHOLD = float(get_or_create_env_var("DEFAULT_DUPLICATE_DETECTION_THRESHOLD", "0.95"))
 DEFAULT_MIN_CONSECUTIVE_PAGES = int(get_or_create_env_var("DEFAULT_MIN_CONSECUTIVE_PAGES", "1"))
 USE_GREEDY_DUPLICATE_DETECTION = get_or_create_env_var("USE_GREEDY_DUPLICATE_DETECTION", "True")
-DEFAULT_COMBINE_PAGES = get_or_create_env_var("DEFAULT_COMBINE_PAGES", "True")
+DEFAULT_COMBINE_PAGES = get_or_create_env_var("DEFAULT_COMBINE_PAGES", "True") # Combine text from the same page number within a file. Alternative will enable line-level duplicate detection.
 DEFAULT_MIN_WORD_COUNT = int(get_or_create_env_var("DEFAULT_MIN_WORD_COUNT", "10"))
+REMOVE_DUPLICATE_ROWS = get_or_create_env_var("REMOVE_DUPLICATE_ROWS", "False")
 
 
 ###
@@ -352,6 +361,7 @@ COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
 RUN_DIRECT_MODE = get_or_create_env_var('RUN_DIRECT_MODE', '0')
 
 # Direct mode configuration options
+DIRECT_MODE_DEFAULT_USER = get_or_create_env_var('DIRECT_MODE_DEFAULT_USER', '') # Default username for cli/direct mode requests
 DIRECT_MODE_TASK = get_or_create_env_var('DIRECT_MODE_TASK', 'redact')  # 'redact' or 'deduplicate'
 DIRECT_MODE_INPUT_FILE = get_or_create_env_var('DIRECT_MODE_INPUT_FILE', '')  # Path to input file
 DIRECT_MODE_OUTPUT_DIR = get_or_create_env_var('DIRECT_MODE_OUTPUT_DIR', OUTPUT_FOLDER)  # Output directory
@@ -447,4 +457,4 @@ TEXTRACT_JOBS_S3_INPUT_LOC = get_or_create_env_var('TEXTRACT_JOBS_S3_INPUT_LOC',
 
 TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var('TEXTRACT_JOBS_LOCAL_LOC', 'output') # Local subfolder where the Textract jobs are stored
 
-DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = get_or_create_env_var('DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS', '7') # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.
+DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(get_or_create_env_var('DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS', '7')) # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.

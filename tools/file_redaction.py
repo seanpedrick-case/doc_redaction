@@ -20,11 +20,11 @@ import gradio as gr
 from gradio import Progress
 from collections import defaultdict  # For efficient grouping
 
-from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER, RETURN_PDF_END_OF_REDACTION, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, LOCAL_PII_OPTION, AWS_PII_OPTION, NO_REDACTION_PII_OPTION, DEFAULT_LANGUAGE, textract_language_choices, aws_comprehend_language_choices
+from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER, RETURN_PDF_END_OF_REDACTION, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, LOCAL_PII_OPTION, AWS_PII_OPTION, NO_REDACTION_PII_OPTION, DEFAULT_LANGUAGE, textract_language_choices, aws_comprehend_language_choices, CUSTOM_ENTITIES, PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction,  recreate_page_line_level_ocr_results_with_page
 from tools.file_conversion import convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, is_pdf, is_pdf_or_image, prepare_image_or_pdf, divide_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, divide_coordinates_by_page_sizes, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, fill_missing_box_ids, load_and_convert_ocr_results_with_words_json, save_pdf_with_or_without_compression, word_level_ocr_output_to_dataframe
-from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_entities, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer, load_spacy_model, download_tesseract_lang_pack, create_nlp_analyser
-from tools.helper_functions import get_file_name_without_type, clean_unicode_text
+from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer, load_spacy_model, download_tesseract_lang_pack, create_nlp_analyser
+from tools.helper_functions import get_file_name_without_type, clean_unicode_text, _get_env_list
 from tools.aws_textract import analyse_page_with_textract, json_to_ocrresult, load_and_convert_textract_json
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
@@ -33,6 +33,10 @@ else: Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 image_dpi = float(IMAGES_DPI)
 
 RETURN_PDF_END_OF_REDACTION = RETURN_PDF_END_OF_REDACTION.lower() == "true"
+
+if CUSTOM_ENTITIES: CUSTOM_ENTITIES = _get_env_list(CUSTOM_ENTITIES)
+
+custom_entities = CUSTOM_ENTITIES
 
 def bounding_boxes_overlap(box1, box2):
     """Check if two bounding boxes overlap."""
@@ -91,7 +95,7 @@ def choose_and_run_redactor(file_paths:List[str],
  chosen_redact_entities:List[str],
  chosen_redact_comprehend_entities:List[str],
  text_extraction_method:str,
- in_allow_list:List[List[str]]=list(),
+ in_allow_list:List[str]=list(),
  in_deny_list:List[str]=list(), 
  redact_whole_page_list:List[str]=list(),
  latest_file_completed:int=0,
@@ -146,9 +150,9 @@ def choose_and_run_redactor(file_paths:List[str],
     - chosen_redact_entities (List[str]): A list of entity types to redact from the files using the local model (spacy) with Microsoft Presidio.
     - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service.
     - text_extraction_method (str): The method to use to extract text from documents.
-    - in_allow_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to None.
-    - in_deny_list (List[List[str]], optional): A list of denied terms for redaction. Defaults to None.
-    - redact_whole_page_list (List[List[str]], optional): A list of whole page numbers for redaction. Defaults to None.
+    - in_allow_list (List[List[str]], optional): A list of allowed terms for redaction. Defaults to empty list. Can also be entered as a string path to a CSV file, or as a single column pandas dataframe.
+    - in_deny_list (List[List[str]], optional): A list of denied terms for redaction. Defaults to empty list. Can also be entered as a string path to a CSV file, or as a single column pandas dataframe.
+    - redact_whole_page_list (List[List[str]], optional): A list of whole page numbers for redaction. Defaults to empty list. Can also be entered as a string path to a CSV file, or as a single column pandas dataframe.
     - latest_file_completed (int, optional): The index of the last completed file. Defaults to 0.
     - combined_out_message (list, optional): A list to store output messages. Defaults to an empty list.
     - out_file_paths (list, optional): A list to store paths to the output files. Defaults to an empty list.
@@ -202,8 +206,19 @@ def choose_and_run_redactor(file_paths:List[str],
     pdf_file_name_without_ext = ""
     page_break_return = False  
     blank_request_metadata = list()
+    custom_recogniser_word_list_flat = list()
     all_textract_request_metadata = all_request_metadata_str.split('\n') if all_request_metadata_str else []
     review_out_file_paths = [prepared_pdf_file_paths[0]]
+    task_textbox = "redact"
+
+    # CLI mode may provide options to enter method names in a different format
+    if text_extraction_method == "AWS Textract": text_extraction_method = TEXTRACT_TEXT_EXTRACT_OPTION
+    if text_extraction_method == "Local OCR": text_extraction_method = TESSERACT_TEXT_EXTRACT_OPTION
+    if text_extraction_method == "Local text": text_extraction_method = SELECTABLE_TEXT_EXTRACT_OPTION
+    if pii_identification_method == "None": pii_identification_method = NO_REDACTION_PII_OPTION
+
+    # If output folder doesn't end with a forward slash, add one
+    if not output_folder.endswith('/'): output_folder = output_folder + '/'
     
     # Use provided language or default
     language = language or DEFAULT_LANGUAGE
@@ -284,6 +299,8 @@ def choose_and_run_redactor(file_paths:List[str],
         progress(0.95, "Completed last file, performing final checks")
         current_loop_page = 0
 
+        if isinstance(combined_out_message, list): combined_out_message = '\n'.join(combined_out_message)
+
         if isinstance(out_message, list) and out_message:
             combined_out_message = combined_out_message + '\n'.join(out_message)
         elif out_message:
@@ -312,7 +329,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
         page_break_return = True
 
-        return combined_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, current_loop_page, page_break_return, all_page_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words,  all_page_line_level_ocr_results_with_words_df, review_file_state
+        return combined_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, current_loop_page, page_break_return, all_page_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words,  all_page_line_level_ocr_results_with_words_df, review_file_state, task_textbox
 
     #if first_loop_state == False:
     # Prepare documents and images as required if they don't already exist
@@ -346,10 +363,11 @@ def choose_and_run_redactor(file_paths:List[str],
             file_paths_loop, text_extraction_method, all_page_line_level_ocr_results_df, all_page_line_level_ocr_results_with_words_df, 0, out_message, True, 
             annotate_max_pages, annotations_all_pages, document_cropboxes, redact_whole_page_list, 
             output_folder=output_folder, prepare_images=prepare_images_flag, page_sizes=page_sizes, pymupdf_doc=pymupdf_doc, input_folder=input_folder 
-        )   
-    
-    page_sizes_df = pd.DataFrame(page_sizes)
+        )
 
+
+    page_sizes_df = pd.DataFrame(page_sizes)
+    
     if page_sizes_df.empty:
         page_sizes_df=pd.DataFrame(columns=["page", "image_path", "image_width", "image_height", "mediabox_width", "mediabox_height", "cropbox_width", "cropbox_height", "original_cropbox"])
     page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(pd.to_numeric, errors="coerce")
@@ -378,32 +396,45 @@ def choose_and_run_redactor(file_paths:List[str],
 
         page_break_return = False
 
-        return combined_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, current_loop_page, page_break_return, all_page_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words, all_page_line_level_ocr_results_with_words_df, review_file_state
+        return combined_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages, current_loop_page, page_break_return, all_page_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words, all_page_line_level_ocr_results_with_words_df, review_file_state, task_textbox
 
-    # Load/create allow list
+    ### Load/create allow list, deny list, and whole page redaction list
+
+    ### Load/create allow list
     # If string, assume file path
-    if isinstance(in_allow_list, str): in_allow_list = pd.read_csv(in_allow_list)
+    if isinstance(in_allow_list, str): 
+        if in_allow_list:
+            in_allow_list = pd.read_csv(in_allow_list, header=None)
     # Now, should be a pandas dataframe format
-    if not in_allow_list.empty:
-        in_allow_list_flat = in_allow_list.iloc[:,0].tolist()
+    if isinstance(in_allow_list, pd.DataFrame):
+        if not in_allow_list.empty:
+            in_allow_list_flat = in_allow_list.iloc[:,0].tolist()
+        else:
+            in_allow_list_flat = list()
     else:
         in_allow_list_flat = list()
 
+    ### Load/create deny list
     # If string, assume file path
     if isinstance(in_deny_list, str):
-        in_deny_list = pd.read_csv(in_deny_list)
+        if in_deny_list:
+            in_deny_list = pd.read_csv(in_deny_list, header=None)
+
     if isinstance(in_deny_list, pd.DataFrame):
         if not in_deny_list.empty:
             custom_recogniser_word_list_flat = in_deny_list.iloc[:, 0].tolist()
         else:
             custom_recogniser_word_list_flat = list()
-
         # Sort the strings in order from the longest string to the shortest
         custom_recogniser_word_list_flat = sorted(custom_recogniser_word_list_flat, key=len, reverse=True)
+    else:
+        custom_recogniser_word_list_flat = list()
 
+    ### Load/create whole page redaction list
     # If string, assume file path
     if isinstance(redact_whole_page_list, str):
-        redact_whole_page_list = pd.read_csv(redact_whole_page_list)
+        if redact_whole_page_list:
+            redact_whole_page_list = pd.read_csv(redact_whole_page_list, header=None)
     if isinstance(redact_whole_page_list, pd.DataFrame):
         if not redact_whole_page_list.empty:
             try:
@@ -412,13 +443,18 @@ def choose_and_run_redactor(file_paths:List[str],
                 print("Could not convert whole page redaction data to number list due to:", e)
                 redact_whole_page_list_flat = redact_whole_page_list.iloc[:,0].tolist()
         else:
-            redact_whole_page_list_flat = list()  
+            redact_whole_page_list_flat = list() 
+    else:
+        redact_whole_page_list_flat = list()
 
-    
+    ### Load/create PII identification method
 
     # Try to connect to AWS services directly only if RUN_AWS_FUNCTIONS environmental variable is 1, otherwise an environment variable or direct textbox input is needed.
     if pii_identification_method == AWS_PII_OPTION:
-        if aws_access_key_textbox and aws_secret_key_textbox:
+        if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+            print("Connecting to Comprehend via existing SSO connection")
+            comprehend_client = boto3.client('comprehend', region_name=AWS_REGION)
+        elif aws_access_key_textbox and aws_secret_key_textbox:
             print("Connecting to Comprehend using AWS access key and secret keys from user input.")
             comprehend_client = boto3.client('comprehend', 
                 aws_access_key_id=aws_access_key_textbox, 
@@ -441,7 +477,10 @@ def choose_and_run_redactor(file_paths:List[str],
         
     # Try to connect to AWS Textract Client if using that text extraction method
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:   
-        if aws_access_key_textbox and aws_secret_key_textbox:
+        if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+            print("Connecting to Textract via existing SSO connection")
+            textract_client = boto3.client('textract', region_name=AWS_REGION)
+        elif aws_access_key_textbox and aws_secret_key_textbox:
             print("Connecting to Textract using AWS access key and secret keys from user input.")
             textract_client = boto3.client('textract', 
                 aws_access_key_id=aws_access_key_textbox, 
@@ -647,7 +686,10 @@ def choose_and_run_redactor(file_paths:List[str],
                         print("Saving redacted PDF file:", out_redacted_pdf_file_path)
                         save_pdf_with_or_without_compression(pymupdf_doc, out_redacted_pdf_file_path)
 
-                    out_file_paths.append(out_redacted_pdf_file_path)
+                    if isinstance(out_redacted_pdf_file_path, str):
+                        out_file_paths.append(out_redacted_pdf_file_path)
+                    else:
+                        out_file_paths.append(out_redacted_pdf_file_path[0])
 
             if not all_page_line_level_ocr_results_df.empty:
                 all_page_line_level_ocr_results_df = all_page_line_level_ocr_results_df[["page", "text", "left", "top", "width", "height", "line"]]
@@ -658,8 +700,12 @@ def choose_and_run_redactor(file_paths:List[str],
             all_page_line_level_ocr_results_df.sort_values(["page", "line"], inplace=True)
             all_page_line_level_ocr_results_df.to_csv(ocr_file_path, index = None, encoding="utf-8-sig")
 
-            out_file_paths.append(ocr_file_path)
-            duplication_file_path_outputs.append(ocr_file_path)
+            
+
+            if isinstance(ocr_file_path, str):
+                out_file_paths.append(ocr_file_path)
+            else:
+                duplication_file_path_outputs.append(ocr_file_path[0])
 
             if all_page_line_level_ocr_results_with_words:
                 all_page_line_level_ocr_results_with_words = merge_page_results(all_page_line_level_ocr_results_with_words)
@@ -670,14 +716,12 @@ def choose_and_run_redactor(file_paths:List[str],
                 all_page_line_level_ocr_results_with_words_df = word_level_ocr_output_to_dataframe(all_page_line_level_ocr_results_with_words)
 
                 all_page_line_level_ocr_results_with_words_df = divide_coordinates_by_page_sizes(all_page_line_level_ocr_results_with_words_df, page_sizes_df, xmin="word_x0", xmax="word_x1", ymin="word_y0", ymax="word_y1")
-                # all_page_line_level_ocr_results_with_words_df = divide_coordinates_by_page_sizes(all_page_line_level_ocr_results_with_words_df, page_sizes_df, xmin="line_x0", xmax="line_x1", ymin="line_y0", ymax="line_y1")               
+
+                             
 
                 if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
                     # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
                     if not all_page_line_level_ocr_results_with_words_df.empty:
-
-                        # all_page_line_level_ocr_results_with_words_df['line_y0'] = reverse_y_coords(all_page_line_level_ocr_results_with_words_df, 'line_y0')
-                        # all_page_line_level_ocr_results_with_words_df['line_y1'] = reverse_y_coords(all_page_line_level_ocr_results_with_words_df, 'line_y1')
                         all_page_line_level_ocr_results_with_words_df['word_y0'] = reverse_y_coords(all_page_line_level_ocr_results_with_words_df, 'word_y0')
                         all_page_line_level_ocr_results_with_words_df['word_y1'] = reverse_y_coords(all_page_line_level_ocr_results_with_words_df, 'word_y1')
 
@@ -685,20 +729,32 @@ def choose_and_run_redactor(file_paths:List[str],
                 all_page_line_level_ocr_results_with_words_df['line_x0'] = ""
                 all_page_line_level_ocr_results_with_words_df['line_x1'] = ""
                 all_page_line_level_ocr_results_with_words_df['line_y0'] = ""
-                all_page_line_level_ocr_results_with_words_df['line_y1'] = ""
+                all_page_line_level_ocr_results_with_words_df['line_y1'] = ""                
 
                 all_page_line_level_ocr_results_with_words_df.sort_values(["page", "line", "word_x0"], inplace=True)
                 all_page_line_level_ocr_results_with_words_df_file_path = all_page_line_level_ocr_results_with_words_json_file_path.replace(".json", ".csv")
                 all_page_line_level_ocr_results_with_words_df.to_csv(all_page_line_level_ocr_results_with_words_df_file_path, index = None, encoding="utf-8-sig")
 
                 if all_page_line_level_ocr_results_with_words_json_file_path not in log_files_output_paths:
+                    if isinstance(all_page_line_level_ocr_results_with_words_json_file_path, str):
+                        log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path)
+                    else:
+                        log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path[0])
                     log_files_output_paths.append(all_page_line_level_ocr_results_with_words_json_file_path)
 
                 if all_page_line_level_ocr_results_with_words_df_file_path not in log_files_output_paths:
-                    log_files_output_paths.append(all_page_line_level_ocr_results_with_words_df_file_path)
+                    if isinstance(all_page_line_level_ocr_results_with_words_df_file_path, str):
+                        log_files_output_paths.append(all_page_line_level_ocr_results_with_words_df_file_path)
+                    else:
+                        log_files_output_paths.append(all_page_line_level_ocr_results_with_words_df_file_path[0])
 
                 if all_page_line_level_ocr_results_with_words_df_file_path not in out_file_paths:
-                    out_file_paths.append(all_page_line_level_ocr_results_with_words_df_file_path)
+                    if isinstance(all_page_line_level_ocr_results_with_words_df_file_path, str):
+                        out_file_paths.append(all_page_line_level_ocr_results_with_words_df_file_path)
+                    else:
+                        out_file_paths.append(all_page_line_level_ocr_results_with_words_df_file_path[0])
+
+                
 
             # Convert the gradio annotation boxes to relative coordinates
             progress(0.93, "Creating review file output")
@@ -711,18 +767,27 @@ def choose_and_run_redactor(file_paths:List[str],
             # Save the gradio_annotation_boxes to a review csv file        
             review_file_state = convert_annotation_json_to_review_df(annotations_all_pages_divide, all_pages_decision_process_table, page_sizes=page_sizes)
 
+
             # Don't need page sizes in outputs
             review_file_state.drop(["image_width", "image_height", "mediabox_width", "mediabox_height", "cropbox_width", "cropbox_height"], axis=1, inplace=True, errors="ignore")
                         
-            review_file_state.to_csv(review_file_path, index=None, encoding="utf-8-sig")
+            if isinstance(review_file_path, str):
+                review_file_state.to_csv(review_file_path, index=None, encoding="utf-8-sig")
+            else:
+                review_file_state.to_csv(review_file_path[0], index=None, encoding="utf-8-sig")
             
-            if pii_identification_method != NO_REDACTION_PII_OPTION: out_file_paths.append(review_file_path)
+            if pii_identification_method != NO_REDACTION_PII_OPTION:
+                if isinstance(review_file_path, str):
+                    out_file_paths.append(review_file_path)
+                else:
+                    out_file_paths.append(review_file_path[0])
 
-            # Make a combined message for the file                
-            if isinstance(out_message, list) and out_message:
-                combined_out_message = combined_out_message + '\n'.join(out_message)  # Ensure out_message is a list of strings
-            elif out_message:
-                combined_out_message = combined_out_message + '\n' + out_message
+            # Make a combined message for the file
+            if isinstance(combined_out_message, list): combined_out_message = '\n'.join(combined_out_message)
+            elif combined_out_message == None: combined_out_message = ""
+
+            if isinstance(out_message, list) and out_message: combined_out_message = combined_out_message + '\n'.join(out_message)
+            elif isinstance(out_message, str) and  out_message: combined_out_message = combined_out_message + '\n' + out_message
 
             toc = time.perf_counter()
             time_taken = toc - tic
@@ -747,7 +812,11 @@ def choose_and_run_redactor(file_paths:List[str],
         with open(all_textract_request_metadata_file_path, "w") as f: f.write(all_request_metadata_str)
 
         # Add the request metadata to the log outputs if not there already
-        if all_textract_request_metadata_file_path not in log_files_output_paths: log_files_output_paths.append(all_textract_request_metadata_file_path)
+        if all_textract_request_metadata_file_path not in log_files_output_paths: 
+            if isinstance(all_textract_request_metadata_file_path, str):
+                log_files_output_paths.append(all_textract_request_metadata_file_path)
+            else:
+                log_files_output_paths.append(all_textract_request_metadata_file_path[0])
 
         new_textract_query_numbers = len(all_textract_request_metadata)
         total_textract_query_number += new_textract_query_numbers
@@ -764,7 +833,7 @@ def choose_and_run_redactor(file_paths:List[str],
 
     page_break_return = True
 
-    return combined_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages_divide, current_loop_page, page_break_return, all_page_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words, all_page_line_level_ocr_results_with_words_df, review_file_state
+    return combined_out_message, out_file_paths, out_file_paths, latest_file_completed, log_files_output_paths, log_files_output_paths, estimated_time_taken_state, all_request_metadata_str, pymupdf_doc, annotations_all_pages_divide, current_loop_page, page_break_return, all_page_line_level_ocr_results_df, all_pages_decision_process_table, comprehend_query_number, review_out_file_paths, annotate_max_pages, annotate_max_pages, prepared_pdf_file_paths, pdf_image_file_paths, review_file_state, page_sizes, duplication_file_path_outputs, duplication_file_path_outputs, review_file_path, total_textract_query_number, ocr_file_path, all_page_line_level_ocr_results, all_page_line_level_ocr_results_with_words, all_page_line_level_ocr_results_with_words_df, review_file_state, task_textbox
 
 def convert_pikepdf_coords_to_pymupdf(pymupdf_page:Page, pikepdf_bbox, type="pikepdf_annot"):
     '''
@@ -1266,10 +1335,13 @@ def merge_img_bboxes(bboxes: list, combined_results: Dict, page_signature_recogn
 
     # Process signature and handwriting results
     if page_signature_recogniser_results or page_handwriting_recogniser_results:
+
         if "Extract handwriting" in handwrite_signature_checkbox:
+            print("Extracting handwriting in merge_img_bboxes function")
             merged_bboxes.extend(copy.deepcopy(page_handwriting_recogniser_results))
 
         if "Extract signatures" in handwrite_signature_checkbox:
+            print("Extracting signatures in merge_img_bboxes function")
             merged_bboxes.extend(copy.deepcopy(page_signature_recogniser_results))
 
     # Reconstruct bounding boxes for substrings of interest
@@ -2385,7 +2457,10 @@ def redact_text_pdf(
                     all_page_line_text_extraction_characters.extend(line_characters)
                     all_page_line_level_ocr_results_with_words.append(line_level_ocr_results_with_words) 
 
-                page_text_ocr_outputs = pd.concat(page_text_ocr_outputs_list)
+                if page_text_ocr_outputs_list:
+                    page_text_ocr_outputs = pd.concat(page_text_ocr_outputs_list)
+                else:
+                    page_text_ocr_outputs = pd.DataFrame(columns=["page", "text", "left", "top", "width", "height", "line"])
 
                 ### REDACTION
                 if pii_identification_method != NO_REDACTION_PII_OPTION:

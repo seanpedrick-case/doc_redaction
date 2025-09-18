@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import re
+import time
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Tuple, Dict
@@ -10,9 +11,10 @@ from pathlib import Path
 from tools.helper_functions import OUTPUT_FOLDER, read_file
 from tools.data_anonymise import initial_clean
 from tools.load_spacy_model_custom_recognisers import nlp
-from tools.config import DO_INITIAL_TABULAR_DATA_CLEAN
+from tools.config import DO_INITIAL_TABULAR_DATA_CLEAN, REMOVE_DUPLICATE_ROWS
 
-similarity_threshold = 0.95
+if REMOVE_DUPLICATE_ROWS == "True": REMOVE_DUPLICATE_ROWS = True
+else: REMOVE_DUPLICATE_ROWS = False
 
 def clean_and_stem_text_series(df: pd.DataFrame, column: str, do_initial_clean_dup: bool = DO_INITIAL_TABULAR_DATA_CLEAN):
     """
@@ -51,13 +53,17 @@ def convert_tabular_data_to_analysis_format(
     Returns:
         List[Tuple[str, pd.DataFrame]]: List containing (file_name, processed_df) tuple
     """
-    if text_columns is None:
-        # Auto-detect text columns (string type columns)
-        text_columns = df.select_dtypes(include=['object', 'string']).columns.tolist()
+    # if text_columns is None:
+    #     # Auto-detect text columns (string type columns)
+    #     print(f"No text columns given for {file_name}")
+    #     return []
+    #     text_columns = df.select_dtypes(include=['object', 'string']).columns.tolist()
+
+    text_columns = [col for col in text_columns if col in df.columns]
     
     if not text_columns:
         print(f"No text columns found in {file_name}")
-        return []
+        return list()
     
     # Create a copy to avoid modifying original
     df_copy = df.copy()
@@ -69,9 +75,9 @@ def convert_tabular_data_to_analysis_format(
     df_copy['row_id'] = df_copy.index
     
     # Create the format expected by the duplicate detection system
-    # Using 'page' as row number and 'text' as the combined text
+    # Using 'row_number' as row number and 'text' as the combined text
     processed_df = pd.DataFrame({
-        'page': df_copy['row_id'],
+        'row_number': df_copy['row_id'],
         'text': df_copy['combined_text'],
         'file': file_name
     })
@@ -86,13 +92,15 @@ def find_duplicate_cells_in_tabular_data(
     input_files: List[str],
     similarity_threshold: float = 0.95,
     min_word_count: int = 3,
-    text_columns: List[str] = None,
+    text_columns: List[str] = [],
     output_folder: str = OUTPUT_FOLDER,
     do_initial_clean_dup: bool = DO_INITIAL_TABULAR_DATA_CLEAN,
+    remove_duplicate_rows: bool = REMOVE_DUPLICATE_ROWS,
+    in_excel_tabular_sheets: str = "",
     progress: Progress = Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, pd.DataFrame]]:
     """
-    Find duplicate cells/text in tabular data files (CSV, XLSX).
+    Find duplicate cells/text in tabular data files (CSV, XLSX, Parquet).
     
     Args:
         input_files (List[str]): List of file paths to analyze
@@ -115,26 +123,49 @@ def find_duplicate_cells_in_tabular_data(
     
     progress(0.1, desc="Loading and processing files...")
     
-    all_data_to_process = []
-    full_data_by_file = {}
-    file_paths = []
+    all_data_to_process = list()
+    full_data_by_file = dict()
+    file_paths = list()    
     
     # Process each file
     for file_path in input_files:
         try:
-            df = read_file(file_path)
+            if file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+                temp_df = pd.DataFrame()
+
+                # Try finding each sheet in the given list until a match is found
+                for sheet_name in in_excel_tabular_sheets:
+                    temp_df = read_file(file_path, excel_sheet_name=sheet_name)
+
+                    # If sheet was successfully_loaded
+                    if not temp_df.empty:
+                        file_name = os.path.basename(file_path) + "_" + sheet_name
+                        file_paths.append(file_path)
+                        
+                        # Convert to analysis format
+                        processed_data = convert_tabular_data_to_analysis_format(
+                            temp_df, file_name, text_columns
+                        )
+                        
+                        if processed_data:
+                            all_data_to_process.extend(processed_data)
+                            full_data_by_file[file_name] = processed_data[0][1]
+
+                    temp_df = pd.DataFrame()
+            else:
+                temp_df = read_file(file_path)
             
-            file_name = os.path.basename(file_path)
-            file_paths.append(file_path)
-            
-            # Convert to analysis format
-            processed_data = convert_tabular_data_to_analysis_format(
-                df, file_name, text_columns
-            )
-            
-            if processed_data:
-                all_data_to_process.extend(processed_data)
-                full_data_by_file[file_name] = processed_data[0][1]
+                file_name = os.path.basename(file_path)
+                file_paths.append(file_path)
+                
+                # Convert to analysis format
+                processed_data = convert_tabular_data_to_analysis_format(
+                    temp_df, file_name, text_columns
+                )
+                
+                if processed_data:
+                    all_data_to_process.extend(processed_data)
+                    full_data_by_file[file_name] = processed_data[0][1]
             
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
@@ -147,6 +178,8 @@ def find_duplicate_cells_in_tabular_data(
     
     # Combine all data
     combined_df = pd.concat([data[1] for data in all_data_to_process], ignore_index=True)
+
+    combined_df = combined_df.drop_duplicates(subset=['row_number', 'file'])
     
     progress(0.3, desc="Cleaning and preparing text...")
     
@@ -188,9 +221,9 @@ def find_duplicate_cells_in_tabular_data(
         
         results_data.append({
             'File1': row1_data['file'],
-            'Row1': int(row1_data['page']),
+            'Row1': int(row1_data['row_number']),
             'File2': row2_data['file'],
-            'Row2': int(row2_data['page']),
+            'Row2': int(row2_data['row_number']),
             'Similarity_Score': round(similarity, 3),
             'Text1': row1_data['text'][:200] + '...' if len(row1_data['text']) > 200 else row1_data['text'],
             'Text2': row2_data['text'][:200] + '...' if len(row2_data['text']) > 200 else row2_data['text'],
@@ -204,13 +237,13 @@ def find_duplicate_cells_in_tabular_data(
     progress(0.9, desc="Saving results...")
     
     # Save results
-    output_paths = save_tabular_duplicate_results(results_df, output_folder, file_paths, file_replaced_index=0)
+    output_paths = save_tabular_duplicate_results(results_df, output_folder, file_paths, remove_duplicate_rows=remove_duplicate_rows, in_excel_tabular_sheets=in_excel_tabular_sheets)
     
     gr.Info(f"Found {len(results_df)} duplicate cell matches")
     
     return results_df, output_paths, full_data_by_file
 
-def save_tabular_duplicate_results(results_df: pd.DataFrame, output_folder: str, file_paths: List[str], file_replaced_index: int = 0) -> List[str]:
+def save_tabular_duplicate_results(results_df: pd.DataFrame, output_folder: str, file_paths: List[str], remove_duplicate_rows: bool = REMOVE_DUPLICATE_ROWS, in_excel_tabular_sheets: List[str] = []) -> List[str]:
     """
     Save tabular duplicate detection results to files.
     
@@ -218,52 +251,163 @@ def save_tabular_duplicate_results(results_df: pd.DataFrame, output_folder: str,
         results_df (pd.DataFrame): Results DataFrame
         output_folder (str): Output folder path
         file_paths (List[str]): List of file paths
-        file_replaced_index (int): Index of the file to replace with duplicate rows removed
-            (0 is the first file in the list)
+        remove_duplicate_rows (bool): Whether to remove duplicate rows
+        in_excel_tabular_sheets (str): Name of the Excel sheet to save the results to
     Returns:
         List[str]: List of output file paths
     """
-    output_paths = []
+    output_paths = list()
     output_folder_path = Path(output_folder)
     output_folder_path.mkdir(exist_ok=True)
     
     if results_df.empty:
         print("No duplicate matches to save.")
-        return []
+        return list()
     
     # Save main results
     results_file = output_folder_path / 'tabular_duplicate_results.csv'
     results_df.to_csv(results_file, index=False, encoding="utf-8-sig")
     output_paths.append(str(results_file))
     
+    # Group results by original file to handle Excel files properly
+    excel_files_processed = dict() # Track which Excel files have been processed
+    
     # Save per-file duplicate lists
-    for file_name, group in results_df.groupby('File1'):
-        file_stem = Path(file_name).stem
-        duplicate_rows_file = output_folder_path / f"{file_stem}_duplicate_rows.csv"
-        
-        # Get unique row numbers to remove
-        rows_to_remove = sorted(group['Row1'].unique())
-        duplicate_df = pd.DataFrame({'Row_to_Remove': rows_to_remove})
-        duplicate_df.to_csv(duplicate_rows_file, index=False)
-        output_paths.append(str(duplicate_rows_file))
+    for file_name, group in results_df.groupby('File2'):
+        # Check for matches with original file names
+        for original_file in file_paths:
+            original_file_name = os.path.basename(original_file)
 
-        # Save also original file (first file in list) with duplicate rows removed
-        file_path = file_paths[file_replaced_index]
-        file_base_name = os.path.basename(file_path)
-        df = read_file(file_path)
-        df_cleaned = df.drop(index=rows_to_remove).reset_index(drop=True)
+            if original_file_name in file_name:
+                original_file_extension = os.path.splitext(original_file)[-1]
+                if original_file_extension in ['.xlsx', '.xls']:                 
+                    
+                    # Split the string using a regex to handle both .xlsx_ and .xls_ delimiters
+                    # The regex r'\.xlsx_|\.xls_' correctly matches either ".xlsx_" or ".xls_" as a delimiter.
+                    parts = re.split(r'\.xlsx_|\.xls_', os.path.basename(file_name))
+                    # The sheet name is the last part after splitting
+                    file_sheet_name = parts[-1]
 
-        output_path = os.path.join(output_folder, f"{file_base_name}_deduplicated.csv")
-        df_cleaned.to_csv(output_path, index=False, encoding="utf-8-sig")
-        
-        output_paths.append(str(output_path))
+                    file_path = original_file
+                    
+                    # Initialize Excel file tracking if not already done
+                    if file_path not in excel_files_processed:
+                        excel_files_processed[file_path] = {
+                            'sheets_data': dict(),
+                            'all_sheets': list(),
+                            'processed_sheets': set()
+                        }
+                    
+                    # Read the original Excel file to get all sheet names
+                    if not excel_files_processed[file_path]['all_sheets']:
+                        try:
+                            excel_file = pd.ExcelFile(file_path)
+                            excel_files_processed[file_path]['all_sheets'] = excel_file.sheet_names
+                        except Exception as e:
+                            print(f"Error reading Excel file {file_path}: {e}")
+                            continue
+                    
+                    # Read the current sheet
+                    df = read_file(file_path, excel_sheet_name=file_sheet_name)
+                    
+                    # Create duplicate rows file for this sheet
+                    file_stem = Path(file_name).stem
+                    duplicate_rows_file = output_folder_path / f"{file_stem}_{file_sheet_name}_duplicate_rows.csv"
+                    
+                    # Get unique row numbers to remove
+                    rows_to_remove = sorted(group['Row2'].unique())
+                    duplicate_df = pd.DataFrame({'Row_to_Remove': rows_to_remove})
+                    duplicate_df.to_csv(duplicate_rows_file, index=False)
+                    output_paths.append(str(duplicate_rows_file))
+                    
+                    # Process the sheet data
+                    df_cleaned = df.copy()
+                    df_cleaned["duplicated"] = False
+                    df_cleaned.loc[rows_to_remove, "duplicated"] = True
+                    if remove_duplicate_rows:
+                        df_cleaned = df_cleaned.drop(index=rows_to_remove)
+                    
+                    # Store the processed sheet data
+                    excel_files_processed[file_path]['sheets_data'][file_sheet_name] = df_cleaned
+                    excel_files_processed[file_path]['processed_sheets'].add(file_sheet_name)
+                    
+                else:
+                    file_sheet_name = ""
+                    file_path = original_file
+                    print("file_path after match:", file_path)
+                    file_base_name = os.path.basename(file_path)
+                    df = read_file(file_path)
+
+                    file_stem = Path(file_name).stem
+                    duplicate_rows_file = output_folder_path / f"{file_stem}_duplicate_rows.csv"
+                    
+                    # Get unique row numbers to remove
+                    rows_to_remove = sorted(group['Row2'].unique())
+                    duplicate_df = pd.DataFrame({'Row_to_Remove': rows_to_remove})
+                    duplicate_df.to_csv(duplicate_rows_file, index=False)
+                    output_paths.append(str(duplicate_rows_file))
+
+                    df_cleaned = df.copy()
+                    df_cleaned["duplicated"] = False
+                    df_cleaned.loc[rows_to_remove, "duplicated"] = True
+                    if remove_duplicate_rows:
+                        df_cleaned = df_cleaned.drop(index=rows_to_remove)
+
+                    file_ext = os.path.splitext(file_name)[-1]
+
+                    if file_ext in ['.parquet']:
+                        output_path = os.path.join(output_folder, f"{file_base_name}_deduplicated.parquet")
+                        df_cleaned.to_parquet(output_path, index=False)
+                    else:
+                        output_path = os.path.join(output_folder, f"{file_base_name}_deduplicated.csv")
+                        df_cleaned.to_csv(output_path, index=False, encoding="utf-8-sig")
+                    
+                    output_paths.append(str(output_path))
+                break
+    
+    # Process Excel files to create complete deduplicated files
+    for file_path, file_data in excel_files_processed.items():
+        try:
+            # Create output filename
+            file_base_name = os.path.splitext(os.path.basename(file_path))[0]
+            file_ext = os.path.splitext(file_path)[-1]
+            output_path = os.path.join(output_folder, f"{file_base_name}_deduplicated{file_ext}")
+            
+            # Create Excel writer
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                # Write all sheets
+                for sheet_name in file_data['all_sheets']:
+                    if sheet_name in file_data['processed_sheets']:
+                        # Use the processed (deduplicated) version
+                        file_data['sheets_data'][sheet_name].to_excel(
+                            writer, 
+                            sheet_name=sheet_name, 
+                            index=False
+                        )
+                    else:
+                        # Use the original sheet (no duplicates found)
+                        original_df = read_file(file_path, excel_sheet_name=sheet_name)
+                        original_df.to_excel(
+                            writer, 
+                            sheet_name=sheet_name, 
+                            index=False
+                        )
+            
+            output_paths.append(str(output_path))
+            print(f"Created deduplicated Excel file: {output_path}")
+            
+        except Exception as e:
+            print(f"Error creating deduplicated Excel file for {file_path}: {e}")
+            continue
     
     return output_paths
 
 def remove_duplicate_rows_from_tabular_data(
     file_path: str,
     duplicate_rows: List[int],
-    output_folder: str = OUTPUT_FOLDER
+    output_folder: str = OUTPUT_FOLDER,
+    in_excel_tabular_sheets: List[str] = [],
+    remove_duplicate_rows: bool = REMOVE_DUPLICATE_ROWS
 ) -> str:
     """
     Remove duplicate rows from a tabular data file.
@@ -272,13 +416,14 @@ def remove_duplicate_rows_from_tabular_data(
         file_path (str): Path to the input file
         duplicate_rows (List[int]): List of row indices to remove
         output_folder (str): Output folder for cleaned file
-    
+        in_excel_tabular_sheets (str): Name of the Excel sheet to save the results to
+        remove_duplicate_rows (bool): Whether to remove duplicate rows
     Returns:
         str: Path to the cleaned file
     """
     try:
         # Load the file
-        df = read_file(file_path)
+        df = read_file(file_path, excel_sheet_name=in_excel_tabular_sheets if in_excel_tabular_sheets else "")
         
         # Remove duplicate rows (0-indexed)
         df_cleaned = df.drop(index=duplicate_rows).reset_index(drop=True)
@@ -286,12 +431,12 @@ def remove_duplicate_rows_from_tabular_data(
         # Save cleaned file
         file_name = os.path.basename(file_path)
         file_stem = os.path.splitext(file_name)[0]
-        file_ext = os.path.splitext(file_name)[1]
+        file_ext = os.path.splitext(file_name)[-1]
         
         output_path = os.path.join(output_folder, f"{file_stem}_deduplicated{file_ext}")
         
         if file_ext in ['.xlsx', '.xls']:
-            df_cleaned.to_excel(output_path, index=False)
+            df_cleaned.to_excel(output_path, index=False, sheet_name=in_excel_tabular_sheets if in_excel_tabular_sheets else [])
         elif file_ext in ['.parquet']:
             df_cleaned.to_parquet(output_path, index=False)
         else:
@@ -307,9 +452,11 @@ def run_tabular_duplicate_analysis(
     files: List[str],
     threshold: float,
     min_words: int,
-    text_columns: List[str] = None,
+    text_columns: List[str] = [],
     output_folder: str = OUTPUT_FOLDER,
     do_initial_clean_dup: bool = DO_INITIAL_TABULAR_DATA_CLEAN,
+    remove_duplicate_rows: bool = REMOVE_DUPLICATE_ROWS,
+    in_excel_tabular_sheets: List[str] = [],
     progress: Progress = Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, pd.DataFrame]]:
     """
@@ -330,26 +477,37 @@ def run_tabular_duplicate_analysis(
         input_files=files,
         similarity_threshold=threshold,
         min_word_count=min_words,
-        text_columns=text_columns,
+        text_columns=text_columns if text_columns else [],
         output_folder=output_folder,
         do_initial_clean_dup=do_initial_clean_dup,
-        progress=progress
+        in_excel_tabular_sheets=in_excel_tabular_sheets if in_excel_tabular_sheets else [],
+        remove_duplicate_rows=remove_duplicate_rows
     )
 
 
 
 # Function to update column choices when files are uploaded
-def update_tabular_column_choices(files):
+def update_tabular_column_choices(files, in_excel_tabular_sheets: List[str] = []):
     if not files:
         return gr.update(choices=[])
     
     all_columns = set()
     for file in files:
         try:
-            df = read_file(file.name)
-            
+            file_extension = os.path.splitext(file.name)[-1]
+            if file_extension in ['.xlsx', '.xls']:
+                for sheet_name in in_excel_tabular_sheets:
+                    df = read_file(file.name, excel_sheet_name=sheet_name)
+                    text_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
+                    all_columns.update(text_cols)
+            else:
+                df = read_file(file.name)
+                text_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
+                all_columns.update(text_cols)
+
             # Get text columns
             text_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
+
             all_columns.update(text_cols)
         except Exception as e:
             print(f"Error reading {file.name}: {e}")
@@ -358,26 +516,59 @@ def update_tabular_column_choices(files):
     return gr.Dropdown(choices=sorted(list(all_columns)))
 
 # Function to handle tabular duplicate detection
-def run_tabular_duplicate_detection(files, threshold, min_words, text_columns, output_folder: str = OUTPUT_FOLDER, do_initial_clean_dup: bool = DO_INITIAL_TABULAR_DATA_CLEAN):
+def run_tabular_duplicate_detection(files, threshold, min_words, text_columns, output_folder: str = OUTPUT_FOLDER, do_initial_clean_dup: bool = DO_INITIAL_TABULAR_DATA_CLEAN, in_excel_tabular_sheets: List[str] = [], remove_duplicate_rows: bool = REMOVE_DUPLICATE_ROWS):
     if not files:
-        return pd.DataFrame(), [], gr.Dropdown(choices=[])
+        print("No files uploaded")
+        return pd.DataFrame(), [], gr.Dropdown(choices=[]), 0, "deduplicate"
+
+    start_time = time.time()
+
+    task_textbox = "deduplicate"
+
+    # If output folder doesn't end with a forward slash, add one
+    if not output_folder.endswith('/'): output_folder = output_folder + '/'
     
-    file_paths = [f.name for f in files]
+    file_paths = []
+    if isinstance(files, str):
+        # If 'files' is a single string, treat it as a list with one element
+        file_paths.append(files)
+    elif isinstance(files, list):
+        # If 'files' is a list, iterate through its elements
+        for f_item in files:
+            if isinstance(f_item, str):
+                # If an element is a string, it's a direct file path
+                file_paths.append(f_item)
+            elif hasattr(f_item, 'name'):
+                # If an element has a '.name' attribute (e.g., a Gradio File object), use its name
+                file_paths.append(f_item.name)
+            else:
+                # Log a warning for unexpected element types within the list
+                print(f"Warning: Skipping an element in 'files' list that is neither a string nor has a '.name' attribute: {type(f_item)}")
+    elif hasattr(files, 'name'):
+        # Handle the case where a single file object (e.g., gr.File) is passed directly, not in a list
+        file_paths.append(files.name)
+    else:
+        # Raise an error for any other unexpected type of the 'files' argument itself
+        raise TypeError(f"Unexpected type for 'files' argument: {type(files)}. Expected str, list of str/file objects, or a single file object.")
+
     results_df, output_paths, full_data = run_tabular_duplicate_analysis(
         files=file_paths,
         threshold=threshold,
         min_words=min_words,
-        text_columns=text_columns if text_columns else None,
+        text_columns=text_columns if text_columns else [],
         output_folder=output_folder,
-        do_initial_clean_dup=do_initial_clean_dup
+        do_initial_clean_dup=do_initial_clean_dup,
+        in_excel_tabular_sheets=in_excel_tabular_sheets if in_excel_tabular_sheets else None,
+        remove_duplicate_rows=remove_duplicate_rows
     )
-
-    print("output_paths:", output_paths)
     
     # Update file choices for cleaning
     file_choices = list(set([f for f in file_paths]))
+
+    end_time = time.time()
+    processing_time = round(end_time - start_time, 2)
     
-    return results_df, output_paths, gr.Dropdown(choices=file_choices)
+    return results_df, output_paths, gr.Dropdown(choices=file_choices), processing_time, task_textbox
 
 # Function to handle row selection for preview
 def handle_tabular_row_selection(results_df, evt:gr.SelectData):
@@ -398,12 +589,12 @@ def handle_tabular_row_selection(results_df, evt:gr.SelectData):
     return selected_index, row['Text1'], row['Text2']
 
 # Function to clean duplicates from selected file
-def clean_tabular_duplicates(file_name, results_df, output_folder):
+def clean_tabular_duplicates(file_name, results_df, output_folder, in_excel_tabular_sheets: str = "", remove_duplicate_rows: bool = REMOVE_DUPLICATE_ROWS):
     if not file_name or results_df.empty:
         return None
     
     # Get duplicate rows for this file
-    file_duplicates = results_df[results_df['File1'] == file_name]['Row1'].tolist()
+    file_duplicates = results_df[results_df['File2'] == file_name]['Row2'].tolist()
     
     if not file_duplicates:
         return None
@@ -414,7 +605,9 @@ def clean_tabular_duplicates(file_name, results_df, output_folder):
         cleaned_file = remove_duplicate_rows_from_tabular_data(
             file_path=file_name,
             duplicate_rows=file_duplicates,
-            output_folder=output_folder
+            output_folder=output_folder,
+            in_excel_tabular_sheets=in_excel_tabular_sheets,
+            remove_duplicate_rows=remove_duplicate_rows
         )
         return cleaned_file
     except Exception as e:

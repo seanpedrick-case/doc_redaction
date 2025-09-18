@@ -1,30 +1,70 @@
+# Initial steps
+
+cd to folder with the cli_redact.py file.
+
+Ensure that your python shortcut resolves to the python environment that contains all the dependencies needed for the redaction app. 
+
 python cli_redact.py --help
 
+## Redaction
+
 python cli_redact.py \
-    --input_file "documents/confidential-report.pdf" \
-    --output_dir "output/redacted_reports/" \
+    --input_file "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf" \
     --ocr_method "Local OCR model - PDFs without selectable text" \
     --pii_detector "Local" \
     --page_min 2 \
     --page_max 10 \
     --allow_list "config/project_allowlist.csv"
 
-python your_cli_script.py \
-    --input_file "data/customer_data.xlsx" \
-    --output_dir "output/anonymised_data/" \
-    --anon_strat "redact" \
-    --columns "Customer Name" "Email" \
-    --excel_sheets "Q3-Data"
+python cli_redact.py \
+    --input_file "example_data/combined_case_notes.csv" \
+    --anon_strategy "redact" \
+    --text_columns "Customer Name" "Email"
 
-python your_cli_script.py \
+python cli_redact.py \
     --input_file "legal_docs/legal_agreement.docx" \
-    --output_dir "output/anonymised_docs/" \
-    --anon_strat "encrypt" \
+    --anon_strategy "redact" \
     --deny_list "config/codenames.csv" \
     --language "en"
 
-python cli_redact.py --task deduplicate --input_file ocr_output.csv --duplicate_type pages --similarity_threshold 0.95 --min_word_count 5
+## Deduplication
 
-python cli_redact.py --task deduplicate --input_file data.csv --duplicate_type tabular --text_columns "Name" "Email" "Description"
+python cli_redact.py \
+    --task deduplicate \
+    --input_file ocr_output.csv \
+    --duplicate_type pages \
+    --similarity_threshold 0.95 \
+    --min_word_count 5
 
-python cli_redact.py --task deduplicate --input_file ocr_output.csv --duplicate_type pages --search_query "confidential information"
+python cli_redact.py \
+    --task deduplicate \
+    --input_file data.csv \
+    --duplicate_type tabular \
+    --text_columns "Name" "Email" "Description"
+
+python cli_redact.py \
+    --task deduplicate \
+    --input_file ocr_output.csv \
+    --duplicate_type pages \
+    --search_query "confidential information"
+
+## Submit to Textract service
+
+### Submit document for analysis
+python cli_redact.py \
+    --task textract \
+    --textract_action submit \
+    --input_file document.pdf \
+    --extract_signatures
+
+### Retrieve results by job ID
+python cli_redact.py \
+    --task textract \
+    --textract_action retrieve \
+    --job_id "12345678-1234-1234-1234-123456789012"
+    --output_dir "output/test_documents/" \
+
+### List recent jobs
+python cli_redact.py \
+    --task textract \
+    --textract_action list
