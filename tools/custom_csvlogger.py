@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from gradio_client import utils as client_utils
 import gradio as gr
-from gradio import utils, wasm_utils
+from gradio import utils
 from tools.config import AWS_REGION, AWS_ACCESS_KEY, AWS_SECRET_KEY, RUN_AWS_FUNCTIONS
 
 
@@ -56,9 +56,7 @@ class CSVLogger_custom(FlaggingCallback):
         self.simplify_file_data = simplify_file_data
         self.verbose = verbose
         self.dataset_file_name = dataset_file_name
-        self.lock = (
-            Lock() if not wasm_utils.IS_WASM else contextlib.nullcontext()
-        )  # The multiprocessing module doesn't work on Lite.
+        self.lock = Lock()
 
     def setup(
         self,
@@ -78,7 +76,7 @@ class CSVLogger_custom(FlaggingCallback):
 
         if replacement_headers:
             if additional_headers is None:
-                additional_headers = []                
+                additional_headers = list()                
 
             if len(replacement_headers) != len(self.components):
                 raise ValueError(
@@ -143,18 +141,16 @@ class CSVLogger_custom(FlaggingCallback):
     replacement_headers: list[str] | None = None
 ) -> int:
         if self.first_time:
-            print("First time creating file")
-            additional_headers = []
+            additional_headers = list()
             if flag_option is not None:
                 additional_headers.append("flag")
             if username is not None:
                 additional_headers.append("username")
             additional_headers.append("id")
-            #additional_headers.append("timestamp")
             self._create_dataset_file(additional_headers=additional_headers, replacement_headers=replacement_headers)
             self.first_time = False
 
-        csv_data = []
+        csv_data = list()
         for idx, (component, sample) in enumerate(
             zip(self.components, flag_data, strict=False)
         ):
@@ -214,7 +210,6 @@ class CSVLogger_custom(FlaggingCallback):
                 try:
                     print("Connecting to DynamoDB via existing SSO connection")
                     dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
-                    #client = boto3.client('dynamodb')
                     
                     test_connection = dynamodb.meta.client.list_tables()                   
 
@@ -224,8 +219,6 @@ class CSVLogger_custom(FlaggingCallback):
                         print("Trying DynamoDB credentials from environment variables")
                         dynamodb = boto3.resource('dynamodb',aws_access_key_id=AWS_ACCESS_KEY, 
                             aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION)
-                        # client = boto3.client('dynamodb',aws_access_key_id=AWS_ACCESS_KEY, 
-                        #     aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION)
                     else:
                         raise Exception("AWS credentials for DynamoDB logging not found")
             else:
@@ -234,12 +227,9 @@ class CSVLogger_custom(FlaggingCallback):
             if dynamodb_table_name is None:
                 raise ValueError("You must provide a dynamodb_table_name if save_to_dynamodb is True")            
             
-            if dynamodb_headers:
-                dynamodb_headers = dynamodb_headers
-            if not dynamodb_headers and replacement_headers:
-                dynamodb_headers = replacement_headers
-            elif headers:
-                dynamodb_headers = headers
+            if dynamodb_headers: dynamodb_headers = dynamodb_headers
+            if not dynamodb_headers and replacement_headers: dynamodb_headers = replacement_headers
+            elif headers: dynamodb_headers = headers
             elif not dynamodb_headers:
                 raise ValueError("Headers not found. You must provide dynamodb_headers or replacement_headers to create a new table.")
             
@@ -260,9 +250,6 @@ class CSVLogger_custom(FlaggingCallback):
                 table.load()
             except botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] == 'ResourceNotFoundException':
-                    
-                    #print(f"Creating DynamoDB table '{dynamodb_table_name}'...")
-                    #print("dynamodb_headers:", dynamodb_headers)
                     
                     attribute_definitions = [
                         {'AttributeName': 'id', 'AttributeType': 'S'}  # Only define key attributes here
@@ -288,17 +275,11 @@ class CSVLogger_custom(FlaggingCallback):
             try:
                 item = {
                     'id': str(generated_id),  # UUID primary key
-                    #'created_by': username if username else "unknown",
                     'timestamp': timestamp,
                 }
 
-                #print("dynamodb_headers:", dynamodb_headers)
-                #print("csv_data:", csv_data)
-
                 # Map the headers to values
                 item.update({header: str(value) for header, value in zip(dynamodb_headers, csv_data)})
-
-                #print("item:", item)
 
                 table.put_item(Item=item)
 
