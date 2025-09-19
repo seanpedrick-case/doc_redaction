@@ -10,7 +10,6 @@ from typing import List
 from math import ceil
 from gradio_image_annotation import image_annotator
 from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, SELECTABLE_TEXT_EXTRACT_OPTION, TESSERACT_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, AWS_PII_OPTION, MAPPED_LANGUAGE_CHOICES, LANGUAGE_CHOICES, textract_language_choices, aws_comprehend_language_choices, DEFAULT_LANGUAGE
-# from tools.load_spacy_model_custom_recognisers import nlp_analyser
 
 def _get_env_list(env_var_name: str) -> List[str]:
     """Parses a comma-separated environment variable into a list of strings."""
@@ -132,35 +131,36 @@ def get_file_name_without_type(file_path):
 
 def detect_file_type(filename:str):
     """Detect the file type based on its extension."""
-    if (filename.endswith('.csv')) | (filename.endswith('.csv.gz')) | (filename.endswith('.zip')):
-        return 'csv'
-    elif filename.endswith('.xlsx'):
-        return 'xlsx'
-    elif filename.endswith('.parquet'):
-        return 'parquet'
-    elif filename.endswith('.pdf'):
-        return 'pdf'
-    elif filename.endswith('.jpg'):
-        return 'jpg'
-    elif filename.endswith('.jpeg'):
-        return 'jpeg'
-    elif filename.endswith('.png'):
-        return 'png'
-    elif filename.endswith('.xfdf'):
-        return 'xfdf'
-    elif filename.endswith('.docx'):
-        return 'docx'
-    else:
-        raise ValueError("Unsupported file type.")
+    if not isinstance(filename, str):
+        filename = str(filename)
 
-def read_file(filename:str):
+    if (filename.endswith('.csv')) | (filename.endswith('.csv.gz')) | (filename.endswith('.zip')): return 'csv'
+    elif filename.endswith('.xlsx'): return 'xlsx'
+    elif filename.endswith('.xls'): return 'xls'
+    elif filename.endswith('.parquet'): return 'parquet'
+    elif filename.endswith('.pdf'): return 'pdf'
+    elif filename.endswith('.jpg'): return 'jpg'
+    elif filename.endswith('.jpeg'): return 'jpeg'
+    elif filename.endswith('.png'): return 'png'
+    elif filename.endswith('.xfdf'): return 'xfdf'
+    elif filename.endswith('.docx'): return 'docx'
+    else: raise ValueError("Unsupported file type.")
+
+def read_file(filename:str, excel_sheet_name: str = ""):
     """Read the file based on its detected type."""
     file_type = detect_file_type(filename)
     
     if file_type == 'csv':
         return pd.read_csv(filename, low_memory=False)
     elif file_type == 'xlsx':
-        return pd.read_excel(filename)
+        if excel_sheet_name:
+            try:
+                return pd.read_excel(filename, sheet_name=excel_sheet_name)
+            except Exception as e:
+                print(f"Error reading {filename} with sheet name {excel_sheet_name}: {e}")
+                return pd.DataFrame()
+        else:
+            return pd.read_excel(filename)
     elif file_type == 'parquet':
         return pd.read_parquet(filename)
 

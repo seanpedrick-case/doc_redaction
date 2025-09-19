@@ -1,8 +1,4 @@
-*.csv
-*.pdf
 *.url
-*.jpg
-*.png
 *.ipynb
 *.pyc
 examples/*

@@ -1,8 +1,4 @@
-*.csv
-*.pdf
 *.url
-*.jpg
-*.png
 *.ipynb
 *.pyc
 examples/*
@@ -17,8 +13,9 @@ build/*
 dist/*
 build_deps/*
 logs/*
+usage/*
+feedback/*
 config/*
-doc_redaction_amplify_app/*
 user_guide/*
 cdk/config/*
 cdk/cdk.out/*

@@ -24,6 +24,8 @@ def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str=""
     '''
     Analyse page with AWS Textract
     '''
+
+    print("handwrite_signature_checkbox in analyse_page_with_textract:", handwrite_signature_checkbox)
     if client == "":
         try:               
             if AWS_ACCESS_KEY and AWS_SECRET_KEY:

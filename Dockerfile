@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm AS builder
 
 # Install system dependencies
 RUN apt-get update \
@@ -24,7 +24,7 @@ COPY lambda_entrypoint.py .
 COPY entrypoint.sh .
 
 # Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm
+FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm
 
 # Set build-time and runtime environment variable
 ARG APP_MODE=gradio

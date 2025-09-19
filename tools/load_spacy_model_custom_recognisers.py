@@ -11,10 +11,13 @@ import re
 import os
 import requests
 import gradio as gr
-from tools.config import DEFAULT_LANGUAGE, TESSERACT_DATA_FOLDER
+from tools.config import DEFAULT_LANGUAGE, TESSERACT_DATA_FOLDER, CUSTOM_ENTITIES
+from tools.helper_functions import _get_env_list
 
 score_threshold = 0.001
-custom_entities = ["TITLES", "UKPOSTCODE", "STREETNAME", "CUSTOM"]
+
+if CUSTOM_ENTITIES: CUSTOM_ENTITIES = _get_env_list(CUSTOM_ENTITIES)
+custom_entities = CUSTOM_ENTITIES
 
 # Create a class inheriting from SpacyNlpEngine
 class LoadedSpacyNlpEngine(SpacyNlpEngine):

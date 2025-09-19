@@ -260,10 +260,12 @@ class ContrastSegmentedImageEnhancer(ImagePreprocessor):
             adjusted_contrast = contrast
         return adjusted_image, contrast, adjusted_contrast
 
-    def preprocess_image(self, image: Image.Image) -> Tuple[Image.Image, dict]:
+    def preprocess_image(self, image: Image.Image, perform_binarization: bool = False) -> Tuple[Image.Image, dict]:
         """
         A corrected, logical pipeline for OCR preprocessing.
         Order: Greyscale -> Rescale -> Denoise -> Enhance Contrast -> Binarize
+
+        I have found that binarization is not always helpful with Tesseract, and can sometimes degrade results. So it is off by default.
         """
         # 1. Convert to greyscale NumPy array
         image_np = self.convert_image_to_array(image)
@@ -278,9 +280,13 @@ class ContrastSegmentedImageEnhancer(ImagePreprocessor):
         adjusted_image_np, _, _ = self._improve_contrast(filtered_image_np)
 
         # 5. Adaptive Thresholding (Binarization) - This is the final step
-        final_image_np, threshold_metadata = self.adaptive_threshold.preprocess_image(
-            adjusted_image_np
-        )
+        if perform_binarization:
+            final_image_np, threshold_metadata = self.adaptive_threshold.preprocess_image(
+                adjusted_image_np
+            )
+        else:
+            final_image_np = adjusted_image_np
+            threshold_metadata = {}
         
         # Combine metadata
         final_metadata = {**scale_metadata, **threshold_metadata}
