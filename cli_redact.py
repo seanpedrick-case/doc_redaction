@@ -334,7 +334,7 @@ python cli_redact.py --task textract --textract_action list
                     prep_summary, prepared_pdf_paths, image_file_paths, _, _, pdf_doc,
                     image_annotations, _, original_cropboxes, page_sizes, _, _, _, _, _
                 ) = prepare_image_or_pdf(
-                    file_paths=args.input_file, text_extract_method=args.ocr_method,
+                    file_paths=args.input_file, text_extract_method=args.ocr_method, all_line_level_ocr_results_df=pd.DataFrame(), all_page_line_level_ocr_results_with_words_df=pd.DataFrame(),
                     first_loop_state=True, prepare_for_review=False,
                     output_folder=args.output_dir, input_folder=args.input_dir, prepare_images=args.prepare_images
                 )

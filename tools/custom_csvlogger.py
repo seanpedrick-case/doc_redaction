@@ -56,9 +56,7 @@ class CSVLogger_custom(FlaggingCallback):
         self.simplify_file_data = simplify_file_data
         self.verbose = verbose
         self.dataset_file_name = dataset_file_name
-        self.lock = (
-            Lock() if not wasm_utils.IS_WASM else contextlib.nullcontext()
-        )  # The multiprocessing module doesn't work on Lite.
+        self.lock = Lock()
 
     def setup(
         self,
