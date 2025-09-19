@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from gradio_client import utils as client_utils
 import gradio as gr
-from gradio import utils, wasm_utils
+from gradio import utils
 from tools.config import AWS_REGION, AWS_ACCESS_KEY, AWS_SECRET_KEY, RUN_AWS_FUNCTIONS
 
 
