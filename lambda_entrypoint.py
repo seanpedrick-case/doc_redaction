@@ -9,7 +9,7 @@ print("Lambda entrypoint loading...")
 
 # Initialize S3 client outside the handler for connection reuse
 s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "eu-west-2"))
-print("S3 client initialized")
+print("S3 client initialised")
 
 # Lambda's only writable directory
 TMP_DIR = "/tmp"
@@ -84,48 +84,90 @@ def lambda_handler(event, context):
         'task': arguments.get('task', 'redact'),
         'input_file': input_file_path,
         'output_dir': OUTPUT_DIR,
-        'language': arguments.get('language', 'en_core_web_sm'),
-        'pii_detector': arguments.get('pii_detector', 'Local Spacy model'), # Default to local
+        'input_dir': INPUT_DIR,
+        'language': arguments.get('language', 'en_core_web_lg'),
+        'pii_detector': arguments.get('pii_detector', 'Local'), # Default to local
+        'username': arguments.get('username', 'lambda_user'),
+        'save_to_user_folders': arguments.get('save_to_user_folders', 'False'),
         'ocr_method': arguments.get('ocr_method', 'Tesseract OCR - all PDF types'),
         'page_min': int(arguments.get('page_min', 0)),
-        'page_max': int(arguments.get('page_max', 999)),
+        'page_max': int(arguments.get('page_max', 0)),
+        'handwrite_signature_extraction': arguments.get('handwrite_signature_checkbox', ['Extract handwriting', 'Extract signatures']),
+        
+        # General arguments
+        'local_redact_entities': arguments.get('local_redact_entities', []),
+        'aws_redact_entities': arguments.get('aws_redact_entities', []),
+        'cost_code': arguments.get('cost_code', ''),
+        'save_logs_to_csv': arguments.get('save_logs_to_csv', 'False'),
+        'save_logs_to_dynamodb': arguments.get('save_logs_to_dynamodb', 'False'),
+        'display_file_names_in_logs': arguments.get('display_file_names_in_logs', 'True'),
+        'upload_logs_to_s3': arguments.get('upload_logs_to_s3', 'False'),
+        's3_logs_prefix': arguments.get('s3_logs_prefix', ''),
+        'do_initial_clean': arguments.get('do_initial_clean', 'False'),
+        
+        # PDF/Image specific arguments
+        'images_dpi': float(arguments.get('images_dpi', 300.0)),
+        'chosen_local_ocr_model': arguments.get('chosen_local_ocr_model', 'tesseract'),
+        'preprocess_local_ocr_images': arguments.get('preprocess_local_ocr_images', 'False'),
         
         # Handle optional files like allow/deny lists
-        'allow_list': None,
-        'deny_list': None,
+        'allow_list_file': arguments.get('allow_list_file', ""),
+        'deny_list_file': arguments.get('deny_list_file', ""),
+        'redact_whole_page_file': arguments.get('redact_whole_page_file', ""),
+        
+        # Tabular/Anonymisation arguments
+        'excel_sheets': arguments.get('excel_sheets', []),
+        'fuzzy_mistakes': int(arguments.get('fuzzy_mistakes', 0)),
+        'match_fuzzy_whole_phrase_bool': arguments.get('match_fuzzy_whole_phrase_bool', 'True'),
         
         # Deduplication specific arguments
         'duplicate_type': arguments.get('duplicate_type', 'pages'),
         'similarity_threshold': float(arguments.get('similarity_threshold', 0.95)),
         'min_word_count': int(arguments.get('min_word_count', 3)),
-        'search_query': arguments.get('search_query'),
+        'min_consecutive_pages': int(arguments.get('min_consecutive_pages', 1)),
+        'greedy_match': arguments.get('greedy_match', 'False'),
+        'combine_pages': arguments.get('combine_pages', 'True'),
+        'search_query': arguments.get('search_query', ""),
         'text_columns': arguments.get('text_columns', []),
+        'remove_duplicate_rows': arguments.get('remove_duplicate_rows', 'True'),
+        'anon_strategy': arguments.get('anon_strategy', 'redact'),
         
-        # Add other arguments from your app.py as needed, using .get() for safety
-        'anon_strat': arguments.get('anon_strat', 'redact'),
-        'columns': arguments.get('columns', []),
-        'aws_access_key': None, # Best practice: use IAM Role instead of keys
+        # Textract specific arguments
+        'textract_action': arguments.get('textract_action', ''),
+        'job_id': arguments.get('job_id', ''),
+        'extract_signatures': arguments.get('extract_signatures', False),
+        'textract_bucket': arguments.get('textract_bucket', ''),
+        'textract_input_prefix': arguments.get('textract_input_prefix', ''),
+        'textract_output_prefix': arguments.get('textract_output_prefix', ''),
+        's3_textract_document_logs_subfolder': arguments.get('s3_textract_document_logs_subfolder', ''),
+        'local_textract_document_logs_subfolder': arguments.get('local_textract_document_logs_subfolder', ''),
+        'poll_interval': int(arguments.get('poll_interval', 30)),
+        'max_poll_attempts': int(arguments.get('max_poll_attempts', 120)),
+        
+        # AWS credentials (use IAM Role instead of keys)
+        'aws_access_key': None,
         'aws_secret_key': None,
-        'aws_region': os.getenv("AWS_REGION", "eu-west-2"),
+        'aws_region': os.getenv("AWS_REGION", ""),
         's3_bucket': bucket_name,
+        
         # Set defaults for boolean flags
-        'prepare_images': True,
-        'compress_redacted_pdf': False,
-        'return_pdf_end_of_redaction': True
+        'prepare_images': arguments.get('prepare_images', True),
+        'compress_redacted_pdf': arguments.get('compress_redacted_pdf', False),
+        'return_pdf_end_of_redaction': arguments.get('return_pdf_end_of_redaction', True)
     }
 
     # Download optional files if they are specified
-    allow_list_key = arguments.get('allow_list')
+    allow_list_key = arguments.get('allow_list_file')
     if allow_list_key:
         allow_list_path = os.path.join(INPUT_DIR, 'allow_list.csv')
         download_file_from_s3(bucket_name, allow_list_key, allow_list_path)
-        cli_args['allow_list'] = allow_list_path
+        cli_args['allow_list_file'] = allow_list_path
         
-    deny_list_key = arguments.get('deny_list')
+    deny_list_key = arguments.get('deny_list_file')
     if deny_list_key:
         deny_list_path = os.path.join(INPUT_DIR, 'deny_list.csv')
         download_file_from_s3(bucket_name, deny_list_key, deny_list_path)
-        cli_args['deny_list'] = deny_list_path
+        cli_args['deny_list_file'] = deny_list_path
 
     # 5. Execute the main application logic
     try:
