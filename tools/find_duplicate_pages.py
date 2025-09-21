@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 import re
-
+import time
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Tuple, Optional, Dict, Union
@@ -725,7 +725,7 @@ def identify_similar_text_sequences(
     do_text_clean:bool = True,
     file1_name: str = '',
     file2_name: str = '',
-    output_folder: str = "output/",
+    output_folder: str = OUTPUT_FOLDER,
     progress=Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, List[str], pd.DataFrame]:
     """
@@ -870,7 +870,7 @@ def handle_selection_and_preview(evt: gr.SelectData, results_df:pd.DataFrame, fu
     # 3. Return all three outputs in the correct order
     return selected_index, page1_data, page2_data
 
-def exclude_match(results_df:pd.DataFrame, selected_index:int, output_folder="./output/"):
+def exclude_match(results_df:pd.DataFrame, selected_index:int, output_folder=OUTPUT_FOLDER):
     """
     Removes a selected row from the results DataFrame, regenerates output files,
     and clears the text preview panes.
@@ -895,12 +895,16 @@ def exclude_match(results_df:pd.DataFrame, selected_index:int, output_folder="./
     # Return the updated dataframe, the new file list, and clear the preview panes
     return updated_df, new_output_paths, None, None
 
-def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:int, min_consecutive:int, greedy_match:bool, combine_pages:bool=True, preview_length:int=500, progress=gr.Progress(track_tqdm=True)):
+def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:int, min_consecutive:int, greedy_match:bool, combine_pages:bool=True, preview_length:int=500, output_folder:str=OUTPUT_FOLDER, progress=gr.Progress(track_tqdm=True)):
     """
     Wrapper function updated to include the 'greedy_match' boolean.
     """
     if not files:
         raise Warning("Please upload files to analyse.")
+
+    start_time = time.time()
+
+    task_textbox = "deduplicate"
         
     progress(0, desc="Combining input files...")
     df_combined, _, full_out_ocr_df = combine_ocr_output_text(files, combine_pages=combine_pages)
@@ -916,6 +920,7 @@ def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:
         min_consecutive_pages=int(min_consecutive),
         greedy_match=greedy_match,
         combine_pages=combine_pages,
+        output_folder=output_folder,
         progress=progress
     )
 
@@ -929,8 +934,11 @@ def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:
 
     if results_df.empty:
         gr.Info(f"No duplicate pages found, no results returned.")
+
+    end_time = time.time()
+    processing_time = round(end_time - start_time, 2)
     
-    return results_df, output_paths, full_data_by_file
+    return results_df, output_paths, full_data_by_file, processing_time, task_textbox
 
 def show_page_previews(full_data_by_file: dict, results_df: pd.DataFrame, evt: gr.SelectData, preview_length:int=500):
     """

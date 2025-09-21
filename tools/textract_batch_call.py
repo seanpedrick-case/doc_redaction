@@ -1,17 +1,17 @@
 import boto3
-import time
 import os
 import pandas as pd
 import json
 import logging
 import datetime
+import pymupdf
 import gradio as gr
 from gradio import FileData
 from typing import List
 from io import StringIO
 from urllib.parse import urlparse
 from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError, TokenRetrievalError
-from tools.config import TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, OUTPUT_FOLDER, AWS_REGION, DOCUMENT_REDACTION_BUCKET, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, TEXTRACT_JOBS_S3_INPUT_LOC, RUN_AWS_FUNCTIONS, INPUT_FOLDER, DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS
+from tools.config import TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, OUTPUT_FOLDER, AWS_REGION, DOCUMENT_REDACTION_BUCKET, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, RUN_AWS_FUNCTIONS, INPUT_FOLDER, DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS
 from tools.aws_functions import download_file_from_s3
 from tools.file_conversion import get_input_file_names
 from tools.helper_functions import get_file_name_without_type
@@ -59,6 +59,7 @@ def analyse_document_with_textract_api(
 
     # This is a variable that is written to logs to indicate that a Textract API call was made
     is_a_textract_api_call = True
+    task_textbox = "textract"
 
     # Keep only latest pdf path if it's a list
     if isinstance(local_pdf_path, list):
@@ -66,6 +67,23 @@ def analyse_document_with_textract_api(
 
     if not os.path.exists(local_pdf_path):
         raise FileNotFoundError(f"Input document not found {local_pdf_path}")
+
+    file_extension = os.path.splitext(local_pdf_path)[1].lower()
+
+    # Load pdf to get page count if not provided
+    if not total_document_page_count and file_extension in ['.pdf']:
+        print("Page count not provided. Loading PDF to get page count")
+        try:
+            pymupdf_doc = pymupdf.open(local_pdf_path)
+            total_document_page_count = pymupdf_doc.page_count
+            pymupdf_doc.close()
+            print("Page count:", total_document_page_count)
+        except Exception as e:
+            print("Failed to load PDF to get page count:", e, "setting page count to 1")
+            total_document_page_count = 1
+            #raise Exception(f"Failed to load PDF to get page count: {e}")
+    else:
+        total_document_page_count = 1
 
     if not os.path.exists(local_output_dir):
         os.makedirs(local_output_dir)
@@ -96,18 +114,32 @@ def analyse_document_with_textract_api(
         #logging.error(log_message)
         raise
 
-    # If job_df is not empty
+    # Filter job_df to include rows only where the analysis date is after the current date - DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS
     if not job_df.empty:
+        job_df = job_df.loc[job_df["job_date_time"] > (datetime.datetime.now() - datetime.timedelta(days=DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS)),:]
+
+    # If job_df is not empty
+    if not job_df.empty:        
+
         if "file_name" in job_df.columns:
             matching_job_id_file_names = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(analyse_signatures)), "file_name"]
+            matching_job_id_file_names_dates = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(analyse_signatures)), "job_date_time"]
+            matching_job_id = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(analyse_signatures)), "job_id"]
+            matching_handwrite_signature = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(analyse_signatures)), "signature_extraction"]
 
-            if len(matching_job_id_file_names) > 0:
-                    raise Exception("Existing Textract outputs found. No need to re-analyse. Please download existing results from the list")
+            if len(matching_job_id) > 0:
+                pass
+            else:
+                matching_job_id = "unknown_job_id"
+
+            if len(matching_job_id_file_names) > 0 and len(matching_handwrite_signature) > 0:
+                out_message = f"Existing Textract outputs found for file {pdf_filename} from date {matching_job_id_file_names_dates.iloc[0]}. No need to re-analyse. Please download existing results from the list with job ID {matching_job_id.iloc[0]}"
+                gr.Warning(out_message)
+                raise Exception(out_message)
 
     # --- 2. Start Textract Document Analysis ---
     message = "Starting Textract document analysis job..."
     print(message)
-    #logging.info("Starting Textract document analysis job...")
 
     try:
         if "Extract signatures" in analyse_signatures:
@@ -143,19 +175,12 @@ def analyse_document_with_textract_api(
                     'S3Bucket': s3_bucket_name,
                     'S3Prefix': s3_output_prefix
                 }
-                # Optional: Add NotificationChannel for SNS topic notifications
-                # NotificationChannel={
-                #     'SNSTopicArn': 'YOUR_SNS_TOPIC_ARN',
-                #     'RoleArn': 'YOUR_IAM_ROLE_ARN_FOR_TEXTRACT_TO_ACCESS_SNS'
-                # }
             )
             job_type="document_text_detection"
 
         job_id = response['JobId']
         print(f"Textract job started with JobId: {job_id}")
-        #logging.info(f"Textract job started with JobId: {job_id}")
 
-        # Write job_id to memory
         # Prepare CSV in memory
         log_csv_key_location = f"{s3_output_prefix}/textract_document_jobs.csv"
         job_location_full = f"s3://{s3_bucket_name}/{s3_output_prefix}/{job_id}/"
@@ -166,12 +191,16 @@ def analyse_document_with_textract_api(
             'file_name': pdf_filename,
             'job_type': job_type,
             'signature_extraction':analyse_signatures,
-            #'s3_location': job_location_full,
-            'job_date_time': datetime.datetime.now()
+            'job_date_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }])
 
         # File path
         log_file_path = os.path.join(local_output_dir, "textract_document_jobs.csv")
+        log_file_path_job_id = os.path.join(local_output_dir, pdf_filename + "_textract_document_jobs_job_id.txt")
+
+        # Write latest job ID to local text file
+        with open(log_file_path_job_id, 'w') as f:
+            f.write(job_id)
 
         # Check if file exists
         file_exists = os.path.exists(log_file_path)
@@ -198,7 +227,7 @@ def analyse_document_with_textract_api(
     successful_job_number += 1
     total_number_of_textract_page_calls = total_document_page_count
 
-    return f"Textract analysis job submitted, job ID:{job_id}", job_id, job_type, successful_job_number, is_a_textract_api_call, total_number_of_textract_page_calls
+    return f"Textract analysis job submitted, job ID:{job_id}", job_id, job_type, successful_job_number, is_a_textract_api_call, total_number_of_textract_page_calls, task_textbox
 
 def return_job_status(job_id:str,
                      response:dict,
@@ -467,13 +496,19 @@ def poll_whole_document_textract_analysis_progress_and_download(
             progress(0.5, "Document analysis task outputs found. Downloading from S3")                 
 
             # If job_df is not empty
+
+            # if not job_df.empty:
+            #     job_df = job_df.loc[job_df["job_date_time"] > (datetime.datetime.now() - datetime.timedelta(days=DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS)),:]
+
             if not job_df.empty:
                 if "file_name" in job_df.columns:
                     matching_job_id_file_names = job_df.loc[job_df["job_id"] == job_id, "file_name"]
 
                     if pdf_filename and not matching_job_id_file_names.empty:
                         if pdf_filename == matching_job_id_file_names.iloc[0]:
-                            raise Exception("Existing Textract outputs found. No need to re-download.")
+                            out_message = f"Existing Textract outputs found for file {pdf_filename}. No need to re-download."
+                            gr.Warning(out_message)
+                            raise Exception(out_message)
 
                     if not matching_job_id_file_names.empty:
                         pdf_filename = matching_job_id_file_names.iloc[0]
