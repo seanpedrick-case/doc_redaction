@@ -5,9 +5,18 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from tldextract import TLDExtract
+from typing import List
 
 today_rev = datetime.now().strftime("%Y%m%d")
 HOST_NAME = socket.gethostname()
+
+def _get_env_list(env_var_name: str) -> List[str]:
+    """Parses a comma-separated environment variable into a list of strings."""
+    value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
+    if not value:
+        return []
+    # Split by comma and filter out any empty strings that might result from extra commas
+    return [s.strip() for s in value.split(',') if s.strip()]
 
 # Set or retrieve configuration variables for the redaction app
 
@@ -297,6 +306,22 @@ CUSTOM_ENTITIES = get_or_create_env_var('CUSTOM_ENTITIES', "['TITLES', 'UKPOSTCO
 
 DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = get_or_create_env_var('DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX', "['Extract handwriting']")
 
+HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS = get_or_create_env_var('HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS', "['Extract handwriting', 'Extract signatures']")
+
+if HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS: HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS = _get_env_list(HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS)
+
+INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION = get_or_create_env_var('INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION', "False")
+INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION = get_or_create_env_var('INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION', "False")
+INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION = get_or_create_env_var('INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION', "False")
+
+if INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION == "True":
+    HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append('Extract forms')
+if INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION == "True":
+    HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append('Extract layout')
+if INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION == "True":
+    HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append('Extract tables')
+
+
 DEFAULT_SEARCH_QUERY = get_or_create_env_var('DEFAULT_SEARCH_QUERY', '')
 DEFAULT_FUZZY_SPELLING_MISTAKES_NUM = int(get_or_create_env_var('DEFAULT_FUZZY_SPELLING_MISTAKES_NUM', '1'))
 
@@ -309,6 +334,11 @@ DEFAULT_PAGE_MAX = int(get_or_create_env_var('DEFAULT_PAGE_MAX', '999'))
 PAGE_BREAK_VALUE = int(get_or_create_env_var('PAGE_BREAK_VALUE', '99999'))
 
 MAX_TIME_VALUE = int(get_or_create_env_var('MAX_TIME_VALUE', '999999'))
+MAX_SIMULTANEOUS_FILES = int(get_or_create_env_var('MAX_SIMULTANEOUS_FILES', '10'))
+MAX_DOC_PAGES = int(get_or_create_env_var('MAX_DOC_PAGES', '3000'))
+MAX_TABLE_ROWS = int(get_or_create_env_var('MAX_TABLE_ROWS', '250000'))
+MAX_TABLE_COLUMNS = int(get_or_create_env_var('MAX_TABLE_COLUMNS', '100'))
+MAX_OPEN_TEXT_CHARACTERS = int(get_or_create_env_var('MAX_OPEN_TEXT_CHARACTERS', '50000'))
 
 CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "") # only "grey" is currently supported as a custom box colour
 

@@ -93,6 +93,9 @@ def lambda_handler(event, context):
         'page_min': int(arguments.get('page_min', 0)),
         'page_max': int(arguments.get('page_max', 0)),
         'handwrite_signature_extraction': arguments.get('handwrite_signature_checkbox', ['Extract handwriting', 'Extract signatures']),
+        'extract_forms': arguments.get('extract_forms', False),
+        'extract_tables': arguments.get('extract_tables', False),
+        'extract_layout': arguments.get('extract_layout', False),
         
         # General arguments
         'local_redact_entities': arguments.get('local_redact_entities', []),
@@ -155,6 +158,16 @@ def lambda_handler(event, context):
         'compress_redacted_pdf': arguments.get('compress_redacted_pdf', False),
         'return_pdf_end_of_redaction': arguments.get('return_pdf_end_of_redaction', True)
     }
+
+    # Combine extraction options
+    extraction_options = list(cli_args['handwrite_signature_extraction']) if cli_args['handwrite_signature_extraction'] else []
+    if cli_args['extract_forms']:
+        extraction_options.append('Extract forms')
+    if cli_args['extract_tables']:
+        extraction_options.append('Extract tables')
+    if cli_args['extract_layout']:
+        extraction_options.append('Extract layout')
+    cli_args['handwrite_signature_extraction'] = extraction_options
 
     # Download optional files if they are specified
     allow_list_key = arguments.get('allow_list_file')
