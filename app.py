@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import gradio as gr
 from gradio_image_annotation import image_annotator
-from tools.config import DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX, DEFAULT_TABULAR_ANONYMISATION_STRATEGY, OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, DEFAULT_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE, OUTPUT_COST_CODES_PATH, ALLOW_LIST_PATH, COGNITO_AUTH, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_ACCESS_LOG_HEADERS, CSV_ACCESS_LOG_HEADERS, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_FEEDBACK_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, USAGE_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_USAGE_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, TEXTRACT_JOBS_S3_INPUT_LOC,  TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, TEXT_EXTRACTION_MODELS, PII_DETECTION_MODELS, DEFAULT_TEXT_EXTRACTION_MODEL, DEFAULT_PII_DETECTION_MODEL, LOG_FILE_NAME, CHOSEN_COMPREHEND_ENTITIES, FULL_COMPREHEND_ENTITY_LIST, CHOSEN_REDACT_ENTITIES, FULL_ENTITY_LIST, FILE_INPUT_HEIGHT, TABULAR_PII_DETECTION_MODELS, USAGE_LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, S3_FEEDBACK_LOGS_FOLDER, S3_ACCESS_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER, CHOSEN_LOCAL_OCR_MODEL, DEFAULT_LANGUAGE_FULL_NAME, SHOW_LANGUAGE_SELECTION, DO_INITIAL_TABULAR_DATA_CLEAN, DEFAULT_DUPLICATE_DETECTION_THRESHOLD, DIRECT_MODE_TASK, DIRECT_MODE_INPUT_FILE, DIRECT_MODE_OUTPUT_DIR, DIRECT_MODE_DUPLICATE_TYPE, DIRECT_MODE_DEFAULT_USER, LOCAL_PII_OPTION, TESSERACT_TEXT_EXTRACT_OPTION, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, DOCUMENT_REDACTION_BUCKET, IMAGES_DPI, PREPROCESS_LOCAL_OCR_IMAGES, COMPRESS_REDACTED_PDF, RETURN_PDF_END_OF_REDACTION, DENY_LIST_PATH, WHOLE_PAGE_REDACTION_LIST_PATH, DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX, DEFAULT_TABULAR_ANONYMISATION_STRATEGY, DEFAULT_FUZZY_SPELLING_MISTAKES_NUM, DEFAULT_PAGE_MIN, DEFAULT_PAGE_MAX, DEFAULT_EXCEL_SHEETS, USE_GREEDY_DUPLICATE_DETECTION, DEFAULT_MIN_CONSECUTIVE_PAGES, DEFAULT_COMBINE_PAGES, DEFAULT_MIN_WORD_COUNT, DEFAULT_TEXT_COLUMNS, DEFAULT_SEARCH_QUERY, REMOVE_DUPLICATE_ROWS
+from tools.config import DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX, DEFAULT_TABULAR_ANONYMISATION_STRATEGY, OUTPUT_FOLDER, INPUT_FOLDER, RUN_DIRECT_MODE, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, GET_DEFAULT_ALLOW_LIST, ALLOW_LIST_PATH, S3_ALLOW_LIST_PATH, FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, DEFAULT_LANGUAGE, GET_COST_CODES, COST_CODES_PATH, S3_COST_CODES_PATH, ENFORCE_COST_CODES, DISPLAY_FILE_NAMES_IN_LOGS, SHOW_COSTS, RUN_AWS_FUNCTIONS, DOCUMENT_REDACTION_BUCKET, SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER, TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER, SESSION_OUTPUT_FOLDER, LOAD_PREVIOUS_TEXTRACT_JOBS_S3, TEXTRACT_JOBS_S3_LOC, TEXTRACT_JOBS_LOCAL_LOC, HOST_NAME, DEFAULT_COST_CODE, OUTPUT_COST_CODES_PATH, ALLOW_LIST_PATH, COGNITO_AUTH, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_ACCESS_LOG_HEADERS, CSV_ACCESS_LOG_HEADERS, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_FEEDBACK_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, USAGE_LOG_DYNAMODB_TABLE_NAME, DYNAMODB_USAGE_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, TEXTRACT_JOBS_S3_INPUT_LOC,  TEXTRACT_TEXT_EXTRACT_OPTION, NO_REDACTION_PII_OPTION, TEXT_EXTRACTION_MODELS, PII_DETECTION_MODELS, DEFAULT_TEXT_EXTRACTION_MODEL, DEFAULT_PII_DETECTION_MODEL, LOG_FILE_NAME, CHOSEN_COMPREHEND_ENTITIES, FULL_COMPREHEND_ENTITY_LIST, CHOSEN_REDACT_ENTITIES, FULL_ENTITY_LIST, FILE_INPUT_HEIGHT, TABULAR_PII_DETECTION_MODELS, USAGE_LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, S3_FEEDBACK_LOGS_FOLDER, S3_ACCESS_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER, CHOSEN_LOCAL_OCR_MODEL, DEFAULT_LANGUAGE_FULL_NAME, SHOW_LANGUAGE_SELECTION, DO_INITIAL_TABULAR_DATA_CLEAN, DEFAULT_DUPLICATE_DETECTION_THRESHOLD, DIRECT_MODE_TASK, DIRECT_MODE_INPUT_FILE, DIRECT_MODE_OUTPUT_DIR, DIRECT_MODE_DUPLICATE_TYPE, DIRECT_MODE_DEFAULT_USER, LOCAL_PII_OPTION, TESSERACT_TEXT_EXTRACT_OPTION, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, DOCUMENT_REDACTION_BUCKET, IMAGES_DPI, PREPROCESS_LOCAL_OCR_IMAGES, COMPRESS_REDACTED_PDF, RETURN_PDF_END_OF_REDACTION, DENY_LIST_PATH, WHOLE_PAGE_REDACTION_LIST_PATH, DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX, DEFAULT_TABULAR_ANONYMISATION_STRATEGY, DEFAULT_FUZZY_SPELLING_MISTAKES_NUM, DEFAULT_PAGE_MIN, DEFAULT_PAGE_MAX, DEFAULT_EXCEL_SHEETS, USE_GREEDY_DUPLICATE_DETECTION, DEFAULT_MIN_CONSECUTIVE_PAGES, DEFAULT_COMBINE_PAGES, DEFAULT_MIN_WORD_COUNT, DEFAULT_TEXT_COLUMNS, DEFAULT_SEARCH_QUERY, REMOVE_DUPLICATE_ROWS, HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS, MAX_OPEN_TEXT_CHARACTERS
 from tools.helper_functions import put_columns_in_df, get_connection_params, reveal_feedback_buttons, custom_regex_load, reset_state_vars, load_in_default_allow_list, reset_review_vars, merge_csv_files, load_all_output_files, update_dataframe, check_for_existing_textract_file, load_in_default_cost_codes, enforce_cost_codes, calculate_aws_costs, calculate_time_taken, reset_base_dataframe, reset_ocr_base_dataframe, update_cost_code_dataframe_from_dropdown_select, check_for_relevant_ocr_output_with_words, reset_data_vars, reset_aws_call_vars, _get_env_list, ensure_folder_exists, reset_ocr_with_words_base_dataframe, update_language_dropdown, LANGUAGE_CHOICES, MAPPED_LANGUAGE_CHOICES
 from tools.aws_functions import download_file_from_s3, upload_log_file_to_s3
 from tools.file_redaction import choose_and_run_redactor
@@ -349,7 +349,7 @@ with app:
             text_extract_method_radio = gr.Radio(label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £2.66 ($3.50) per 1,000 pages with signature detection (default), £1.14 ($1.50) without. Change the settings in the tab below (AWS Textract signature detection) to change this.""", value = DEFAULT_TEXT_EXTRACTION_MODEL, choices=TEXT_EXTRACTION_MODELS)
 
             with gr.Accordion("Enable AWS Textract signature detection (default is off)", open = False):
-                handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract extraction settings", choices=["Extract handwriting", "Extract signatures"], value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX)
+                handwrite_signature_checkbox = gr.CheckboxGroup(label="AWS Textract extraction settings", choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS, value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX)
 
             with gr.Row(equal_height=True):
                 pii_identification_method_drop = gr.Radio(label = """Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""", value = DEFAULT_PII_DETECTION_MODEL, choices=PII_DETECTION_MODELS)
@@ -385,7 +385,7 @@ with app:
                         with gr.Column(scale=2):      
                             textract_job_detail_df = gr.Dataframe(label="Previous job details", visible=True, type="pandas", wrap=True, interactive=True, row_count=(0, 'fixed'), col_count=(5,'fixed'), static_columns=[0,1,2,3,4], max_height=400)
                         with gr.Column(scale=1):
-                            job_id_textbox = gr.Textbox(label = "Job ID to check status", value='', visible=True)     
+                            job_id_textbox = gr.Textbox(label = "Job ID to check status", value='', visible=True, lines=2)     
                             check_state_of_textract_api_call_btn = gr.Button("Check status of Textract job and download", variant="secondary", visible=True)
                     with gr.Row():
                         with gr.Column(): 
@@ -604,7 +604,7 @@ with app:
             with gr.Accordion("Upload docx, xlsx, or csv files", open = True):
                 in_data_files = gr.File(label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.docx'], height=FILE_INPUT_HEIGHT)
             with gr.Accordion("Redact open text", open = False):
-                in_text = gr.Textbox(label="Enter open text", lines=10)
+                in_text = gr.Textbox(label="Enter open text", lines=10, max_length=MAX_OPEN_TEXT_CHARACTERS)
             
             in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheets to anonymise"], multiselect = True, label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).", visible=False, allow_custom_value=True)
 
@@ -627,7 +627,7 @@ with app:
         
 
         ###
-        # TABULAR DUPLICATE DETECTION TAB
+        # TABULAR DUPLICATE DETECTION
         ###
         with gr.Accordion(label="Find duplicate cells in tabular data", open=False):
             gr.Markdown("""Find duplicate cells or rows in CSV, Excel, or Parquet files. This tool analyzes text content across all columns to identify similar or identical entries that may be duplicates. You can review the results and choose to remove duplicate rows from your files.""")
@@ -1355,6 +1355,9 @@ if __name__ == "__main__":
             'deny_list_file': DENY_LIST_PATH,
             'redact_whole_page_file': WHOLE_PAGE_REDACTION_LIST_PATH,
             'handwrite_signature_extraction': DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+            'extract_forms': False,
+            'extract_tables': False,
+            'extract_layout': False,
             'anon_strategy': DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
             'excel_sheets': DEFAULT_EXCEL_SHEETS,
             'fuzzy_mistakes': DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
@@ -1398,5 +1401,16 @@ if __name__ == "__main__":
             if DEFAULT_TEXT_COLUMNS:
                 print(f"Text columns: {DEFAULT_TEXT_COLUMNS}")
             print(f"Remove duplicate rows: {REMOVE_DUPLICATE_ROWS}")
+        
+        # Combine extraction options
+        extraction_options = list(direct_mode_args['handwrite_signature_extraction']) if direct_mode_args['handwrite_signature_extraction'] else []
+        if direct_mode_args['extract_forms']:
+            extraction_options.append('Extract forms')
+        if direct_mode_args['extract_tables']:
+            extraction_options.append('Extract tables')
+        if direct_mode_args['extract_layout']:
+            extraction_options.append('Extract layout')
+        direct_mode_args['handwrite_signature_extraction'] = extraction_options
+        
         # Run the CLI main function with direct mode arguments
         main(direct_mode_args=direct_mode_args)

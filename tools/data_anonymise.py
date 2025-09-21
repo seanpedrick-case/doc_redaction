@@ -18,7 +18,7 @@ from botocore.client import BaseClient
 from presidio_anonymizer.entities import OperatorConfig, ConflictResolutionStrategy
 from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine, DictAnalyzerResult, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
-from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, OUTPUT_FOLDER, DEFAULT_LANGUAGE, aws_comprehend_language_choices, DO_INITIAL_TABULAR_DATA_CLEAN, CUSTOM_ENTITIES, PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS, AWS_REGION
+from tools.config import RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, OUTPUT_FOLDER, DEFAULT_LANGUAGE, aws_comprehend_language_choices, DO_INITIAL_TABULAR_DATA_CLEAN, CUSTOM_ENTITIES, PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS, AWS_REGION, MAX_TABLE_ROWS, MAX_TABLE_COLUMNS, MAX_SIMULTANEOUS_FILES
 from tools.helper_functions import get_file_name_without_type, read_file, detect_file_type, _get_env_list
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_word_list_recogniser, CustomWordFuzzyRecognizer,  create_nlp_analyser, load_spacy_model
 # Use custom version of analyze_dict to be able to track progress
@@ -261,6 +261,13 @@ def handle_docx_anonymisation(
     text_elements = list()  # This will store the actual docx objects (paragraphs, cells)
     original_texts = list() # This will store the text from those objects
 
+    paragraph_count = len(doc.paragraphs)
+
+    if paragraph_count > MAX_TABLE_ROWS:
+        out_message = f"Number of paragraphs in document is greater than {MAX_TABLE_ROWS}. Please submit a smaller document."
+        print(out_message)
+        raise Exception(out_message)
+
     # Extract from paragraphs
     for para in doc.paragraphs:
         if para.text.strip():  # Only process non-empty paragraphs
@@ -464,6 +471,14 @@ def anonymise_files_with_open_text(file_paths: List[str],
         else:
             out_message = "Please enter text or a file to redact."
             raise Exception(out_message)
+
+    if not isinstance(file_paths, list):
+        file_paths = [file_paths]
+
+    if len(file_paths) > MAX_SIMULTANEOUS_FILES:
+        out_message = f"Number of files to anonymise is greater than {MAX_SIMULTANEOUS_FILES}. Please submit a smaller number of files."
+        print(out_message)
+        raise Exception(out_message)
         
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
     if latest_file_completed >= len(file_paths):
@@ -527,9 +542,7 @@ def anonymise_files_with_open_text(file_paths: List[str],
 
                 # Create xlsx file:
                 anon_xlsx = pd.ExcelFile(file_path)                
-                anon_xlsx_export_file_name = output_folder + out_file_part + "_redacted.xlsx"                
-
-                
+                anon_xlsx_export_file_name = output_folder + out_file_part + "_redacted.xlsx"
 
                 # Iterate through the sheet names
                 for sheet_name in progress.tqdm(in_excel_sheets, desc="Anonymising sheets", unit = "sheets"):
@@ -675,7 +688,20 @@ def tabular_anonymise_wrapper_func(
     anon_df_part = anon_df[chosen_cols_in_anon_df]
     anon_df_remain = anon_df.drop(chosen_cols_in_anon_df, axis = 1)
 
-        
+    row_count = anon_df_part.shape[0]
+    
+    if row_count > MAX_TABLE_ROWS:
+        out_message = f"Number of rows in dataframe is greater than {MAX_TABLE_ROWS}. Please submit a smaller dataframe."
+        print(out_message)
+        raise Exception(out_message)
+    
+    column_count = anon_df_part.shape[1]
+    
+    if column_count > MAX_TABLE_COLUMNS:
+        out_message = f"Number of columns in dataframe is greater than {MAX_TABLE_COLUMNS}. Please submit a smaller dataframe."
+        print(out_message)
+        raise Exception(out_message)
+
     # Anonymise the selected columns
     anon_df_part_out, key_string, decision_process_output_str, comprehend_query_number = anonymise_script(anon_df_part, anon_strategy, language, chosen_redact_entities, in_allow_list, in_deny_list, max_fuzzy_spelling_mistakes_num, pii_identification_method, chosen_redact_comprehend_entities, comprehend_query_number, comprehend_client, nlp_analyser=nlp_analyser, do_initial_clean=do_initial_clean)
 

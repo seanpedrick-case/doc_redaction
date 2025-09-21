@@ -25,7 +25,7 @@ def analyse_document_with_textract_api(
     job_df:pd.DataFrame,
     s3_bucket_name: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
     local_output_dir: str = OUTPUT_FOLDER,    
-    analyse_signatures:List[str] = [],
+    handwrite_signature_checkbox:List[str] = list(),
     successful_job_number:int=0,
     total_document_page_count:int=1,
     general_s3_bucket_name: str = DOCUMENT_REDACTION_BUCKET,
@@ -43,7 +43,7 @@ def analyse_document_with_textract_api(
         job_df (pd.DataFrame): Dataframe containing information from previous Textract API calls.
         s3_bucket_name (str, optional): S3 bucket in which to save API call outputs.
         local_output_dir (str, optional): Local directory to save the downloaded JSON results.        
-        analyse_signatures (List[str], optional): Analyse signatures? Default is no.
+        handwrite_signature_checkbox (List[str], optional): List of feature types to extract from the document.
         successful_job_number (int): The number of successful jobs that have been submitted in this session.
         total_document_page_count (int): The number of pages in the document
         aws_region (str, optional): AWS region name. Defaults to boto3 default region.
@@ -122,10 +122,10 @@ def analyse_document_with_textract_api(
     if not job_df.empty:        
 
         if "file_name" in job_df.columns:
-            matching_job_id_file_names = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(analyse_signatures)), "file_name"]
-            matching_job_id_file_names_dates = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(analyse_signatures)), "job_date_time"]
-            matching_job_id = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(analyse_signatures)), "job_id"]
-            matching_handwrite_signature = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(analyse_signatures)), "signature_extraction"]
+            matching_job_id_file_names = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(handwrite_signature_checkbox)), "file_name"]
+            matching_job_id_file_names_dates = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(handwrite_signature_checkbox)), "job_date_time"]
+            matching_job_id = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(handwrite_signature_checkbox)), "job_id"]
+            matching_handwrite_signature = job_df.loc[(job_df["file_name"] == pdf_filename) & (job_df["signature_extraction"].astype(str) == str(handwrite_signature_checkbox)), "signature_extraction"]
 
             if len(matching_job_id) > 0:
                 pass
@@ -142,7 +142,16 @@ def analyse_document_with_textract_api(
     print(message)
 
     try:
-        if "Extract signatures" in analyse_signatures:
+        if "Extract signatures" in handwrite_signature_checkbox or "Extract forms" in handwrite_signature_checkbox or "Extract layout" in handwrite_signature_checkbox or "Extract tables" in handwrite_signature_checkbox:
+            feature_types = list()
+            if 'Extract signatures' in handwrite_signature_checkbox:
+                feature_types.append('SIGNATURES')
+            if "Extract forms" in handwrite_signature_checkbox:
+                feature_types.append('FORMS')
+            if "Extract layout" in handwrite_signature_checkbox:
+                feature_types.append('LAYOUT')
+            if "Extract tables" in handwrite_signature_checkbox:
+                feature_types.append('TABLES')
             response = textract_client.start_document_analysis(
                 DocumentLocation={
                     'S3Object': {
@@ -150,20 +159,15 @@ def analyse_document_with_textract_api(
                         'Name': s3_input_key
                     }
                 },
-                FeatureTypes=['SIGNATURES'], # Analyze for signatures, forms, and tables
+                FeatureTypes=feature_types, # Analyze for signatures, forms, and tables
                 OutputConfig={
                     'S3Bucket': s3_bucket_name,
                     'S3Prefix': s3_output_prefix
                 }
-                # Optional: Add NotificationChannel for SNS topic notifications
-                # NotificationChannel={
-                #     'SNSTopicArn': 'YOUR_SNS_TOPIC_ARN',
-                #     'RoleArn': 'YOUR_IAM_ROLE_ARN_FOR_TEXTRACT_TO_ACCESS_SNS'
-                # }
             )
             job_type="document_analysis"
 
-        else:
+        if not "Extract signatures" in handwrite_signature_checkbox and not "Extract forms" in handwrite_signature_checkbox and not "Extract layout" in handwrite_signature_checkbox and not "Extract tables" in handwrite_signature_checkbox:
             response = textract_client.start_document_text_detection(
                 DocumentLocation={
                     'S3Object': {
@@ -190,7 +194,7 @@ def analyse_document_with_textract_api(
             'job_id': job_id,
             'file_name': pdf_filename,
             'job_type': job_type,
-            'signature_extraction':analyse_signatures,
+            'signature_extraction':handwrite_signature_checkbox,
             'job_date_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }])
 
@@ -236,7 +240,21 @@ def return_job_status(job_id:str,
                      max_polling_attempts: int = 1 # ~10 minutes total wait time
                      ):
     '''
-    Poll Textract for the current status of a previously-submitted job.
+    Polls the AWS Textract service to retrieve the current status of an asynchronous document analysis job.
+    This function checks the job status from the provided response and logs relevant information or errors.
+
+    Args:
+        job_id (str): The unique identifier of the Textract job.
+        response (dict): The response dictionary received from Textract's `get_document_analysis` or `get_document_text_detection` call.
+        attempts (int): The current polling attempt number.
+        poll_interval_seconds (int, optional): The time in seconds to wait before the next poll (currently unused in this function, but kept for context). Defaults to 0.
+        max_polling_attempts (int, optional): The maximum number of polling attempts allowed (currently unused in this function, but kept for context). Defaults to 1.
+
+    Returns:
+        str: The current status of the Textract job (e.g., 'IN_PROGRESS', 'SUCCEEDED').
+
+    Raises:
+        Exception: If the Textract job status is 'FAILED' or 'PARTIAL_SUCCESS', or if an unexpected status is encountered.
     '''
 
     job_status = response['JobStatus']
