@@ -11,7 +11,7 @@ from pathlib import Path
 from tools.helper_functions import OUTPUT_FOLDER, read_file
 from tools.data_anonymise import initial_clean
 from tools.load_spacy_model_custom_recognisers import nlp
-from tools.config import DO_INITIAL_TABULAR_DATA_CLEAN, REMOVE_DUPLICATE_ROWS, MAX_SIMULTANEOUS_FILES, MAX_TABULAR_ROWS
+from tools.config import DO_INITIAL_TABULAR_DATA_CLEAN, REMOVE_DUPLICATE_ROWS, MAX_SIMULTANEOUS_FILES, MAX_TABLE_ROWS
 
 if REMOVE_DUPLICATE_ROWS == "True": REMOVE_DUPLICATE_ROWS = True
 else: REMOVE_DUPLICATE_ROWS = False
@@ -140,8 +140,8 @@ def find_duplicate_cells_in_tabular_data(
                     # If sheet was successfully_loaded
                     if not temp_df.empty:
 
-                        if temp_df.shape[0] > MAX_TABULAR_ROWS:
-                            out_message = f"Number of rows in {file_path} for sheet {sheet_name} is greater than {MAX_TABULAR_ROWS}. Please submit a smaller file."
+                        if temp_df.shape[0] > MAX_TABLE_ROWS:
+                            out_message = f"Number of rows in {file_path} for sheet {sheet_name} is greater than {MAX_TABLE_ROWS}. Please submit a smaller file."
                             print(out_message)
                             raise Exception(out_message)
 
@@ -161,8 +161,8 @@ def find_duplicate_cells_in_tabular_data(
             else:
                 temp_df = read_file(file_path)
 
-                if temp_df.shape[0] > MAX_TABULAR_ROWS:
-                    out_message = f"Number of rows in {file_path} is greater than {MAX_TABULAR_ROWS}. Please submit a smaller file."
+                if temp_df.shape[0] > MAX_TABLE_ROWS:
+                    out_message = f"Number of rows in {file_path} is greater than {MAX_TABLE_ROWS}. Please submit a smaller file."
                     print(out_message)
                     raise Exception(out_message)
             
