@@ -10,7 +10,7 @@ jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           lfs: true
@@ -19,4 +19,4 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
           HF_REPO_ID: ${{ secrets.HF_REPO_ID }}
-        run: git push https://$HF_USERNAME:$HF_TOKEN@huggingface.co/$HF_USERNAME/$HF_REPO_ID main
+        run: git push https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID main
