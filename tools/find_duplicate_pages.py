@@ -11,6 +11,7 @@ from gradio import Progress
 from pathlib import Path
 from typing import List
 from tools.helper_functions import OUTPUT_FOLDER
+from tools.config import MAX_SIMULTANEOUS_FILES
 from tools.file_conversion import redact_whole_pymupdf_page, convert_annotation_data_to_dataframe, fill_missing_box_ids_each_box
 from tools.load_spacy_model_custom_recognisers import nlp
 
@@ -603,8 +604,6 @@ def save_results_and_redaction_lists(final_df: pd.DataFrame, output_folder: str,
             
     return output_paths
 
-
-
 def _sequences_match(query_seq: List[str], ref_seq: List[str]) -> bool:
     """
     Helper function to compare two sequences of tokens with punctuation flexibility.
@@ -639,7 +638,6 @@ def _sequences_match(query_seq: List[str], ref_seq: List[str]) -> bool:
 
     # If the loop completes, every token has matched.
     return True
-
 
 def find_consecutive_sequence_matches(
     df_filtered: pd.DataFrame,
@@ -895,12 +893,32 @@ def exclude_match(results_df:pd.DataFrame, selected_index:int, output_folder=OUT
     # Return the updated dataframe, the new file list, and clear the preview panes
     return updated_df, new_output_paths, None, None
 
-def run_duplicate_analysis(files:list[pd.DataFrame], threshold:float, min_words:int, min_consecutive:int, greedy_match:bool, combine_pages:bool=True, preview_length:int=500, output_folder:str=OUTPUT_FOLDER, progress=gr.Progress(track_tqdm=True)):
+def run_duplicate_analysis(files:list[str], threshold:float, min_words:int, min_consecutive:int, greedy_match:bool, combine_pages:bool=True, preview_length:int=500, output_folder:str=OUTPUT_FOLDER, progress=gr.Progress(track_tqdm=True)):
     """
-    Wrapper function updated to include the 'greedy_match' boolean.
+    Main wrapper function to orchestrate the duplicate page analysis process.
+    It handles file loading, text combination, similarity identification,
+    and result saving.
+
+    Args:
+        files (list[str]): A list of file paths (PDFs, etc.) to be analyzed for duplicate content.
+        threshold (float): The similarity threshold (0.0 to 1.0) above which text segments are considered duplicates.
+        min_words (int): The minimum number of words a text segment must contain to be included in the analysis.
+        min_consecutive (int): The minimum number of consecutive pages that must match for a sequence to be considered a duplicate.
+        greedy_match (bool): If True, uses a greedy matching strategy for identifying consecutive sequences.
+        combine_pages (bool, optional): If True, text from multiple pages is combined into larger segments for analysis. Defaults to True.
+        preview_length (int, optional): The maximum number of characters to display in the text preview panes. Defaults to 500.
+        output_folder (str, optional): The directory where the similarity results and redaction lists will be saved. Defaults to OUTPUT_FOLDER.
+        progress (gr.Progress, optional): A Gradio progress tracker object to display progress in the UI.
     """
-    if not files:
-        raise Warning("Please upload files to analyse.")
+
+    if not files: raise Warning("Please upload files to analyse.")
+
+    if isinstance(files, str): files = [files]
+
+    if len(files) > MAX_SIMULTANEOUS_FILES:
+        out_message = f"Number of files to deduplicate is greater than {MAX_SIMULTANEOUS_FILES}. Please submit a smaller number of files."
+        print(out_message)
+        raise Exception(out_message)
 
     start_time = time.time()
 

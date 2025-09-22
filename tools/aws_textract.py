@@ -7,7 +7,7 @@ import pikepdf
 import time
 import pandas as pd
 from tools.custom_image_analyser_engine import OCRResult, CustomImageRecognizerResult
-from tools.config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
+from tools.config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, RUN_AWS_FUNCTIONS, PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS
 
 def extract_textract_metadata(response:object):
     """Extracts metadata from an AWS Textract response."""
@@ -20,20 +20,69 @@ def extract_textract_metadata(response:object):
         'Pages': pages
     })
 
-def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str="", handwrite_signature_checkbox:List[str]=["Extract handwriting", "Redact all identified signatures"]):
+def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str="", handwrite_signature_checkbox:List[str]=["Extract handwriting"], textract_output_found:bool=False, aws_access_key_textbox:str=AWS_ACCESS_KEY, aws_secret_key_textbox:str=AWS_SECRET_KEY, RUN_AWS_FUNCTIONS:str=RUN_AWS_FUNCTIONS, PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:str=PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS):
     '''
-    Analyse page with AWS Textract
+    Analyzes a single page of a document using AWS Textract to extract text and other features.
+
+    Args:
+        pdf_page_bytes (object): The content of the PDF page or image as bytes.
+        page_no (int): The page number being analyzed.
+        client (str, optional): An optional pre-initialized AWS Textract client. If not provided,
+                                the function will attempt to create one based on configuration.
+                                Defaults to "".
+        handwrite_signature_checkbox (List[str], optional): A list of feature types to extract
+                                                            from the document. Options include
+                                                            "Extract handwriting", "Extract signatures",
+                                                            "Extract forms", "Extract layout", "Extract tables".
+                                                            Defaults to ["Extract handwriting"].
+        textract_output_found (bool, optional): A flag indicating whether existing Textract output
+                                                for the document has been found. This can prevent
+                                                unnecessary API calls. Defaults to False.
+        aws_access_key_textbox (str, optional): AWS access key provided by the user, if not using
+                                                SSO or environment variables. Defaults to AWS_ACCESS_KEY.
+        aws_secret_key_textbox (str, optional): AWS secret key provided by the user, if not using
+                                                SSO or environment variables. Defaults to AWS_SECRET_KEY.
+        RUN_AWS_FUNCTIONS (str, optional): Configuration flag (e.g., "1" or "0") to enable or
+                                           disable AWS functions. Defaults to RUN_AWS_FUNCTIONS.
+        PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS (str, optional): Configuration flag (e.g., "1" or "0")
+                                                                 to prioritize AWS SSO credentials
+                                                                 over environment variables.
+                                                                 Defaults to PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS.
+
+    Returns:
+        Tuple[List[Dict], str]: A tuple containing:
+            - A list of dictionaries, where each dictionary represents a Textract block (e.g., LINE, WORD, FORM, TABLE).
+            - A string containing metadata about the Textract request.
     '''
 
-    print("handwrite_signature_checkbox in analyse_page_with_textract:", handwrite_signature_checkbox)
+    #print("handwrite_signature_checkbox in analyse_page_with_textract:", handwrite_signature_checkbox)
     if client == "":
         try:               
-            if AWS_ACCESS_KEY and AWS_SECRET_KEY:
-                client = boto3.client('textract', 
-                aws_access_key_id=AWS_ACCESS_KEY, 
-                aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION)
-            else:
+            # Try to connect to AWS Textract Client if using that text extraction method
+            if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+                print("Connecting to Textract via existing SSO connection")
                 client = boto3.client('textract', region_name=AWS_REGION)
+            elif aws_access_key_textbox and aws_secret_key_textbox:
+                print("Connecting to Textract using AWS access key and secret keys from user input.")
+                client = boto3.client('textract', 
+                    aws_access_key_id=aws_access_key_textbox, 
+                    aws_secret_access_key=aws_secret_key_textbox, region_name=AWS_REGION)
+            elif RUN_AWS_FUNCTIONS == "1":
+                print("Connecting to Textract via existing SSO connection")
+                client = boto3.client('textract', region_name=AWS_REGION)
+            elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+                print("Getting Textract credentials from environment variables.")
+                client = boto3.client('textract', 
+                    aws_access_key_id=AWS_ACCESS_KEY, 
+                    aws_secret_access_key=AWS_SECRET_KEY, region_name=AWS_REGION) 
+            elif textract_output_found==True:
+                print("Existing Textract data found for file, no need to connect to AWS Textract")
+                client = boto3.client('textract', region_name=AWS_REGION)  
+            else:
+                client = ""
+                out_message = "Cannot connect to AWS Textract service."
+                print(out_message)
+                raise Exception(out_message)
         except:
             out_message = "Cannot connect to AWS Textract"
             print(out_message)
@@ -41,15 +90,25 @@ def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str=""
             return [], ""  # Return an empty list and an empty string
     
     # Redact signatures if specified
-    if "Redact all identified signatures" in handwrite_signature_checkbox:
-        #print("Analysing document with signature detection")
+    feature_types = list()
+    if "Extract signatures" in handwrite_signature_checkbox or "Extract forms" in handwrite_signature_checkbox or "Extract layout" in handwrite_signature_checkbox or "Extract tables" in handwrite_signature_checkbox:
+        if "Extract signatures" in handwrite_signature_checkbox:
+            feature_types.append("SIGNATURES")
+        if "Extract forms" in handwrite_signature_checkbox:
+            feature_types.append("FORMS")
+        if "Extract layout" in handwrite_signature_checkbox:
+            feature_types.append("LAYOUT")
+        if "Extract tables" in handwrite_signature_checkbox:
+            feature_types.append("TABLES")
         try:
-            response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
+            response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=feature_types)
         except Exception as e:
             print("Textract call failed due to:", e, "trying again in 3 seconds.")
             time.sleep(3)
-            response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=["SIGNATURES"])
-    else:
+            response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=feature_types)
+
+
+    if not "Extract signatures" in handwrite_signature_checkbox and not "Extract forms" in handwrite_signature_checkbox and not "Extract layout" in handwrite_signature_checkbox and not "Extract tables" in handwrite_signature_checkbox:
         # Call detect_document_text to extract plain text
         try:
             response = client.detect_document_text(Document={'Bytes': pdf_page_bytes})
@@ -98,16 +157,33 @@ def convert_pike_pdf_page_to_bytes(pdf:object, page_num:int):
 
 def json_to_ocrresult(json_data:dict, page_width:float, page_height:float, page_no:int):
     '''
-    Convert the json response from textract to the OCRResult format used elsewhere in the code. Looks for lines, words, and signatures. Handwriting and signatures are set aside especially for later in case the user wants to override the default behaviour and redact all handwriting/signatures.
+    Convert the json response from Textract to the OCRResult format used elsewhere in the code.
+    Looks for lines, words, and signatures. Handwriting and signatures are set aside especially
+    for later in case the user wants to override the default behaviour and redact all
+    handwriting/signatures.
+
+    Args:
+        json_data (dict): The raw JSON response from AWS Textract for a document or page.
+        page_width (float): The absolute width of the page in pixels.
+        page_height (float): The absolute height of the page in pixels.
+        page_no (int): The 1-based page number being processed.
+
+    Returns:
+        tuple: A tuple containing:
+            - dict: OCR results structured as an OCRResult object (containing 'page' and 'results' list).
+            - list: Bounding boxes identified as handwriting or signatures.
+            - list: Bounding boxes identified specifically as signatures.
+            - list: Bounding boxes identified specifically as handwriting.
+            - dict: OCR results with word-level detail, structured for further processing.
     '''
-    all_ocr_results = []
-    signature_or_handwriting_recogniser_results = []
-    signature_recogniser_results = []
-    handwriting_recogniser_results = []
-    signatures = []
-    handwriting = []
-    ocr_results_with_words = {}
-    text_block={}
+    all_ocr_results = list()
+    signature_or_handwriting_recogniser_results = list()
+    signature_recogniser_results = list()
+    handwriting_recogniser_results = list()
+    signatures = list()
+    handwriting = list()
+    ocr_results_with_words = dict()
+    text_block=dict()
 
     text_line_number = 1
 

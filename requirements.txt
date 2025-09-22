@@ -27,5 +27,9 @@ python-docx==1.2.0
 paddlepaddle==3.1.0 # Consider installing the GPU version for faster local OCR inference with PaddleOCR: paddlepaddle-gpu==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/ , compatible with CUDA 12.6. See this for more details: https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/linux-pip_en.html#span-id-gpu-gpu-version-of-paddlepaddle-span
 paddleocr==3.1.1
 
+# Test dependencies
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
 
 

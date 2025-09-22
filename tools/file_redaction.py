@@ -20,7 +20,7 @@ import gradio as gr
 from gradio import Progress
 from collections import defaultdict  # For efficient grouping
 
-from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER, RETURN_PDF_END_OF_REDACTION, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, LOCAL_PII_OPTION, AWS_PII_OPTION, NO_REDACTION_PII_OPTION, DEFAULT_LANGUAGE, textract_language_choices, aws_comprehend_language_choices, CUSTOM_ENTITIES, PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS
+from tools.config import OUTPUT_FOLDER, IMAGES_DPI, MAX_IMAGE_PIXELS, RUN_AWS_FUNCTIONS, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, PAGE_BREAK_VALUE, MAX_TIME_VALUE, LOAD_TRUNCATED_IMAGES, INPUT_FOLDER, RETURN_PDF_END_OF_REDACTION, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, LOCAL_PII_OPTION, AWS_PII_OPTION, NO_REDACTION_PII_OPTION, DEFAULT_LANGUAGE, textract_language_choices, aws_comprehend_language_choices, CUSTOM_ENTITIES, PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS, MAX_DOC_PAGES, MAX_SIMULTANEOUS_FILES
 from tools.custom_image_analyser_engine import CustomImageAnalyzerEngine, OCRResult, combine_ocr_results, CustomImageRecognizerResult, run_page_text_redaction,  recreate_page_line_level_ocr_results_with_page
 from tools.file_conversion import convert_annotation_json_to_review_df, redact_whole_pymupdf_page, redact_single_box, is_pdf, is_pdf_or_image, prepare_image_or_pdf, divide_coordinates_by_page_sizes, convert_annotation_data_to_dataframe, divide_coordinates_by_page_sizes, create_annotation_dicts_from_annotation_df, remove_duplicate_images_with_blank_boxes, fill_missing_ids, fill_missing_box_ids, load_and_convert_ocr_results_with_words_json, save_pdf_with_or_without_compression, word_level_ocr_output_to_dataframe
 from tools.load_spacy_model_custom_recognisers import nlp_analyser, score_threshold, custom_recogniser, custom_word_list_recogniser, CustomWordFuzzyRecognizer, load_spacy_model, download_tesseract_lang_pack, create_nlp_analyser
@@ -106,7 +106,7 @@ def choose_and_run_redactor(file_paths:List[str],
  page_min:int=0,
  page_max:int=999,
  estimated_time_taken_state:float=0.0,
- handwrite_signature_checkbox:List[str]=list(["Extract handwriting", "Extract signatures"]),
+ handwrite_signature_checkbox:List[str]=list(["Extract handwriting"]),
  all_request_metadata_str:str = "",
  annotations_all_pages:List[dict]=list(),
  all_page_line_level_ocr_results_df:pd.DataFrame=None,
@@ -273,6 +273,11 @@ def choose_and_run_redactor(file_paths:List[str],
         file_paths_list = [os.path.abspath(file_paths)]
     else: file_paths_list = file_paths
 
+    if len(file_paths_list) > MAX_SIMULTANEOUS_FILES:
+        out_message = f"Number of files to redact is greater than {MAX_SIMULTANEOUS_FILES}. Please submit a smaller number of files."
+        print(out_message)
+        raise Exception(out_message)
+
     valid_extensions = {".pdf", ".jpg", ".jpeg", ".png"}
     # Filter only files with valid extensions. Currently only allowing one file to be redacted at a time
     # Filter the file_paths_list to include only files with valid extensions
@@ -374,7 +379,12 @@ def choose_and_run_redactor(file_paths:List[str],
 
     page_sizes = page_sizes_df.to_dict(orient="records")
 
-    number_of_pages = pymupdf_doc.page_count    
+    number_of_pages = pymupdf_doc.page_count 
+
+    if number_of_pages > MAX_DOC_PAGES:
+        out_message = f"Number of pages in document is greater than {MAX_DOC_PAGES}. Please submit a smaller document."
+        print(out_message)
+        raise Exception(out_message)
 
     # If we have reached the last page, return message and outputs
     if current_loop_page >= number_of_pages:

@@ -57,8 +57,6 @@ def _get_env_list(env_var_name: str) -> list[str]:
     # Split by comma and filter out any empty strings that might result from extra commas
     return [s.strip() for s in value.split(',') if s.strip()]
 
-
-
 # --- Constants and Configuration ---
 
 if CHOSEN_COMPREHEND_ENTITIES: CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
@@ -91,7 +89,19 @@ def main(direct_mode_args={}):
         description='A versatile CLI for redacting PII from PDF/image files and anonymising Word/tabular data.',
         formatter_class=argparse.RawTextHelpFormatter,
         epilog='''
-Examples (look in the output/ folder to see output files):
+Examples:
+
+To run these, you need to do the following:
+
+- Open a terminal window
+
+- CD to the app folder that contains this file (cli_redact.py)
+
+- Load the virtual environment using either conda or venv depending on your setup
+
+- Run one of the example commands below
+
+- Look in the output/ folder to see output files:
 
 # Redaction
 
@@ -132,6 +142,9 @@ python cli_redact.py --input_file example_data/example_of_emails_sent_to_a_profe
 
 ## Redact specific pages with AWS OCR and signature extraction:
 python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --page_min 6 --page_max 7 --ocr_method "AWS Textract" --handwrite_signature_extraction "Extract handwriting" "Extract signatures"
+
+## Redact with AWS OCR and additional layout extraction options:
+python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --ocr_method "AWS Textract" --extract_layout
 
 # Duplicate page detection
 
@@ -212,6 +225,9 @@ python cli_redact.py --task textract --textract_action list
     pdf_group.add_argument('--allow_list_file', default=ALLOW_LIST_PATH, help='Custom words file to recognize for redaction.')
     pdf_group.add_argument('--redact_whole_page_file', default=WHOLE_PAGE_REDACTION_LIST_PATH, help='File for pages to redact completely.')
     pdf_group.add_argument('--handwrite_signature_extraction', nargs='+', default=default_handwrite_signature_checkbox, help='Handwriting and signature extraction options. Choose from "Extract handwriting", "Extract signatures".')
+    pdf_group.add_argument('--extract_forms', action='store_true', help='Extract forms during Textract analysis.')
+    pdf_group.add_argument('--extract_tables', action='store_true', help='Extract tables during Textract analysis.')
+    pdf_group.add_argument('--extract_layout', action='store_true', help='Extract layout during Textract analysis.')
 
     # --- Word/Tabular Anonymisation Arguments ---
     tabular_group = parser.add_argument_group('Word/Tabular Anonymisation Options (.docx, .csv, .xlsx)')
@@ -279,6 +295,16 @@ python cli_redact.py --task textract --textract_action list
     if args.save_to_user_folders == "True": args.save_to_user_folders = True
     else: args.save_to_user_folders = False
 
+    # Combine extraction options
+    extraction_options = list(args.handwrite_signature_extraction) if args.handwrite_signature_extraction else []
+    if args.extract_forms:
+        extraction_options.append('Extract forms')
+    if args.extract_tables:
+        extraction_options.append('Extract tables')
+    if args.extract_layout:
+        extraction_options.append('Extract layout')
+    args.handwrite_signature_extraction = extraction_options
+
     if args.task in ['redact', 'deduplicate']:
         if args.input_file:
             if isinstance(args.input_file, str):
@@ -297,8 +323,6 @@ python cli_redact.py --task textract --textract_action list
             usage_logger = create_cli_usage_logger()
         except Exception as e:
             print(f"Warning: Could not initialise usage logger: {e}")
-
-    print(f"Argument args.save_to_user_folders: {args.save_to_user_folders} will be used to determine if outputs will be saved to user folders.")
 
     # Get username and folders
     session_hash, args.output_dir, _, args.input_dir, args.textract_input_prefix, args.textract_output_prefix, args.s3_textract_document_logs_subfolder, args.local_textract_document_logs_subfolder = get_username_and_folders(username=args.username, output_folder_textbox=args.output_dir, input_folder_textbox=args.input_dir, session_output_folder=args.save_to_user_folders, textract_document_upload_input_folder=args.textract_input_prefix, textract_document_upload_output_folder=args.textract_output_prefix, s3_textract_document_logs_subfolder=args.s3_textract_document_logs_subfolder, local_textract_document_logs_subfolder=args.local_textract_document_logs_subfolder)
@@ -711,7 +735,7 @@ python cli_redact.py --task textract --textract_action list
                     s3_bucket_name=textract_bucket,
                     general_s3_bucket_name=args.s3_bucket,
                     local_output_dir=args.output_dir,
-                    analyse_signatures=signature_options,
+                    handwrite_signature_checkbox=signature_options,
                     aws_region=args.aws_region
                 )
 

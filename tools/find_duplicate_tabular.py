@@ -11,7 +11,7 @@ from pathlib import Path
 from tools.helper_functions import OUTPUT_FOLDER, read_file
 from tools.data_anonymise import initial_clean
 from tools.load_spacy_model_custom_recognisers import nlp
-from tools.config import DO_INITIAL_TABULAR_DATA_CLEAN, REMOVE_DUPLICATE_ROWS
+from tools.config import DO_INITIAL_TABULAR_DATA_CLEAN, REMOVE_DUPLICATE_ROWS, MAX_SIMULTANEOUS_FILES, MAX_TABULAR_ROWS
 
 if REMOVE_DUPLICATE_ROWS == "True": REMOVE_DUPLICATE_ROWS = True
 else: REMOVE_DUPLICATE_ROWS = False
@@ -139,6 +139,12 @@ def find_duplicate_cells_in_tabular_data(
 
                     # If sheet was successfully_loaded
                     if not temp_df.empty:
+
+                        if temp_df.shape[0] > MAX_TABULAR_ROWS:
+                            out_message = f"Number of rows in {file_path} for sheet {sheet_name} is greater than {MAX_TABULAR_ROWS}. Please submit a smaller file."
+                            print(out_message)
+                            raise Exception(out_message)
+
                         file_name = os.path.basename(file_path) + "_" + sheet_name
                         file_paths.append(file_path)
                         
@@ -154,6 +160,11 @@ def find_duplicate_cells_in_tabular_data(
                     temp_df = pd.DataFrame()
             else:
                 temp_df = read_file(file_path)
+
+                if temp_df.shape[0] > MAX_TABULAR_ROWS:
+                    out_message = f"Number of rows in {file_path} is greater than {MAX_TABULAR_ROWS}. Please submit a smaller file."
+                    print(out_message)
+                    raise Exception(out_message)
             
                 file_name = os.path.basename(file_path)
                 file_paths.append(file_path)
@@ -528,7 +539,7 @@ def run_tabular_duplicate_detection(files, threshold, min_words, text_columns, o
     # If output folder doesn't end with a forward slash, add one
     if not output_folder.endswith('/'): output_folder = output_folder + '/'
     
-    file_paths = []
+    file_paths = list()
     if isinstance(files, str):
         # If 'files' is a single string, treat it as a list with one element
         file_paths.append(files)
@@ -550,6 +561,11 @@ def run_tabular_duplicate_detection(files, threshold, min_words, text_columns, o
     else:
         # Raise an error for any other unexpected type of the 'files' argument itself
         raise TypeError(f"Unexpected type for 'files' argument: {type(files)}. Expected str, list of str/file objects, or a single file object.")
+
+    if len(file_paths) > MAX_SIMULTANEOUS_FILES:
+        out_message = f"Number of files to deduplicate is greater than {MAX_SIMULTANEOUS_FILES}. Please submit a smaller number of files."
+        print(out_message)
+        raise Exception(out_message)
 
     results_df, output_paths, full_data = run_tabular_duplicate_analysis(
         files=file_paths,

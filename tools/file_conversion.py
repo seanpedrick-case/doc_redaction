@@ -23,7 +23,7 @@ import random
 import string
 import warnings # To warn about potential type changes
 
-from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, IMAGES_DPI, LOAD_TRUNCATED_IMAGES, MAX_IMAGE_PIXELS, CUSTOM_BOX_COLOUR, COMPRESS_REDACTED_PDF, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION
+from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, IMAGES_DPI, LOAD_TRUNCATED_IMAGES, MAX_IMAGE_PIXELS, CUSTOM_BOX_COLOUR, COMPRESS_REDACTED_PDF, TESSERACT_TEXT_EXTRACT_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION, MAX_SIMULTANEOUS_FILES
 from tools.helper_functions import get_file_name_without_type, read_file
 # from tools.aws_textract import load_and_convert_textract_json
 
@@ -568,6 +568,11 @@ def prepare_image_or_pdf(
 
     if isinstance(file_paths, str): file_path_number = 1
     else: file_path_number = len(file_paths)
+
+    if file_path_number > MAX_SIMULTANEOUS_FILES:
+        out_message = f"Number of files loaded is greater than {MAX_SIMULTANEOUS_FILES}. Please submit a smaller number of files."
+        print(out_message)
+        raise Exception(out_message)
     
     latest_file_completed = int(latest_file_completed)
 
