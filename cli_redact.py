@@ -89,7 +89,19 @@ def main(direct_mode_args={}):
         description='A versatile CLI for redacting PII from PDF/image files and anonymising Word/tabular data.',
         formatter_class=argparse.RawTextHelpFormatter,
         epilog='''
-Examples (look in the output/ folder to see output files):
+Examples:
+
+To run these, you need to do the following:
+
+- Open a terminal window
+
+- CD to the app folder that contains this file (cli_redact.py)
+
+- Load the virtual environment using either conda or venv depending on your setup
+
+- Run one of the example commands below
+
+- Look in the output/ folder to see output files:
 
 # Redaction
 
