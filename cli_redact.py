@@ -57,8 +57,6 @@ def _get_env_list(env_var_name: str) -> list[str]:
     # Split by comma and filter out any empty strings that might result from extra commas
     return [s.strip() for s in value.split(',') if s.strip()]
 
-
-
 # --- Constants and Configuration ---
 
 if CHOSEN_COMPREHEND_ENTITIES: CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
@@ -91,7 +89,19 @@ def main(direct_mode_args={}):
         description='A versatile CLI for redacting PII from PDF/image files and anonymising Word/tabular data.',
         formatter_class=argparse.RawTextHelpFormatter,
         epilog='''
-Examples (look in the output/ folder to see output files):
+Examples:
+
+To run these, you need to do the following:
+
+- Open a terminal window
+
+- CD to the app folder that contains this file (cli_redact.py)
+
+- Load the virtual environment using either conda or venv depending on your setup
+
+- Run one of the example commands below
+
+- Look in the output/ folder to see output files:
 
 # Redaction
 
@@ -133,8 +143,8 @@ python cli_redact.py --input_file example_data/example_of_emails_sent_to_a_profe
 ## Redact specific pages with AWS OCR and signature extraction:
 python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --page_min 6 --page_max 7 --ocr_method "AWS Textract" --handwrite_signature_extraction "Extract handwriting" "Extract signatures"
 
-## Redact with AWS OCR and additional extraction options:
-python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --ocr_method "AWS Textract" --extract_forms --extract_tables --extract_layout
+## Redact with AWS OCR and additional layout extraction options:
+python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --ocr_method "AWS Textract" --extract_layout
 
 # Duplicate page detection
 

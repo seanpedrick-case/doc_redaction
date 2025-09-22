@@ -90,15 +90,16 @@ def analyse_page_with_textract(pdf_page_bytes:object, page_no:int, client:str=""
             return [], ""  # Return an empty list and an empty string
     
     # Redact signatures if specified
-    feature_types = []
+    feature_types = list()
     if "Extract signatures" in handwrite_signature_checkbox or "Extract forms" in handwrite_signature_checkbox or "Extract layout" in handwrite_signature_checkbox or "Extract tables" in handwrite_signature_checkbox:
-        feature_types.append("SIGNATURES")
-    if "Extract forms" in handwrite_signature_checkbox:
-        feature_types.append("FORMS")
-    if "Extract layout" in handwrite_signature_checkbox:
-        feature_types.append("LAYOUT")
-    if "Extract tables" in handwrite_signature_checkbox:
-        feature_types.append("TABLES")
+        if "Extract signatures" in handwrite_signature_checkbox:
+            feature_types.append("SIGNATURES")
+        if "Extract forms" in handwrite_signature_checkbox:
+            feature_types.append("FORMS")
+        if "Extract layout" in handwrite_signature_checkbox:
+            feature_types.append("LAYOUT")
+        if "Extract tables" in handwrite_signature_checkbox:
+            feature_types.append("TABLES")
         try:
             response = client.analyze_document(Document={'Bytes': pdf_page_bytes}, FeatureTypes=feature_types)
         except Exception as e:

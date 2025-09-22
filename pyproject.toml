@@ -47,6 +47,7 @@ repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+test = ["pytest", "pytest-cov"]
 
 # Configuration for Ruff linter:
 [tool.ruff]

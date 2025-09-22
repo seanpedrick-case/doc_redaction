@@ -1,0 +1,211 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.10, 3.11, 3.12]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          tesseract-ocr \
+          tesseract-ocr-eng \
+          poppler-utils \
+          libgl1-mesa-glx \
+          libglib2.0-0
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-html pytest-xdist
+    
+    - name: Download spaCy model
+      run: |
+        python -m spacy download en_core_web_lg
+    
+    - name: Create example data directory
+      run: |
+        mkdir -p example_data
+        mkdir -p example_data/example_outputs
+    
+    - name: Create dummy test files (if example data is missing)
+      run: |
+        # Create dummy PDF for testing
+        python -c "
+        import os
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import letter
+        
+        # Install reportlab if not available
+        try:
+            import reportlab
+        except ImportError:
+            import subprocess
+            subprocess.check_call(['pip', 'install', 'reportlab'])
+            import reportlab
+        
+        # Create dummy PDF
+        c = canvas.Canvas('example_data/example_of_emails_sent_to_a_professor_before_applying.pdf', pagesize=letter)
+        c.drawString(100, 750, 'This is a test document for redaction testing.')
+        c.drawString(100, 700, 'Email: test@example.com')
+        c.drawString(100, 650, 'Phone: 123-456-7890')
+        c.drawString(100, 600, 'Name: John Doe')
+        c.save()
+        print('Created dummy PDF for testing')
+        "
+    
+    - name: Create dummy CSV for testing
+      run: |
+        python -c "
+        import pandas as pd
+        import os
+        
+        # Create dummy CSV
+        data = {
+            'Case Note': ['Client visited for consultation', 'Follow-up appointment scheduled'],
+            'Client': ['John Smith', 'Jane Doe'],
+            'Date': ['2024-01-15', '2024-01-16']
+        }
+        df = pd.DataFrame(data)
+        df.to_csv('example_data/combined_case_notes.csv', index=False)
+        print('Created dummy CSV for testing')
+        "
+    
+    - name: Create dummy Word document
+      run: |
+        python -c "
+        from docx import Document
+        import os
+        
+        # Create dummy Word document
+        doc = Document()
+        doc.add_heading('Test Document', 0)
+        doc.add_paragraph('This is a test document for redaction testing.')
+        doc.add_paragraph('Contact: test@example.com')
+        doc.add_paragraph('Phone: 123-456-7890')
+        doc.save('example_data/Bold minimalist professional cover letter.docx')
+        print('Created dummy Word document for testing')
+        "
+    
+    - name: Create dummy allow/deny lists
+      run: |
+        python -c "
+        import pandas as pd
+        
+        # Create allow list
+        allow_data = {'word': ['test', 'example']}
+        pd.DataFrame(allow_data).to_csv('example_data/test_allow_list_graduate.csv', index=False)
+        pd.DataFrame(allow_data).to_csv('example_data/test_allow_list_partnership.csv', index=False)
+        
+        # Create deny list
+        deny_data = {'word': ['sensitive', 'confidential']}
+        pd.DataFrame(deny_data).to_csv('example_data/partnership_toolkit_redact_custom_deny_list.csv', index=False)
+        pd.DataFrame(deny_data).to_csv('example_data/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv', index=False)
+        
+        # Create whole page redaction list
+        page_data = {'page': [1, 2]}
+        pd.DataFrame(page_data).to_csv('example_data/partnership_toolkit_redact_some_pages.csv', index=False)
+        
+        print('Created dummy allow/deny lists')
+        "
+    
+    - name: Create dummy OCR output CSV
+      run: |
+        python -c "
+        import pandas as pd
+        import os
+        
+        # Create dummy OCR output
+        ocr_data = {
+            'file_name': ['test.pdf', 'test.pdf'],
+            'page_number': [1, 2],
+            'text': ['This is page 1 content', 'This is page 2 content'],
+            'confidence': [0.95, 0.92]
+        }
+        df = pd.DataFrame(ocr_data)
+        os.makedirs('example_data/example_outputs', exist_ok=True)
+        df.to_csv('example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv', index=False)
+        print('Created dummy OCR output CSV')
+        "
+    
+    - name: Create dummy image for testing
+      run: |
+        python -c "
+        from PIL import Image, ImageDraw, ImageFont
+        import os
+        
+        # Create dummy image
+        img = Image.new('RGB', (800, 600), color='white')
+        draw = ImageDraw.Draw(img)
+        
+        # Add some text
+        try:
+            font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 20)
+        except:
+            font = ImageFont.load_default()
+        
+        draw.text((50, 50), 'Test Document for Redaction', fill='black', font=font)
+        draw.text((50, 100), 'Email: test@example.com', fill='black', font=font)
+        draw.text((50, 150), 'Phone: 123-456-7890', fill='black', font=font)
+        
+        img.save('example_data/example_complaint_letter.jpg')
+        print('Created dummy image for testing')
+        "
+    
+    - name: Run tests with unittest
+      run: |
+        cd test
+        python test.py
+    
+    - name: Run tests with pytest
+      run: |
+        pytest test/test.py -v --tb=short
+    
+    - name: Run tests with coverage
+      run: |
+        pytest test/test.py --cov=. --cov-report=xml --cov-report=html
+    
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      if: matrix.python-version == '3.11'
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-python-${{ matrix.python-version }}
+        path: |
+          test-results/
+          htmlcov/
+          coverage.xml

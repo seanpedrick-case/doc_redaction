@@ -1,0 +1,13 @@
+# Test-specific dependencies for the CLI redaction test suite
+# These are in addition to the main application dependencies
+
+# Test framework
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Optional: For more detailed test reporting
+pytest-html>=3.1.0
+pytest-xdist>=3.0.0  # For parallel test execution
+
+# Note: The test suite uses unittest (standard library) but pytest provides
+# better test discovery and reporting capabilities
