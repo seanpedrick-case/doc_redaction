@@ -524,12 +524,9 @@ class CustomImageAnalyzerEngine:
         # Remove or replace invalid filename characters
         # Windows: < > : " | ? * \ /
         # Unix: / (forward slash)
-        # Also remove control characters and other problematic chars
-        invalid_chars = r'[<>:"|?*\\/\x00-\x1f\x7f-\x9f]'
-        sanitized = re.sub(invalid_chars, "_", text)
+        from tools.secure_regex_utils import safe_sanitize_text
 
-        # Replace multiple consecutive underscores with a single one
-        sanitized = re.sub(r"_+", "_", sanitized)
+        sanitized = safe_sanitize_text(text)
 
         # Remove leading/trailing underscores and spaces
         sanitized = sanitized.strip("_ ")

@@ -32,6 +32,11 @@ from tools.config import (
 )
 from tools.file_conversion import get_input_file_names
 from tools.helper_functions import get_file_name_without_type
+from tools.secure_path_utils import (
+    secure_basename,
+    secure_file_write,
+    secure_join,
+)
 
 DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS)
 
@@ -115,8 +120,8 @@ def analyse_document_with_textract_api(
     textract_client = session.client("textract")
 
     # --- 1. Upload PDF to S3 ---
-    pdf_filename = os.path.basename(local_pdf_path)
-    s3_input_key = os.path.join(s3_input_prefix, pdf_filename).replace(
+    pdf_filename = secure_basename(local_pdf_path)
+    s3_input_key = secure_join(s3_input_prefix, pdf_filename).replace(
         "\\", "/"
     )  # Ensure forward slashes for S3
 
@@ -262,14 +267,13 @@ def analyse_document_with_textract_api(
         )
 
         # File path
-        log_file_path = os.path.join(local_output_dir, "textract_document_jobs.csv")
-        log_file_path_job_id = os.path.join(
+        log_file_path = secure_join(local_output_dir, "textract_document_jobs.csv")
+        log_file_path_job_id = secure_join(
             local_output_dir, pdf_filename + "_textract_document_jobs_job_id.txt"
         )
 
         # Write latest job ID to local text file
-        with open(log_file_path_job_id, "w") as f:
-            f.write(job_id)
+        secure_file_write(log_file_path_job_id, job_id)
 
         # Check if file exists
         file_exists = os.path.exists(log_file_path)
@@ -447,10 +451,9 @@ def download_textract_job_files(
     output_filename_base = os.path.basename(pdf_filename)
     output_filename_base_no_ext = os.path.splitext(output_filename_base)[0]
     local_output_filename = f"{output_filename_base_no_ext}_textract.json"
-    local_output_path = os.path.join(local_output_dir, local_output_filename)
+    local_output_path = secure_join(local_output_dir, local_output_filename)
 
-    with open(local_output_path, "w") as f:
-        json.dump(combined_output, f)
+    secure_file_write(local_output_path, json.dumps(combined_output))
 
     print(f"Combined Textract output written to {local_output_path}")
 
@@ -484,12 +487,12 @@ def load_pdf_job_file_from_s3(
         pdf_file_location = ""
         doc_file_name_no_extension_textbox = ""
 
-        s3_input_key_prefix = os.path.join(
-            load_s3_jobs_input_loc, pdf_filename
-        ).replace("\\", "/")
+        s3_input_key_prefix = secure_join(load_s3_jobs_input_loc, pdf_filename).replace(
+            "\\", "/"
+        )
         s3_input_key_prefix = s3_input_key_prefix + ".pdf"
 
-        local_input_file_path = os.path.join(local_output_dir, pdf_filename)
+        local_input_file_path = secure_join(local_output_dir, pdf_filename)
         local_input_file_path = local_input_file_path + ".pdf"
 
         download_file_from_s3(
@@ -705,7 +708,7 @@ def poll_whole_document_textract_analysis_progress_and_download(
             # For robust handling, list objects and find the JSON(s).
 
             s3_output_key_prefix = (
-                os.path.join(s3_output_prefix, job_id).replace("\\", "/") + "/"
+                secure_join(s3_output_prefix, job_id).replace("\\", "/") + "/"
             )
             logging.info(
                 f"Searching for output files in s3://{s3_bucket_name}/{s3_output_key_prefix}"
@@ -848,7 +851,7 @@ def download_textract_output(
 
     # Find output ZIP file in S3
     output_file_key = f"{output_prefix}/{job_id}.zip"
-    local_file_path = os.path.join(local_folder, f"{job_id}.zip")
+    local_file_path = secure_join(local_folder, f"{job_id}.zip")
 
     # Download file
     try:

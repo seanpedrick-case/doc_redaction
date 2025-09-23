@@ -142,14 +142,17 @@ def create_allow_deny_lists():
 def create_ocr_output():
     """Create dummy OCR output CSV."""
     ocr_data = {
-        "file_name": ["test.pdf", "test.pdf", "test.pdf"],
-        "page_number": [1, 2, 3],
+        "page": [1, 2, 3],
         "text": [
             "This is page 1 content with some text",
             "This is page 2 content with different text",
             "This is page 3 content with more text",
         ],
-        "confidence": [0.95, 0.92, 0.88],
+        "left": [0.1, 0.3, 0.5],
+        "top": [0.95, 0.92, 0.88],
+        "width": [0.05, 0.02, 0.02],
+        "height": [0.01, 0.02, 0.02],
+        "line": [1, 2, 3],
     }
     df = pd.DataFrame(ocr_data)
     df.to_csv(

@@ -1,5 +1,4 @@
 import os
-import re
 import unicodedata
 from math import ceil
 from typing import List
@@ -33,6 +32,7 @@ from tools.config import (
     aws_comprehend_language_choices,
     textract_language_choices,
 )
+from tools.secure_path_utils import secure_join
 
 
 def _get_env_list(env_var_name: str) -> List[str]:
@@ -348,7 +348,7 @@ def put_columns_in_df(in_file: List[str]):
 def check_for_existing_textract_file(
     doc_file_name_no_extension_textbox: str, output_folder: str = OUTPUT_FOLDER
 ):
-    textract_output_path = os.path.join(
+    textract_output_path = secure_join(
         output_folder, doc_file_name_no_extension_textbox + "_textract.json"
     )
 
@@ -377,7 +377,7 @@ def check_for_relevant_ocr_output_with_words(
 
     doc_file_with_ending = doc_file_name_no_extension_textbox + file_ending
 
-    local_ocr_output_path = os.path.join(output_folder, doc_file_with_ending)
+    local_ocr_output_path = secure_join(output_folder, doc_file_with_ending)
 
     if os.path.exists(local_ocr_output_path):
         print("Existing OCR with words analysis output file found.")
@@ -591,7 +591,9 @@ def clean_unicode_text(text: str):
     # Step 3: Optionally remove non-ASCII characters if needed
     # This regex removes any remaining non-ASCII characters, if desired.
     # Comment this line if you want to keep all Unicode characters.
-    cleaned_text = re.sub(r"[^\x00-\x7F]+", "", normalized_text)
+    from tools.secure_regex_utils import safe_remove_non_ascii
+
+    cleaned_text = safe_remove_non_ascii(normalized_text)
 
     return cleaned_text
 
@@ -603,7 +605,7 @@ def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:
     # List all files in the specified folder
     for filename in os.listdir(folder_path):
         # Construct full file path
-        full_path = os.path.join(folder_path, filename)
+        full_path = secure_join(folder_path, filename)
         # Check if it's a file (not a directory)
         if os.path.isfile(full_path):
             file_paths.append(full_path)

@@ -1,11 +1,10 @@
 import os
 import shutil
 import subprocess
-import tempfile
-import unittest
 import sys
+import tempfile
 import threading
-import time
+import unittest
 from typing import List, Optional
 
 
@@ -893,35 +892,40 @@ class TestGUIApp(unittest.TestCase):
         cls.app_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "app.py"
         )
-        
+
         # Verify app.py exists
         if not os.path.isfile(cls.app_path):
             raise FileNotFoundError(f"App file not found: {cls.app_path}")
-        
+
         print(f"GUI test setup complete. App: {cls.app_path}")
 
     def test_app_import_and_initialization(self):
         """Test: Import app.py and check if the Gradio app object is created successfully."""
         print("\n=== Testing GUI app import and initialization ===")
-        
+
         try:
             # Add the parent directory to the path so we can import app
             parent_dir = os.path.dirname(os.path.dirname(__file__))
             if parent_dir not in sys.path:
                 sys.path.insert(0, parent_dir)
-            
+
             # Import the app module
             import app
-            
+
             # Check if the app object exists and is a Gradio Blocks object
-            self.assertTrue(hasattr(app, 'app'), "App object should exist in the module")
-            
+            self.assertTrue(
+                hasattr(app, "app"), "App object should exist in the module"
+            )
+
             # Check if it's a Gradio Blocks instance
             import gradio as gr
-            self.assertIsInstance(app.app, gr.Blocks, "App should be a Gradio Blocks instance")
-            
+
+            self.assertIsInstance(
+                app.app, gr.Blocks, "App should be a Gradio Blocks instance"
+            )
+
             print("✅ GUI app import and initialization passed")
-            
+
         except ImportError as e:
             error_msg = f"Failed to import app module: {e}"
             if "gradio_image_annotation" in str(e):
@@ -935,41 +939,40 @@ class TestGUIApp(unittest.TestCase):
     def test_app_launch_headless(self):
         """Test: Launch the app in headless mode to verify it starts without errors."""
         print("\n=== Testing GUI app launch in headless mode ===")
-        
+
         try:
             # Add the parent directory to the path
             parent_dir = os.path.dirname(os.path.dirname(__file__))
             if parent_dir not in sys.path:
                 sys.path.insert(0, parent_dir)
-            
+
             # Import the app module
+
             import app
-            import gradio as gr
-            
+
             # Set up a flag to track if the app launched successfully
             app_launched = threading.Event()
             launch_error = None
-            
+
             def launch_app():
                 try:
                     # Launch the app in headless mode with a short timeout
                     app.app.launch(
                         show_error=True,
                         inbrowser=False,  # Don't open browser
-                        server_port=0,    # Use any available port
-                        quiet=True,       # Suppress output
-                        prevent_thread_lock=True  # Don't block the main thread
+                        server_port=0,  # Use any available port
+                        quiet=True,  # Suppress output
+                        prevent_thread_lock=True,  # Don't block the main thread
                     )
                     app_launched.set()
-                except Exception as e:
-                    launch_error = e
+                except Exception:
                     app_launched.set()
-            
+
             # Start the app in a separate thread
             launch_thread = threading.Thread(target=launch_app)
             launch_thread.daemon = True
             launch_thread.start()
-            
+
             # Wait for the app to launch (with timeout)
             if app_launched.wait(timeout=10):  # 10 second timeout
                 if launch_error:
@@ -978,7 +981,7 @@ class TestGUIApp(unittest.TestCase):
                     print("✅ GUI app launch in headless mode passed")
             else:
                 self.fail("App launch timed out after 10 seconds")
-                
+
         except Exception as e:
             error_msg = f"Unexpected error during app launch test: {e}"
             if "gradio_image_annotation" in str(e):
@@ -990,33 +993,39 @@ class TestGUIApp(unittest.TestCase):
     def test_app_configuration_loading(self):
         """Test: Verify that the app can load its configuration without errors."""
         print("\n=== Testing GUI app configuration loading ===")
-        
+
         try:
             # Add the parent directory to the path
             parent_dir = os.path.dirname(os.path.dirname(__file__))
             if parent_dir not in sys.path:
                 sys.path.insert(0, parent_dir)
-            
-            # Import the app module
-            import app
-            
+
+            # Import the app module (not needed?)
+            # import app
+
             # Check if key configuration variables are accessible
             # These should be imported from tools.config
             from tools.config import (
+                DEFAULT_LANGUAGE,
                 GRADIO_SERVER_PORT,
                 MAX_FILE_SIZE,
-                DEFAULT_LANGUAGE,
-                PII_DETECTION_MODELS
+                PII_DETECTION_MODELS,
             )
-            
+
             # Verify these are not None/empty
-            self.assertIsNotNone(GRADIO_SERVER_PORT, "GRADIO_SERVER_PORT should be configured")
+            self.assertIsNotNone(
+                GRADIO_SERVER_PORT, "GRADIO_SERVER_PORT should be configured"
+            )
             self.assertIsNotNone(MAX_FILE_SIZE, "MAX_FILE_SIZE should be configured")
-            self.assertIsNotNone(DEFAULT_LANGUAGE, "DEFAULT_LANGUAGE should be configured")
-            self.assertIsNotNone(PII_DETECTION_MODELS, "PII_DETECTION_MODELS should be configured")
-            
+            self.assertIsNotNone(
+                DEFAULT_LANGUAGE, "DEFAULT_LANGUAGE should be configured"
+            )
+            self.assertIsNotNone(
+                PII_DETECTION_MODELS, "PII_DETECTION_MODELS should be configured"
+            )
+
             print("✅ GUI app configuration loading passed")
-            
+
         except ImportError as e:
             error_msg = f"Failed to import configuration: {e}"
             if "gradio_image_annotation" in str(e):
@@ -1048,11 +1057,11 @@ def run_all_tests():
     # Create test suite
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
-    
+
     # Add CLI tests
     cli_suite = loader.loadTestsFromTestCase(TestCLIRedactExamples)
     suite.addTests(cli_suite)
-    
+
     # Add GUI tests
     gui_suite = loader.loadTestsFromTestCase(TestGUIApp)
     suite.addTests(gui_suite)

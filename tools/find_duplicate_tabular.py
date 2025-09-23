@@ -1,5 +1,4 @@
 import os
-import re
 import time
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -19,6 +18,7 @@ from tools.config import (
 from tools.data_anonymise import initial_clean
 from tools.helper_functions import OUTPUT_FOLDER, read_file
 from tools.load_spacy_model_custom_recognisers import nlp
+from tools.secure_path_utils import secure_join
 
 if REMOVE_DUPLICATE_ROWS == "True":
     REMOVE_DUPLICATE_ROWS = True
@@ -345,9 +345,12 @@ def save_tabular_duplicate_results(
                 original_file_extension = os.path.splitext(original_file)[-1]
                 if original_file_extension in [".xlsx", ".xls"]:
 
-                    # Split the string using a regex to handle both .xlsx_ and .xls_ delimiters
-                    # The regex r'\.xlsx_|\.xls_' correctly matches either ".xlsx_" or ".xls_" as a delimiter.
-                    parts = re.split(r"\.xlsx_|\.xls_", os.path.basename(file_name))
+                    # Split the string using secure regex to handle both .xlsx_ and .xls_ delimiters
+                    from tools.secure_regex_utils import safe_split_filename
+
+                    parts = safe_split_filename(
+                        os.path.basename(file_name), [".xlsx_", ".xls_"]
+                    )
                     # The sheet name is the last part after splitting
                     file_sheet_name = parts[-1]
 
@@ -430,12 +433,12 @@ def save_tabular_duplicate_results(
                     file_ext = os.path.splitext(file_name)[-1]
 
                     if file_ext in [".parquet"]:
-                        output_path = os.path.join(
+                        output_path = secure_join(
                             output_folder, f"{file_base_name}_deduplicated.parquet"
                         )
                         df_cleaned.to_parquet(output_path, index=False)
                     else:
-                        output_path = os.path.join(
+                        output_path = secure_join(
                             output_folder, f"{file_base_name}_deduplicated.csv"
                         )
                         df_cleaned.to_csv(
@@ -451,7 +454,7 @@ def save_tabular_duplicate_results(
             # Create output filename
             file_base_name = os.path.splitext(os.path.basename(file_path))[0]
             file_ext = os.path.splitext(file_path)[-1]
-            output_path = os.path.join(
+            output_path = secure_join(
                 output_folder, f"{file_base_name}_deduplicated{file_ext}"
             )
 
@@ -513,7 +516,7 @@ def remove_duplicate_rows_from_tabular_data(
         file_stem = os.path.splitext(file_name)[0]
         file_ext = os.path.splitext(file_name)[-1]
 
-        output_path = os.path.join(output_folder, f"{file_stem}_deduplicated{file_ext}")
+        output_path = secure_join(output_folder, f"{file_stem}_deduplicated{file_ext}")
 
         if file_ext in [".xlsx", ".xls"]:
             df_cleaned.to_excel(

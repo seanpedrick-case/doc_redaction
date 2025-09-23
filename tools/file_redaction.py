@@ -2,7 +2,6 @@ import copy
 import io
 import json
 import os
-import re
 import time
 from collections import defaultdict  # For efficient grouping
 from typing import Any, Dict, List, Optional, Tuple
@@ -94,6 +93,7 @@ from tools.load_spacy_model_custom_recognisers import (
     nlp_analyser,
     score_threshold,
 )
+from tools.secure_path_utils import secure_file_write
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
 if not MAX_IMAGE_PIXELS:
@@ -130,11 +130,10 @@ def sum_numbers_before_seconds(string: str):
         The sum of all numbers before 'seconds' in the string.
     """
 
-    # Extract numbers before 'seconds' using regular expression
-    numbers = re.findall(r"(\d+\.\d+)?\s*seconds", string)
+    # Extract numbers before 'seconds' using secure regex
+    from tools.secure_regex_utils import safe_extract_numbers_with_seconds
 
-    # Extract the numbers from the matches
-    numbers = [float(num.split()[0]) for num in numbers]
+    numbers = safe_extract_numbers_with_seconds(string)
 
     # Sum up the extracted numbers
     sum_of_numbers = round(sum(numbers), 1)
@@ -445,7 +444,9 @@ def choose_and_run_redactor(
         elif out_message:
             combined_out_message = combined_out_message + "\n" + out_message
 
-        combined_out_message = re.sub(r"^\n+", "", combined_out_message).strip()
+        from tools.secure_regex_utils import safe_remove_leading_newlines
+
+        combined_out_message = safe_remove_leading_newlines(combined_out_message)
 
         end_message = "\n\nPlease review and modify the suggested redaction outputs on the 'Review redactions' tab of the app (you can find this under the introduction text at the top of the page)."
 
@@ -1304,8 +1305,9 @@ def choose_and_run_redactor(
             output_folder + pdf_file_name_without_ext + "_textract_metadata.txt"
         )
 
-        with open(all_textract_request_metadata_file_path, "w") as f:
-            f.write(all_request_metadata_str)
+        secure_file_write(
+            all_textract_request_metadata_file_path, all_request_metadata_str
+        )
 
         # Add the request metadata to the log outputs if not there already
         if all_textract_request_metadata_file_path not in log_files_output_paths:
@@ -2785,10 +2787,10 @@ def redact_image_pdf(
                 if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
                     if original_textract_data != textract_data:
                         # Write the updated existing textract data back to the JSON file
-                        with open(textract_json_file_path, "w") as json_file:
-                            json.dump(
-                                textract_data, json_file, separators=(",", ":")
-                            )  # indent=4 makes the JSON file pretty-printed
+                        secure_file_write(
+                            textract_json_file_path,
+                            json.dumps(textract_data, separators=(",", ":")),
+                        )
 
                         if textract_json_file_path not in log_files_output_paths:
                             log_files_output_paths.append(textract_json_file_path)
@@ -2848,10 +2850,10 @@ def redact_image_pdf(
             if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
                 # Write the updated existing textract data back to the JSON file
                 if original_textract_data != textract_data:
-                    with open(textract_json_file_path, "w") as json_file:
-                        json.dump(
-                            textract_data, json_file, separators=(",", ":")
-                        )  # indent=4 makes the JSON file pretty-printed
+                    secure_file_write(
+                        textract_json_file_path,
+                        json.dumps(textract_data, separators=(",", ":")),
+                    )
 
                 if textract_json_file_path not in log_files_output_paths:
                     log_files_output_paths.append(textract_json_file_path)
@@ -2907,10 +2909,10 @@ def redact_image_pdf(
         # Write the updated existing textract data back to the JSON file
 
         if original_textract_data != textract_data:
-            with open(textract_json_file_path, "w") as json_file:
-                json.dump(
-                    textract_data, json_file, separators=(",", ":")
-                )  # indent=4 makes the JSON file pretty-printed
+            secure_file_write(
+                textract_json_file_path,
+                json.dumps(textract_data, separators=(",", ":")),
+            )
 
         if textract_json_file_path not in log_files_output_paths:
             log_files_output_paths.append(textract_json_file_path)

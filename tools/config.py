@@ -382,7 +382,7 @@ CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
 )  # Choose between "tesseract", "hybrid", and "paddle". "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.
 
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
-    "PREPROCESS_LOCAL_OCR_IMAGES", "True"
+    "PREPROCESS_LOCAL_OCR_IMAGES", "False"
 )  # Whether to try and preprocess images before extracting text. NOTE: I have found in testing that this doesn't necessarily imporove results, and greatly slows down extraction.
 
 # Entities for redaction

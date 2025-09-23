@@ -10,6 +10,7 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     SAVE_LOGS_TO_CSV,
 )
+from tools.secure_path_utils import secure_join
 
 PandasDataFrame = Type[pd.DataFrame]
 
@@ -90,7 +91,7 @@ def download_folder_from_s3(
             for obj in response.get("Contents", []):
                 # Extract object key and construct local file path
                 object_key = obj["Key"]
-                local_file_path = os.path.join(
+                local_file_path = secure_join(
                     local_folder, os.path.relpath(object_key, s3_folder)
                 )
 
@@ -143,8 +144,8 @@ def download_files_from_s3(
                 print("Found filenames in AWS folder: ", filenames)
 
             for filename in filenames:
-                object_key = os.path.join(s3_folder, filename)
-                local_file_path = os.path.join(local_folder, filename)
+                object_key = secure_join(s3_folder, filename)
+                local_file_path = secure_join(local_folder, filename)
 
                 # Create directories if necessary
                 os.makedirs(os.path.dirname(local_file_path), exist_ok=True)

@@ -1,6 +1,5 @@
 import base64
 import os
-import re
 import secrets
 import time
 import unicodedata
@@ -20,7 +19,7 @@ from presidio_analyzer import (
     AnalyzerEngine,
     BatchAnalyzerEngine,
     DictAnalyzerResult,
-    RecognizerResult
+    RecognizerResult,
 )
 from presidio_anonymizer import AnonymizerEngine, BatchAnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
@@ -57,6 +56,7 @@ from tools.load_spacy_model_custom_recognisers import (
 
 # Use custom version of analyze_dict to be able to track progress
 from tools.presidio_analyzer_custom import analyze_dict
+from tools.secure_path_utils import secure_file_write, secure_join
 
 if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
     DO_INITIAL_TABULAR_DATA_CLEAN = True
@@ -406,22 +406,21 @@ def handle_docx_anonymisation(
     base_name = os.path.basename(file_path)
     file_name_without_ext = os.path.splitext(base_name)[0]
 
-    output_docx_path = os.path.join(
+    output_docx_path = secure_join(
         output_folder, f"{file_name_without_ext}_redacted.docx"
     )
-    log_file_path = os.path.join(
+    log_file_path = secure_join(
         output_folder, f"{file_name_without_ext}_redacted_log.txt"
     )
 
-    output_xlsx_path = os.path.join(
+    output_xlsx_path = secure_join(
         output_folder, f"{file_name_without_ext}_redacted.csv"
     )
 
     anonymised_df.to_csv(output_xlsx_path, encoding="utf-8-sig", index=None)
     doc.save(output_docx_path)
 
-    with open(log_file_path, "w", encoding="utf-8-sig") as f:
-        f.write(decision_log)
+    secure_file_write(log_file_path, decision_log, encoding="utf-8-sig")
 
     return output_docx_path, log_file_path, output_xlsx_path, comprehend_query_number
 
@@ -542,8 +541,6 @@ def anonymise_files_with_open_text(
             print(
                 "Connecting to Comprehend using AWS access key and secret keys from textboxes."
             )
-            print("aws_access_key_textbox:", aws_access_key_textbox)
-            print("aws_secret_access_key:", aws_secret_key_textbox)
             comprehend_client = boto3.client(
                 "comprehend",
                 aws_access_key_id=aws_access_key_textbox,
@@ -801,7 +798,10 @@ def anonymise_files_with_open_text(
             + "\n\nGo to to the Redaction settings tab to see redaction logs. Please give feedback on the results below to help improve this app."
         )
 
-        out_message_out = re.sub(r"^\n+|^\. ", "", out_message_out).strip()
+        from tools.secure_regex_utils import safe_remove_leading_newlines
+
+        out_message_out = safe_remove_leading_newlines(out_message_out)
+        out_message_out = out_message_out.lstrip(". ")
 
     return (
         out_message_out,
@@ -1004,8 +1004,7 @@ def tabular_anonymise_wrapper_func(
             + excel_sheet_name
             + "_decision_process_output.txt"
         )
-        with open(decision_process_log_output_file, "w") as f:
-            f.write(decision_process_output_str)
+        secure_file_write(decision_process_log_output_file, decision_process_output_str)
 
     else:
         anon_export_file_name = (
@@ -1016,8 +1015,7 @@ def tabular_anonymise_wrapper_func(
         decision_process_log_output_file = (
             anon_export_file_name + "_decision_process_output.txt"
         )
-        with open(decision_process_log_output_file, "w") as f:
-            f.write(decision_process_output_str)
+        secure_file_write(decision_process_log_output_file, decision_process_output_str)
 
     out_file_paths.append(anon_export_file_name)
     log_files_output_paths.append(decision_process_log_output_file)
@@ -1296,11 +1294,9 @@ def anonymise_script(
     redact_config = {"DEFAULT": OperatorConfig("redact")}
     hash_config = {"DEFAULT": OperatorConfig("hash")}
     mask_config = {
-        "DEFAULT": OperatorConfig("mask", {
-            "masking_char": "*",
-            "chars_to_mask": 100,
-            "from_end": True
-        })
+        "DEFAULT": OperatorConfig(
+            "mask", {"masking_char": "*", "chars_to_mask": 100, "from_end": True}
+        )
     }
     people_encrypt_config = {
         "PERSON": OperatorConfig("encrypt", {"key": key_string})
@@ -1343,7 +1339,8 @@ def anonymise_script(
     combined_config = {**chosen_mask_config}
 
     anonymizer_results = batch_anonymizer.anonymize_dict(
-        analyzer_results, operators=combined_config)
+        analyzer_results, operators=combined_config
+    )
 
     scrubbed_df = pd.DataFrame(anonymizer_results)
 

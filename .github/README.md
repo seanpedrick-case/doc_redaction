@@ -27,7 +27,7 @@ This directory contains GitHub Actions workflows for automated testing of the CL
 
 ### 3. **Multi-OS Testing** (`.github/workflows/multi-os-test.yml`)
 - **Purpose**: Cross-platform testing
-- **OS**: Ubuntu, Windows, macOS
+- **OS**: Ubuntu, macOS (Windows not included currently but may be reintroduced)
 - **Python**: 3.10, 3.11, 3.12
 - **Features**: Tests compatibility across different operating systems
 

@@ -34,6 +34,7 @@ from tools.config import (
     TEXTRACT_TEXT_EXTRACT_OPTION,
 )
 from tools.helper_functions import get_file_name_without_type, read_file
+from tools.secure_path_utils import secure_file_read, secure_join
 
 # from tools.aws_textract import load_and_convert_textract_json
 
@@ -143,8 +144,8 @@ def process_single_page_for_image_conversion(
     if create_images is True:
         try:
             # Construct the full output directory path
-            image_output_dir = os.path.join(os.getcwd(), input_folder)
-            out_path = os.path.join(
+            image_output_dir = secure_join(os.getcwd(), input_folder)
+            out_path = secure_join(
                 image_output_dir, f"{os.path.basename(pdf_path)}_{page_num}.png"
             )
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -914,8 +915,8 @@ def prepare_image_or_pdf(
 
             if (file_extension in [".json"]) & (prepare_for_review is True):
                 if isinstance(file_path, str):
-                    with open(file_path, "r") as json_file:
-                        all_annotations_object = json.load(json_file)
+                    json_content = secure_file_read(file_path)
+                    all_annotations_object = json.loads(json_content)
                 else:
                     # Assuming file_path is a NamedString or similar
                     all_annotations_object = json.loads(
@@ -936,7 +937,7 @@ def prepare_image_or_pdf(
                 else:
                     output_textract_json_file_name = file_path_without_ext + ".json"
 
-                out_textract_path = os.path.join(
+                out_textract_path = secure_join(
                     output_folder, output_textract_json_file_name
                 )
 
@@ -956,7 +957,7 @@ def prepare_image_or_pdf(
                 # if not file_path.endswith("_ocr_results_with_words.json"): output_ocr_results_with_words_json_file_name = file_path_without_ext + "_ocr_results_with_words.json"
                 # else: output_ocr_results_with_words_json_file_name = file_path_without_ext + ".json"
 
-                out_ocr_results_with_words_path = os.path.join(
+                out_ocr_results_with_words_path = secure_join(
                     output_folder, output_ocr_results_with_words_json_file_name
                 )
 
@@ -1026,10 +1027,12 @@ def prepare_image_or_pdf(
             if all_annotations_object:
 
                 # Get list of page numbers
+                from tools.secure_regex_utils import safe_extract_page_number_from_path
+
                 image_file_paths_pages = [
-                    int(re.search(r"_(\d+)\.png$", os.path.basename(s)).group(1))
+                    safe_extract_page_number_from_path(s)
                     for s in image_file_paths
-                    if re.search(r"_(\d+)\.png$", os.path.basename(s))
+                    if safe_extract_page_number_from_path(s) is not None
                 ]
                 image_file_paths_pages = [int(i) for i in image_file_paths_pages]
 
@@ -1046,15 +1049,19 @@ def prepare_image_or_pdf(
                         try:
                             if not annotation:
                                 annotation = {"image": "", "boxes": []}
-                                annotation_page_number = int(
-                                    re.search(r"_(\d+)\.png$", image_file_path).group(1)
+                                annotation_page_number = (
+                                    safe_extract_page_number_from_path(image_file_path)
                                 )
+                                if annotation_page_number is None:
+                                    continue
                             else:
-                                annotation_page_number = int(
-                                    re.search(
-                                        r"_(\d+)\.png$", annotation["image"]
-                                    ).group(1)
+                                annotation_page_number = (
+                                    safe_extract_page_number_from_path(
+                                        annotation["image"]
+                                    )
                                 )
+                                if annotation_page_number is None:
+                                    continue
                         except Exception as e:
                             print("Extracting page number from image failed due to:", e)
                             annotation_page_number = 0
@@ -1110,7 +1117,7 @@ def prepare_image_or_pdf(
         if file_extension in [".zip"]:
 
             # Assume it's a Textract response object. Copy it to the output folder so it can be used later.
-            out_folder = os.path.join(
+            out_folder = secure_join(
                 output_folder, file_path_without_ext + "_textract.json"
             )
 
@@ -1125,7 +1132,7 @@ def prepare_image_or_pdf(
                     json_filename = json_files[0]
 
                     # Extract the JSON file to the same directory as the ZIP file
-                    extracted_path = os.path.join(
+                    extracted_path = secure_join(
                         os.path.dirname(file_path), json_filename
                     )
                     zip_ref.extract(json_filename, os.path.dirname(file_path))

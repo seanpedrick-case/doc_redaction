@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import os
-import re
 import time
 import uuid
 from collections.abc import Sequence
@@ -105,10 +104,17 @@ class CSVLogger_custom(FlaggingCallback):
             self.dataset_filepath = self.flagging_dir / self.dataset_file_name
         elif dataset_files:
             try:
-                latest_file = max(
-                    dataset_files, key=lambda f: int(re.findall(r"\d+", f.stem)[0])
+                from tools.secure_regex_utils import (
+                    safe_extract_latest_number_from_filename,
                 )
-                latest_num = int(re.findall(r"\d+", latest_file.stem)[0])
+
+                latest_file = max(
+                    dataset_files,
+                    key=lambda f: safe_extract_latest_number_from_filename(f.stem) or 0,
+                )
+                latest_num = (
+                    safe_extract_latest_number_from_filename(latest_file.stem) or 0
+                )
 
                 with open(latest_file, newline="", encoding="utf-8") as csvfile:
                     reader = csv.reader(csvfile)
