@@ -22,7 +22,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
     
     - name: Cache pip dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
@@ -36,7 +36,7 @@ jobs:
           tesseract-ocr \
           tesseract-ocr-eng \
           poppler-utils \
-          libgl1-mesa-glx \
+          libgl1-mesa-dri \
           libglib2.0-0
     
     - name: Install Python dependencies
@@ -201,7 +201,7 @@ jobs:
         fail_ci_if_error: false
     
     - name: Upload test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-results-python-${{ matrix.python-version }}

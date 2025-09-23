@@ -36,7 +36,7 @@ jobs:
           tesseract-ocr \
           tesseract-ocr-eng \
           poppler-utils \
-          libgl1-mesa-glx \
+          libgl1-mesa-dri \
           libglib2.0-0
     
     - name: Install system dependencies (macOS)
