@@ -52,7 +52,9 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: |
         # Create tools directory
-        mkdir C:\tools
+        if (!(Test-Path "C:\tools")) {
+            mkdir C:\tools
+        }
         
         # Download and install Tesseract
         $tesseractUrl = "https://github.com/UB-Mannheim/tesseract/releases/download/v5.3.3.20231005/tesseract-ocr-w64-setup-5.3.3.20231005.exe"
