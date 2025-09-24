@@ -1017,8 +1017,6 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
 
     progress(1.0, desc="Completed annotation processing")
 
-    print("final_annotations_list:", final_annotations_list)
-
     return (
         final_annotations_list,
         existing_annotations_list,

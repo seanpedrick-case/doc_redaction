@@ -15,12 +15,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest] # windows-latest removed for now as I have not been able to install tesseract on Windows using this method
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
         exclude:
           # Exclude some combinations to reduce CI time
-          #- os: windows-latest
-          #  python-version: "3.10"
+          - os: windows-latest
+            python-version: "3.11"
           - os: macos-latest
             python-version: "3.11"
 
@@ -51,8 +51,37 @@ jobs:
     - name: Install system dependencies (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        # Windows dependencies are handled by the Python packages
-        echo "Windows system dependencies handled by Python packages"
+        # Create tools directory
+        mkdir C:\tools
+        
+        # Download and install Tesseract
+        $tesseractUrl = "https://github.com/UB-Mannheim/tesseract/releases/download/v5.3.3.20231005/tesseract-ocr-w64-setup-5.3.3.20231005.exe"
+        $tesseractInstaller = "C:\tools\tesseract-installer.exe"
+        Invoke-WebRequest -Uri $tesseractUrl -OutFile $tesseractInstaller
+        
+        # Install Tesseract silently
+        Start-Process -FilePath $tesseractInstaller -ArgumentList "/S", "/D=C:\tools\tesseract" -Wait
+        
+        # Download and extract Poppler
+        $popplerUrl = "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip"
+        $popplerZip = "C:\tools\poppler.zip"
+        Invoke-WebRequest -Uri $popplerUrl -OutFile $popplerZip
+        
+        # Extract Poppler
+        Expand-Archive -Path $popplerZip -DestinationPath C:\tools\poppler -Force
+        
+        # Add to PATH
+        echo "C:\tools\tesseract" >> $env:GITHUB_PATH
+        echo "C:\tools\poppler\poppler-24.02.0\Library\bin" >> $env:GITHUB_PATH
+        
+        # Set environment variables for your application
+        echo "TESSERACT_FOLDER=C:\tools\tesseract" >> $env:GITHUB_ENV
+        echo "POPPLER_FOLDER=C:\tools\poppler\poppler-24.02.0\Library\bin" >> $env:GITHUB_ENV
+        echo "TESSERACT_DATA_FOLDER=C:\tools\tesseract\tessdata" >> $env:GITHUB_ENV
+        
+        # Verify installation
+        tesseract --version
+        pdftoppm -v
     
     - name: Install Python dependencies
       run: |
