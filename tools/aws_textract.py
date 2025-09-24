@@ -16,6 +16,7 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
 )
 from tools.custom_image_analyser_engine import CustomImageRecognizerResult, OCRResult
+from tools.secure_path_utils import secure_file_read
 
 
 def extract_textract_metadata(response: object):
@@ -478,8 +479,8 @@ def load_and_convert_textract_json(
         log_files_output_paths.append(textract_json_file_path)
 
     try:
-        with open(textract_json_file_path, "r", encoding="utf-8") as json_file:
-            textract_data = json.load(json_file)
+        json_content = secure_file_read(textract_json_file_path, encoding="utf-8")
+        textract_data = json.loads(json_content)
     except json.JSONDecodeError:
         print("Error: Failed to parse Textract JSON file. Returning empty data.")
         return {}, True, log_files_output_paths  # Indicate failure

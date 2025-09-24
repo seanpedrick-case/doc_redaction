@@ -29,3 +29,11 @@ cdk.context.json
 .quarto/*
 /.quarto/
 /_site/
+test/config/*
+test/feedback/*
+test/input/*
+test/logs/*
+test/output/*
+test/tmp/*
+test/usage/*
+.ruff_cache/*

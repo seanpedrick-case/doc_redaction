@@ -1,6 +1,5 @@
 import os
 import random
-import re
 import string
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -37,6 +36,9 @@ from tools.file_conversion import (
 )
 from tools.file_redaction import redact_page_with_pymupdf
 from tools.helper_functions import detect_file_type, get_file_name_without_type
+from tools.secure_path_utils import (
+    secure_file_write,
+)
 
 if not MAX_IMAGE_PIXELS:
     Image.MAX_IMAGE_PIXELS = None
@@ -535,10 +537,14 @@ def update_annotator_page_from_review_df(
             for i, page_state_entry in enumerate(out_image_annotations_state):
                 # Assuming page_state_entry has a 'page' key (1-based)
 
-                match = re.search(r"(\d+)\.png$", page_state_entry["image"])
-                if match:
-                    page_no = int(match.group(1))
-                else:
+                from tools.secure_regex_utils import (
+                    safe_extract_page_number_from_filename,
+                )
+
+                page_no = safe_extract_page_number_from_filename(
+                    page_state_entry["image"]
+                )
+                if page_no is None:
                     page_no = 0
 
                 if (
@@ -834,15 +840,11 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
         valid = False
         if isinstance(colour_label, str):
             label_str = colour_label.strip()
-            match = re.match(
-                r"^\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,?\s*\)$", label_str
-            )
-            if match:
-                r_val, g_val, b_val = (
-                    int(match.group(1)),
-                    int(match.group(2)),
-                    int(match.group(3)),
-                )
+            from tools.secure_regex_utils import safe_extract_rgb_values
+
+            rgb_values = safe_extract_rgb_values(label_str)
+            if rgb_values:
+                r_val, g_val, b_val = rgb_values
                 if 0 <= r_val <= 255 and 0 <= g_val <= 255 and 0 <= b_val <= 255:
                     valid = True
         elif isinstance(colour_label, (tuple, list)) and len(colour_label) == 3:
@@ -2568,9 +2570,9 @@ def create_xfdf(
         pymupdf_page = pymupdf_doc.load_page(page_python_format)
 
         if document_cropboxes and page_python_format < len(document_cropboxes):
-            match = re.findall(
-                r"[-+]?\d*\.\d+|\d+", document_cropboxes[page_python_format]
-            )
+            from tools.secure_regex_utils import safe_extract_numbers
+
+            match = safe_extract_numbers(document_cropboxes[page_python_format])
             if match and len(match) == 4:
                 rect_values = list(map(float, match))
                 pymupdf_page.set_cropbox(Rect(*rect_values))
@@ -2722,8 +2724,7 @@ def convert_df_to_xfdf(
 
             output_path = output_folder + file_path_name + "_adobe.xfdf"
 
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(xfdf_content)
+            secure_file_write(output_path, xfdf_content, encoding="utf-8")
 
             output_paths.append(output_path)
 

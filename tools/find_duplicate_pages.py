@@ -521,8 +521,9 @@ def clean_and_stem_text_series(df: pd.DataFrame, column: str):
     """
 
     def _clean_text(raw_text):
-        # Remove HTML tags
-        clean = re.sub(r"<.*?>", "", raw_text)
+        from tools.secure_regex_utils import safe_clean_text
+
+        clean = safe_clean_text(raw_text, remove_html=True)
         clean = " ".join(clean.split())
         # Join the cleaned words back into a string
         return clean
@@ -1271,9 +1272,11 @@ def apply_whole_page_redactions_from_list(
 
         list_whole_pages_to_redact = []
         for annotation in new_annotations_with_bounding_boxes:
-            match = re.search(r"_(\d+)\.png$", annotation["image"])
-            if match:
-                page = int(match.group(1)) + 1
+            from tools.secure_regex_utils import safe_extract_page_number_from_path
+
+            page_num = safe_extract_page_number_from_path(annotation["image"])
+            if page_num is not None:
+                page = page_num + 1
                 list_whole_pages_to_redact.append(page)
             else:
                 print(

@@ -856,14 +856,14 @@ def check_for_secret(secret_name: str, secret_value: dict = ""):
     try:
         # Try to get the secret. If it doesn't exist, a ResourceNotFoundException will be raised.
         secret_value = secretsmanager_client.get_secret_value(SecretId=secret_name)
-        print(f"Secret '{secret_name}' already exists.")
+        print("Secret already exists.")
         return True, secret_value
     except secretsmanager_client.exceptions.ResourceNotFoundException:
         print("Secret not found")
         return False, {}
     except Exception as e:
         # Handle other potential exceptions during the get operation
-        print(f"Error checking for secret '{secret_name}': {e}")
+        print(f"Error checking for secret: {e}")
         return False, {}
 
 

@@ -12,7 +12,7 @@ import sys
 # Add the parent directory to the path so we can import the test module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from test.test import run_all_tests
+from test import run_all_tests
 
 if __name__ == "__main__":
     print("Starting CLI Redaction Test Suite...")
