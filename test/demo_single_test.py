@@ -14,7 +14,7 @@ import tempfile
 # Add the parent directory to the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from test.test import run_cli_redact
+from test import run_cli_redact
 
 
 def demo_pdf_redaction():

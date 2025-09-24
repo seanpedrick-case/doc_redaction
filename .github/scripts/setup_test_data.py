@@ -8,6 +8,14 @@ import os
 
 import pandas as pd
 
+ # Install reportlab if not available
+try:
+      import reportlab
+except ImportError:
+      import subprocess
+      subprocess.check_call(['pip', 'install', 'reportlab'])
+      import reportlab
+
 
 def create_directories():
     """Create necessary directories."""
@@ -152,7 +160,7 @@ def create_ocr_output():
         "top": [0.95, 0.92, 0.88],
         "width": [0.05, 0.02, 0.02],
         "height": [0.01, 0.02, 0.02],
-        "line": [1, 2, 3],
+        "line": [1, 2, 3]
     }
     df = pd.DataFrame(ocr_data)
     df.to_csv(

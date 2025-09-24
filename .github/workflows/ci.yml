@@ -186,9 +186,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install safety bandit
     
-    - name: Run safety scan
-      run: |
-        safety scan -r requirements.txt
+    #- name: Run safety scan - removed as now requires login
+    #  run: |
+    #    safety scan -r requirements.txt
     
     - name: Run bandit security check
       run: |

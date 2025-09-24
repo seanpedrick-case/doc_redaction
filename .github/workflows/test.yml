@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.10, 3.11, 3.12]
+        python-version: [3.11, 3.12, 3.13]
 
     steps:
     - uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest pytest-cov pytest-html pytest-xdist
+        pip install pytest pytest-cov pytest-html pytest-xdist reportlab pillow
     
     - name: Download spaCy model
       run: |
@@ -64,16 +64,18 @@ jobs:
         # Create dummy PDF for testing
         python -c "
         import os
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.pagesizes import letter
-        
+
         # Install reportlab if not available
         try:
-            import reportlab
+          import reportlab
         except ImportError:
-            import subprocess
-            subprocess.check_call(['pip', 'install', 'reportlab'])
-            import reportlab
+          import subprocess
+          subprocess.check_call(['pip', 'install', 'reportlab'])
+          import reportlab
+
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import letter      
+        
         
         # Create dummy PDF
         c = canvas.Canvas('example_data/example_of_emails_sent_to_a_professor_before_applying.pdf', pagesize=letter)
@@ -148,15 +150,24 @@ jobs:
         
         # Create dummy OCR output
         ocr_data = {
-            'file_name': ['test.pdf', 'test.pdf'],
-            'page_number': [1, 2],
-            'text': ['This is page 1 content', 'This is page 2 content'],
-            'confidence': [0.95, 0.92]
+        "page": [1, 2, 3],
+        "text": [
+            "This is page 1 content with some text",
+            "This is page 2 content with different text",
+            "This is page 3 content with more text",
+        ],
+        "left": [0.1, 0.3, 0.5],
+        "top": [0.95, 0.92, 0.88],
+        "width": [0.05, 0.02, 0.02],
+        "height": [0.01, 0.02, 0.02],
+        "line": [1, 2, 3]
         }
         df = pd.DataFrame(ocr_data)
-        os.makedirs('example_data/example_outputs', exist_ok=True)
-        df.to_csv('example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv', index=False)
-        print('Created dummy OCR output CSV')
+        df.to_csv(
+            "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv",
+            index=False,
+        )
+        print("Created dummy OCR output CSV")
         "
     
     - name: Create dummy image for testing

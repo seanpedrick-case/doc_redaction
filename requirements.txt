@@ -24,8 +24,9 @@ rapidfuzz==3.13.0
 python-dotenv==1.0.1
 awslambdaric==3.1.1
 python-docx==1.2.0
-paddlepaddle==3.1.0 # Consider installing the GPU version for faster local OCR inference with PaddleOCR: paddlepaddle-gpu==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/ , compatible with CUDA 12.6. See this for more details: https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/linux-pip_en.html#span-id-gpu-gpu-version-of-paddlepaddle-span
-paddleocr==3.1.1
+# Optional: uncomment the below to install paddleOCR if you want to use hybrid text extraction (tesseract plus paddleocr)
+# paddlepaddle==3.1.0 # Consider installing the GPU version for faster local OCR inference with PaddleOCR: paddlepaddle-gpu==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/ , compatible with CUDA 12.6. See this for more details: https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/linux-pip_en.html#span-id-gpu-gpu-version-of-paddlepaddle-span
+# paddleocr==3.1.1
 
 # Test dependencies
 pytest>=7.0.0
