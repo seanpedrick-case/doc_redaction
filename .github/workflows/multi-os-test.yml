@@ -57,7 +57,7 @@ jobs:
         }
         
         # Download and install Tesseract
-        $tesseractUrl = "https://github.com/UB-Mannheim/tesseract/releases/download/v5.3.3.20231005/tesseract-ocr-w64-setup-5.3.3.20231005.exe"
+        $tesseractUrl = "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
         $tesseractInstaller = "C:\tools\tesseract-installer.exe"
         Invoke-WebRequest -Uri $tesseractUrl -OutFile $tesseractInstaller
         
@@ -65,7 +65,7 @@ jobs:
         Start-Process -FilePath $tesseractInstaller -ArgumentList "/S", "/D=C:\tools\tesseract" -Wait
         
         # Download and extract Poppler
-        $popplerUrl = "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip"
+        $popplerUrl = "https://github.com/oschwartz10612/poppler-windows/releases/download/v25.07.0-0/Release-25.07.0-0.zip"
         $popplerZip = "C:\tools\poppler.zip"
         Invoke-WebRequest -Uri $popplerUrl -OutFile $popplerZip
         

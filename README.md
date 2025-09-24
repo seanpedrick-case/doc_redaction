@@ -10,7 +10,7 @@ license: agpl-3.0
 ---
 # Document redaction
 
-version: 1.1.0
+version: 1.2.0
 
 Redact personally identifiable information (PII) from documents (pdf, images), Word files (.docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a walkthrough on how to use the app. Below is a very brief overview.
     
@@ -44,7 +44,7 @@ Installation on Windows requires downloading installers and adding the programs 
 
 
 2.  **Install Poppler:**
-    *   Download the latest Poppler binary for Windows. A common source is the [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows) GitHub releases page. Download the `.zip` file (e.g., `poppler-24.02.0-win.zip`).
+    *   Download the latest Poppler binary for Windows. A common source is the [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows) GitHub releases page. Download the `.zip` file (e.g., `poppler-25.07.0-win.zip`).
     *   Extract the contents of the zip file to a permanent location on your computer, for example, `C:\Program Files\poppler\`.
     *   You must add the `bin` folder from your Poppler installation to your system's PATH environment variable.
         *   Search for "Edit the system environment variables" in the Windows Start Menu and open it.
