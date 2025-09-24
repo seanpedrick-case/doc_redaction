@@ -74,16 +74,16 @@ jobs:
         
         # Add to PATH
         echo "C:\tools\tesseract" >> $env:GITHUB_PATH
-        echo "C:\tools\poppler\poppler-24.02.0\Library\bin" >> $env:GITHUB_PATH
+        echo "C:\tools\poppler\poppler-25.07.0\Library\bin" >> $env:GITHUB_PATH
         
         # Set environment variables for your application
         echo "TESSERACT_FOLDER=C:\tools\tesseract" >> $env:GITHUB_ENV
-        echo "POPPLER_FOLDER=C:\tools\poppler\poppler-24.02.0\Library\bin" >> $env:GITHUB_ENV
+        echo "POPPLER_FOLDER=C:\tools\poppler\poppler-25.07.0\Library\bin" >> $env:GITHUB_ENV
         echo "TESSERACT_DATA_FOLDER=C:\tools\tesseract\tessdata" >> $env:GITHUB_ENV
         
-        # Verify installation
-        tesseract --version
-        pdftoppm -v
+        # Verify installation using full paths (since PATH won't be updated in current session)
+        & "C:\tools\tesseract\tesseract.exe" --version
+        & "C:\tools\poppler\poppler-25.07.0\Library\bin\pdftoppm.exe" -v
     
     - name: Install Python dependencies
       run: |
