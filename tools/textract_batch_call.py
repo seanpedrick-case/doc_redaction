@@ -268,15 +268,12 @@ def analyse_document_with_textract_api(
 
         # File path
         log_file_path = secure_join(local_output_dir, "textract_document_jobs.csv")
-        log_file_path_job_id = secure_join(
-            local_output_dir, pdf_filename + "_textract_document_jobs_job_id.txt"
-        )
 
         # Write latest job ID to local text file
         secure_file_write(
             local_output_dir,
             pdf_filename + "_textract_document_jobs_job_id.txt",
-            job_id
+            job_id,
         )
 
         # Check if file exists
@@ -458,9 +455,7 @@ def download_textract_job_files(
     local_output_path = secure_join(local_output_dir, local_output_filename)
 
     secure_file_write(
-        local_output_dir,
-        local_output_filename,
-        json.dumps(combined_output)
+        local_output_dir, local_output_filename, json.dumps(combined_output)
     )
 
     print(f"Combined Textract output written to {local_output_path}")

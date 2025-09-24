@@ -2722,10 +2722,10 @@ def convert_df_to_xfdf(
 
             # Split output_folder (trusted base) from filename (untrusted)
             secure_file_write(
-                output_folder, 
-                file_path_name + "_adobe.xfdf", 
-                xfdf_content, 
-                encoding="utf-8"
+                output_folder,
+                file_path_name + "_adobe.xfdf",
+                xfdf_content,
+                encoding="utf-8",
             )
 
             # Reconstruct the full path for logging purposes

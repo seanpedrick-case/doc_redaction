@@ -484,7 +484,7 @@ def load_and_convert_textract_json(
         textract_json_file_path_obj = Path(textract_json_file_path)
         base_dir = textract_json_file_path_obj.parent
         filename = textract_json_file_path_obj.name
-        
+
         json_content = secure_file_read(base_dir, filename, encoding="utf-8")
         textract_data = json.loads(json_content)
     except json.JSONDecodeError:

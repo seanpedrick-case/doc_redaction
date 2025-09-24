@@ -920,7 +920,7 @@ def prepare_image_or_pdf(
                     file_path_obj = Path(file_path)
                     base_dir = file_path_obj.parent
                     filename = file_path_obj.name
-                    
+
                     json_content = secure_file_read(base_dir, filename)
                     all_annotations_object = json.loads(json_content)
                 else:

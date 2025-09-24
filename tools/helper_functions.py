@@ -605,7 +605,7 @@ def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:
 
     # Ensure folder_path is a safe, absolute path
     safe_folder_path = Path(folder_path).resolve()
-    
+
     # List all files in the specified folder
     for filename in os.listdir(safe_folder_path):
         # Construct full file path using secure_join to prevent path traversal

@@ -1306,7 +1306,7 @@ def choose_and_run_redactor(
         secure_file_write(
             output_folder,
             pdf_file_name_without_ext + "_textract_metadata.txt",
-            all_request_metadata_str
+            all_request_metadata_str,
         )
 
         # Reconstruct the full path for logging purposes

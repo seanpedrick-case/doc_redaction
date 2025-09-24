@@ -411,10 +411,10 @@ def handle_docx_anonymisation(
     )
     # Use secure_file_write with base_path and filename for better security
     secure_file_write(
-        output_folder, 
-        f"{file_name_without_ext}_redacted_log.txt", 
-        decision_log, 
-        encoding="utf-8-sig"
+        output_folder,
+        f"{file_name_without_ext}_redacted_log.txt",
+        decision_log,
+        encoding="utf-8-sig",
     )
 
     # Reconstruct log_file_path for return value
@@ -1008,8 +1008,11 @@ def tabular_anonymise_wrapper_func(
         # Use secure_file_write with base_path and filename for better security
         secure_file_write(
             output_folder,
-            out_file_part + "_redacted.xlsx_" + excel_sheet_name + "_decision_process_output.txt",
-            decision_process_output_str
+            out_file_part
+            + "_redacted.xlsx_"
+            + excel_sheet_name
+            + "_decision_process_output.txt",
+            decision_process_output_str,
         )
 
         # Reconstruct full path for logging purposes
@@ -1029,8 +1032,11 @@ def tabular_anonymise_wrapper_func(
         # Use secure_file_write with base_path and filename for better security
         secure_file_write(
             output_folder,
-            out_file_part + "_anon_" + anon_strat_txt + ".csv_decision_process_output.txt",
-            decision_process_output_str
+            out_file_part
+            + "_anon_"
+            + anon_strat_txt
+            + ".csv_decision_process_output.txt",
+            decision_process_output_str,
         )
 
         # Reconstruct full path for logging purposes
