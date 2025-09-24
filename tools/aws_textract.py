@@ -2,6 +2,7 @@ import io
 import json
 import os
 import time
+from pathlib import Path
 from typing import List
 
 import boto3
@@ -479,7 +480,12 @@ def load_and_convert_textract_json(
         log_files_output_paths.append(textract_json_file_path)
 
     try:
-        json_content = secure_file_read(textract_json_file_path, encoding="utf-8")
+        # Split the path into base directory and filename for security
+        textract_json_file_path_obj = Path(textract_json_file_path)
+        base_dir = textract_json_file_path_obj.parent
+        filename = textract_json_file_path_obj.name
+        
+        json_content = secure_file_read(base_dir, filename, encoding="utf-8")
         textract_data = json.loads(json_content)
     except json.JSONDecodeError:
         print("Error: Failed to parse Textract JSON file. Returning empty data.")

@@ -409,6 +409,15 @@ def handle_docx_anonymisation(
     output_docx_path = secure_join(
         output_folder, f"{file_name_without_ext}_redacted.docx"
     )
+    # Use secure_file_write with base_path and filename for better security
+    secure_file_write(
+        output_folder, 
+        f"{file_name_without_ext}_redacted_log.txt", 
+        decision_log, 
+        encoding="utf-8-sig"
+    )
+
+    # Reconstruct log_file_path for return value
     log_file_path = secure_join(
         output_folder, f"{file_name_without_ext}_redacted_log.txt"
     )
@@ -419,8 +428,6 @@ def handle_docx_anonymisation(
 
     anonymised_df.to_csv(output_xlsx_path, encoding="utf-8-sig", index=None)
     doc.save(output_docx_path)
-
-    secure_file_write(log_file_path, decision_log, encoding="utf-8-sig")
 
     return output_docx_path, log_file_path, output_xlsx_path, comprehend_query_number
 
@@ -998,13 +1005,20 @@ def tabular_anonymise_wrapper_func(
             # Write each DataFrame to a different worksheet.
             anon_df_out.to_excel(writer, sheet_name=excel_sheet_name, index=None)
 
+        # Use secure_file_write with base_path and filename for better security
+        secure_file_write(
+            output_folder,
+            out_file_part + "_redacted.xlsx_" + excel_sheet_name + "_decision_process_output.txt",
+            decision_process_output_str
+        )
+
+        # Reconstruct full path for logging purposes
         decision_process_log_output_file = (
             anon_xlsx_export_file_name
             + "_"
             + excel_sheet_name
             + "_decision_process_output.txt"
         )
-        secure_file_write(decision_process_log_output_file, decision_process_output_str)
 
     else:
         anon_export_file_name = (
@@ -1012,10 +1026,17 @@ def tabular_anonymise_wrapper_func(
         )
         anon_df_out.to_csv(anon_export_file_name, index=None, encoding="utf-8-sig")
 
+        # Use secure_file_write with base_path and filename for better security
+        secure_file_write(
+            output_folder,
+            out_file_part + "_anon_" + anon_strat_txt + ".csv_decision_process_output.txt",
+            decision_process_output_str
+        )
+
+        # Reconstruct full path for logging purposes
         decision_process_log_output_file = (
             anon_export_file_name + "_decision_process_output.txt"
         )
-        secure_file_write(decision_process_log_output_file, decision_process_output_str)
 
     out_file_paths.append(anon_export_file_name)
     log_files_output_paths.append(decision_process_log_output_file)

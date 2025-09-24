@@ -273,7 +273,11 @@ def analyse_document_with_textract_api(
         )
 
         # Write latest job ID to local text file
-        secure_file_write(log_file_path_job_id, job_id)
+        secure_file_write(
+            local_output_dir,
+            pdf_filename + "_textract_document_jobs_job_id.txt",
+            job_id
+        )
 
         # Check if file exists
         file_exists = os.path.exists(log_file_path)
@@ -453,7 +457,11 @@ def download_textract_job_files(
     local_output_filename = f"{output_filename_base_no_ext}_textract.json"
     local_output_path = secure_join(local_output_dir, local_output_filename)
 
-    secure_file_write(local_output_path, json.dumps(combined_output))
+    secure_file_write(
+        local_output_dir,
+        local_output_filename,
+        json.dumps(combined_output)
+    )
 
     print(f"Combined Textract output written to {local_output_path}")
 

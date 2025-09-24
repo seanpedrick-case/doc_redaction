@@ -8,6 +8,7 @@ import time
 import zipfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
@@ -915,7 +916,12 @@ def prepare_image_or_pdf(
 
             if (file_extension in [".json"]) & (prepare_for_review is True):
                 if isinstance(file_path, str):
-                    json_content = secure_file_read(file_path)
+                    # Split the path into base directory and filename for security
+                    file_path_obj = Path(file_path)
+                    base_dir = file_path_obj.parent
+                    filename = file_path_obj.name
+                    
+                    json_content = secure_file_read(base_dir, filename)
                     all_annotations_object = json.loads(json_content)
                 else:
                     # Assuming file_path is a NamedString or similar
