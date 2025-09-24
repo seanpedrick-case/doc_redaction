@@ -87,9 +87,6 @@ def is_pdf(filename):
     return filename.lower().endswith(".pdf")
 
 
-## Convert pdf to image if necessary
-
-
 def check_image_size_and_reduce(out_path: str, image: Image):
     """
     Check if a given image size is above around 4.5mb, and reduce size if necessary. 5mb is the maximum possible to submit to AWS Textract.
@@ -297,7 +294,6 @@ def process_file_for_image_creation(
 
     # Check if the file is a PDF
     elif file_extension == ".pdf":
-        # print(f"{file_path} is a PDF file. Converting to image set")
 
         # Run your function for processing PDF files here
         img_path, image_sizes_width, image_sizes_height, all_img_details = (
@@ -653,8 +649,8 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
 def prepare_image_or_pdf(
     file_paths: List[str],
     text_extract_method: str,
-    all_line_level_ocr_results_df: pd.DataFrame,
-    all_page_line_level_ocr_results_with_words_df: pd.DataFrame,
+    all_line_level_ocr_results_df: pd.DataFrame = None,
+    all_page_line_level_ocr_results_with_words_df: pd.DataFrame = None,
     latest_file_completed: int = 0,
     out_message: List[str] = list(),
     first_loop_state: bool = False,

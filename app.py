@@ -1,5 +1,4 @@
 import os
-import time
 
 import gradio as gr
 import pandas as pd
@@ -95,6 +94,7 @@ from tools.config import (
     SAVE_LOGS_TO_DYNAMODB,
     SESSION_OUTPUT_FOLDER,
     SHOW_COSTS,
+    SHOW_EXAMPLES,
     SHOW_LANGUAGE_SELECTION,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     TABULAR_PII_DETECTION_MODELS,
@@ -206,8 +206,11 @@ pd.set_option("future.no_silent_downcasting", True)
 ensure_folder_exists(CONFIG_FOLDER)
 ensure_folder_exists(OUTPUT_FOLDER)
 ensure_folder_exists(INPUT_FOLDER)
-ensure_folder_exists(GRADIO_TEMP_DIR)
-ensure_folder_exists(MPLCONFIGDIR)
+if GRADIO_TEMP_DIR:
+    ensure_folder_exists(GRADIO_TEMP_DIR)
+if MPLCONFIGDIR:
+    ensure_folder_exists(MPLCONFIGDIR)
+
 ensure_folder_exists(FEEDBACK_LOGS_FOLDER)
 ensure_folder_exists(ACCESS_LOGS_FOLDER)
 ensure_folder_exists(USAGE_LOGS_FOLDER)
@@ -291,79 +294,116 @@ if DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX:
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 
-FILE_INPUT_HEIGHT = int(FILE_INPUT_HEIGHT)
+# Load some components outside of blocks context that are used for examples
+## Redaction examples
+in_doc_files = gr.File(
+    label="Choose a PDF document or image file (PDF, JPG, PNG)",
+    file_count="multiple",
+    file_types=[".pdf", ".jpg", ".png", ".json", ".zip"],
+    height=FILE_INPUT_HEIGHT,
+)
 
+text_extract_method_radio = gr.Radio(
+    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £2.66 ($3.50) per 1,000 pages with signature detection (default), £1.14 ($1.50) without. Change the settings in the tab below (AWS Textract signature detection) to change this.""",
+    value=DEFAULT_TEXT_EXTRACTION_MODEL,
+    choices=TEXT_EXTRACTION_MODELS,
+)
 
-# Wrapper functions to add timing to deduplication functions
-def run_duplicate_analysis_with_timing(
-    files,
-    threshold,
-    min_words,
-    min_consecutive,
-    greedy_match,
-    combine_pages,
-    output_folder,
-):
-    """
-    Wrapper for run_duplicate_analysis that adds timing and returns time taken.
-    """
-    start_time = time.time()
-    results_df, output_paths, full_data_by_file = run_duplicate_analysis(
-        files=files,
-        threshold=threshold,
-        min_words=min_words,
-        min_consecutive=min_consecutive,
-        greedy_match=greedy_match,
-        combine_pages=combine_pages,
-        output_folder=output_folder,
-    )
-    end_time = time.time()
-    processing_time = end_time - start_time
+pii_identification_method_drop = gr.Radio(
+    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+    value=DEFAULT_PII_DETECTION_MODEL,
+    choices=PII_DETECTION_MODELS,
+)
 
-    # Store the time taken in a global variable for logging
-    global duplicate_analysis_time_taken
-    duplicate_analysis_time_taken = processing_time
+handwrite_signature_checkbox = gr.CheckboxGroup(
+    label="AWS Textract extraction settings",
+    choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
+    value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+)
 
-    return results_df, output_paths, full_data_by_file
+in_redact_entities = gr.Dropdown(
+    value=CHOSEN_REDACT_ENTITIES,
+    choices=FULL_ENTITY_LIST,
+    multiselect=True,
+    label="Local PII identification model (click empty space in box for full list)",
+)
+in_redact_comprehend_entities = gr.Dropdown(
+    value=CHOSEN_COMPREHEND_ENTITIES,
+    choices=FULL_COMPREHEND_ENTITY_LIST,
+    multiselect=True,
+    label="AWS Comprehend PII identification model (click empty space in box for full list)",
+)
 
+## Deduplication examples
+in_duplicate_pages = gr.File(
+    label="Upload one or multiple 'ocr_output.csv' files to find duplicate pages and subdocuments",
+    file_count="multiple",
+    height=FILE_INPUT_HEIGHT,
+    file_types=[".csv"],
+)
 
-def run_tabular_duplicate_detection_with_timing(
-    files,
-    threshold,
-    min_words,
-    text_columns,
-    output_folder,
-    do_initial_clean_dup,
-    in_excel_tabular_sheets,
-    remove_duplicate_rows,
-):
-    """
-    Wrapper for run_tabular_duplicate_detection that adds timing and returns time taken.
-    """
-    start_time = time.time()
-    results_df, output_paths, file_choices = run_tabular_duplicate_detection(
-        files=files,
-        threshold=threshold,
-        min_words=min_words,
-        text_columns=text_columns,
-        output_folder=output_folder,
-        do_initial_clean_dup=do_initial_clean_dup,
-        in_excel_tabular_sheets=in_excel_tabular_sheets,
-        remove_duplicate_rows=remove_duplicate_rows,
-    )
-    end_time = time.time()
-    processing_time = end_time - start_time
+duplicate_threshold_input = gr.Number(
+    value=DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
+    label="Similarity threshold",
+    info="Score (0-1) to consider pages a match.",
+)
 
-    # Store the time taken in a global variable for logging
-    global tabular_duplicate_analysis_time_taken
-    tabular_duplicate_analysis_time_taken = processing_time
+min_word_count_input = gr.Number(
+    value=DEFAULT_MIN_WORD_COUNT,
+    label="Minimum word count",
+    info="Pages with fewer words than this value are ignored.",
+)
 
-    return results_df, output_paths, file_choices
+combine_page_text_for_duplicates_bool = gr.Checkbox(
+    value=True,
+    label="Analyse duplicate text by page (off for by line)",
+)
 
+## Tabular examples
+in_data_files = gr.File(
+    label="Choose Excel or csv files",
+    file_count="multiple",
+    file_types=[".xlsx", ".xls", ".csv", ".parquet", ".docx"],
+    height=FILE_INPUT_HEIGHT,
+)
 
-# Initialize global variables for timing
-duplicate_analysis_time_taken = 0.0
-tabular_duplicate_analysis_time_taken = 0.0
+in_colnames = gr.Dropdown(
+    choices=["Choose columns to anonymise"],
+    multiselect=True,
+    allow_custom_value=True,
+    label="Select columns that you want to anonymise (showing columns present across all files).",
+)
+
+pii_identification_method_drop_tabular = gr.Radio(
+    label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
+    value=DEFAULT_PII_DETECTION_MODEL,
+    choices=TABULAR_PII_DETECTION_MODELS,
+)
+
+anon_strategy = gr.Radio(
+    choices=[
+        "replace with 'REDACTED'",
+        "replace with <ENTITY_NAME>",
+        "redact completely",
+        "hash",
+        "mask",
+    ],
+    label="Select an anonymisation method.",
+    value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
+)  # , "encrypt", "fake_first_name" are also available, but are not currently included as not that useful in current form
+
+in_tabular_duplicate_files = gr.File(
+    label="Upload CSV, Excel, or Parquet files to find duplicate cells/rows. Note that the app will remove duplicates from later cells/files that are found in earlier cells/files and not vice versa.",
+    file_count="multiple",
+    file_types=[".csv", ".xlsx", ".xls", ".parquet"],
+    height=FILE_INPUT_HEIGHT,
+)
+
+tabular_text_columns = gr.Dropdown(
+    label="Choose columns to deduplicate",
+    multiselect=True,
+    allow_custom_value=True,
+)
 
 # Create the gradio interface
 app = gr.Blocks(
@@ -967,35 +1007,105 @@ with app:
     # REDACTION PDF/IMAGES TABLE
     ###
     with gr.Tab("Redact PDFs/images"):
-        with gr.Accordion("Redact document", open=True):
-            in_doc_files = gr.File(
-                label="Choose a PDF document or image file (PDF, JPG, PNG)",
-                file_count="multiple",
-                file_types=[".pdf", ".jpg", ".png", ".json", ".zip"],
-                height=FILE_INPUT_HEIGHT,
+
+        # Examples for PDF/image redaction
+        if SHOW_EXAMPLES == "True":
+            gr.Markdown(
+                "### Try an example - Click on an example below and then the 'Extract text and redact document' button:"
+            )
+            redaction_examples = gr.Examples(
+                examples=[
+                    [
+                        [
+                            "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
+                        ],
+                        "Local model - selectable text",
+                        "Local",
+                        [],
+                        CHOSEN_REDACT_ENTITIES,
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        [
+                            "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
+                        ],
+                    ],
+                    [
+                        ["example_data/example_complaint_letter.jpg"],
+                        "Local OCR model - PDFs without selectable text",
+                        "Local",
+                        [],
+                        CHOSEN_REDACT_ENTITIES,
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        ["example_data/example_complaint_letter.jpg"],
+                    ],
+                    [
+                        ["example_data/graduate-job-example-cover-letter.pdf"],
+                        "Local OCR model - PDFs without selectable text",
+                        "Local",
+                        [],
+                        ["TITLES", "PERSON", "DATE_TIME"],
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        ["example_data/graduate-job-example-cover-letter.pdf"],
+                    ],
+                    [
+                        ["example_data/Partnership-Agreement-Toolkit_0_0.pdf"],
+                        "AWS Textract service - all PDF types",
+                        "AWS Comprehend",
+                        ["Extract handwriting", "Extract signatures"],
+                        CHOSEN_REDACT_ENTITIES,
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        ["example_data/Partnership-Agreement-Toolkit_0_0.pdf"],
+                    ],
+                ],
+                inputs=[
+                    in_doc_files,
+                    text_extract_method_radio,
+                    pii_identification_method_drop,
+                    handwrite_signature_checkbox,
+                    in_redact_entities,
+                    in_redact_comprehend_entities,
+                    prepared_pdf_state,
+                ],
+                example_labels=[
+                    "PDF with selectable text redaction",
+                    "Image redaction with local OCR",
+                    "PDF redaction with custom entities (TITLES, PERSON, DATE_TIME)",
+                    "PDF redaction with AWS services and signature detection",
+                ],
             )
 
-            text_extract_method_radio = gr.Radio(
-                label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £2.66 ($3.50) per 1,000 pages with signature detection (default), £1.14 ($1.50) without. Change the settings in the tab below (AWS Textract signature detection) to change this.""",
-                value=DEFAULT_TEXT_EXTRACTION_MODEL,
-                choices=TEXT_EXTRACTION_MODELS,
-            )
+        with gr.Accordion("Redact document", open=True):
+            # in_doc_files = gr.File(
+            #     label="Choose a PDF document or image file (PDF, JPG, PNG)",
+            #     file_count="multiple",
+            #     file_types=[".pdf", ".jpg", ".png", ".json", ".zip"],
+            #     height=FILE_INPUT_HEIGHT,
+            # )
+            in_doc_files.render()
+
+            # text_extract_method_radio = gr.Radio(
+            #     label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £2.66 ($3.50) per 1,000 pages with signature detection (default), £1.14 ($1.50) without. Change the settings in the tab below (AWS Textract signature detection) to change this.""",
+            #     value=DEFAULT_TEXT_EXTRACTION_MODEL,
+            #     choices=TEXT_EXTRACTION_MODELS,
+            # )
+            text_extract_method_radio.render()
 
             with gr.Accordion(
                 "Enable AWS Textract signature detection (default is off)", open=False
             ):
-                handwrite_signature_checkbox = gr.CheckboxGroup(
-                    label="AWS Textract extraction settings",
-                    choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
-                    value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
-                )
+                # handwrite_signature_checkbox = gr.CheckboxGroup(
+                #     label="AWS Textract extraction settings",
+                #     choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
+                #     value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+                # )
+                handwrite_signature_checkbox.render()
 
             with gr.Row(equal_height=True):
-                pii_identification_method_drop = gr.Radio(
-                    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
-                    value=DEFAULT_PII_DETECTION_MODEL,
-                    choices=PII_DETECTION_MODELS,
-                )
+                # pii_identification_method_drop = gr.Radio(
+                #     label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+                #     value=DEFAULT_PII_DETECTION_MODEL,
+                #     choices=PII_DETECTION_MODELS,
+                # )
+                pii_identification_method_drop.render()
 
             if SHOW_COSTS == "True":
                 with gr.Accordion(
@@ -1536,30 +1646,72 @@ with app:
             "Search for duplicate pages/subdocuments in your ocr_output files. By default, this function will search for duplicate text across multiple pages, and then join consecutive matching pages together into matched 'subdocuments'. The results can be reviewed below, false positives removed, and then the verified results applied to a document you have loaded in on the 'Review redactions' tab."
         )
 
-        with gr.Accordion("Step 1: Configure and run analysis", open=True):
-            in_duplicate_pages = gr.File(
-                label="Upload one or multiple 'ocr_output.csv' files to find duplicate pages and subdocuments",
-                file_count="multiple",
-                height=FILE_INPUT_HEIGHT,
-                file_types=[".csv"],
+        # Examples for duplicate page detection
+        if SHOW_EXAMPLES == "True":
+            gr.Markdown(
+                "### Try an example - Click on an example below and then the 'Identify duplicate pages/subdocuments' button:"
             )
+            duplicate_examples = gr.Examples(
+                examples=[
+                    [
+                        [
+                            "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
+                        ],
+                        0.95,
+                        10,
+                        True,
+                    ],
+                    [
+                        [
+                            "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
+                        ],
+                        0.95,
+                        3,
+                        False,
+                    ],
+                ],
+                inputs=[
+                    in_duplicate_pages,
+                    duplicate_threshold_input,
+                    min_word_count_input,
+                    combine_page_text_for_duplicates_bool,
+                ],
+                example_labels=[
+                    "Find duplicate pages of text in document OCR outputs",
+                    "Find duplicate text lines in document OCR outputs",
+                ],
+            )
+
+        with gr.Accordion("Step 1: Configure and run analysis", open=True):
+            # in_duplicate_pages = gr.File(
+            #     label="Upload one or multiple 'ocr_output.csv' files to find duplicate pages and subdocuments",
+            #     file_count="multiple",
+            #     height=FILE_INPUT_HEIGHT,
+            #     file_types=[".csv"],
+            # )
+            in_duplicate_pages.render()
 
             with gr.Accordion("Duplicate matching parameters", open=False):
                 with gr.Row():
-                    duplicate_threshold_input = gr.Number(
-                        value=DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
-                        label="Similarity threshold",
-                        info="Score (0-1) to consider pages a match.",
-                    )
-                    min_word_count_input = gr.Number(
-                        value=DEFAULT_MIN_WORD_COUNT,
-                        label="Minimum word count",
-                        info="Pages with fewer words than this value are ignored.",
-                    )
-                    combine_page_text_for_duplicates_bool = gr.Checkbox(
-                        value=True,
-                        label="Analyse duplicate text by page (off for by line)",
-                    )
+                    # duplicate_threshold_input = gr.Number(
+                    #     value=DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
+                    #     label="Similarity threshold",
+                    #     info="Score (0-1) to consider pages a match.",
+                    # )
+                    duplicate_threshold_input.render()
+
+                    # min_word_count_input = gr.Number(
+                    #     value=DEFAULT_MIN_WORD_COUNT,
+                    #     label="Minimum word count",
+                    #     info="Pages with fewer words than this value are ignored.",
+                    # )
+                    min_word_count_input.render()
+
+                    # combine_page_text_for_duplicates_bool = gr.Checkbox(
+                    #     value=True,
+                    #     label="Analyse duplicate text by page (off for by line)",
+                    # )
+                    combine_page_text_for_duplicates_bool.render()
 
                 gr.Markdown("#### Matching Strategy")
                 greedy_match_input = gr.Checkbox(
@@ -1653,14 +1805,62 @@ with app:
             """Choose Word or a tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
         )
 
+        # Examples for Word/Excel/csv redaction and tabular duplicate detection
+        if SHOW_EXAMPLES == "True":
+            gr.Markdown(
+                "### Try an example - Click on an example below and then the 'Redact text/data files' button for redaction, or the 'Find duplicate cells/rows' button for duplicate detection:"
+            )
+            tabular_examples = gr.Examples(
+                examples=[
+                    [
+                        ["example_data/combined_case_notes.csv"],
+                        ["Case Note", "Client"],
+                        "Local",
+                        "replace with 'REDACTED'",
+                        ["example_data/combined_case_notes.csv"],
+                        ["Case Note"],
+                    ],
+                    [
+                        ["example_data/Bold minimalist professional cover letter.docx"],
+                        [],
+                        "Local",
+                        "replace with 'REDACTED'",
+                        [],
+                        [],
+                    ],
+                    [
+                        ["example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"],
+                        ["text"],
+                        "Local",
+                        "replace with 'REDACTED'",
+                        ["example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"],
+                        ["text"],
+                    ],
+                ],
+                inputs=[
+                    in_data_files,
+                    in_colnames,
+                    pii_identification_method_drop_tabular,
+                    anon_strategy,
+                    in_tabular_duplicate_files,
+                    tabular_text_columns,
+                ],
+                example_labels=[
+                    "CSV file redaction with specific columns - remove text",
+                    "Word document redaction - replace with REDACTED",
+                    "Tabular duplicate detection in CSV files",
+                ],
+            )
+
         with gr.Accordion("Redact Word or Excel/csv files", open=True):
             with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
-                in_data_files = gr.File(
-                    label="Choose Excel or csv files",
-                    file_count="multiple",
-                    file_types=[".xlsx", ".xls", ".csv", ".parquet", ".docx"],
-                    height=FILE_INPUT_HEIGHT,
-                )
+                # in_data_files = gr.File(
+                #     label="Choose Excel or csv files",
+                #     file_count="multiple",
+                #     file_types=[".xlsx", ".xls", ".csv", ".parquet", ".docx"],
+                #     height=FILE_INPUT_HEIGHT,
+                # )
+                in_data_files.render()
             with gr.Accordion("Redact open text", open=False):
                 in_text = gr.Textbox(
                     label="Enter open text",
@@ -1676,34 +1876,39 @@ with app:
                 allow_custom_value=True,
             )
 
-            in_colnames = gr.Dropdown(
-                choices=["Choose columns to anonymise"],
-                multiselect=True,
-                label="Select columns that you want to anonymise (showing columns present across all files).",
-            )
+            # in_colnames = gr.Dropdown(
+            #     choices=["Choose columns to anonymise"],
+            #     multiselect=True,
+            #     allow_custom_value=True,
+            #     label="Select columns that you want to anonymise (showing columns present across all files).",
+            # )
+            in_colnames.render()
 
-            pii_identification_method_drop_tabular = gr.Radio(
-                label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
-                value=DEFAULT_PII_DETECTION_MODEL,
-                choices=TABULAR_PII_DETECTION_MODELS,
-            )
+            # pii_identification_method_drop_tabular = gr.Radio(
+            #     label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
+            #     value=DEFAULT_PII_DETECTION_MODEL,
+            #     choices=TABULAR_PII_DETECTION_MODELS,
+            # )
+            pii_identification_method_drop_tabular.render()
 
             with gr.Accordion(
                 "Anonymisation output format - by default will replace PII with a blank space",
                 open=False,
             ):
                 with gr.Row():
-                    anon_strategy = gr.Radio(
-                        choices=[
-                            "replace with 'REDACTED'",
-                            "replace with <ENTITY_NAME>",
-                            "redact completely",
-                            "hash",
-                            "mask",
-                        ],
-                        label="Select an anonymisation method.",
-                        value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
-                    )  # , "encrypt", "fake_first_name" are also available, but are not currently included as not that useful in current form
+                    # anon_strategy = gr.Radio(
+                    #     choices=[
+                    #         "replace with 'REDACTED'",
+                    #         "replace with <ENTITY_NAME>",
+                    #         "redact completely",
+                    #         "hash",
+                    #         "mask",
+                    #     ],
+                    #     label="Select an anonymisation method.",
+                    #     value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
+                    # )  # , "encrypt", "fake_first_name" are also available, but are not currently included as not that useful in current form
+                    anon_strategy.render()
+
                     do_initial_clean = gr.Checkbox(
                         label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
                         value=DO_INITIAL_TABULAR_DATA_CLEAN,
@@ -1713,15 +1918,15 @@ with app:
                 "Redact text/data files", variant="primary"
             )
 
-            with gr.Row():
-                text_output_summary = gr.Textbox(label="Output result", lines=4)
-                text_output_file = gr.File(label="Output files")
-                text_tabular_files_done = gr.Number(
-                    value=0,
-                    label="Number of tabular files redacted",
-                    interactive=False,
-                    visible=False,
-                )
+        with gr.Row():
+            text_output_summary = gr.Textbox(label="Output result", lines=4)
+            text_output_file = gr.File(label="Output files")
+            text_tabular_files_done = gr.Number(
+                value=0,
+                label="Number of tabular files redacted",
+                interactive=False,
+                visible=False,
+            )
 
         ###
         # TABULAR DUPLICATE DETECTION
@@ -1732,12 +1937,13 @@ with app:
             )
 
             with gr.Accordion("Step 1: Upload files and configure analysis", open=True):
-                in_tabular_duplicate_files = gr.File(
-                    label="Upload CSV, Excel, or Parquet files to find duplicate cells/rows. Note that the app will remove duplicates from later cells/files that are found in earlier cells/files and not vice versa.",
-                    file_count="multiple",
-                    file_types=[".csv", ".xlsx", ".xls", ".parquet"],
-                    height=FILE_INPUT_HEIGHT,
-                )
+                # in_tabular_duplicate_files = gr.File(
+                #     label="Upload CSV, Excel, or Parquet files to find duplicate cells/rows. Note that the app will remove duplicates from later cells/files that are found in earlier cells/files and not vice versa.",
+                #     file_count="multiple",
+                #     file_types=[".csv", ".xlsx", ".xls", ".parquet"],
+                #     height=FILE_INPUT_HEIGHT,
+                # )
+                in_tabular_duplicate_files.render()
 
                 with gr.Row(equal_height=True):
                     tabular_duplicate_threshold = gr.Number(
@@ -1768,12 +1974,13 @@ with app:
                         allow_custom_value=True,
                     )
 
-                    tabular_text_columns = gr.Dropdown(
-                        choices=DEFAULT_TEXT_COLUMNS,
-                        multiselect=True,
-                        label="Select specific columns to analyse (leave empty to analyse all text columns simultaneously - i.e. all text is joined together)",
-                        info="If no columns selected, all text columns will combined together and analysed",
-                    )
+                    # tabular_text_columns = gr.Dropdown(
+                    #     choices=DEFAULT_TEXT_COLUMNS,
+                    #     multiselect=True,
+                    #     label="Select specific columns to analyse (leave empty to analyse all text columns simultaneously - i.e. all text is joined together)",
+                    #     info="If no columns selected, all text columns will combined together and analysed",
+                    # )
+                    tabular_text_columns.render()
 
                 find_tabular_duplicates_btn = gr.Button(
                     value="Find duplicate cells/rows", variant="primary"
@@ -1937,18 +2144,20 @@ with app:
                         )
 
         with gr.Accordion("Select entity types to redact", open=True):
-            in_redact_entities = gr.Dropdown(
-                value=CHOSEN_REDACT_ENTITIES,
-                choices=FULL_ENTITY_LIST,
-                multiselect=True,
-                label="Local PII identification model (click empty space in box for full list)",
-            )
-            in_redact_comprehend_entities = gr.Dropdown(
-                value=CHOSEN_COMPREHEND_ENTITIES,
-                choices=FULL_COMPREHEND_ENTITY_LIST,
-                multiselect=True,
-                label="AWS Comprehend PII identification model (click empty space in box for full list)",
-            )
+            # in_redact_entities = gr.Dropdown(
+            #     value=CHOSEN_REDACT_ENTITIES,
+            #     choices=FULL_ENTITY_LIST,
+            #     multiselect=True,
+            #     label="Local PII identification model (click empty space in box for full list)",
+            # )
+            # in_redact_comprehend_entities = gr.Dropdown(
+            #     value=CHOSEN_COMPREHEND_ENTITIES,
+            #     choices=FULL_COMPREHEND_ENTITY_LIST,
+            #     multiselect=True,
+            #     label="AWS Comprehend PII identification model (click empty space in box for full list)",
+            # )
+            in_redact_entities.render()
+            in_redact_comprehend_entities.render()
 
             with gr.Row():
                 max_fuzzy_spelling_mistakes_num = gr.Number(
@@ -5013,6 +5222,7 @@ with app:
             comprehend_query_number,
         ],
         api_name="redact_data",
+        show_progress_on=[text_output_summary],
     )
 
     # If the output file count text box changes, keep going with redacting each data file until done
@@ -5053,6 +5263,7 @@ with app:
             actual_time_taken_number,
             comprehend_query_number,
         ],
+        show_progress_on=[text_output_summary],
     ).success(
         fn=reveal_feedback_buttons,
         outputs=[
@@ -5085,6 +5296,7 @@ with app:
             actual_time_taken_number,
             task_textbox,
         ],
+        show_progress_on=[results_df_preview],
     )
 
     # full_duplicated_data_df,

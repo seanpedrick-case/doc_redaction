@@ -515,8 +515,6 @@ def anonymise_files_with_open_text(
     if isinstance(out_message, str):
         out_message = [out_message]
 
-    # print("log_files_output_paths:",log_files_output_paths)
-
     if isinstance(log_files_output_paths, str):
         log_files_output_paths = list()
 
