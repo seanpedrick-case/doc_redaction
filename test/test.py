@@ -1,17 +1,19 @@
-from typing import List, Optional
 import os
-import subprocess
-import unittest
-import tempfile
 import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+from typing import List, Optional
+
 
 def run_cli_redact(
     script_path: str,
     input_file: str,
     output_dir: str,
-    task: str = 'redact',
-    timeout: int = 600, # 10-minute timeout
-    
+    task: str = "redact",
+    timeout: int = 600,  # 10-minute timeout
     # --- General Arguments ---
     input_dir: Optional[str] = None,
     language: Optional[str] = None,
@@ -32,7 +34,6 @@ def run_cli_redact(
     display_file_names_in_logs: Optional[bool] = None,
     upload_logs_to_s3: Optional[bool] = None,
     s3_logs_prefix: Optional[str] = None,
-    
     # --- PDF/Image Redaction Arguments ---
     ocr_method: Optional[str] = None,
     page_min: Optional[int] = None,
@@ -49,14 +50,12 @@ def run_cli_redact(
     extract_forms: Optional[bool] = None,
     extract_tables: Optional[bool] = None,
     extract_layout: Optional[bool] = None,
-    
     # --- Word/Tabular Anonymisation Arguments ---
     anon_strategy: Optional[str] = None,
     text_columns: Optional[List[str]] = None,
     excel_sheets: Optional[List[str]] = None,
     fuzzy_mistakes: Optional[int] = None,
     match_fuzzy_whole_phrase_bool: Optional[bool] = None,
-    
     # --- Duplicate Detection Arguments ---
     duplicate_type: Optional[str] = None,
     similarity_threshold: Optional[float] = None,
@@ -65,7 +64,6 @@ def run_cli_redact(
     greedy_match: Optional[bool] = None,
     combine_pages: Optional[bool] = None,
     remove_duplicate_rows: Optional[bool] = None,
-    
     # --- Textract Batch Operations Arguments ---
     textract_action: Optional[str] = None,
     job_id: Optional[str] = None,
@@ -76,7 +74,7 @@ def run_cli_redact(
     s3_textract_document_logs_subfolder: Optional[str] = None,
     local_textract_document_logs_subfolder: Optional[str] = None,
     poll_interval: Optional[int] = None,
-    max_poll_attempts: Optional[int] = None
+    max_poll_attempts: Optional[int] = None,
 ) -> bool:
     """
     Executes the cli_redact.py script with specified arguments using a subprocess.
@@ -87,7 +85,7 @@ def run_cli_redact(
         output_dir (str): The path to the directory for output files.
         task (str): The main task to perform ('redact', 'deduplicate', or 'textract').
         timeout (int): Timeout in seconds for the subprocess.
-        
+
         # General Arguments
         input_dir (str): Directory for all input files.
         language (str): Language of the document content.
@@ -108,7 +106,7 @@ def run_cli_redact(
         display_file_names_in_logs (bool): Include file names in log outputs.
         upload_logs_to_s3 (bool): Upload log files to S3 after processing.
         s3_logs_prefix (str): S3 prefix for usage log files.
-        
+
         # PDF/Image Redaction Arguments
         ocr_method (str): OCR method for text extraction from images.
         page_min (int): First page to redact.
@@ -125,14 +123,14 @@ def run_cli_redact(
         extract_forms (bool): Extract forms during Textract analysis.
         extract_tables (bool): Extract tables during Textract analysis.
         extract_layout (bool): Extract layout during Textract analysis.
-        
+
         # Word/Tabular Anonymisation Arguments
         anon_strategy (str): The anonymisation strategy to apply.
         text_columns (List[str]): A list of column names to anonymise or deduplicate.
         excel_sheets (List[str]): Specific Excel sheet names to process.
         fuzzy_mistakes (int): Number of allowed spelling mistakes for fuzzy matching.
         match_fuzzy_whole_phrase_bool (bool): Match fuzzy whole phrase boolean.
-        
+
         # Duplicate Detection Arguments
         duplicate_type (str): Type of duplicate detection (pages or tabular).
         similarity_threshold (float): Similarity threshold (0-1) to consider content as duplicates.
@@ -141,7 +139,7 @@ def run_cli_redact(
         greedy_match (bool): Use greedy matching strategy for consecutive pages.
         combine_pages (bool): Combine text from the same page number within a file.
         remove_duplicate_rows (bool): Remove duplicate rows from the output.
-        
+
         # Textract Batch Operations Arguments
         textract_action (str): Textract action to perform (submit, retrieve, or list).
         job_id (str): Textract job ID for retrieve action.
@@ -160,9 +158,9 @@ def run_cli_redact(
     # 1. Get absolute paths and perform pre-checks
     script_abs_path = os.path.abspath(script_path)
     output_abs_dir = os.path.abspath(output_dir)
-    
+
     # Handle input file based on task and action
-    if task == 'textract' and textract_action in ['retrieve', 'list']:
+    if task == "textract" and textract_action in ["retrieve", "list"]:
         # For retrieve and list actions, input file is not required
         input_abs_path = None
     else:
@@ -172,25 +170,27 @@ def run_cli_redact(
         input_abs_path = os.path.abspath(input_file)
         if not os.path.isfile(input_abs_path):
             raise FileNotFoundError(f"Input file not found: {input_abs_path}")
-    
+
     if not os.path.isfile(script_abs_path):
         raise FileNotFoundError(f"Script not found: {script_abs_path}")
-    
+
     if not os.path.isdir(output_abs_dir):
         # Create the output directory if it doesn't exist
         print(f"Output directory not found. Creating: {output_abs_dir}")
         os.makedirs(output_abs_dir)
-        
+
     script_folder = os.path.dirname(script_abs_path)
 
     # 2. Dynamically build the command list
     command = [
         "python",
         script_abs_path,
-        "--output_dir", output_abs_dir,
-        "--task", task,
+        "--output_dir",
+        output_abs_dir,
+        "--task",
+        task,
     ]
-    
+
     # Add input_file only if it's not None
     if input_abs_path is not None:
         command.extend(["--input_file", input_abs_path])
@@ -231,7 +231,9 @@ def run_cli_redact(
     if save_logs_to_dynamodb is not None:
         command.extend(["--save_logs_to_dynamodb", str(save_logs_to_dynamodb)])
     if display_file_names_in_logs is not None:
-        command.extend(["--display_file_names_in_logs", str(display_file_names_in_logs)])
+        command.extend(
+            ["--display_file_names_in_logs", str(display_file_names_in_logs)]
+        )
     if upload_logs_to_s3 is not None:
         command.extend(["--upload_logs_to_s3", str(upload_logs_to_s3)])
     if s3_logs_prefix:
@@ -249,17 +251,23 @@ def run_cli_redact(
     if chosen_local_ocr_model:
         command.extend(["--chosen_local_ocr_model", chosen_local_ocr_model])
     if preprocess_local_ocr_images is not None:
-        command.extend(["--preprocess_local_ocr_images", str(preprocess_local_ocr_images)])
+        command.extend(
+            ["--preprocess_local_ocr_images", str(preprocess_local_ocr_images)]
+        )
     if compress_redacted_pdf is not None:
         command.extend(["--compress_redacted_pdf", str(compress_redacted_pdf)])
     if return_pdf_end_of_redaction is not None:
-        command.extend(["--return_pdf_end_of_redaction", str(return_pdf_end_of_redaction)])
+        command.extend(
+            ["--return_pdf_end_of_redaction", str(return_pdf_end_of_redaction)]
+        )
     if deny_list_file and os.path.isfile(deny_list_file):
         command.extend(["--deny_list_file", os.path.abspath(deny_list_file)])
     if allow_list_file and os.path.isfile(allow_list_file):
         command.extend(["--allow_list_file", os.path.abspath(allow_list_file)])
     if redact_whole_page_file and os.path.isfile(redact_whole_page_file):
-        command.extend(["--redact_whole_page_file", os.path.abspath(redact_whole_page_file)])
+        command.extend(
+            ["--redact_whole_page_file", os.path.abspath(redact_whole_page_file)]
+        )
     if handwrite_signature_extraction:
         command.append("--handwrite_signature_extraction")
         command.extend(handwrite_signature_extraction)
@@ -282,7 +290,9 @@ def run_cli_redact(
     if fuzzy_mistakes is not None:
         command.extend(["--fuzzy_mistakes", str(fuzzy_mistakes)])
     if match_fuzzy_whole_phrase_bool is not None:
-        command.extend(["--match_fuzzy_whole_phrase_bool", str(match_fuzzy_whole_phrase_bool)])
+        command.extend(
+            ["--match_fuzzy_whole_phrase_bool", str(match_fuzzy_whole_phrase_bool)]
+        )
 
     # Add duplicate detection arguments
     if duplicate_type:
@@ -315,16 +325,26 @@ def run_cli_redact(
     if textract_output_prefix:
         command.extend(["--textract_output_prefix", textract_output_prefix])
     if s3_textract_document_logs_subfolder:
-        command.extend(["--s3_textract_document_logs_subfolder", s3_textract_document_logs_subfolder])
+        command.extend(
+            [
+                "--s3_textract_document_logs_subfolder",
+                s3_textract_document_logs_subfolder,
+            ]
+        )
     if local_textract_document_logs_subfolder:
-        command.extend(["--local_textract_document_logs_subfolder", local_textract_document_logs_subfolder])
+        command.extend(
+            [
+                "--local_textract_document_logs_subfolder",
+                local_textract_document_logs_subfolder,
+            ]
+        )
     if poll_interval is not None:
         command.extend(["--poll_interval", str(poll_interval)])
     if max_poll_attempts is not None:
         command.extend(["--max_poll_attempts", str(max_poll_attempts)])
 
     # Filter out None values before joining
-    command_str = ' '.join(str(arg) for arg in command if arg is not None)
+    command_str = " ".join(str(arg) for arg in command if arg is not None)
     print(f"Executing command: {command_str}")
 
     # 3. Execute the command using subprocess
@@ -334,12 +354,12 @@ def run_cli_redact(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            cwd=script_folder # Important for relative paths within the script
+            cwd=script_folder,  # Important for relative paths within the script
         )
 
         # Communicate with the process to get output and handle timeout
         stdout, stderr = result.communicate(timeout=timeout)
-        
+
         print("--- SCRIPT STDOUT ---")
         if stdout:
             print(stdout)
@@ -366,124 +386,150 @@ def run_cli_redact(
 
 class TestCLIRedactExamples(unittest.TestCase):
     """Test suite for CLI redaction examples from the epilog."""
-    
+
     @classmethod
     def setUpClass(cls):
         """Set up test environment before running tests."""
-        cls.script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cli_redact.py")
-        cls.example_data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "example_data")
+        cls.script_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "cli_redact.py"
+        )
+        cls.example_data_dir = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "example_data"
+        )
         cls.temp_output_dir = tempfile.mkdtemp(prefix="test_output_")
-        
+
         # Verify script exists
         if not os.path.isfile(cls.script_path):
             raise FileNotFoundError(f"CLI script not found: {cls.script_path}")
-        
+
         print(f"Test setup complete. Script: {cls.script_path}")
         print(f"Example data directory: {cls.example_data_dir}")
         print(f"Temp output directory: {cls.temp_output_dir}")
-    
+
     @classmethod
     def tearDownClass(cls):
         """Clean up test environment after running tests."""
         if os.path.exists(cls.temp_output_dir):
             shutil.rmtree(cls.temp_output_dir)
         print(f"Cleaned up temp directory: {cls.temp_output_dir}")
-    
+
     def test_pdf_redaction_default_settings(self):
         """Test: Redact a PDF with default settings (local OCR)"""
         print("\n=== Testing PDF redaction with default settings ===")
-        input_file = os.path.join(self.example_data_dir, "example_of_emails_sent_to_a_professor_before_applying.pdf")
-        
+        input_file = os.path.join(
+            self.example_data_dir,
+            "example_of_emails_sent_to_a_professor_before_applying.pdf",
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
-            output_dir=self.temp_output_dir
+            output_dir=self.temp_output_dir,
         )
-        
+
         self.assertTrue(result, "PDF redaction with default settings should succeed")
         print("✅ PDF redaction with default settings passed")
-    
+
     def test_pdf_text_extraction_only(self):
         """Test: Extract text from a PDF only (i.e. no redaction), using local OCR"""
         print("\n=== Testing PDF text extraction only ===")
-        input_file = os.path.join(self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf")
-        whole_page_file = os.path.join(self.example_data_dir, "partnership_toolkit_redact_some_pages.csv")
-        
+        input_file = os.path.join(
+            self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf"
+        )
+        whole_page_file = os.path.join(
+            self.example_data_dir, "partnership_toolkit_redact_some_pages.csv"
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
         if not os.path.isfile(whole_page_file):
             self.skipTest(f"Whole page file not found: {whole_page_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
             redact_whole_page_file=whole_page_file,
-            pii_detector="None"
+            pii_detector="None",
         )
-        
+
         self.assertTrue(result, "PDF text extraction should succeed")
         print("✅ PDF text extraction only passed")
-    
+
     def test_pdf_text_extraction_with_whole_page_redaction(self):
         """Test: Extract text from a PDF only with a whole page redaction list"""
         print("\n=== Testing PDF text extraction with whole page redaction ===")
-        input_file = os.path.join(self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf")
-        whole_page_file = os.path.join(self.example_data_dir, "partnership_toolkit_redact_some_pages.csv")
-        
+        input_file = os.path.join(
+            self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf"
+        )
+        whole_page_file = os.path.join(
+            self.example_data_dir, "partnership_toolkit_redact_some_pages.csv"
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
         if not os.path.isfile(whole_page_file):
             self.skipTest(f"Whole page file not found: {whole_page_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
             redact_whole_page_file=whole_page_file,
             pii_detector="Local",
-            local_redact_entities=["CUSTOM"]
+            local_redact_entities=["CUSTOM"],
         )
-        
-        self.assertTrue(result, "PDF text extraction with whole page redaction should succeed")
+
+        self.assertTrue(
+            result, "PDF text extraction with whole page redaction should succeed"
+        )
         print("✅ PDF text extraction with whole page redaction passed")
-    
+
     def test_pdf_redaction_with_allow_list(self):
         """Test: Redact a PDF with allow list (local OCR) and custom list of redaction entities"""
         print("\n=== Testing PDF redaction with allow list ===")
-        input_file = os.path.join(self.example_data_dir, "graduate-job-example-cover-letter.pdf")
-        allow_list_file = os.path.join(self.example_data_dir, "test_allow_list_graduate.csv")
-        
+        input_file = os.path.join(
+            self.example_data_dir, "graduate-job-example-cover-letter.pdf"
+        )
+        allow_list_file = os.path.join(
+            self.example_data_dir, "test_allow_list_graduate.csv"
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
         if not os.path.isfile(allow_list_file):
             self.skipTest(f"Allow list file not found: {allow_list_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
             allow_list_file=allow_list_file,
-            local_redact_entities=["TITLES", "PERSON", "DATE_TIME"]
+            local_redact_entities=["TITLES", "PERSON", "DATE_TIME"],
         )
-        
+
         self.assertTrue(result, "PDF redaction with allow list should succeed")
         print("✅ PDF redaction with allow list passed")
-    
+
     def test_pdf_redaction_limited_pages_with_custom_fuzzy(self):
         """Test: Redact a PDF with limited pages and text extraction method with custom fuzzy matching"""
         print("\n=== Testing PDF redaction with limited pages and fuzzy matching ===")
-        input_file = os.path.join(self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf")
-        deny_list_file = os.path.join(self.example_data_dir, "Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv")
-        
+        input_file = os.path.join(
+            self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf"
+        )
+        deny_list_file = os.path.join(
+            self.example_data_dir,
+            "Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv",
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
         if not os.path.isfile(deny_list_file):
             self.skipTest(f"Deny list file not found: {deny_list_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
@@ -493,20 +539,30 @@ class TestCLIRedactExamples(unittest.TestCase):
             page_min=1,
             page_max=3,
             ocr_method="Local text",
-            fuzzy_mistakes=3
+            fuzzy_mistakes=3,
         )
-        
-        self.assertTrue(result, "PDF redaction with limited pages and fuzzy matching should succeed")
+
+        self.assertTrue(
+            result, "PDF redaction with limited pages and fuzzy matching should succeed"
+        )
         print("✅ PDF redaction with limited pages and fuzzy matching passed")
-    
+
     def test_pdf_redaction_with_custom_lists(self):
         """Test: Redaction with custom deny list, allow list, and whole page redaction list"""
         print("\n=== Testing PDF redaction with custom lists ===")
-        input_file = os.path.join(self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf")
-        deny_list_file = os.path.join(self.example_data_dir, "partnership_toolkit_redact_custom_deny_list.csv")
-        whole_page_file = os.path.join(self.example_data_dir, "partnership_toolkit_redact_some_pages.csv")
-        allow_list_file = os.path.join(self.example_data_dir, "test_allow_list_partnership.csv")
-        
+        input_file = os.path.join(
+            self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf"
+        )
+        deny_list_file = os.path.join(
+            self.example_data_dir, "partnership_toolkit_redact_custom_deny_list.csv"
+        )
+        whole_page_file = os.path.join(
+            self.example_data_dir, "partnership_toolkit_redact_some_pages.csv"
+        )
+        allow_list_file = os.path.join(
+            self.example_data_dir, "test_allow_list_partnership.csv"
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
         if not os.path.isfile(deny_list_file):
@@ -515,164 +571,186 @@ class TestCLIRedactExamples(unittest.TestCase):
             self.skipTest(f"Whole page file not found: {whole_page_file}")
         if not os.path.isfile(allow_list_file):
             self.skipTest(f"Allow list file not found: {allow_list_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
             deny_list_file=deny_list_file,
             redact_whole_page_file=whole_page_file,
-            allow_list_file=allow_list_file
+            allow_list_file=allow_list_file,
         )
-        
+
         self.assertTrue(result, "PDF redaction with custom lists should succeed")
         print("✅ PDF redaction with custom lists passed")
-    
+
     def test_image_redaction(self):
         """Test: Redact an image"""
         print("\n=== Testing image redaction ===")
         input_file = os.path.join(self.example_data_dir, "example_complaint_letter.jpg")
-        
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
-            output_dir=self.temp_output_dir
+            output_dir=self.temp_output_dir,
         )
-        
+
         self.assertTrue(result, "Image redaction should succeed")
         print("✅ Image redaction passed")
-    
+
     def test_csv_anonymisation_specific_columns(self):
         """Test: Anonymise csv file with specific columns"""
         print("\n=== Testing CSV anonymisation with specific columns ===")
         input_file = os.path.join(self.example_data_dir, "combined_case_notes.csv")
-        
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
             text_columns=["Case Note", "Client"],
-            anon_strategy="replace_redacted"
+            anon_strategy="replace_redacted",
         )
-        
-        self.assertTrue(result, "CSV anonymisation with specific columns should succeed")
+
+        self.assertTrue(
+            result, "CSV anonymisation with specific columns should succeed"
+        )
         print("✅ CSV anonymisation with specific columns passed")
-    
+
     def test_csv_anonymisation_different_strategy(self):
         """Test: Anonymise csv file with a different strategy (remove text completely)"""
         print("\n=== Testing CSV anonymisation with different strategy ===")
         input_file = os.path.join(self.example_data_dir, "combined_case_notes.csv")
-        
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
             text_columns=["Case Note", "Client"],
-            anon_strategy="redact"
+            anon_strategy="redact",
         )
-        
-        self.assertTrue(result, "CSV anonymisation with different strategy should succeed")
+
+        self.assertTrue(
+            result, "CSV anonymisation with different strategy should succeed"
+        )
         print("✅ CSV anonymisation with different strategy passed")
-    
+
     def test_word_document_anonymisation(self):
         """Test: Anonymise a word document"""
         print("\n=== Testing Word document anonymisation ===")
-        input_file = os.path.join(self.example_data_dir, "Bold minimalist professional cover letter.docx")
-        
+        input_file = os.path.join(
+            self.example_data_dir, "Bold minimalist professional cover letter.docx"
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
-            anon_strategy="replace_redacted"
+            anon_strategy="replace_redacted",
         )
-        
+
         self.assertTrue(result, "Word document anonymisation should succeed")
         print("✅ Word document anonymisation passed")
-    
+
     def test_aws_textract_comprehend_redaction(self):
         """Test: Use Textract and Comprehend for redaction"""
         print("\n=== Testing AWS Textract and Comprehend redaction ===")
-        input_file = os.path.join(self.example_data_dir, "example_of_emails_sent_to_a_professor_before_applying.pdf")
-        
+        input_file = os.path.join(
+            self.example_data_dir,
+            "example_of_emails_sent_to_a_professor_before_applying.pdf",
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
-        
+
         # Skip this test if AWS credentials are not available
         # This is a conditional test that may not work in all environments
-        result = run_cli_redact(
+        run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
             ocr_method="AWS Textract",
-            pii_detector="AWS Comprehend"
+            pii_detector="AWS Comprehend",
         )
-        
+
         # Note: This test may fail if AWS credentials are not configured
         # We'll mark it as passed if it runs without crashing
         print("✅ AWS Textract and Comprehend redaction test completed")
-    
+
     def test_aws_textract_signature_extraction(self):
         """Test: Redact specific pages with AWS OCR and signature extraction"""
         print("\n=== Testing AWS Textract with signature extraction ===")
-        input_file = os.path.join(self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf")
-        
+        input_file = os.path.join(
+            self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf"
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
-        
+
         # Skip this test if AWS credentials are not available
-        result = run_cli_redact(
+        run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
             page_min=6,
             page_max=7,
             ocr_method="AWS Textract",
-            handwrite_signature_extraction=["Extract handwriting", "Extract signatures"]
+            handwrite_signature_extraction=[
+                "Extract handwriting",
+                "Extract signatures",
+            ],
         )
-        
+
         # Note: This test may fail if AWS credentials are not configured
         print("✅ AWS Textract with signature extraction test completed")
-    
+
     def test_duplicate_pages_detection(self):
         """Test: Find duplicate pages in OCR files"""
         print("\n=== Testing duplicate pages detection ===")
-        input_file = os.path.join(self.example_data_dir, "example_outputs", "doubled_output_joined.pdf_ocr_output.csv")
-        
+        input_file = os.path.join(
+            self.example_data_dir,
+            "example_outputs",
+            "doubled_output_joined.pdf_ocr_output.csv",
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example OCR file not found: {input_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
             task="deduplicate",
             duplicate_type="pages",
-            similarity_threshold=0.95
+            similarity_threshold=0.95,
         )
-        
+
         self.assertTrue(result, "Duplicate pages detection should succeed")
         print("✅ Duplicate pages detection passed")
-    
+
     def test_duplicate_line_level_detection(self):
         """Test: Find duplicate in OCR files at the line level"""
         print("\n=== Testing duplicate line level detection ===")
-        input_file = os.path.join(self.example_data_dir, "example_outputs", "doubled_output_joined.pdf_ocr_output.csv")
-        
+        input_file = os.path.join(
+            self.example_data_dir,
+            "example_outputs",
+            "doubled_output_joined.pdf_ocr_output.csv",
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example OCR file not found: {input_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
@@ -681,20 +759,22 @@ class TestCLIRedactExamples(unittest.TestCase):
             duplicate_type="pages",
             similarity_threshold=0.95,
             combine_pages=False,
-            min_word_count=3
+            min_word_count=3,
         )
-        
+
         self.assertTrue(result, "Duplicate line level detection should succeed")
         print("✅ Duplicate line level detection passed")
-    
+
     def test_duplicate_tabular_detection(self):
         """Test: Find duplicate rows in tabular data"""
         print("\n=== Testing duplicate tabular detection ===")
-        input_file = os.path.join(self.example_data_dir, "Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv")
-        
+        input_file = os.path.join(
+            self.example_data_dir, "Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example CSV file not found: {input_file}")
-        
+
         result = run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
@@ -702,124 +782,294 @@ class TestCLIRedactExamples(unittest.TestCase):
             task="deduplicate",
             duplicate_type="tabular",
             text_columns=["text"],
-            similarity_threshold=0.95
+            similarity_threshold=0.95,
         )
-        
+
         self.assertTrue(result, "Duplicate tabular detection should succeed")
         print("✅ Duplicate tabular detection passed")
-    
+
     def test_textract_submit_document(self):
         """Test: Submit document to Textract for basic text analysis"""
         print("\n=== Testing Textract document submission ===")
-        input_file = os.path.join(self.example_data_dir, "example_of_emails_sent_to_a_professor_before_applying.pdf")
-        
+        input_file = os.path.join(
+            self.example_data_dir,
+            "example_of_emails_sent_to_a_professor_before_applying.pdf",
+        )
+
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
-        
+
         # Skip this test if AWS credentials are not available
         try:
-            result = run_cli_redact(
-                script_path=self.script_path,
-                input_file=input_file,
-                output_dir=self.temp_output_dir,
-                task="textract",
-                textract_action="submit"
-            )
-        except Exception as e:
-            print(f"Textract test failed (expected without AWS credentials): {e}")
-            result = True  # Mark as passed since this is expected to fail without credentials
-        
-        # Note: This test may fail if AWS credentials are not configured
-        print("✅ Textract document submission test completed")
-    
-    def test_textract_submit_with_signatures(self):
-        """Test: Submit document to Textract for analysis with signature extraction"""
-        print("\n=== Testing Textract submission with signature extraction ===")
-        input_file = os.path.join(self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf")
-        
-        if not os.path.isfile(input_file):
-            self.skipTest(f"Example file not found: {input_file}")
-        
-        # Skip this test if AWS credentials are not available
-        try:
-            result = run_cli_redact(
+            run_cli_redact(
                 script_path=self.script_path,
                 input_file=input_file,
                 output_dir=self.temp_output_dir,
                 task="textract",
                 textract_action="submit",
-                extract_signatures=True
             )
         except Exception as e:
             print(f"Textract test failed (expected without AWS credentials): {e}")
-            result = True  # Mark as passed since this is expected to fail without credentials
-        
+
+        # Note: This test may fail if AWS credentials are not configured
+        print("✅ Textract document submission test completed")
+
+    def test_textract_submit_with_signatures(self):
+        """Test: Submit document to Textract for analysis with signature extraction"""
+        print("\n=== Testing Textract submission with signature extraction ===")
+        input_file = os.path.join(
+            self.example_data_dir, "Partnership-Agreement-Toolkit_0_0.pdf"
+        )
+
+        if not os.path.isfile(input_file):
+            self.skipTest(f"Example file not found: {input_file}")
+
+        # Skip this test if AWS credentials are not available
+        try:
+            run_cli_redact(
+                script_path=self.script_path,
+                input_file=input_file,
+                output_dir=self.temp_output_dir,
+                task="textract",
+                textract_action="submit",
+                extract_signatures=True,
+            )
+        except Exception as e:
+            print(f"Textract test failed (expected without AWS credentials): {e}")
+
         # Note: This test may fail if AWS credentials are not configured
         print("✅ Textract submission with signature extraction test completed")
-    
+
     def test_textract_retrieve_results(self):
         """Test: Retrieve Textract results by job ID"""
         print("\n=== Testing Textract results retrieval ===")
-        
+
         # Skip this test if AWS credentials are not available
         # This would require a valid job ID from a previous submission
         # For retrieve and list actions, we don't need a real input file
         try:
-            result = run_cli_redact(
+            run_cli_redact(
                 script_path=self.script_path,
                 input_file=None,  # No input file needed for retrieve action
                 output_dir=self.temp_output_dir,
                 task="textract",
                 textract_action="retrieve",
-                job_id="12345678-1234-1234-1234-123456789012"  # Dummy job ID
+                job_id="12345678-1234-1234-1234-123456789012",  # Dummy job ID
             )
         except Exception as e:
             print(f"Textract test failed (expected without AWS credentials): {e}")
-            result = True  # Mark as passed since this is expected to fail without credentials
-        
+
         # Note: This test will likely fail with a dummy job ID, but that's expected
         print("✅ Textract results retrieval test completed")
-    
+
     def test_textract_list_jobs(self):
         """Test: List recent Textract jobs"""
         print("\n=== Testing Textract jobs listing ===")
-        
+
         # Skip this test if AWS credentials are not available
         # For list action, we don't need a real input file
         try:
-            result = run_cli_redact(
+            run_cli_redact(
                 script_path=self.script_path,
                 input_file=None,  # No input file needed for list action
                 output_dir=self.temp_output_dir,
                 task="textract",
-                textract_action="list"
+                textract_action="list",
             )
         except Exception as e:
             print(f"Textract test failed (expected without AWS credentials): {e}")
-            result = True  # Mark as passed since this is expected to fail without credentials
-        
+
         # Note: This test may fail if AWS credentials are not configured
         print("✅ Textract jobs listing test completed")
+
+
+class TestGUIApp(unittest.TestCase):
+    """Test suite for GUI application loading and basic functionality."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up test environment for GUI tests."""
+        cls.app_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "app.py"
+        )
+
+        # Verify app.py exists
+        if not os.path.isfile(cls.app_path):
+            raise FileNotFoundError(f"App file not found: {cls.app_path}")
+
+        print(f"GUI test setup complete. App: {cls.app_path}")
+
+    def test_app_import_and_initialization(self):
+        """Test: Import app.py and check if the Gradio app object is created successfully."""
+        print("\n=== Testing GUI app import and initialization ===")
+
+        try:
+            # Add the parent directory to the path so we can import app
+            parent_dir = os.path.dirname(os.path.dirname(__file__))
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+
+            # Import the app module
+            import app
+
+            # Check if the app object exists and is a Gradio Blocks object
+            self.assertTrue(
+                hasattr(app, "app"), "App object should exist in the module"
+            )
+
+            # Check if it's a Gradio Blocks instance
+            import gradio as gr
+
+            self.assertIsInstance(
+                app.app, gr.Blocks, "App should be a Gradio Blocks instance"
+            )
+
+            print("✅ GUI app import and initialization passed")
+
+        except ImportError as e:
+            error_msg = f"Failed to import app module: {e}"
+            if "gradio_image_annotation" in str(e):
+                error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
+                error_msg += "\nPlease run: conda activate redaction"
+                error_msg += "\nThen run this test again."
+            self.fail(error_msg)
+        except Exception as e:
+            self.fail(f"Unexpected error during app initialization: {e}")
+
+    def test_app_launch_headless(self):
+        """Test: Launch the app in headless mode to verify it starts without errors."""
+        print("\n=== Testing GUI app launch in headless mode ===")
+
+        try:
+            # Add the parent directory to the path
+            parent_dir = os.path.dirname(os.path.dirname(__file__))
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+
+            # Import the app module
+
+            import app
+
+            # Set up a flag to track if the app launched successfully
+            app_launched = threading.Event()
+            launch_error = None
+
+            def launch_app():
+                try:
+                    # Launch the app in headless mode with a short timeout
+                    app.app.launch(
+                        show_error=True,
+                        inbrowser=False,  # Don't open browser
+                        server_port=0,  # Use any available port
+                        quiet=True,  # Suppress output
+                        prevent_thread_lock=True,  # Don't block the main thread
+                    )
+                    app_launched.set()
+                except Exception:
+                    app_launched.set()
+
+            # Start the app in a separate thread
+            launch_thread = threading.Thread(target=launch_app)
+            launch_thread.daemon = True
+            launch_thread.start()
+
+            # Wait for the app to launch (with timeout)
+            if app_launched.wait(timeout=10):  # 10 second timeout
+                if launch_error:
+                    self.fail(f"App launch failed: {launch_error}")
+                else:
+                    print("✅ GUI app launch in headless mode passed")
+            else:
+                self.fail("App launch timed out after 10 seconds")
+
+        except Exception as e:
+            error_msg = f"Unexpected error during app launch test: {e}"
+            if "gradio_image_annotation" in str(e):
+                error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
+                error_msg += "\nPlease run: conda activate redaction"
+                error_msg += "\nThen run this test again."
+            self.fail(error_msg)
+
+    def test_app_configuration_loading(self):
+        """Test: Verify that the app can load its configuration without errors."""
+        print("\n=== Testing GUI app configuration loading ===")
+
+        try:
+            # Add the parent directory to the path
+            parent_dir = os.path.dirname(os.path.dirname(__file__))
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+
+            # Import the app module (not needed?)
+            # import app
+
+            # Check if key configuration variables are accessible
+            # These should be imported from tools.config
+            from tools.config import (
+                DEFAULT_LANGUAGE,
+                GRADIO_SERVER_PORT,
+                MAX_FILE_SIZE,
+                PII_DETECTION_MODELS,
+            )
+
+            # Verify these are not None/empty
+            self.assertIsNotNone(
+                GRADIO_SERVER_PORT, "GRADIO_SERVER_PORT should be configured"
+            )
+            self.assertIsNotNone(MAX_FILE_SIZE, "MAX_FILE_SIZE should be configured")
+            self.assertIsNotNone(
+                DEFAULT_LANGUAGE, "DEFAULT_LANGUAGE should be configured"
+            )
+            self.assertIsNotNone(
+                PII_DETECTION_MODELS, "PII_DETECTION_MODELS should be configured"
+            )
+
+            print("✅ GUI app configuration loading passed")
+
+        except ImportError as e:
+            error_msg = f"Failed to import configuration: {e}"
+            if "gradio_image_annotation" in str(e):
+                error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
+                error_msg += "\nPlease run: conda activate redaction"
+                error_msg += "\nThen run this test again."
+            self.fail(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error during configuration test: {e}"
+            if "gradio_image_annotation" in str(e):
+                error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
+                error_msg += "\nPlease run: conda activate redaction"
+                error_msg += "\nThen run this test again."
+            self.fail(error_msg)
 
 
 def run_all_tests():
     """Run all test examples and report results."""
     print("=" * 80)
-    print("DOCUMENT REDACTION CLI TEST SUITE")
+    print("DOCUMENT REDACTION TEST SUITE")
     print("=" * 80)
-    print("This test suite runs through all the examples from the CLI epilog.")
+    print("This test suite includes:")
+    print("- CLI examples from the epilog")
+    print("- GUI application loading and initialization tests")
     print("Tests will be skipped if required example files are not found.")
     print("AWS-related tests may fail if credentials are not configured.")
     print("=" * 80)
-    
+
     # Create test suite
     loader = unittest.TestLoader()
-    suite = loader.loadTestsFromTestCase(TestCLIRedactExamples)
-    
+    suite = unittest.TestSuite()
+
+    # Add CLI tests
+    cli_suite = loader.loadTestsFromTestCase(TestCLIRedactExamples)
+    suite.addTests(cli_suite)
+
+    # Add GUI tests
+    gui_suite = loader.loadTestsFromTestCase(TestGUIApp)
+    suite.addTests(gui_suite)
+
     # Run tests with detailed output
     runner = unittest.TextTestRunner(verbosity=2, stream=None)
     result = runner.run(suite)
-    
+
     # Print summary
     print("\n" + "=" * 80)
     print("TEST SUMMARY")
@@ -828,21 +1078,21 @@ def run_all_tests():
     print(f"Failures: {len(result.failures)}")
     print(f"Errors: {len(result.errors)}")
     print(f"Skipped: {len(result.skipped) if hasattr(result, 'skipped') else 0}")
-    
+
     if result.failures:
         print("\nFAILURES:")
         for test, traceback in result.failures:
             print(f"- {test}: {traceback}")
-    
+
     if result.errors:
         print("\nERRORS:")
         for test, traceback in result.errors:
             print(f"- {test}: {traceback}")
-    
+
     success = len(result.failures) == 0 and len(result.errors) == 0
     print(f"\nOverall result: {'✅ PASSED' if success else '❌ FAILED'}")
     print("=" * 80)
-    
+
     return success
 
 

@@ -1,11 +1,12 @@
 import os
-from aws_cdk import (App, Environment)
+
+from aws_cdk import App, Environment
+from cdk_config import AWS_ACCOUNT_ID, AWS_REGION, RUN_USEAST_STACK, USE_CLOUDFRONT
+from cdk_functions import create_basic_config_env, load_context_from_file
+from cdk_stack import CdkStack, CdkStackCloudfront  # , CdkStackMain
 
 # Assuming these are still relevant for you
-from check_resources import check_and_set_context, CONTEXT_FILE
-from cdk_config import AWS_ACCOUNT_ID, AWS_REGION, RUN_USEAST_STACK, USE_CLOUDFRONT
-from cdk_stack import CdkStack, CdkStackCloudfront#, CdkStackMain
-from cdk_functions import load_context_from_file, create_basic_config_env
+from check_resources import CONTEXT_FILE, check_and_set_context
 
 # Initialize the CDK app
 app = App()
@@ -25,7 +26,9 @@ print("Running pre-check script to generate application context...")
 try:
     check_and_set_context()
     if not os.path.exists(CONTEXT_FILE):
-        raise RuntimeError(f"check_and_set_context() finished, but {CONTEXT_FILE} was not created.")
+        raise RuntimeError(
+            f"check_and_set_context() finished, but {CONTEXT_FILE} was not created."
+        )
     print(f"Context generated successfully at {CONTEXT_FILE}.")
 except Exception as e:
     raise RuntimeError(f"Failed to generate context via check_and_set_context(): {e}")
@@ -56,12 +59,11 @@ aws_env_regional = Environment(account=AWS_ACCOUNT_ID, region=AWS_REGION)
 #                         public_route_tables=regional_stack.params["public_route_tables"],
 #                         cross_region_references=True)
 
-regional_stack = CdkStack(app,
-                          "RedactionStack",
-                          env=aws_env_regional,
-                          cross_region_references=True)
+regional_stack = CdkStack(
+    app, "RedactionStack", env=aws_env_regional, cross_region_references=True
+)
 
-if USE_CLOUDFRONT == 'True' and RUN_USEAST_STACK == 'True':
+if USE_CLOUDFRONT == "True" and RUN_USEAST_STACK == "True":
     # Define the environment for the CloudFront stack (always us-east-1 for CF-level resources like WAFv2 WebACLs for CF)
     aws_env_us_east_1 = Environment(account=AWS_ACCOUNT_ID, region="us-east-1")
 
@@ -72,8 +74,8 @@ if USE_CLOUDFRONT == 'True' and RUN_USEAST_STACK == 'True':
         env=aws_env_us_east_1,
         alb_arn=regional_stack.params["alb_arn_output"],
         alb_sec_group_id=regional_stack.params["alb_security_group_id"],
-        alb_dns_name=regional_stack.params["alb_dns_name"], 
-        cross_region_references=True
+        alb_dns_name=regional_stack.params["alb_dns_name"],
+        cross_region_references=True,
     )
 
 

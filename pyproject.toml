@@ -52,7 +52,16 @@ test = ["pytest", "pytest-cov"]
 # Configuration for Ruff linter:
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
 select = ["E", "F", "I"]
+ignore = [
+    "E501",  # line-too-long (handled with Black)
+    "E402",  # module-import-not-at-top-of-file (sometimes needed for conditional imports)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
 
 # Configuration for a Black formatter:
 [tool.black]
