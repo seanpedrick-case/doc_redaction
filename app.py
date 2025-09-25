@@ -1009,69 +1009,87 @@ with app:
     with gr.Tab("Redact PDFs/images"):
 
         # Examples for PDF/image redaction
+        # Examples for PDF/image redaction
         if SHOW_EXAMPLES == "True":
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Extract text and redact document' button:"
             )
-            redaction_examples = gr.Examples(
-                examples=[
-                    [
-                        [
-                            "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
-                        ],
-                        "Local model - selectable text",
-                        "Local",
-                        [],
-                        CHOSEN_REDACT_ENTITIES,
-                        CHOSEN_COMPREHEND_ENTITIES,
-                        [
-                            "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
-                        ],
+            
+            # Check which example files exist and create examples only for available files
+            example_files = [
+                "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
+                "example_data/example_complaint_letter.jpg", 
+                "example_data/graduate-job-example-cover-letter.pdf",
+                "example_data/Partnership-Agreement-Toolkit_0_0.pdf"
+            ]
+            
+            available_examples = []
+            example_labels = []
+            
+            # Check each example file and add to examples if it exists
+            if os.path.exists(example_files[0]):
+                available_examples.append([
+                    [example_files[0]],
+                    "Local model - selectable text",
+                    "Local",
+                    [],
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[0]],
+                ])
+                example_labels.append("PDF with selectable text redaction")
+            
+            if os.path.exists(example_files[1]):
+                available_examples.append([
+                    [example_files[1]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    [],
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[1]],
+                ])
+                example_labels.append("Image redaction with local OCR")
+            
+            if os.path.exists(example_files[2]):
+                available_examples.append([
+                    [example_files[2]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    [],
+                    ["TITLES", "PERSON", "DATE_TIME"],
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[2]],
+                ])
+                example_labels.append("PDF redaction with custom entities (TITLES, PERSON, DATE_TIME)")
+            
+            if os.path.exists(example_files[3]):
+                available_examples.append([
+                    [example_files[3]],
+                    "AWS Textract service - all PDF types",
+                    "AWS Comprehend",
+                    ["Extract handwriting", "Extract signatures"],
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[3]],
+                ])
+                example_labels.append("PDF redaction with AWS services and signature detection")
+            
+            # Only create examples if we have available files
+            if available_examples:
+                redaction_examples = gr.Examples(
+                    examples=available_examples,
+                    inputs=[
+                        in_doc_files,
+                        text_extract_method_radio,
+                        pii_identification_method_drop,
+                        handwrite_signature_checkbox,
+                        in_redact_entities,
+                        in_redact_comprehend_entities,
+                        prepared_pdf_state,
                     ],
-                    [
-                        ["example_data/example_complaint_letter.jpg"],
-                        "Local OCR model - PDFs without selectable text",
-                        "Local",
-                        [],
-                        CHOSEN_REDACT_ENTITIES,
-                        CHOSEN_COMPREHEND_ENTITIES,
-                        ["example_data/example_complaint_letter.jpg"],
-                    ],
-                    [
-                        ["example_data/graduate-job-example-cover-letter.pdf"],
-                        "Local OCR model - PDFs without selectable text",
-                        "Local",
-                        [],
-                        ["TITLES", "PERSON", "DATE_TIME"],
-                        CHOSEN_COMPREHEND_ENTITIES,
-                        ["example_data/graduate-job-example-cover-letter.pdf"],
-                    ],
-                    [
-                        ["example_data/Partnership-Agreement-Toolkit_0_0.pdf"],
-                        "AWS Textract service - all PDF types",
-                        "AWS Comprehend",
-                        ["Extract handwriting", "Extract signatures"],
-                        CHOSEN_REDACT_ENTITIES,
-                        CHOSEN_COMPREHEND_ENTITIES,
-                        ["example_data/Partnership-Agreement-Toolkit_0_0.pdf"],
-                    ],
-                ],
-                inputs=[
-                    in_doc_files,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    handwrite_signature_checkbox,
-                    in_redact_entities,
-                    in_redact_comprehend_entities,
-                    prepared_pdf_state,
-                ],
-                example_labels=[
-                    "PDF with selectable text redaction",
-                    "Image redaction with local OCR",
-                    "PDF redaction with custom entities (TITLES, PERSON, DATE_TIME)",
-                    "PDF redaction with AWS services and signature detection",
-                ],
-            )
+                    example_labels=example_labels,
+                )
 
         with gr.Accordion("Redact document", open=True):
             # in_doc_files = gr.File(
@@ -1651,36 +1669,37 @@ with app:
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Identify duplicate pages/subdocuments' button:"
             )
-            duplicate_examples = gr.Examples(
-                examples=[
-                    [
+            
+            # Check if duplicate example file exists
+            duplicate_example_file = "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
+            
+            if os.path.exists(duplicate_example_file):
+                duplicate_examples = gr.Examples(
+                    examples=[
                         [
-                            "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
+                            [duplicate_example_file],
+                            0.95,
+                            10,
+                            True,
                         ],
-                        0.95,
-                        10,
-                        True,
-                    ],
-                    [
                         [
-                            "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
+                            [duplicate_example_file],
+                            0.95,
+                            3,
+                            False,
                         ],
-                        0.95,
-                        3,
-                        False,
                     ],
-                ],
-                inputs=[
-                    in_duplicate_pages,
-                    duplicate_threshold_input,
-                    min_word_count_input,
-                    combine_page_text_for_duplicates_bool,
-                ],
-                example_labels=[
-                    "Find duplicate pages of text in document OCR outputs",
-                    "Find duplicate text lines in document OCR outputs",
-                ],
-            )
+                    inputs=[
+                        in_duplicate_pages,
+                        duplicate_threshold_input,
+                        min_word_count_input,
+                        combine_page_text_for_duplicates_bool,
+                    ],
+                    example_labels=[
+                        "Find duplicate pages of text in document OCR outputs",
+                        "Find duplicate text lines in document OCR outputs",
+                    ],
+                )
 
         with gr.Accordion("Step 1: Configure and run analysis", open=True):
             # in_duplicate_pages = gr.File(
@@ -1810,47 +1829,65 @@ with app:
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Redact text/data files' button for redaction, or the 'Find duplicate cells/rows' button for duplicate detection:"
             )
-            tabular_examples = gr.Examples(
-                examples=[
-                    [
-                        ["example_data/combined_case_notes.csv"],
-                        ["Case Note", "Client"],
-                        "Local",
-                        "replace with 'REDACTED'",
-                        ["example_data/combined_case_notes.csv"],
-                        ["Case Note"],
+            
+            # Check which tabular example files exist
+            tabular_example_files = [
+                "example_data/combined_case_notes.csv",
+                "example_data/Bold minimalist professional cover letter.docx",
+                "example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"
+            ]
+            
+            available_tabular_examples = []
+            tabular_example_labels = []
+            
+            # Check each tabular example file and add to examples if it exists
+            if os.path.exists(tabular_example_files[0]):
+                available_tabular_examples.append([
+                    [tabular_example_files[0]],
+                    ["Case Note", "Client"],
+                    "Local",
+                    "replace with 'REDACTED'",
+                    [tabular_example_files[0]],
+                    ["Case Note"],
+                ])
+                tabular_example_labels.append("CSV file redaction with specific columns - remove text")
+            
+            if os.path.exists(tabular_example_files[1]):
+                available_tabular_examples.append([
+                    [tabular_example_files[1]],
+                    [],
+                    "Local",
+                    "replace with 'REDACTED'",
+                    [],
+                    [],
+                ])
+                tabular_example_labels.append("Word document redaction - replace with REDACTED")
+            
+            if os.path.exists(tabular_example_files[2]):
+                available_tabular_examples.append([
+                    [tabular_example_files[2]],
+                    ["text"],
+                    "Local",
+                    "replace with 'REDACTED'",
+                    [tabular_example_files[2]],
+                    ["text"],
+                ])
+                tabular_example_labels.append("Tabular duplicate detection in CSV files")
+            
+            # Only create examples if we have available files
+            if available_tabular_examples:
+                tabular_examples = gr.Examples(
+                    examples=available_tabular_examples,
+                    inputs=[
+                        in_data_files,
+                        in_colnames,
+                        pii_identification_method_drop_tabular,
+                        anon_strategy,
+                        in_tabular_duplicate_files,
+                        tabular_text_columns,
                     ],
-                    [
-                        ["example_data/Bold minimalist professional cover letter.docx"],
-                        [],
-                        "Local",
-                        "replace with 'REDACTED'",
-                        [],
-                        [],
-                    ],
-                    [
-                        ["example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"],
-                        ["text"],
-                        "Local",
-                        "replace with 'REDACTED'",
-                        ["example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"],
-                        ["text"],
-                    ],
-                ],
-                inputs=[
-                    in_data_files,
-                    in_colnames,
-                    pii_identification_method_drop_tabular,
-                    anon_strategy,
-                    in_tabular_duplicate_files,
-                    tabular_text_columns,
-                ],
-                example_labels=[
-                    "CSV file redaction with specific columns - remove text",
-                    "Word document redaction - replace with REDACTED",
-                    "Tabular duplicate detection in CSV files",
-                ],
-            )
+                    example_labels=tabular_example_labels,
+                )
 
         with gr.Accordion("Redact Word or Excel/csv files", open=True):
             with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
@@ -6368,6 +6405,24 @@ if __name__ == "__main__":
             if DEFAULT_TEXT_COLUMNS:
                 print(f"Text columns: {DEFAULT_TEXT_COLUMNS}")
             print(f"Remove duplicate rows: {REMOVE_DUPLICATE_ROWS}")
+
+        # Combine extraction options
+        extraction_options = (
+            list(direct_mode_args["handwrite_signature_extraction"])
+            if direct_mode_args["handwrite_signature_extraction"]
+            else []
+        )
+        if direct_mode_args["extract_forms"]:
+            extraction_options.append("Extract forms")
+        if direct_mode_args["extract_tables"]:
+            extraction_options.append("Extract tables")
+        if direct_mode_args["extract_layout"]:
+            extraction_options.append("Extract layout")
+        direct_mode_args["handwrite_signature_extraction"] = extraction_options
+
+        # Run the CLI main function with direct mode arguments
+        main(direct_mode_args=direct_mode_args)
+
 
         # Combine extraction options
         extraction_options = (
