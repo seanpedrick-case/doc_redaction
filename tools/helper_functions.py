@@ -1,6 +1,7 @@
 import os
 import unicodedata
 from math import ceil
+from pathlib import Path
 from typing import List
 
 import boto3
@@ -602,10 +603,13 @@ def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:
     """Get the file paths of all files in the given folder."""
     file_paths = []
 
+    # Ensure folder_path is a safe, absolute path
+    safe_folder_path = Path(folder_path).resolve()
+
     # List all files in the specified folder
-    for filename in os.listdir(folder_path):
-        # Construct full file path
-        full_path = secure_join(folder_path, filename)
+    for filename in os.listdir(safe_folder_path):
+        # Construct full file path using secure_join to prevent path traversal
+        full_path = secure_join(safe_folder_path, filename)
         # Check if it's a file (not a directory)
         if os.path.isfile(full_path):
             file_paths.append(full_path)

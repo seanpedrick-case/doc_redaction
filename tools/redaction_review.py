@@ -4,8 +4,14 @@ import string
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Set, Tuple
-from xml.dom import minidom
-from xml.etree.ElementTree import Element, SubElement, parse, tostring
+from xml.etree.ElementTree import Element, SubElement, tostring
+
+import defusedxml
+import defusedxml.ElementTree as defused_etree
+import defusedxml.minidom as defused_minidom
+
+# Defuse the standard library XML modules for security
+defusedxml.defuse_stdlib()
 
 import gradio as gr
 import numpy as np
@@ -617,6 +623,10 @@ def update_annotator_page_from_review_df(
             print(
                 f"Error during image path replacement for page {gradio_annotator_current_page_number}: {e}"
             )
+    else:
+        print(
+            f"Warning: Page index {page_num_reported_zero_indexed} out of bounds for all_image_annotations list."
+        )
 
     # Save back page_sizes_df to page_sizes list format
     if not page_sizes_df.empty:
@@ -1016,8 +1026,6 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
         final_annotations_list.append({"image": image_path, "boxes": boxes})
 
     progress(1.0, desc="Completed annotation processing")
-
-    print("final_annotations_list:", final_annotations_list)
 
     return (
         final_annotations_list,
@@ -2654,7 +2662,7 @@ def create_xfdf(
         data_element.text = data_content_string
 
     rough_string = tostring(xfdf_root, encoding="unicode", method="xml")
-    reparsed = minidom.parseString(rough_string)
+    reparsed = defused_minidom.parseString(rough_string)
     return reparsed.toxml()  # .toprettyxml(indent="  ")
 
 
@@ -2722,9 +2730,16 @@ def convert_df_to_xfdf(
                 page_sizes,
             )
 
-            output_path = output_folder + file_path_name + "_adobe.xfdf"
+            # Split output_folder (trusted base) from filename (untrusted)
+            secure_file_write(
+                output_folder,
+                file_path_name + "_adobe.xfdf",
+                xfdf_content,
+                encoding="utf-8",
+            )
 
-            secure_file_write(output_path, xfdf_content, encoding="utf-8")
+            # Reconstruct the full path for logging purposes
+            output_path = output_folder + file_path_name + "_adobe.xfdf"
 
             output_paths.append(output_path)
 
@@ -2788,7 +2803,9 @@ def parse_xfdf(xfdf_path: str):
     Returns:
     - List of dictionaries containing redaction information
     """
-    tree = parse(xfdf_path)
+    # Assuming xfdf_path is a file path. If you are passing the XML string,
+    # you would use defused_etree.fromstring(xfdf_string) instead of .parse()
+    tree = defused_etree.parse(xfdf_path)
     root = tree.getroot()
 
     # Define the namespace
@@ -2799,6 +2816,25 @@ def parse_xfdf(xfdf_path: str):
     # Find all redact elements using the namespace
     for redact in root.findall(".//xfdf:redact", namespaces=namespace):
 
+        # Extract text from contents-richtext if it exists
+        text_content = ""
+
+        # *** THE FIX IS HERE ***
+        # Use the namespace to find the contents-richtext element
+        contents_richtext = redact.find(
+            ".//xfdf:contents-richtext", namespaces=namespace
+        )
+
+        if contents_richtext is not None:
+            # Get all text content from the HTML structure
+            # The children of contents-richtext (body, p, span) have a different namespace
+            # but itertext() cleverly handles that for us.
+            text_content = "".join(contents_richtext.itertext()).strip()
+
+        # Fallback to contents attribute if no richtext content
+        if not text_content:
+            text_content = redact.get("contents", "")
+
         redaction_info = {
             "image": "",  # Image will be filled in later
             "page": int(redact.get("page")) + 1,  # Convert to 1-based index
@@ -2807,7 +2843,7 @@ def parse_xfdf(xfdf_path: str):
             "xmax": float(redact.get("rect").split(",")[2]),
             "ymax": float(redact.get("rect").split(",")[3]),
             "label": redact.get("title"),
-            "text": redact.get("contents"),
+            "text": text_content,  # Use the extracted text content
             "color": redact.get(
                 "border-color", "(0, 0, 0)"
             ),  # Default to black if not specified
@@ -2819,9 +2855,10 @@ def parse_xfdf(xfdf_path: str):
 
 def convert_xfdf_to_dataframe(
     file_paths_list: List[str],
-    pymupdf_doc,
+    pymupdf_doc: Document,
     image_paths: List[str],
     output_folder: str = OUTPUT_FOLDER,
+    input_folder: str = INPUT_FOLDER,
 ):
     """
     Convert redaction annotations from XFDF and associated images into a DataFrame.
@@ -2830,12 +2867,16 @@ def convert_xfdf_to_dataframe(
     - xfdf_path: Path to the XFDF file
     - pdf_doc: PyMuPDF document object
     - image_paths: List of PIL Image objects corresponding to PDF pages
+    - output_folder: Output folder for file save
+    - input_folder: Input folder for image creation
 
     Returns:
     - DataFrame containing redaction information
     """
     output_paths = list()
     df = pd.DataFrame()
+    pdf_name = ""
+    pdf_path = ""
 
     # Sort the file paths so that the pdfs come first
     file_paths_list = sorted(
@@ -2858,6 +2899,7 @@ def convert_xfdf_to_dataframe(
 
         if file_path_end == "pdf":
             pdf_name = os.path.basename(file_path)
+            pdf_path = file_path
 
             # Add pdf to outputs
             output_paths.append(file_path)
@@ -2891,7 +2933,18 @@ def convert_xfdf_to_dataframe(
                 image_path = image_paths[page_python_format]
 
                 if isinstance(image_path, str):
-                    image = Image.open(image_path)
+                    try:
+                        image = Image.open(image_path)
+                    except Exception:
+                        # print(f"Error opening image: {e}")
+
+                        page_num, out_path, width, height = (
+                            process_single_page_for_image_conversion(
+                                pdf_path, page_python_format, input_folder=input_folder
+                            )
+                        )
+
+                        image = Image.open(out_path)
 
                 image_page_width, image_page_height = image.size
 
@@ -2921,5 +2974,9 @@ def convert_xfdf_to_dataframe(
     df.to_csv(out_file_path, index=None)
 
     output_paths.append(out_file_path)
+
+    gr.Info(
+        f"Review file saved to {out_file_path}. Now click on '1. Upload original pdf' to view the pdf with the annotations."
+    )
 
     return output_paths

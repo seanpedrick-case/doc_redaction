@@ -8,6 +8,7 @@ import time
 import zipfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
@@ -84,9 +85,6 @@ def is_pdf(filename):
         bool: True if the file name ends with ".pdf", False otherwise.
     """
     return filename.lower().endswith(".pdf")
-
-
-## Convert pdf to image if necessary
 
 
 def check_image_size_and_reduce(out_path: str, image: Image):
@@ -296,7 +294,6 @@ def process_file_for_image_creation(
 
     # Check if the file is a PDF
     elif file_extension == ".pdf":
-        # print(f"{file_path} is a PDF file. Converting to image set")
 
         # Run your function for processing PDF files here
         img_path, image_sizes_width, image_sizes_height, all_img_details = (
@@ -652,8 +649,8 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
 def prepare_image_or_pdf(
     file_paths: List[str],
     text_extract_method: str,
-    all_line_level_ocr_results_df: pd.DataFrame,
-    all_page_line_level_ocr_results_with_words_df: pd.DataFrame,
+    all_line_level_ocr_results_df: pd.DataFrame = None,
+    all_page_line_level_ocr_results_with_words_df: pd.DataFrame = None,
     latest_file_completed: int = 0,
     out_message: List[str] = list(),
     first_loop_state: bool = False,
@@ -915,7 +912,12 @@ def prepare_image_or_pdf(
 
             if (file_extension in [".json"]) & (prepare_for_review is True):
                 if isinstance(file_path, str):
-                    json_content = secure_file_read(file_path)
+                    # Split the path into base directory and filename for security
+                    file_path_obj = Path(file_path)
+                    base_dir = file_path_obj.parent
+                    filename = file_path_obj.name
+
+                    json_content = secure_file_read(base_dir, filename)
                     all_annotations_object = json.loads(json_content)
                 else:
                     # Assuming file_path is a NamedString or similar

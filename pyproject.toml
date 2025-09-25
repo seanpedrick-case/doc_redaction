@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "1.1.0"
+version = "1.2.0"
 description = "Redact PDF/image-based documents, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,33 +12,34 @@ requires-python = ">=3.10"
 dependencies = [
     "pdfminer.six==20250506",
     "pdf2image==1.17.0",
-    "pymupdf==1.26.3",
+    "pymupdf==1.26.4",
     "opencv-python==4.12.0.88",
-    "presidio_analyzer==2.2.359",
-    "presidio_anonymizer==2.2.359",
+    "presidio_analyzer==2.2.360",
+    "presidio_anonymizer==2.2.360",
     "presidio-image-redactor==0.0.57",
-    "pikepdf==9.10.2",
-    "pandas==2.3.1",
-    "scikit-learn==1.7.1",
+    "pikepdf==9.11.0",
+    "pandas==2.3.2",
+    "scikit-learn==1.7.2",
     "spacy==3.8.7",
     # Direct URL dependency for spacy model
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
-    "gradio==5.46.1",
-    "boto3==1.40.31",
+    "gradio==5.47.0",
+    "boto3==1.40.37",
     "pyarrow==21.0.0",
     "openpyxl==3.1.5",
-    "Faker==37.5.3",
+    "Faker==37.8.0",
     "python-levenshtein==0.27.1",
     "spaczz==0.6.1",
     # Direct URL dependency for gradio_image_annotator wheel
     "gradio_image_annotation @ https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.3/gradio_image_annotation-0.3.3-py3-none-any.whl",
-    "rapidfuzz==3.13.0",
+    "rapidfuzz==3.14.1",
     "python-dotenv==1.0.1",
     "awslambdaric==3.1.1",
     "python-docx==1.2.0",
-    "paddlepaddle==3.1.0",
-    "paddleocr==3.1.1",
-    "polars==1.33.1"
+    "polars==1.33.1",
+    "defusedxml==0.7.1",
+    #"paddlepaddle==3.2.0", # Optional paddle imports - only if you want to use hybrid OCR mode with tesseract and paddleOCR
+    #"paddleocr==3.2.0"    
 ]
 
 [project.urls]
@@ -67,3 +68,26 @@ ignore = [
 [tool.black]
 line-length = 88
 target-version = ['py310']
+
+# Configuration for pytest:
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:click.parser",
+    "ignore::DeprecationWarning:weasel.util.config",
+    "ignore::DeprecationWarning:builtin type",
+    "ignore::DeprecationWarning:websockets.legacy",
+    "ignore::DeprecationWarning:websockets.server",
+    "ignore::DeprecationWarning:spacy.cli._util",
+    "ignore::DeprecationWarning:weasel.util.config",
+    "ignore::DeprecationWarning:importlib._bootstrap",
+]
+testpaths = ["test"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+]

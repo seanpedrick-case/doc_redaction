@@ -161,11 +161,9 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
             INPUT_FOLDER = temp_dir + "/"
 
 GRADIO_TEMP_DIR = get_or_create_env_var(
-    "GRADIO_TEMP_DIR", "tmp/gradio_tmp/"
+    "GRADIO_TEMP_DIR", ""
 )  # Default Gradio temp folder
-MPLCONFIGDIR = get_or_create_env_var(
-    "MPLCONFIGDIR", "tmp/matplotlib_cache/"
-)  # Matplotlib cache folder
+MPLCONFIGDIR = get_or_create_env_var("MPLCONFIGDIR", "")  # Matplotlib cache folder
 
 ###
 # LOGGING OPTIONS
@@ -545,6 +543,9 @@ except Exception as e:
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "0")
 
+SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "False")
+SHOW_AWS_EXAMPLES = get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
+
 RUN_DIRECT_MODE = get_or_create_env_var("RUN_DIRECT_MODE", "0")
 
 # Direct mode configuration options
@@ -574,7 +575,7 @@ ROOT_PATH = get_or_create_env_var("ROOT_PATH", "")
 
 DEFAULT_CONCURRENCY_LIMIT = int(get_or_create_env_var("DEFAULT_CONCURRENCY_LIMIT", "3"))
 
-FILE_INPUT_HEIGHT = get_or_create_env_var("FILE_INPUT_HEIGHT", "200")
+FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))
 
 ### ALLOW LIST
 

@@ -470,6 +470,8 @@ def choose_and_run_redactor(
         )
         print("Estimated total processing time:", str(estimate_total_processing_time))
 
+        gr.Info(combined_out_message)
+
         page_break_return = True
 
         return (
@@ -1301,12 +1303,17 @@ def choose_and_run_redactor(
     ):
         all_request_metadata_str = "\n".join(all_textract_request_metadata).strip()
 
-        all_textract_request_metadata_file_path = (
-            output_folder + pdf_file_name_without_ext + "_textract_metadata.txt"
+        # all_textract_request_metadata_file_path is constructed by output_folder + filename
+        # Split output_folder (trusted base) from pdf_file_name_without_ext + "_textract_metadata.txt" (untrusted)
+        secure_file_write(
+            output_folder,
+            pdf_file_name_without_ext + "_textract_metadata.txt",
+            all_request_metadata_str,
         )
 
-        secure_file_write(
-            all_textract_request_metadata_file_path, all_request_metadata_str
+        # Reconstruct the full path for logging purposes
+        all_textract_request_metadata_file_path = (
+            output_folder + pdf_file_name_without_ext + "_textract_metadata.txt"
         )
 
         # Add the request metadata to the log outputs if not there already
@@ -2788,7 +2795,8 @@ def redact_image_pdf(
                     if original_textract_data != textract_data:
                         # Write the updated existing textract data back to the JSON file
                         secure_file_write(
-                            textract_json_file_path,
+                            output_folder,
+                            file_name + "_textract.json",
                             json.dumps(textract_data, separators=(",", ":")),
                         )
 
@@ -2851,7 +2859,8 @@ def redact_image_pdf(
                 # Write the updated existing textract data back to the JSON file
                 if original_textract_data != textract_data:
                     secure_file_write(
-                        textract_json_file_path,
+                        output_folder,
+                        file_name + "_textract.json",
                         json.dumps(textract_data, separators=(",", ":")),
                     )
 
@@ -2910,7 +2919,8 @@ def redact_image_pdf(
 
         if original_textract_data != textract_data:
             secure_file_write(
-                textract_json_file_path,
+                output_folder,
+                file_name + "_textract.json",
                 json.dumps(textract_data, separators=(",", ":")),
             )
 

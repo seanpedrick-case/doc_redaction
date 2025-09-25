@@ -39,7 +39,10 @@ from cdk_config import (
     CLUSTER_NAME,
     CODEBUILD_PROJECT_NAME,
     CODEBUILD_ROLE_NAME,
+    COGNITO_ACCESS_TOKEN_VALIDITY,
+    COGNITO_ID_TOKEN_VALIDITY,
     COGNITO_REDIRECTION_URL,
+    COGNITO_REFRESH_TOKEN_VALIDITY,
     COGNITO_USER_POOL_CLIENT_NAME,
     COGNITO_USER_POOL_CLIENT_SECRET_NAME,
     COGNITO_USER_POOL_DOMAIN_PREFIX,
@@ -1160,6 +1163,13 @@ class CdkStack(Stack):
                             cognito.OAuthScope.PROFILE,
                         ],
                         callback_urls=redirect_uris,
+                    ),
+                    refresh_token_validity=Duration.minutes(
+                        COGNITO_REFRESH_TOKEN_VALIDITY
+                    ),
+                    id_token_validity=Duration.minutes(COGNITO_ID_TOKEN_VALIDITY),
+                    access_token_validity=Duration.minutes(
+                        COGNITO_ACCESS_TOKEN_VALIDITY
                     ),
                 )
 

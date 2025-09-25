@@ -105,30 +105,29 @@ def secure_path_join(base_path: Union[str, Path], *path_parts: str) -> Path:
 
 
 def secure_file_write(
-    file_path: Union[str, Path],
+    base_path: Union[str, Path],
+    filename: str,
     content: str,
     mode: str = "w",
     encoding: Optional[str] = None,
     **kwargs,
 ) -> None:
     """
-    Safely write content to a file with path validation.
+    Safely write content to a file within a base directory with path validation.
 
     Args:
-        file_path: The file path to write to
+        base_path: The base directory under which to write the file
+        filename: The target file name or relative path (untrusted)
         content: The content to write
         mode: File open mode (default: 'w')
         encoding: Text encoding (default: None for binary mode)
         **kwargs: Additional arguments for open()
     """
-    file_path = Path(file_path)
+    # Use secure_path_join to ensure the final path is within base_path and to sanitize filename
+    file_path = secure_path_join(base_path, filename)
 
-    # Ensure the parent directory exists
+    # Ensure the parent directory exists AFTER joining and securing the final path
     file_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Validate the path is safe
-    if not file_path.is_absolute():
-        file_path = file_path.resolve()
 
     # Write the file
     open_kwargs = {"mode": mode}
@@ -141,16 +140,18 @@ def secure_file_write(
 
 
 def secure_file_read(
-    file_path: Union[str, Path],
+    base_path: Union[str, Path],
+    filename: str,
     mode: str = "r",
     encoding: Optional[str] = None,
     **kwargs,
 ) -> str:
     """
-    Safely read content from a file with path validation.
+    Safely read content from a file within a base directory with path validation.
 
     Args:
-        file_path: The file path to read from
+        base_path: The base directory under which to read the file
+        filename: The target file name or relative path (untrusted)
         mode: File open mode (default: 'r')
         encoding: Text encoding (default: None for binary mode)
         **kwargs: Additional arguments for open()
@@ -158,7 +159,8 @@ def secure_file_read(
     Returns:
         The file content
     """
-    file_path = Path(file_path)
+    # Use secure_path_join to ensure the final path is within base_path and to sanitize filename
+    file_path = secure_path_join(base_path, filename)
 
     # Validate the path exists and is a file
     if not file_path.exists():

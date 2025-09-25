@@ -36,7 +36,7 @@ def split_text_with_punctuation(text: str) -> List[str]:
     # 2. OR a sequence of one or more characters that are NOT punctuation or whitespace `[^.,?!:;\s]+`
     pattern = re.compile(r"([.,?!:;]+|[^.,?!:;\s]+)")
 
-    final_list = []
+    final_list = list()
     # We first split by whitespace to handle sentences correctly
     for word in text.split():
         # Then, for each whitespace-separated word, we tokenize it further
@@ -381,7 +381,7 @@ def combine_ocr_dataframes(
             - The final combined and processed DataFrame.
             - A list containing the path to the saved output CSV file.
     """
-    all_data = []
+    all_data = list()
 
     for file_identifier, df_initial in input_data:
         df = df_initial.copy()  # Work on a copy to avoid side effects
@@ -454,7 +454,7 @@ def combine_ocr_dataframes(
     combined_df = combined_df.copy()[existing_final_columns]
 
     # --- Save Output ---
-    output_files = []
+    output_files = list()
     if output_folder and output_filename:
         os.makedirs(output_folder, exist_ok=True)
         output_path = os.path.join(output_folder, output_filename)
@@ -490,7 +490,7 @@ def combine_ocr_output_text(
     else:
         file_paths_list = input_files
 
-    data_to_process = []
+    data_to_process = list()
     for file_path in file_paths_list:
         try:
             df = pd.read_csv(file_path)
@@ -644,7 +644,7 @@ def save_results_and_redaction_lists(
     Returns:
         list: A list of paths to all generated files.
     """
-    output_paths = []
+    output_paths = list()
     output_folder_path = Path(output_folder)
     output_folder_path.mkdir(exist_ok=True)
 
@@ -657,7 +657,6 @@ def save_results_and_redaction_lists(
     final_df.to_csv(similarity_file_output_path, index=False, encoding="utf-8-sig")
 
     output_paths.append(str(similarity_file_output_path))
-    # print(f"Main results saved to {similarity_file_output_path}")
 
     # 2. Save per-file redaction lists
     # Use 'Page2_File' as the source of duplicate content
@@ -754,7 +753,6 @@ def find_consecutive_sequence_matches(
         A DataFrame with two columns ('Page1_Index', 'Page2_Index') mapping the
         consecutive match, or an empty DataFrame if no match is found.
     """
-    # print(f"Starting sequence search for '{search_file_name}' in '{reference_file_name}'...")
 
     # Step 1: Isolate the data for each file
     search_df = df_filtered[df_filtered["file"] == search_file_name]
@@ -773,7 +771,7 @@ def find_consecutive_sequence_matches(
     reference_indices = reference_df.index.tolist()
 
     query_len = len(query_tokens)
-    all_found_matches = []
+    all_found_matches = list()
 
     print(f"Searching for a sequence of {query_len} tokens...")
 
@@ -784,7 +782,6 @@ def find_consecutive_sequence_matches(
 
         # Step 4: If the window matches the query with or without punctuation on end
         if _sequences_match(query_tokens, window):
-            # print(f"Found a consecutive match starting at reference index: {reference_indices[i]}")
 
             # Get the global indices for this entire matching block
             matching_reference_indices = reference_indices[i : i + query_len]
@@ -874,7 +871,7 @@ def identify_similar_text_sequences(
         # Use the original, simpler path for all-to-all comparisons (including intra-file).
         vectorizer = TfidfVectorizer()
         print("Standard Path: Calculating all-to-all similarity.")
-        progress(0.2, desc="Vectorizing text...")
+        progress(0.2, desc="Vectorising text...")
         tfidf_matrix = vectorizer.fit_transform(df_filtered["text_clean"])
 
         progress(0.3, desc="Calculating similarity matrix...")
@@ -897,12 +894,8 @@ def identify_similar_text_sequences(
     progress(0.7, desc="Aggregating results based on matching strategy")
 
     if greedy_match or min_consecutive_pages > 1:
-        # print("Finding all consecutive page matches of minimum length:", min_consecutive_pages)
-
         # Sort the dataframe to ensure consecutive pages are adjacent
-        similarity_df = (
-            base_similarity_df  # .sort_values(['Page1_Index', 'Page2_Index']).copy()
-        )
+        similarity_df = base_similarity_df
 
         # A new sequence starts if the difference from the previous row is not (1, 1)
         # is_consecutive will be True if a row continues the sequence, False if it's a new one.
@@ -1023,8 +1016,8 @@ def run_duplicate_analysis(
     min_consecutive: int,
     greedy_match: bool,
     combine_pages: bool = True,
-    preview_length: int = 500,
     output_folder: str = OUTPUT_FOLDER,
+    preview_length: int = 500,
     progress=gr.Progress(track_tqdm=True),
 ):
     """
@@ -1039,8 +1032,8 @@ def run_duplicate_analysis(
         min_consecutive (int): The minimum number of consecutive pages that must match for a sequence to be considered a duplicate.
         greedy_match (bool): If True, uses a greedy matching strategy for identifying consecutive sequences.
         combine_pages (bool, optional): If True, text from multiple pages is combined into larger segments for analysis. Defaults to True.
-        preview_length (int, optional): The maximum number of characters to display in the text preview panes. Defaults to 500.
         output_folder (str, optional): The directory where the similarity results and redaction lists will be saved. Defaults to OUTPUT_FOLDER.
+        preview_length (int, optional): The maximum number of characters to display in the text preview panes. Defaults to 500.
         progress (gr.Progress, optional): A Gradio progress tracker object to display progress in the UI.
     """
 
@@ -1079,8 +1072,11 @@ def run_duplicate_analysis(
         progress=progress,
     )
 
+    full_df["text"] = full_df["text"].astype(str)
+
     # Clip text to first 200 characters
     full_df["text"] = full_df["text"].str[:preview_length]
+
     # Preprocess full_data (without preview text) for fast access (run once)
     full_data_by_file = {
         file: df.sort_values("page").set_index("page")
@@ -1134,6 +1130,9 @@ def show_page_previews(
 
         page1_data = full_data_by_file[file1].loc[[page1], ["text"]].reset_index()
         page2_data = full_data_by_file[file2].loc[[page2], ["text"]].reset_index()
+
+    page1_data["text"] = page1_data["text"].astype(str)
+    page2_data["text"] = page2_data["text"].astype(str)
 
     page1_data["text"] = page1_data["text"].str[:preview_length]
     page2_data["text"] = page2_data["text"].str[:preview_length]
@@ -1217,10 +1216,10 @@ def apply_whole_page_redactions_from_list(
         new_annotations_with_bounding_boxes (List[dict], optional): A list of new annotations with bounding boxes. Defaults to an empty list.
     """
     if all_existing_annotations is None:
-        all_existing_annotations = []
+        all_existing_annotations = list()
 
     if new_annotations_with_bounding_boxes is None:
-        new_annotations_with_bounding_boxes = []
+        new_annotations_with_bounding_boxes = list()
 
     all_annotations = all_existing_annotations.copy()
 
@@ -1229,7 +1228,7 @@ def apply_whole_page_redactions_from_list(
         print(f"Warning: {message}")
         raise Warning(message)
 
-    list_whole_pages_to_redact = []
+    list_whole_pages_to_redact = list()
 
     if combine_pages is True:
         # Get list of pages to redact from either dataframe or file
@@ -1270,7 +1269,7 @@ def apply_whole_page_redactions_from_list(
             print(message)
             raise Warning(message)
 
-        list_whole_pages_to_redact = []
+        list_whole_pages_to_redact = list()
         for annotation in new_annotations_with_bounding_boxes:
             from tools.secure_regex_utils import safe_extract_page_number_from_path
 
@@ -1285,7 +1284,7 @@ def apply_whole_page_redactions_from_list(
 
         list_whole_pages_to_redact = list(set(list_whole_pages_to_redact))
 
-    new_annotations = []
+    new_annotations = list()
     # Process each page for redaction
     for page in list_whole_pages_to_redact:
         try:
@@ -1312,8 +1311,7 @@ def apply_whole_page_redactions_from_list(
                 )
                 continue
 
-            # --- Create a LIST of boxes to add.---
-            boxes_to_add = []
+            boxes_to_add = list()
 
             pymupdf_page = pymupdf_doc[page_index]
 
@@ -1439,7 +1437,7 @@ def create_annotation_objects_from_duplicates(
     Returns:
         List[Dict]: A list of dictionaries, where each dict represents a page and its list of annotation boxes, in the format: [{"image": "path/to/img.png", "boxes": [...]}, ...]
     """
-    final_output = []
+    final_output = list()
 
     if duplicates_df.empty:
         raise Warning("No duplicates found")
@@ -1503,7 +1501,7 @@ def create_annotation_objects_from_duplicates(
                 annotations_by_page[page_number].append(box)
 
         # --- Format the final output list using the page-to-image map ---
-        final_output = []
+        final_output = list()
         # Sort by page number for a predictable order
         for page_num, boxes in sorted(annotations_by_page.items()):
             # Look up the image path using the page number

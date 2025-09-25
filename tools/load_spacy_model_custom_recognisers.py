@@ -277,7 +277,7 @@ def download_tesseract_lang_pack(
 
     # Download the file
     try:
-        response = requests.get(url, stream=True)
+        response = requests.get(url, stream=True, timeout=60)
         response.raise_for_status()  # Raise an exception for bad status codes
 
         with open(file_path, "wb") as f:
