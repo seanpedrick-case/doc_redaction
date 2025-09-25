@@ -86,7 +86,7 @@ def safe_extract_page_number_from_filename(filename: str) -> Optional[int]:
 
 def safe_extract_page_number_from_path(path: str) -> Optional[int]:
     """
-    Safely extract page number from path containing _(\d+).png pattern.
+    Safely extract page number from path containing _(\\d+).png pattern.
 
     Args:
         path: The path to extract page number from

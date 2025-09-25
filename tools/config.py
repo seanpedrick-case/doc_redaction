@@ -544,6 +544,7 @@ except Exception as e:
 COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "0")
 
 SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "False")
+SHOW_AWS_EXAMPLES = get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
 
 RUN_DIRECT_MODE = get_or_create_env_var("RUN_DIRECT_MODE", "0")
 

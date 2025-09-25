@@ -93,6 +93,7 @@ from tools.config import (
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SESSION_OUTPUT_FOLDER,
+    SHOW_AWS_EXAMPLES,
     SHOW_COSTS,
     SHOW_EXAMPLES,
     SHOW_LANGUAGE_SELECTION,
@@ -1009,74 +1010,100 @@ with app:
     with gr.Tab("Redact PDFs/images"):
 
         # Examples for PDF/image redaction
-        # Examples for PDF/image redaction
         if SHOW_EXAMPLES == "True":
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Extract text and redact document' button:"
             )
-            
+
             # Check which example files exist and create examples only for available files
             example_files = [
                 "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
-                "example_data/example_complaint_letter.jpg", 
+                "example_data/example_complaint_letter.jpg",
                 "example_data/graduate-job-example-cover-letter.pdf",
-                "example_data/Partnership-Agreement-Toolkit_0_0.pdf"
+                "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
             ]
-            
-            available_examples = []
-            example_labels = []
-            
+
+            available_examples = list()
+            example_labels = list()
+
             # Check each example file and add to examples if it exists
             if os.path.exists(example_files[0]):
-                available_examples.append([
-                    [example_files[0]],
-                    "Local model - selectable text",
-                    "Local",
-                    [],
-                    CHOSEN_REDACT_ENTITIES,
-                    CHOSEN_COMPREHEND_ENTITIES,
-                    [example_files[0]],
-                ])
+                available_examples.append(
+                    [
+                        [example_files[0]],
+                        "Local model - selectable text",
+                        "Local",
+                        [],
+                        CHOSEN_REDACT_ENTITIES,
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        [example_files[0]],
+                    ]
+                )
                 example_labels.append("PDF with selectable text redaction")
-            
+
             if os.path.exists(example_files[1]):
-                available_examples.append([
-                    [example_files[1]],
-                    "Local OCR model - PDFs without selectable text",
-                    "Local",
-                    [],
-                    CHOSEN_REDACT_ENTITIES,
-                    CHOSEN_COMPREHEND_ENTITIES,
-                    [example_files[1]],
-                ])
+                available_examples.append(
+                    [
+                        [example_files[1]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Local",
+                        [],
+                        CHOSEN_REDACT_ENTITIES,
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        [example_files[1]],
+                    ]
+                )
                 example_labels.append("Image redaction with local OCR")
-            
+
             if os.path.exists(example_files[2]):
-                available_examples.append([
-                    [example_files[2]],
-                    "Local OCR model - PDFs without selectable text",
-                    "Local",
-                    [],
-                    ["TITLES", "PERSON", "DATE_TIME"],
-                    CHOSEN_COMPREHEND_ENTITIES,
-                    [example_files[2]],
-                ])
-                example_labels.append("PDF redaction with custom entities (TITLES, PERSON, DATE_TIME)")
-            
+                available_examples.append(
+                    [
+                        [example_files[2]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Local",
+                        [],
+                        ["TITLES", "PERSON", "DATE_TIME"],
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        [example_files[2]],
+                    ]
+                )
+                example_labels.append(
+                    "PDF redaction with custom entities (Titles, Person, Dates)"
+                )
+
             if os.path.exists(example_files[3]):
-                available_examples.append([
-                    [example_files[3]],
-                    "AWS Textract service - all PDF types",
-                    "AWS Comprehend",
-                    ["Extract handwriting", "Extract signatures"],
-                    CHOSEN_REDACT_ENTITIES,
-                    CHOSEN_COMPREHEND_ENTITIES,
-                    [example_files[3]],
-                ])
-                example_labels.append("PDF redaction with AWS services and signature detection")
-            
+                if SHOW_AWS_EXAMPLES == "True":
+                    available_examples.append(
+                        [
+                            [example_files[3]],
+                            "AWS Textract service - all PDF types",
+                            "AWS Comprehend",
+                            ["Extract handwriting", "Extract signatures"],
+                            CHOSEN_REDACT_ENTITIES,
+                            CHOSEN_COMPREHEND_ENTITIES,
+                            [example_files[3]],
+                        ]
+                    )
+                    example_labels.append(
+                        "PDF redaction with AWS services and signature detection"
+                    )
+
             # Only create examples if we have available files
             if available_examples:
+
+                def show_info_box_on_click(
+                    in_doc_files,
+                    text_extract_method_radio,
+                    pii_identification_method_drop,
+                    handwrite_signature_checkbox,
+                    in_redact_entities,
+                    in_redact_comprehend_entities,
+                    prepared_pdf_state,
+                ):
+                    gr.Info(
+                        "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
+                    )
+
                 redaction_examples = gr.Examples(
                     examples=available_examples,
                     inputs=[
@@ -1089,6 +1116,8 @@ with app:
                         prepared_pdf_state,
                     ],
                     example_labels=example_labels,
+                    fn=show_info_box_on_click,
+                    run_on_click=True,
                 )
 
         with gr.Accordion("Redact document", open=True):
@@ -1665,15 +1694,31 @@ with app:
         )
 
         # Examples for duplicate page detection
+        # ... existing code ...
+
+        # Examples for duplicate page detection
         if SHOW_EXAMPLES == "True":
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Identify duplicate pages/subdocuments' button:"
             )
-            
+
             # Check if duplicate example file exists
-            duplicate_example_file = "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
-            
+            duplicate_example_file = (
+                "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
+            )
+
             if os.path.exists(duplicate_example_file):
+
+                def show_duplicate_info_box_on_click(
+                    in_duplicate_pages,
+                    duplicate_threshold_input,
+                    min_word_count_input,
+                    combine_page_text_for_duplicates_bool,
+                ):
+                    gr.Info(
+                        "Example data loaded. Now click on 'Identify duplicate pages/subdocuments' below to run the example duplicate detection."
+                    )
+
                 duplicate_examples = gr.Examples(
                     examples=[
                         [
@@ -1699,6 +1744,8 @@ with app:
                         "Find duplicate pages of text in document OCR outputs",
                         "Find duplicate text lines in document OCR outputs",
                     ],
+                    fn=show_duplicate_info_box_on_click,
+                    run_on_click=True,
                 )
 
         with gr.Accordion("Step 1: Configure and run analysis", open=True):
@@ -1821,7 +1868,7 @@ with app:
     ###
     with gr.Tab(label="Word or Excel/csv files"):
         gr.Markdown(
-            """Choose Word or a tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
+            """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
         )
 
         # Examples for Word/Excel/csv redaction and tabular duplicate detection
@@ -1829,53 +1876,78 @@ with app:
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Redact text/data files' button for redaction, or the 'Find duplicate cells/rows' button for duplicate detection:"
             )
-            
+
             # Check which tabular example files exist
             tabular_example_files = [
                 "example_data/combined_case_notes.csv",
                 "example_data/Bold minimalist professional cover letter.docx",
-                "example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"
+                "example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv",
             ]
-            
-            available_tabular_examples = []
-            tabular_example_labels = []
-            
+
+            available_tabular_examples = list()
+            tabular_example_labels = list()
+
             # Check each tabular example file and add to examples if it exists
             if os.path.exists(tabular_example_files[0]):
-                available_tabular_examples.append([
-                    [tabular_example_files[0]],
-                    ["Case Note", "Client"],
-                    "Local",
-                    "replace with 'REDACTED'",
-                    [tabular_example_files[0]],
-                    ["Case Note"],
-                ])
-                tabular_example_labels.append("CSV file redaction with specific columns - remove text")
-            
+                available_tabular_examples.append(
+                    [
+                        [tabular_example_files[0]],
+                        ["Case Note", "Client"],
+                        "Local",
+                        "replace with 'REDACTED'",
+                        [tabular_example_files[0]],
+                        ["Case Note"],
+                    ]
+                )
+                tabular_example_labels.append(
+                    "CSV file redaction with specific columns - remove text"
+                )
+
             if os.path.exists(tabular_example_files[1]):
-                available_tabular_examples.append([
-                    [tabular_example_files[1]],
-                    [],
-                    "Local",
-                    "replace with 'REDACTED'",
-                    [],
-                    [],
-                ])
-                tabular_example_labels.append("Word document redaction - replace with REDACTED")
-            
+                available_tabular_examples.append(
+                    [
+                        [tabular_example_files[1]],
+                        [],
+                        "Local",
+                        "replace with 'REDACTED'",
+                        [],
+                        [],
+                    ]
+                )
+                tabular_example_labels.append(
+                    "Word document redaction - replace with REDACTED"
+                )
+
             if os.path.exists(tabular_example_files[2]):
-                available_tabular_examples.append([
-                    [tabular_example_files[2]],
-                    ["text"],
-                    "Local",
-                    "replace with 'REDACTED'",
-                    [tabular_example_files[2]],
-                    ["text"],
-                ])
-                tabular_example_labels.append("Tabular duplicate detection in CSV files")
-            
+                available_tabular_examples.append(
+                    [
+                        [tabular_example_files[2]],
+                        ["text"],
+                        "Local",
+                        "replace with 'REDACTED'",
+                        [tabular_example_files[2]],
+                        ["text"],
+                    ]
+                )
+                tabular_example_labels.append(
+                    "Tabular duplicate detection in CSV files"
+                )
+
             # Only create examples if we have available files
             if available_tabular_examples:
+
+                def show_tabular_info_box_on_click(
+                    in_data_files,
+                    in_colnames,
+                    pii_identification_method_drop_tabular,
+                    anon_strategy,
+                    in_tabular_duplicate_files,
+                    tabular_text_columns,
+                ):
+                    gr.Info(
+                        "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' below to run the example."
+                    )
+
                 tabular_examples = gr.Examples(
                     examples=available_tabular_examples,
                     inputs=[
@@ -1887,6 +1959,8 @@ with app:
                         tabular_text_columns,
                     ],
                     example_labels=tabular_example_labels,
+                    fn=show_tabular_info_box_on_click,
+                    run_on_click=True,
                 )
 
         with gr.Accordion("Redact Word or Excel/csv files", open=True):
@@ -2313,7 +2387,7 @@ with app:
     # Recalculate estimated costs based on changes to inputs
     if SHOW_COSTS == "True":
         # Calculate costs
-        total_pdf_page_count.change(
+        total_pdf_page_count.input(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2325,7 +2399,7 @@ with app:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        text_extract_method_radio.change(
+        text_extract_method_radio.input(
             fn=check_for_relevant_ocr_output_with_words,
             inputs=[
                 doc_file_name_no_extension_textbox,
@@ -2345,7 +2419,7 @@ with app:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        pii_identification_method_drop.change(
+        pii_identification_method_drop.input(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2357,7 +2431,7 @@ with app:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        handwrite_signature_checkbox.change(
+        handwrite_signature_checkbox.input(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2369,7 +2443,7 @@ with app:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        textract_output_found_checkbox.change(
+        textract_output_found_checkbox.input(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2381,7 +2455,7 @@ with app:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        only_extract_text_radio.change(
+        only_extract_text_radio.input(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2393,7 +2467,7 @@ with app:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        textract_output_found_checkbox.change(
+        textract_output_found_checkbox.input(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2407,7 +2481,7 @@ with app:
         )
 
         # Calculate time taken
-        total_pdf_page_count.change(
+        total_pdf_page_count.input(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2419,7 +2493,7 @@ with app:
             ],
             outputs=[estimated_time_taken_number],
         )
-        text_extract_method_radio.change(
+        text_extract_method_radio.input(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2431,7 +2505,7 @@ with app:
             ],
             outputs=[estimated_time_taken_number],
         )
-        pii_identification_method_drop.change(
+        pii_identification_method_drop.input(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2443,7 +2517,7 @@ with app:
             ],
             outputs=[estimated_time_taken_number],
         )
-        handwrite_signature_checkbox.change(
+        handwrite_signature_checkbox.input(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2455,7 +2529,7 @@ with app:
             ],
             outputs=[estimated_time_taken_number],
         )
-        textract_output_found_checkbox.change(
+        textract_output_found_checkbox.input(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2468,7 +2542,7 @@ with app:
             ],
             outputs=[estimated_time_taken_number],
         )
-        only_extract_text_radio.change(
+        only_extract_text_radio.input(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2480,7 +2554,7 @@ with app:
             ],
             outputs=[estimated_time_taken_number],
         )
-        textract_output_found_checkbox.change(
+        textract_output_found_checkbox.input(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2492,7 +2566,7 @@ with app:
             ],
             outputs=[estimated_time_taken_number],
         )
-        relevant_ocr_output_with_words_found_checkbox.change(
+        relevant_ocr_output_with_words_found_checkbox.input(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -5190,6 +5264,7 @@ with app:
             pdf_doc_state,
             images_pdf_state,
             output_folder_textbox,
+            input_folder_textbox,
         ],
         outputs=[input_pdf_for_review],
         scroll_to_output=True,
@@ -6422,7 +6497,6 @@ if __name__ == "__main__":
 
         # Run the CLI main function with direct mode arguments
         main(direct_mode_args=direct_mode_args)
-
 
         # Combine extraction options
         extraction_options = (

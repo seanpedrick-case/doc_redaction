@@ -470,6 +470,8 @@ def choose_and_run_redactor(
         )
         print("Estimated total processing time:", str(estimate_total_processing_time))
 
+        gr.Info(combined_out_message)
+
         page_break_return = True
 
         return (

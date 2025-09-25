@@ -588,6 +588,9 @@ def anonymise_files_with_open_text(
         # Set to a very high number so as not to mess with subsequent file processing by the user
         # latest_file_completed = 99
         final_out_message = "\n".join(out_message)
+
+        gr.Info(final_out_message)
+
         return (
             final_out_message,
             out_file_paths,

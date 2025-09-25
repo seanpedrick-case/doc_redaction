@@ -1,0 +1,56 @@
+[run]
+source = .
+omit = 
+    */tests/*
+    */test/*
+    */__pycache__/*
+    */venv/*
+    */env/*
+    */build/*
+    */dist/*
+    */cdk/*
+    */docs/*
+    */example_data/*
+    */examples/*
+    */feedback/*
+    */logs/*
+    */old_code/*
+    */output/*
+    */tmp/*
+    */usage/*
+    */tld/*
+    */tesseract/*
+    */poppler/*
+    config*.py
+    setup.py
+    lambda_entrypoint.py
+    entrypoint.sh
+    cli_redact.py
+    load_dynamo_logs.py
+    load_s3_logs.py
+    *.spec
+    Dockerfile
+    *.qmd
+    *.md
+    *.txt
+    *.yml
+    *.yaml
+    *.json
+    *.csv
+    *.env
+    *.bat
+    *.ps1
+    *.sh
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if self.debug:
+    if settings.DEBUG
+    raise AssertionError
+    raise NotImplementedError
+    if 0:
+    if __name__ == .__main__.:
+    class .*\bProtocol\):
+    @(abc\.)?abstractmethod

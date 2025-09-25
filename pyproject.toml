@@ -36,7 +36,8 @@ dependencies = [
     "python-dotenv==1.0.1",
     "awslambdaric==3.1.1",
     "python-docx==1.2.0",
-    "polars==1.33.1"
+    "polars==1.33.1",
+    "defusedxml==0.7.1",
     #"paddlepaddle==3.2.0", # Optional paddle imports - only if you want to use hybrid OCR mode with tesseract and paddleOCR
     #"paddleocr==3.2.0"    
 ]
@@ -67,3 +68,26 @@ ignore = [
 [tool.black]
 line-length = 88
 target-version = ['py310']
+
+# Configuration for pytest:
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:click.parser",
+    "ignore::DeprecationWarning:weasel.util.config",
+    "ignore::DeprecationWarning:builtin type",
+    "ignore::DeprecationWarning:websockets.legacy",
+    "ignore::DeprecationWarning:websockets.server",
+    "ignore::DeprecationWarning:spacy.cli._util",
+    "ignore::DeprecationWarning:weasel.util.config",
+    "ignore::DeprecationWarning:importlib._bootstrap",
+]
+testpaths = ["test"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+]
