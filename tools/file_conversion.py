@@ -635,11 +635,13 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
                         "word_y0": word["bounding_box"][1],
                         "word_x1": word["bounding_box"][2],
                         "word_y1": word["bounding_box"][3],
+                        "word_conf": word["conf"],
                         "line_text": "",  # line_data['text'], # This data is too large to include
                         "line_x0": line_data["bounding_box"][0],
                         "line_y0": line_data["bounding_box"][1],
                         "line_x1": line_data["bounding_box"][2],
                         "line_y1": line_data["bounding_box"][3],
+                        "line_conf": line_data["conf"],
                     }
                 )
 
@@ -956,8 +958,6 @@ def prepare_image_or_pdf(
                 output_ocr_results_with_words_json_file_name = (
                     file_path_without_ext + ".json"
                 )
-                # if not file_path.endswith("_ocr_results_with_words.json"): output_ocr_results_with_words_json_file_name = file_path_without_ext + "_ocr_results_with_words.json"
-                # else: output_ocr_results_with_words_json_file_name = file_path_without_ext + ".json"
 
                 out_ocr_results_with_words_path = secure_join(
                     output_folder, output_ocr_results_with_words_json_file_name

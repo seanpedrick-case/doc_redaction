@@ -256,10 +256,13 @@ def json_to_ocrresult(
     is_handwriting = False
 
     for text_block in text_blocks:
+        current_block_confidence = 0.0
 
-        if (text_block["BlockType"] == "LINE") | (
+        if (text_block["BlockType"] == "LINE") or (
             text_block["BlockType"] == "SIGNATURE"
-        ):  # (text_block['BlockType'] == 'WORD') |
+        ):
+
+            current_block_confidence = round(text_block.get("Confidence", 0.0), 0)
 
             # Extract text and bounding box for the line
             line_bbox = text_block["Geometry"]["BoundingBox"]
@@ -295,7 +298,9 @@ def json_to_ocrresult(
                                 if child_block and child_block["BlockType"] == "WORD":
                                     word_text = child_block.get("Text", "")
                                     word_bbox = child_block["Geometry"]["BoundingBox"]
-                                    confidence = child_block.get("Confidence", "")
+                                    word_confidence = round(
+                                        child_block.get("Confidence", 0.0), 0
+                                    )
                                     word_left = int(word_bbox["Left"] * page_width)
                                     word_top = int(word_bbox["Top"] * page_height)
                                     word_right = int(
@@ -315,9 +320,11 @@ def json_to_ocrresult(
                                     word_width_abs = int(word_width * page_width)
                                     word_height_abs = int(word_height * page_height)
 
+                                    # --- MODIFICATION: Add confidence to the word dictionary ---
                                     words.append(
                                         {
                                             "text": word_text,
+                                            "confidence": word_confidence,
                                             "bounding_box": (
                                                 word_left,
                                                 word_top,
@@ -337,7 +344,7 @@ def json_to_ocrresult(
                                         recogniser_result = CustomImageRecognizerResult(
                                             entity_type=entity_name,
                                             text=word_text,
-                                            score=confidence,
+                                            score=word_confidence,  # Using word confidence here
                                             start=0,
                                             end=word_end,
                                             left=word_left,
@@ -364,13 +371,13 @@ def json_to_ocrresult(
                 line_text = "SIGNATURE"
                 is_signature = True
                 entity_name = "SIGNATURE"
-                confidence = text_block.get("Confidence", 0)
+                # current_block_confidence is already set from the top of the if statement
                 word_end = len(line_text)
 
                 recogniser_result = CustomImageRecognizerResult(
                     entity_type=entity_name,
                     text=line_text,
-                    score=confidence,
+                    score=current_block_confidence,
                     start=0,
                     end=word_end,
                     left=line_left,
@@ -384,61 +391,67 @@ def json_to_ocrresult(
                 signature_recogniser_results.append(recogniser_result)
                 signature_or_handwriting_recogniser_results.append(recogniser_result)
 
+                # --- MODIFICATION: Add confidence to the signature "word" for consistency ---
                 words = [
                     {
                         "text": line_text,
+                        "confidence": current_block_confidence,
                         "bounding_box": (line_left, line_top, line_right, line_bottom),
                     }
                 ]
-        else:
-            line_text = ""
-            words = []
-            line_left = 0
-            line_top = 0
-            line_right = 0
-            line_bottom = 0
-            width_abs = 0
-            height_abs = 0
+            else:
+                line_text = ""
+                words = []
+                line_left = 0
+                line_top = 0
+                line_right = 0
+                line_bottom = 0
+                width_abs = 0
+                height_abs = 0
 
-        if line_text:
+            if line_text:
+                # --- MODIFICATION: Add line confidence to the detailed results dict ---
+                ocr_results_with_words["text_line_" + str(text_line_number)] = {
+                    "line": text_line_number,
+                    "text": line_text,
+                    "confidence": current_block_confidence,
+                    "bounding_box": (line_left, line_top, line_right, line_bottom),
+                    "words": words,
+                    "page": page_no,
+                }
 
-            ocr_results_with_words["text_line_" + str(text_line_number)] = {
-                "line": text_line_number,
-                "text": line_text,
-                "bounding_box": (line_left, line_top, line_right, line_bottom),
-                "words": words,
-                "page": page_no,
-            }
+                # --- MODIFICATION: Pass the correct line-level confidence to OCRResult ---
+                # Create OCRResult with absolute coordinates
+                ocr_result = OCRResult(
+                    line_text,
+                    line_left,
+                    line_top,
+                    width_abs,
+                    height_abs,
+                    conf=current_block_confidence,  # Use the stored line/signature confidence
+                    line=text_line_number,
+                )
+                all_ocr_results.append(ocr_result)
 
-            # Create OCRResult with absolute coordinates
-            ocr_result = OCRResult(
-                line_text,
-                line_left,
-                line_top,
-                width_abs,
-                height_abs,
-                conf=confidence,
-                line=text_line_number,
-            )
-            all_ocr_results.append(ocr_result)
+                # Increase line number
+                text_line_number += 1
 
-            # Increase line number
-            text_line_number += 1
+            is_signature_or_handwriting = is_signature or is_handwriting
 
-        is_signature_or_handwriting = is_signature | is_handwriting
+            # If it is signature or handwriting, will overwrite the default behaviour of the PII analyser
+            if is_signature_or_handwriting:
+                if recogniser_result not in signature_or_handwriting_recogniser_results:
+                    signature_or_handwriting_recogniser_results.append(
+                        recogniser_result
+                    )
 
-        # If it is signature or handwriting, will overwrite the default behaviour of the PII analyser
-        if is_signature_or_handwriting:
-            if recogniser_result not in signature_or_handwriting_recogniser_results:
-                signature_or_handwriting_recogniser_results.append(recogniser_result)
+                if is_signature:
+                    if recogniser_result not in signature_recogniser_results:
+                        signature_recogniser_results.append(recogniser_result)
 
-            if is_signature:
-                if recogniser_result not in signature_recogniser_results:
-                    signature_recogniser_results.append(recogniser_result)
-
-            if is_handwriting:
-                if recogniser_result not in handwriting_recogniser_results:
-                    handwriting_recogniser_results.append(recogniser_result)
+                if is_handwriting:
+                    if recogniser_result not in handwriting_recogniser_results:
+                        handwriting_recogniser_results.append(recogniser_result)
 
     # Add page key to the line level results
     all_ocr_results_with_page = {"page": page_no, "results": all_ocr_results}
@@ -446,6 +459,9 @@ def json_to_ocrresult(
         "page": page_no,
         "results": ocr_results_with_words,
     }
+
+    print("ocr_results_with_words_with_page:", ocr_results_with_words_with_page)
+    print("all_ocr_results_with_page:", all_ocr_results_with_page)
 
     return (
         all_ocr_results_with_page,

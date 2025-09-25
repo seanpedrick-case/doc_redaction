@@ -826,7 +826,8 @@ class CustomImageAnalyzerEngine:
                 left=ocr_result["left"][i],
                 top=ocr_result["top"][i],
                 width=ocr_result["width"][i],
-                height=ocr_result["height"][i],  # ,
+                height=ocr_result["height"][i],
+                conf=round(float(ocr_result["conf"][i]), 0),
                 # line_number=ocr_result['abs_line_id'][i]
             )
             for i in valid_indices
@@ -1019,6 +1020,7 @@ class CustomImageAnalyzerEngine:
                                 top=text_line.top,
                                 width=text_line.width,
                                 height=text_line.height,
+                                conf=text_line.conf,
                             )
                         ],
                         text_line.text,
@@ -1697,6 +1699,12 @@ def recreate_page_line_level_ocr_results_with_page(
         text = line_data["text"]
         if line_data["line"]:
             line_number = line_data["line"]
+        if "conf" in line_data["words"][0]:
+            conf = sum(word["conf"] for word in line_data["words"]) / len(
+                line_data["words"]
+            )
+        else:
+            conf = 0.0
 
         # Recreate the OCRResult
         line_result = OCRResult(
@@ -1706,6 +1714,7 @@ def recreate_page_line_level_ocr_results_with_page(
             width=bbox[2] - bbox[0],
             height=bbox[3] - bbox[1],
             line=line_number,
+            conf=round(float(conf), 0),
         )
         reconstructed_results.append(line_result)
 
@@ -1773,6 +1782,7 @@ def split_words_and_punctuation_from_line(
                     top=word_result.top,
                     width=punc_width,
                     height=word_result.height,
+                    conf=word_result.conf,
                 )
             )
             current_left += punc_width
@@ -1787,6 +1797,7 @@ def split_words_and_punctuation_from_line(
                     top=word_result.top,
                     width=core_width,
                     height=word_result.height,
+                    conf=word_result.conf,
                 )
             )
             current_left += core_width
@@ -1801,6 +1812,7 @@ def split_words_and_punctuation_from_line(
                     top=word_result.top,
                     width=punc_width,
                     height=word_result.height,
+                    conf=word_result.conf,
                 )
             )
 
@@ -1828,9 +1840,11 @@ def create_ocr_result_with_children(
                     word.left + word.width,
                     word.top + word.height,
                 ),
+                "conf": word.conf,
             }
             for word in current_line
         ],
+        "conf": current_bbox.conf,
     }
     return combined_results["text_line_" + str(i)]
 
@@ -1849,6 +1863,7 @@ def combine_ocr_results(
 
     lines = list()
     current_line = list()
+
     for result in sorted(ocr_results, key=lambda x: (x.top, x.left)):
         if not current_line or abs(result.top - current_line[0].top) <= y_threshold:
             current_line.append(result)
@@ -1875,6 +1890,9 @@ def combine_ocr_results(
         line_top = min(word.top for word in line)
         line_right = max(word.left + word.width for word in line)
         line_bottom = max(word.top + word.height for word in line)
+        line_conf = round(
+            sum(word.conf for word in line) / len(line), 0
+        )  # This is mean confidence for the line
 
         final_line_bbox = OCRResult(
             text=line_text,
@@ -1883,6 +1901,7 @@ def combine_ocr_results(
             width=line_right - line_left,
             height=line_bottom - line_top,
             line=line_counter,
+            conf=line_conf,
         )
 
         page_line_level_ocr_results.append(final_line_bbox)
@@ -1893,7 +1912,7 @@ def combine_ocr_results(
                 page_line_level_ocr_results_with_words,
                 line_counter,
                 final_line_bbox,
-                processed_line,  # <-- Use the new, split list of words
+                processed_line,
             )
         )
         line_counter += 1

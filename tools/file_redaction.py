@@ -831,7 +831,7 @@ def choose_and_run_redactor(
         ]
     )
     all_page_line_level_ocr_results_df = pd.DataFrame(
-        columns=["page", "text", "left", "top", "width", "height", "line"]
+        columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
     )
 
     # Run through file loop, redact each file at a time
@@ -1068,11 +1068,20 @@ def choose_and_run_redactor(
 
             if not all_page_line_level_ocr_results_df.empty:
                 all_page_line_level_ocr_results_df = all_page_line_level_ocr_results_df[
-                    ["page", "text", "left", "top", "width", "height", "line"]
+                    ["page", "text", "left", "top", "width", "height", "line", "conf"]
                 ]
             else:
                 all_page_line_level_ocr_results_df = pd.DataFrame(
-                    columns=["page", "text", "left", "top", "width", "height", "line"]
+                    columns=[
+                        "page",
+                        "text",
+                        "left",
+                        "top",
+                        "width",
+                        "height",
+                        "line",
+                        "conf",
+                    ]
                 )
 
             # ocr_file_path = orig_pdf_file_path + "_ocr_output.csv"
@@ -2163,7 +2172,7 @@ def redact_image_pdf(
     page_break_return: bool = False,
     annotations_all_pages: List = list(),
     all_page_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(
-        columns=["page", "text", "left", "top", "width", "height", "line"]
+        columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
     ),
     all_pages_decision_process_table: pd.DataFrame = pd.DataFrame(
         columns=[
@@ -2345,8 +2354,6 @@ def redact_image_pdf(
             all_page_line_level_ocr_results_with_words.copy()
         )
 
-        # print("Loaded in local OCR analysis results from file")
-
     ###
     if current_loop_page == 0:
         page_loop_start = 0
@@ -2450,11 +2457,18 @@ def redact_image_pdf(
                     print(
                         "Found OCR results for page in existing OCR with words object"
                     )
+
                     page_line_level_ocr_results = (
                         recreate_page_line_level_ocr_results_with_page(
                             page_line_level_ocr_results_with_words
                         )
                     )
+
+                    print(
+                        "page_line_level_ocr_results_with_words:",
+                        page_line_level_ocr_results_with_words,
+                    )
+                    print("page_line_level_ocr_results:", page_line_level_ocr_results)
                 else:
                     page_word_level_ocr_results = image_analyser.perform_ocr(image_path)
 
@@ -2464,6 +2478,12 @@ def redact_image_pdf(
                     ) = combine_ocr_results(
                         page_word_level_ocr_results, page=reported_page_number
                     )
+
+                    print(
+                        "page_line_level_ocr_results_with_words:",
+                        page_line_level_ocr_results_with_words,
+                    )
+                    print("page_line_level_ocr_results:", page_line_level_ocr_results)
 
                     if all_page_line_level_ocr_results_with_words is None:
                         all_page_line_level_ocr_results_with_words = list()
@@ -2601,6 +2621,7 @@ def redact_image_pdf(
                         "width": result.width,
                         "height": result.height,
                         "line": result.line,
+                        "conf": result.conf,
                     }
                     for result in page_line_level_ocr_results["results"]
                 ]
@@ -3131,7 +3152,11 @@ def generate_words_for_line(line_chars: List) -> List[Dict[str, Any]]:
                 round(current_word_bbox[1], 2),  # Note: using y0 from pdfminer bbox
             ]
             line_words.append(
-                {"text": current_word_text.strip(), "bounding_box": final_bbox}
+                {
+                    "text": current_word_text.strip(),
+                    "bounding_box": final_bbox,
+                    "conf": 100.0,
+                }
             )
         # Reset for the next word
         current_word_text = ""
@@ -3148,7 +3173,9 @@ def generate_words_for_line(line_chars: List) -> List[Dict[str, Any]]:
             # Treat the punctuation itself as a separate word.
             px0, py0, px1, py1 = char.bbox
             punc_bbox = [round(px0, 2), round(py1, 2), round(px1, 2), round(py0, 2)]
-            line_words.append({"text": char_text, "bounding_box": punc_bbox})
+            line_words.append(
+                {"text": char_text, "bounding_box": punc_bbox, "conf": 100.0}
+            )
 
             prev_char = char
             continue  # Skip to the next character
@@ -3237,6 +3264,7 @@ def process_page_to_structured_ocr(
             "text": line_info.text,
             "bounding_box": line_bbox,
             "words": word_level_results,
+            "conf": 100.0,
         }
 
     # The list of OCRResult objects is already correct.
@@ -3327,7 +3355,7 @@ def redact_text_pdf(
     page_break_return: bool = False,  # Flag to indicate if a page break should be returned
     annotations_all_pages: List[dict] = list(),  # List of annotations across all pages
     all_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(
-        columns=["page", "text", "left", "top", "width", "height", "line"]
+        columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
     ),  # DataFrame for OCR results
     all_pages_decision_process_table: pd.DataFrame = pd.DataFrame(
         columns=[
@@ -3509,7 +3537,16 @@ def redact_text_pdf(
                     ]
                 )
                 page_text_ocr_outputs = pd.DataFrame(
-                    columns=["page", "text", "left", "top", "width", "height", "line"]
+                    columns=[
+                        "page",
+                        "text",
+                        "left",
+                        "top",
+                        "width",
+                        "height",
+                        "line",
+                        "conf",
+                    ]
                 )
                 page_text_ocr_outputs_list = list()
 
@@ -3553,6 +3590,7 @@ def redact_text_pdf(
                                     "width": result.width,
                                     "height": result.height,
                                     "line": result.line,
+                                    "conf": 100.0,
                                 }
                                 for result in line_level_text_results_list
                             ]
@@ -3580,6 +3618,7 @@ def redact_text_pdf(
                             "width",
                             "height",
                             "line",
+                            "conf",
                         ]
                     )
 
@@ -3657,7 +3696,17 @@ def redact_text_pdf(
                         ["line"]
                     ).reset_index(drop=True)
                     page_text_ocr_outputs = page_text_ocr_outputs.loc[
-                        :, ["page", "text", "left", "top", "width", "height", "line"]
+                        :,
+                        [
+                            "page",
+                            "text",
+                            "left",
+                            "top",
+                            "width",
+                            "height",
+                            "line",
+                            "conf",
+                        ],
                     ]
                     all_line_level_ocr_results_list.append(page_text_ocr_outputs)
 
@@ -3694,10 +3743,6 @@ def redact_text_pdf(
                     )
                     all_line_level_ocr_results_df = pd.concat(
                         all_line_level_ocr_results_list
-                    )
-
-                    print(
-                        "all_line_level_ocr_results_df:", all_line_level_ocr_results_df
                     )
 
                     current_loop_page += 1
