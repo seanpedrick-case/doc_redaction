@@ -3,7 +3,7 @@ import os
 import secrets
 import time
 import unicodedata
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 import botocore
@@ -56,7 +56,7 @@ from tools.load_spacy_model_custom_recognisers import (
 
 # Use custom version of analyze_dict to be able to track progress
 from tools.presidio_analyzer_custom import analyze_dict
-from tools.secure_path_utils import secure_file_write, secure_join
+from tools.secure_path_utils import secure_join
 
 if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
     DO_INITIAL_TABULAR_DATA_CLEAN = True
@@ -148,8 +148,9 @@ def process_recognizer_result(
     dictionary_key: int,
     df_dict: Dict[str, List[Any]],
     keys_to_keep: List[str],
-) -> List[str]:
+) -> Tuple[List[str], List[Dict[str, Any]]]:
     output = list()
+    output_dicts = list()
 
     if hasattr(result, "value"):
         text = result.value[data_row]
@@ -173,14 +174,15 @@ def process_recognizer_result(
                 }
             )
             output.append(str(analysis_explanation))
+            output_dicts.append(analysis_explanation)
 
-    return output
+    return output, output_dicts
 
 
 # Writing decision making process to file
-def generate_decision_process_output(
+def generate_log(
     analyzer_results: List[DictAnalyzerResult], df_dict: Dict[str, List[Any]]
-) -> str:
+) -> Tuple[str, pd.DataFrame]:
     """
     Generate a detailed output of the decision process for entity recognition.
 
@@ -194,9 +196,10 @@ def generate_decision_process_output(
         df_dict (Dict[str, List[Any]]): The original data in dictionary format.
 
     Returns:
-        str: A string containing the detailed decision process output.
+        Tuple[str, pd.DataFrame]: A tuple containing the string output and DataFrame with all columns.
     """
     decision_process_output = list()
+    decision_process_output_dicts = list()  # New list to store dictionaries
     keys_to_keep = ["entity_type", "start", "end"]
 
     # Run through each column to analyse for PII
@@ -204,32 +207,35 @@ def generate_decision_process_output(
 
         # If a single result
         if isinstance(result, RecognizerResult):
-            decision_process_output.extend(
-                process_recognizer_result(result, result, 0, i, df_dict, keys_to_keep)
+            output, output_dicts = process_recognizer_result(
+                result, result, 0, i, df_dict, keys_to_keep
             )
+            decision_process_output.extend(output)
+            decision_process_output_dicts.extend(output_dicts)
 
         # If a list of results
         elif isinstance(result, list) or isinstance(result, DictAnalyzerResult):
             for x, recognizer_result in enumerate(result.recognizer_results):
-                decision_process_output.extend(
-                    process_recognizer_result(
-                        result, recognizer_result, x, i, df_dict, keys_to_keep
-                    )
+                output, output_dicts = process_recognizer_result(
+                    result, recognizer_result, x, i, df_dict, keys_to_keep
                 )
+                decision_process_output.extend(output)
+                decision_process_output_dicts.extend(output_dicts)
 
         else:
             try:
-                decision_process_output.extend(
-                    process_recognizer_result(
-                        result, result, 0, i, df_dict, keys_to_keep
-                    )
+                output, output_dicts = process_recognizer_result(
+                    result, result, 0, i, df_dict, keys_to_keep
                 )
+                decision_process_output.extend(output)
+                decision_process_output_dicts.extend(output_dicts)
             except Exception as e:
                 print(e)
 
     decision_process_output_str = "\n".join(decision_process_output)
+    decision_process_output_df = pd.DataFrame(decision_process_output_dicts)
 
-    return decision_process_output_str
+    return decision_process_output_str, decision_process_output_df
 
 
 def anon_consistent_names(df: pd.DataFrame) -> pd.DataFrame:
@@ -329,6 +335,7 @@ def handle_docx_anonymisation(
     comprehend_query_number: int,
     comprehend_client: BaseClient,
     language: Optional[str] = DEFAULT_LANGUAGE,
+    out_file_paths: List[str] = list(),
     nlp_analyser: AnalyzerEngine = nlp_analyser,
 ):
     """
@@ -375,7 +382,13 @@ def handle_docx_anonymisation(
     df_to_anonymise = pd.DataFrame({"text_to_redact": original_texts})
 
     # 3. Call the core anonymisation script
-    anonymised_df, _, decision_log, comprehend_query_number = anonymise_script(
+    (
+        anonymised_df,
+        _,
+        decision_log,
+        comprehend_query_number,
+        decision_process_output_df,
+    ) = anonymise_script(
         df=df_to_anonymise,
         anon_strategy=anon_strategy,
         language=language,
@@ -409,18 +422,8 @@ def handle_docx_anonymisation(
     output_docx_path = secure_join(
         output_folder, f"{file_name_without_ext}_redacted.docx"
     )
-    # Use secure_file_write with base_path and filename for better security
-    secure_file_write(
-        output_folder,
-        f"{file_name_without_ext}_redacted_log.txt",
-        decision_log,
-        encoding="utf-8-sig",
-    )
 
-    # Reconstruct log_file_path for return value
-    log_file_path = secure_join(
-        output_folder, f"{file_name_without_ext}_redacted_log.txt"
-    )
+    out_file_paths.append(output_docx_path)
 
     output_xlsx_path = secure_join(
         output_folder, f"{file_name_without_ext}_redacted.csv"
@@ -429,7 +432,18 @@ def handle_docx_anonymisation(
     anonymised_df.to_csv(output_xlsx_path, encoding="utf-8-sig", index=None)
     doc.save(output_docx_path)
 
-    return output_docx_path, log_file_path, output_xlsx_path, comprehend_query_number
+    out_file_paths.append(output_xlsx_path)
+
+    # Reconstruct log_file_path for return value
+    log_file_path = secure_join(
+        output_folder, f"{file_name_without_ext}_redacted_log.csv"
+    )
+
+    decision_process_output_df.to_csv(log_file_path, index=None, encoding="utf-8-sig")
+
+    out_file_paths.append(log_file_path)
+
+    return out_file_paths, comprehend_query_number
 
 
 def anonymise_files_with_open_text(
@@ -659,28 +673,21 @@ def anonymise_files_with_open_text(
             out_file_part = get_file_name_without_type(file_path)
 
             if file_type == "docx":
-                output_path, log_path, output_xlsx_path, comprehend_query_number = (
-                    handle_docx_anonymisation(
-                        file_path=file_path,
-                        output_folder=output_folder,
-                        anon_strategy=anon_strategy,
-                        chosen_redact_entities=chosen_redact_entities,
-                        in_allow_list=in_allow_list_flat,
-                        in_deny_list=in_deny_list,
-                        max_fuzzy_spelling_mistakes_num=max_fuzzy_spelling_mistakes_num,
-                        pii_identification_method=pii_identification_method,
-                        chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
-                        comprehend_query_number=comprehend_query_number,
-                        comprehend_client=comprehend_client,
-                        language=language,
-                    )
+                out_file_paths, comprehend_query_number = handle_docx_anonymisation(
+                    file_path=file_path,
+                    output_folder=output_folder,
+                    anon_strategy=anon_strategy,
+                    chosen_redact_entities=chosen_redact_entities,
+                    in_allow_list=in_allow_list_flat,
+                    in_deny_list=in_deny_list,
+                    max_fuzzy_spelling_mistakes_num=max_fuzzy_spelling_mistakes_num,
+                    pii_identification_method=pii_identification_method,
+                    chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+                    comprehend_query_number=comprehend_query_number,
+                    comprehend_client=comprehend_client,
+                    language=language,
+                    out_file_paths=out_file_paths,
                 )
-                if output_path:
-                    out_file_paths.append(output_path)
-                if output_xlsx_path:
-                    out_file_paths.append(output_xlsx_path)
-                if log_path:
-                    log_files_output_paths.append(log_path)
 
             elif file_type == "xlsx":
                 print("Running through all xlsx sheets")
@@ -803,7 +810,7 @@ def anonymise_files_with_open_text(
 
         out_message_out = (
             out_message_out
-            + "\n\nGo to to the Redaction settings tab to see redaction logs. Please give feedback on the results below to help improve this app."
+            + "\n\nPlease give feedback on the results below to help improve this app."
         )
 
         from tools.secure_regex_utils import safe_remove_leading_newlines
@@ -952,6 +959,7 @@ def tabular_anonymise_wrapper_func(
         key_string,
         decision_process_output_str,
         comprehend_query_number,
+        decision_process_output_df,
     ) = anonymise_script(
         anon_df_part,
         anon_strategy,
@@ -1006,22 +1014,12 @@ def tabular_anonymise_wrapper_func(
             # Write each DataFrame to a different worksheet.
             anon_df_out.to_excel(writer, sheet_name=excel_sheet_name, index=None)
 
-        # Use secure_file_write with base_path and filename for better security
-        secure_file_write(
-            output_folder,
-            out_file_part
-            + "_redacted.xlsx_"
-            + excel_sheet_name
-            + "_decision_process_output.txt",
-            decision_process_output_str,
+        decision_process_log_output_file = (
+            anon_xlsx_export_file_name + "_" + excel_sheet_name + "_log.csv"
         )
 
-        # Reconstruct full path for logging purposes
-        decision_process_log_output_file = (
-            anon_xlsx_export_file_name
-            + "_"
-            + excel_sheet_name
-            + "_decision_process_output.txt"
+        decision_process_output_df.to_csv(
+            decision_process_log_output_file, index=None, encoding="utf-8-sig"
         )
 
     else:
@@ -1030,23 +1028,14 @@ def tabular_anonymise_wrapper_func(
         )
         anon_df_out.to_csv(anon_export_file_name, index=None, encoding="utf-8-sig")
 
-        # Use secure_file_write with base_path and filename for better security
-        secure_file_write(
-            output_folder,
-            out_file_part
-            + "_anon_"
-            + anon_strat_txt
-            + ".csv_decision_process_output.txt",
-            decision_process_output_str,
-        )
+        decision_process_log_output_file = anon_export_file_name + "_log.csv"
 
-        # Reconstruct full path for logging purposes
-        decision_process_log_output_file = (
-            anon_export_file_name + "_decision_process_output.txt"
+        decision_process_output_df.to_csv(
+            decision_process_log_output_file, index=None, encoding="utf-8-sig"
         )
 
     out_file_paths.append(anon_export_file_name)
-    log_files_output_paths.append(decision_process_log_output_file)
+    out_file_paths.append(decision_process_log_output_file)
 
     # As files are created in a loop, there is a risk of duplicate file names being output. Use set to keep uniques.
     out_file_paths = list(set(out_file_paths))
@@ -1304,7 +1293,7 @@ def anonymise_script(
         print("Unable to redact.")
 
     # Usage in the main function:
-    decision_process_output_str = generate_decision_process_output(
+    decision_process_output_str, decision_process_output_df = generate_log(
         analyzer_results, df_dict
     )
 
@@ -1372,4 +1361,10 @@ def anonymise_script(
 
     scrubbed_df = pd.DataFrame(anonymizer_results)
 
-    return scrubbed_df, key_string, decision_process_output_str, comprehend_query_number
+    return (
+        scrubbed_df,
+        key_string,
+        decision_process_output_str,
+        comprehend_query_number,
+        decision_process_output_df,
+    )
