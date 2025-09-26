@@ -737,10 +737,14 @@ with app:
         pd.DataFrame(columns=["page", "label", "text", "id"])
     )
     all_page_line_level_ocr_results_df_base = gr.State(
-        pd.DataFrame(columns=["page", "text", "left", "top", "width", "height", "line"])
+        pd.DataFrame(
+            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+        )
     )
     all_line_level_ocr_results_df_placeholder = gr.State(
-        pd.DataFrame(columns=["page", "text", "left", "top", "width", "height", "line"])
+        pd.DataFrame(
+            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+        )
     )
 
     # Placeholder for selected entity dataframe row
@@ -1562,7 +1566,7 @@ with app:
                                 label="Label for new redactions", value="Redaction"
                             )
                             colour_label = gr.Textbox(
-                                label="Colour for labels (three number RGB format, max 255 with brackes)",
+                                label="Colour for labels (three number RGB format, max 255 with brackets)",
                                 value="(0, 0, 0)",
                             )
 

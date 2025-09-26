@@ -19,6 +19,7 @@ from tools.file_conversion import (
 )
 from tools.helper_functions import OUTPUT_FOLDER
 from tools.load_spacy_model_custom_recognisers import nlp
+from tools.secure_path_utils import secure_path_join, validate_path_safety
 
 number_of_zeros_to_add_to_index = 7  # Number of zeroes to add between page number and line numbers to get a unique page/line index value
 ID_MULTIPLIER = 100000
@@ -644,16 +645,27 @@ def save_results_and_redaction_lists(
     Returns:
         list: A list of paths to all generated files.
     """
+    # Validate the output_folder path for security
+    if not validate_path_safety(output_folder):
+        raise ValueError(f"Invalid or unsafe output folder path: {output_folder}")
+
     output_paths = list()
-    output_folder_path = Path(output_folder)
-    output_folder_path.mkdir(exist_ok=True)
+
+    # Use secure path operations to prevent path injection
+    try:
+        output_folder_path = Path(output_folder).resolve()
+        output_folder_path.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as e:
+        raise ValueError(f"Cannot create output directory {output_folder}: {e}")
 
     if final_df.empty:
         print("No matches to save.")
         return []
 
-    # 1. Save the main results DataFrame
-    similarity_file_output_path = output_folder_path / "page_similarity_results.csv"
+    # 1. Save the main results DataFrame using secure path operations
+    similarity_file_output_path = secure_path_join(
+        output_folder_path, "page_similarity_results.csv"
+    )
     final_df.to_csv(similarity_file_output_path, index=False, encoding="utf-8-sig")
 
     output_paths.append(str(similarity_file_output_path))
@@ -669,9 +681,11 @@ def save_results_and_redaction_lists(
             return output_paths
 
         for redact_file, group in final_df.groupby(grouping_col):
+            # Sanitize the filename to prevent path injection
             output_file_name_stem = Path(redact_file).stem
-            output_file_path = (
-                output_folder_path / f"{output_file_name_stem}_pages_to_redact.csv"
+            # Use secure path operations for the output file
+            output_file_path = secure_path_join(
+                output_folder_path, f"{output_file_name_stem}_pages_to_redact.csv"
             )
 
             all_pages_to_redact = set()

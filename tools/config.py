@@ -449,7 +449,7 @@ DEFAULT_FUZZY_SPELLING_MISTAKES_NUM = int(
 
 DEFAULT_PAGE_MIN = int(get_or_create_env_var("DEFAULT_PAGE_MIN", "0"))
 
-DEFAULT_PAGE_MAX = int(get_or_create_env_var("DEFAULT_PAGE_MAX", "999"))
+DEFAULT_PAGE_MAX = int(get_or_create_env_var("DEFAULT_PAGE_MAX", "0"))
 
 
 # Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).
@@ -464,9 +464,26 @@ MAX_OPEN_TEXT_CHARACTERS = int(
     get_or_create_env_var("MAX_OPEN_TEXT_CHARACTERS", "50000")
 )
 
+USE_GUI_BOX_COLOURS_FOR_OUTPUTS = get_or_create_env_var(
+    "USE_GUI_BOX_COLOURS_FOR_OUTPUTS", "False"
+)
+
+# This is the colour of the output pdf redaction boxes. Should be a tuple of three integers between 0 and 1
 CUSTOM_BOX_COLOUR = get_or_create_env_var(
-    "CUSTOM_BOX_COLOUR", ""
-)  # only "grey" is currently supported as a custom box colour
+    "CUSTOM_BOX_COLOUR", "(0, 0, 0)"
+)  
+
+if CUSTOM_BOX_COLOUR == "grey":
+    # only "grey" is currently supported as a custom box colour by name, or a tuple of three integers between 0 and 1
+    CUSTOM_BOX_COLOUR = (0.5, 0.5, 0.5)
+else:
+    components_str = CUSTOM_BOX_COLOUR.strip("()").split(",")
+    CUSTOM_BOX_COLOUR = tuple(int(c.strip()) for c in components_str) # Always gives a tuple of three integers between 0 and 255
+
+# If you don't want to redact the text, but instead just draw a box over it, set this to True
+RETURN_PDF_FOR_REVIEW = get_or_create_env_var(
+    "RETURN_PDF_FOR_REVIEW", "False"
+)
 
 ### Language selection options
 
