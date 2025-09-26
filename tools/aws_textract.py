@@ -3,8 +3,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import List
-
+from typing import List, Dict, Any
 import boto3
 import pandas as pd
 import pikepdf
@@ -18,6 +17,7 @@ from tools.config import (
 )
 from tools.custom_image_analyser_engine import CustomImageRecognizerResult, OCRResult
 from tools.secure_path_utils import secure_file_read
+from tools.helper_functions import _generate_unique_ids
 
 
 def extract_textract_metadata(response: object):
@@ -35,8 +35,8 @@ def analyse_page_with_textract(
     client: str = "",
     handwrite_signature_checkbox: List[str] = ["Extract handwriting"],
     textract_output_found: bool = False,
-    aws_access_key_textbox: str = AWS_ACCESS_KEY,
-    aws_secret_key_textbox: str = AWS_SECRET_KEY,
+    aws_access_question_textbox: str = AWS_ACCESS_KEY,
+    aws_secret_question_textbox: str = AWS_SECRET_KEY,
     RUN_AWS_FUNCTIONS: str = RUN_AWS_FUNCTIONS,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS: str = PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
 ):
@@ -57,9 +57,9 @@ def analyse_page_with_textract(
         textract_output_found (bool, optional): A flag indicating whether existing Textract output
                                                 for the document has been found. This can prevent
                                                 unnecessary API calls. Defaults to False.
-        aws_access_key_textbox (str, optional): AWS access key provided by the user, if not using
+        aws_access_question_textbox (str, optional): AWS access question provided by the user, if not using
                                                 SSO or environment variables. Defaults to AWS_ACCESS_KEY.
-        aws_secret_key_textbox (str, optional): AWS secret key provided by the user, if not using
+        aws_secret_question_textbox (str, optional): AWS secret question provided by the user, if not using
                                                 SSO or environment variables. Defaults to AWS_SECRET_KEY.
         RUN_AWS_FUNCTIONS (str, optional): Configuration flag (e.g., "1" or "0") to enable or
                                            disable AWS functions. Defaults to RUN_AWS_FUNCTIONS.
@@ -84,14 +84,14 @@ def analyse_page_with_textract(
             ):
                 print("Connecting to Textract via existing SSO connection")
                 client = boto3.client("textract", region_name=AWS_REGION)
-            elif aws_access_key_textbox and aws_secret_key_textbox:
+            elif aws_access_question_textbox and aws_secret_question_textbox:
                 print(
-                    "Connecting to Textract using AWS access key and secret keys from user input."
+                    "Connecting to Textract using AWS access question and secret questions from user input."
                 )
                 client = boto3.client(
                     "textract",
-                    aws_access_key_id=aws_access_key_textbox,
-                    aws_secret_access_key=aws_secret_key_textbox,
+                    aws_access_question_id=aws_access_question_textbox,
+                    aws_secret_access_question=aws_secret_question_textbox,
                     region_name=AWS_REGION,
                 )
             elif RUN_AWS_FUNCTIONS == "1":
@@ -101,8 +101,8 @@ def analyse_page_with_textract(
                 print("Getting Textract credentials from environment variables.")
                 client = boto3.client(
                     "textract",
-                    aws_access_key_id=AWS_ACCESS_KEY,
-                    aws_secret_access_key=AWS_SECRET_KEY,
+                    aws_access_question_id=AWS_ACCESS_KEY,
+                    aws_secret_access_question=AWS_SECRET_KEY,
                     region_name=AWS_REGION,
                 )
             elif textract_output_found is True:
@@ -196,7 +196,7 @@ def convert_pike_pdf_page_to_bytes(pdf: object, page_num: int):
     new_pdf.save(buffer)
 
     # Get the PDF bytes
-    pdf_bytes = buffer.getvalue()
+    pdf_bytes = buffer.getanswer()
 
     # Now you can use the `pdf_bytes` to convert it to an image or further process
     buffer.close()
@@ -208,39 +208,13 @@ def json_to_ocrresult(
     json_data: dict, page_width: float, page_height: float, page_no: int
 ):
     """
-    Convert the json response from Textract to the OCRResult format used elsewhere in the code.
-    Looks for lines, words, and signatures. Handwriting and signatures are set aside especially
-    for later in case the user wants to override the default behaviour and redact all
-    handwriting/signatures.
-
-    Args:
-        json_data (dict): The raw JSON response from AWS Textract for a document or page.
-        page_width (float): The absolute width of the page in pixels.
-        page_height (float): The absolute height of the page in pixels.
-        page_no (int): The 1-based page number being processed.
-
-    Returns:
-        tuple: A tuple containing:
-            - dict: OCR results structured as an OCRResult object (containing 'page' and 'results' list).
-            - list: Bounding boxes identified as handwriting or signatures.
-            - list: Bounding boxes identified specifically as signatures.
-            - list: Bounding boxes identified specifically as handwriting.
-            - dict: OCR results with word-level detail, structured for further processing.
+    Convert Textract JSON to structured OCR, handling lines, words, signatures, 
+    selection elements (associating them with lines), and question-answer form data.
+    The question-answer data is sorted in a top-to-bottom, left-to-right reading order.
     """
-    all_ocr_results = list()
-    signature_or_handwriting_recogniser_results = list()
-    signature_recogniser_results = list()
-    handwriting_recogniser_results = list()
-    signatures = list()
-    handwriting = list()
-    ocr_results_with_words = dict()
-    text_block = dict()
-
-    text_line_number = 1
-
-    # Assuming json_data is structured as a dictionary with a "pages" key
-
-    # Find the specific page data
+    # --- STAGE 1: Block Mapping & Initial Data Collection ---
+    #text_blocks = json_data.get("Blocks", [])
+     # Find the specific page data
     page_json_data = json_data  # next((page for page in json_data["pages"] if page["page_no"] == page_no), None)
 
     if "Blocks" in page_json_data:
@@ -252,225 +226,154 @@ def json_to_ocrresult(
     else:
         text_blocks = []
 
-    is_signature = False
-    is_handwriting = False
+    block_map = {block['Id']: block for block in text_blocks}
 
-    for text_block in text_blocks:
-        current_block_confidence = 0.0
+    lines_data = list()
+    selections_data = list()
+    signature_or_handwriting_recogniser_results = list()
+    signature_recogniser_results = list()
+    handwriting_recogniser_results = list()
 
-        if (text_block["BlockType"] == "LINE") or (
-            text_block["BlockType"] == "SIGNATURE"
-        ):
+    def _get_text_from_block(block, b_map):
+        text_parts = list()
+        if "Relationships" in block:
+            for rel in block["Relationships"]:
+                if rel["Type"] == "CHILD":
+                    for child_id in rel["Ids"]:
+                        child = b_map.get(child_id)
+                        if child:
+                            if child["BlockType"] == "WORD":
+                                text_parts.append(child["Text"])
+                            elif child["BlockType"] == "SELECTION_ELEMENT":
+                                text_parts.append(f"[{child['SelectionStatus']}]")
+        return " ".join(text_parts)
 
-            current_block_confidence = round(text_block.get("Confidence", 0.0), 0)
+    # text_line_number = 1  
 
-            # Extract text and bounding box for the line
-            line_bbox = text_block["Geometry"]["BoundingBox"]
-            line_left = int(line_bbox["Left"] * page_width)
-            line_top = int(line_bbox["Top"] * page_height)
-            line_right = int((line_bbox["Left"] + line_bbox["Width"]) * page_width)
-            line_bottom = int((line_bbox["Top"] + line_bbox["Height"]) * page_height)
+    # is_signature = False
+    # is_handwriting = False
 
-            width_abs = int(line_bbox["Width"] * page_width)
-            height_abs = int(line_bbox["Height"] * page_height)
-
-            if text_block["BlockType"] == "LINE":
-
-                # Extract text and bounding box for the line
-                line_text = text_block.get("Text", "")
-                words = []
-                current_line_handwriting_results = (
-                    []
-                )  # Track handwriting results for this line
-
-                if "Relationships" in text_block:
-                    for relationship in text_block["Relationships"]:
-                        if relationship["Type"] == "CHILD":
-                            for child_id in relationship["Ids"]:
-                                child_block = next(
-                                    (
-                                        block
-                                        for block in text_blocks
-                                        if block["Id"] == child_id
-                                    ),
-                                    None,
-                                )
-                                if child_block and child_block["BlockType"] == "WORD":
-                                    word_text = child_block.get("Text", "")
-                                    word_bbox = child_block["Geometry"]["BoundingBox"]
-                                    word_confidence = round(
-                                        child_block.get("Confidence", 0.0), 0
+    for block in text_blocks:
+        block_type = block.get("BlockType")
+        
+        if block_type == "LINE":
+            bbox = block["Geometry"]["BoundingBox"]
+            line_info = {
+                "id": block["Id"], "text": block.get("Text", ""), "confidence": round(block.get("Confidence", 0.0), 0), "words": [],
+                "geometry": { "left": int(bbox["Left"] * page_width), "top": int(bbox["Top"] * page_height), "width": int(bbox["Width"] * page_width), "height": int(bbox["Height"] * page_height)}
+            }
+            if "Relationships" in block:
+                for rel in block.get("Relationships", []):
+                    if rel['Type'] == 'CHILD':
+                        for child_id in rel['Ids']:
+                            word_block = block_map.get(child_id)
+                            if word_block and word_block['BlockType'] == 'WORD':
+                                w_bbox = word_block["Geometry"]["BoundingBox"]
+                                line_info["words"].append({
+                                    "text": word_block.get("Text", ""), "confidence": round(word_block.get("Confidence", 0.0), 0),
+                                    "bounding_box": (
+                                        int(w_bbox["Left"] * page_width), int(w_bbox["Top"] * page_height),
+                                        int((w_bbox["Left"] + w_bbox["Width"]) * page_width), int((w_bbox["Top"] + w_bbox["Height"]) * page_height)
                                     )
-                                    word_left = int(word_bbox["Left"] * page_width)
-                                    word_top = int(word_bbox["Top"] * page_height)
-                                    word_right = int(
-                                        (word_bbox["Left"] + word_bbox["Width"])
-                                        * page_width
-                                    )
-                                    word_bottom = int(
-                                        (word_bbox["Top"] + word_bbox["Height"])
-                                        * page_height
-                                    )
+                                })
+                                if word_block.get("TextType") == "HANDWRITING":
+                                    rec_res = CustomImageRecognizerResult(entity_type="HANDWRITING", text=word_block.get("Text", ""), score=round(word_block.get("Confidence", 0.0), 0), start=0, end=len(word_block.get("Text", "")), left=int(w_bbox["Left"] * page_width), top=int(w_bbox["Top"] * page_height), width=int(w_bbox["Width"] * page_width), height=int(w_bbox["Height"] * page_height))
+                                    handwriting_recogniser_results.append(rec_res)
+                                    signature_or_handwriting_recogniser_results.append(rec_res)
+            lines_data.append(line_info)
 
-                                    # Extract BoundingBox details
-                                    word_width = word_bbox["Width"]
-                                    word_height = word_bbox["Height"]
+        elif block_type == "SELECTION_ELEMENT":
+            bbox = block["Geometry"]["BoundingBox"]
+            selections_data.append({
+                "id": block["Id"], "status": block.get("SelectionStatus", "UNKNOWN"), "confidence": round(block.get("Confidence", 0.0), 0),
+                "geometry": { "left": int(bbox["Left"]*page_width), "top": int(bbox["Top"]*page_height), "width": int(bbox["Width"]*page_width), "height": int(bbox["Height"]*page_height)}
+            })
 
-                                    # Convert proportional coordinates to absolute coordinates
-                                    word_width_abs = int(word_width * page_width)
-                                    word_height_abs = int(word_height * page_height)
+        elif block_type == "SIGNATURE":
+            bbox = block["Geometry"]["BoundingBox"]
+            rec_res = CustomImageRecognizerResult(entity_type="SIGNATURE", text="SIGNATURE", score=round(block.get("Confidence", 0.0), 0), start=0, end=9, left=int(bbox["Left"] * page_width), top=int(bbox["Top"] * page_height), width=int(bbox["Width"] * page_width), height=int(bbox["Height"] * page_height))
+            signature_recogniser_results.append(rec_res)
+            signature_or_handwriting_recogniser_results.append(rec_res)
 
-                                    # --- MODIFICATION: Add confidence to the word dictionary ---
-                                    words.append(
-                                        {
-                                            "text": word_text,
-                                            "confidence": word_confidence,
-                                            "bounding_box": (
-                                                word_left,
-                                                word_top,
-                                                word_right,
-                                                word_bottom,
-                                            ),
-                                        }
-                                    )
-                                    # Check for handwriting
-                                    text_type = child_block.get("TextType", "")
+    # --- STAGE 2: Question-Answer Pair Extraction & Sorting ---
+    def _create_question_answer_results_object(text_blocks):
+        question_answer_results = list()
+        key_blocks = [b for b in text_blocks if b.get("BlockType") == "KEY_VALUE_SET" and "KEY" in b.get("EntityTypes", [])]
+        for question_block in key_blocks:
+            answer_block = next((block_map.get(rel["Ids"][0]) for rel in question_block.get("Relationships", []) if rel["Type"] == "VALUE"), None)
+            
+            # The check for value_block now happens BEFORE we try to access its properties.
+            if answer_block:
+                question_bbox = question_block["Geometry"]["BoundingBox"]
+                # We also get the answer_bbox safely inside this block.
+                answer_bbox = answer_block["Geometry"]["BoundingBox"]
 
-                                    if text_type == "HANDWRITING":
-                                        is_handwriting = True
-                                        entity_name = "HANDWRITING"
-                                        word_end = len(word_text)
+                question_answer_results.append({
+                    # Data for final output
+                    "Page": page_no,
+                    "Question": _get_text_from_block(question_block, block_map),
+                    "Answer": _get_text_from_block(answer_block, block_map),
+                    "Confidence Score % (Question)": round(question_block.get("Confidence", 0.0), 0),
+                    "Confidence Score % (Answer)": round(answer_block.get("Confidence", 0.0), 0),
+                    "Question_left": round(question_bbox["Left"], 5),
+                    "Question_top": round(question_bbox["Top"], 5),
+                    "Question_width": round(question_bbox["Width"], 5),
+                    "Question_height": round(question_bbox["Height"], 5),
+                    "Answer_left": round(answer_bbox["Left"], 5),
+                    "Answer_top": round(answer_bbox["Top"], 5),
+                    "Answer_width": round(answer_bbox["Width"], 5),
+                    "Answer_height": round(answer_bbox["Height"], 5),
+                })
+        
+        question_answer_results.sort(key=lambda item: (item["Question_top"], item["Question_left"]))
 
-                                        recogniser_result = CustomImageRecognizerResult(
-                                            entity_type=entity_name,
-                                            text=word_text,
-                                            score=word_confidence,  # Using word confidence here
-                                            start=0,
-                                            end=word_end,
-                                            left=word_left,
-                                            top=word_top,
-                                            width=word_width_abs,
-                                            height=word_height_abs,
-                                        )
+        return question_answer_results
+    
+    question_answer_results = _create_question_answer_results_object(text_blocks)
 
-                                        # Add to handwriting collections immediately
-                                        handwriting.append(recogniser_result)
-                                        handwriting_recogniser_results.append(
-                                            recogniser_result
-                                        )
-                                        signature_or_handwriting_recogniser_results.append(
-                                            recogniser_result
-                                        )
-                                        current_line_handwriting_results.append(
-                                            recogniser_result
-                                        )
+    # --- STAGE 3: Association of Selection Elements to Lines ---
+    unmatched_selections = list()
+    for selection in selections_data:
+        best_match_line = None; min_dist = float('inf')
+        sel_geom = selection["geometry"]; sel_y_center = sel_geom["top"] + sel_geom["height"] / 2
+        for line in lines_data:
+            line_geom = line["geometry"]; line_y_center = line_geom["top"] + line_geom["height"] / 2
+            if abs(sel_y_center - line_y_center) < line_geom["height"]:
+                dist = 0
+                if sel_geom["left"] > (line_geom["left"] + line_geom["width"]): dist = sel_geom["left"] - (line_geom["left"] + line_geom["width"])
+                elif line_geom["left"] > (sel_geom["left"] + sel_geom["width"]): dist = line_geom["left"] - (sel_geom["left"] + sel_geom["width"])
+                if dist < min_dist: min_dist = dist; best_match_line = line
+        if best_match_line and min_dist < (best_match_line["geometry"]["height"] * 5):
+            selection_as_word = {"text": f"[{selection['status']}]", "confidence": round(selection["confidence"], 0), "bounding_box": (sel_geom["left"], sel_geom["top"], sel_geom["left"] + sel_geom["width"], sel_geom["top"] + sel_geom["height"])}
+            best_match_line["words"].append(selection_as_word)
+            best_match_line["words"].sort(key=lambda w: w["bounding_box"][0])
+        else: unmatched_selections.append(selection)
 
-            # If handwriting or signature, add to bounding box
+    # --- STAGE 4: Final Output Generation ---
+    all_ocr_results = list(); ocr_results_with_words = dict(); selection_element_results = list()
+    for i, line in enumerate(lines_data):
+        line_num = i + 1; line_geom = line["geometry"]; reconstructed_text = " ".join(w["text"] for w in line["words"])
+        all_ocr_results.append(OCRResult(reconstructed_text, line_geom["left"], line_geom["top"], line_geom["width"], line_geom["height"], round(line["confidence"], 0), line_num))
+        ocr_results_with_words[f"text_line_{line_num}"] = {"line": line_num, "text": reconstructed_text, "confidence": line["confidence"], "bounding_box": (line_geom["left"], line_geom["top"], line_geom["left"] + line_geom["width"], line_geom["top"] + line_geom["height"]), "words": line["words"], "page": page_no}
+    for selection in unmatched_selections:
+        sel_geom = selection["geometry"]; sel_text = f"[{selection['status']}]"
+        all_ocr_results.append(OCRResult(sel_text, sel_geom["left"], sel_geom["top"], sel_geom["width"], sel_geom["height"], round(selection["confidence"], 0), -1))
+    for selection in selections_data:
+        sel_geom = selection["geometry"]
+        selection_element_results.append({"status": selection["status"], "confidence": round(selection["confidence"], 0), "bounding_box": (sel_geom["left"], sel_geom["top"], sel_geom["left"] + sel_geom["width"], sel_geom["top"] + sel_geom["height"]), "page": page_no})
 
-            elif text_block["BlockType"] == "SIGNATURE":
-                line_text = "SIGNATURE"
-                is_signature = True
-                entity_name = "SIGNATURE"
-                # current_block_confidence is already set from the top of the if statement
-                word_end = len(line_text)
-
-                recogniser_result = CustomImageRecognizerResult(
-                    entity_type=entity_name,
-                    text=line_text,
-                    score=current_block_confidence,
-                    start=0,
-                    end=word_end,
-                    left=line_left,
-                    top=line_top,
-                    width=width_abs,
-                    height=height_abs,
-                )
-
-                # Add to signature collections immediately
-                signatures.append(recogniser_result)
-                signature_recogniser_results.append(recogniser_result)
-                signature_or_handwriting_recogniser_results.append(recogniser_result)
-
-                # --- MODIFICATION: Add confidence to the signature "word" for consistency ---
-                words = [
-                    {
-                        "text": line_text,
-                        "confidence": current_block_confidence,
-                        "bounding_box": (line_left, line_top, line_right, line_bottom),
-                    }
-                ]
-            else:
-                line_text = ""
-                words = []
-                line_left = 0
-                line_top = 0
-                line_right = 0
-                line_bottom = 0
-                width_abs = 0
-                height_abs = 0
-
-            if line_text:
-                # --- MODIFICATION: Add line confidence to the detailed results dict ---
-                ocr_results_with_words["text_line_" + str(text_line_number)] = {
-                    "line": text_line_number,
-                    "text": line_text,
-                    "confidence": current_block_confidence,
-                    "bounding_box": (line_left, line_top, line_right, line_bottom),
-                    "words": words,
-                    "page": page_no,
-                }
-
-                # --- MODIFICATION: Pass the correct line-level confidence to OCRResult ---
-                # Create OCRResult with absolute coordinates
-                ocr_result = OCRResult(
-                    line_text,
-                    line_left,
-                    line_top,
-                    width_abs,
-                    height_abs,
-                    conf=current_block_confidence,  # Use the stored line/signature confidence
-                    line=text_line_number,
-                )
-                all_ocr_results.append(ocr_result)
-
-                # Increase line number
-                text_line_number += 1
-
-            is_signature_or_handwriting = is_signature or is_handwriting
-
-            # If it is signature or handwriting, will overwrite the default behaviour of the PII analyser
-            if is_signature_or_handwriting:
-                if recogniser_result not in signature_or_handwriting_recogniser_results:
-                    signature_or_handwriting_recogniser_results.append(
-                        recogniser_result
-                    )
-
-                if is_signature:
-                    if recogniser_result not in signature_recogniser_results:
-                        signature_recogniser_results.append(recogniser_result)
-
-                if is_handwriting:
-                    if recogniser_result not in handwriting_recogniser_results:
-                        handwriting_recogniser_results.append(recogniser_result)
-
-    # Add page key to the line level results
     all_ocr_results_with_page = {"page": page_no, "results": all_ocr_results}
-    ocr_results_with_words_with_page = {
-        "page": page_no,
-        "results": ocr_results_with_words,
-    }
-
-    print("ocr_results_with_words_with_page:", ocr_results_with_words_with_page)
-    print("all_ocr_results_with_page:", all_ocr_results_with_page)
-
+    ocr_results_with_words_with_page = {"page": page_no, "results": ocr_results_with_words}
+    
     return (
         all_ocr_results_with_page,
         signature_or_handwriting_recogniser_results,
         signature_recogniser_results,
         handwriting_recogniser_results,
         ocr_results_with_words_with_page,
+        selection_element_results,
+        question_answer_results,
     )
-
 
 def load_and_convert_textract_json(
     textract_json_file_path: str,
@@ -541,7 +444,7 @@ def restructure_textract_output(textract_output: dict, page_sizes_df: pd.DataFra
     Reorganise Textract output from the bulk Textract analysis option on AWS
     into a format that works in this redaction app, reducing size.
     """
-    pages_dict = {}
+    pages_dict = dict()
 
     # Extract total pages from DocumentMetadata
     document_metadata = textract_output.get("DocumentMetadata", {})
@@ -612,8 +515,8 @@ def restructure_textract_output(textract_output: dict, page_sizes_df: pd.DataFra
 
         # Keep only essential fields to reduce size
         filtered_block = {
-            key: block[key]
-            for key in [
+            question: block[question]
+            for question in [
                 "BlockType",
                 "Confidence",
                 "Text",
@@ -622,7 +525,7 @@ def restructure_textract_output(textract_output: dict, page_sizes_df: pd.DataFra
                 "Id",
                 "Relationships",
             ]
-            if key in block
+            if question in block
         }
 
         pages_dict[page_no]["data"]["Blocks"].append(filtered_block)
@@ -630,7 +533,345 @@ def restructure_textract_output(textract_output: dict, page_sizes_df: pd.DataFra
     # Convert pages dictionary to a sorted list
     structured_output = {
         "DocumentMetadata": document_metadata,  # Store metadata separately
-        "pages": [pages_dict[page] for page in sorted(pages_dict.keys())],
+        "pages": [pages_dict[page] for page in sorted(pages_dict.questions())],
     }
 
     return structured_output
+
+
+def convert_question_answer_to_dataframe(question_answer_results: List[Dict[str, Any]], page_sizes_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert question-answer results to DataFrame format matching convert_annotation_data_to_dataframe.
+    
+    Each Question and Answer will be on separate lines in the resulting dataframe.
+    The 'image' column will be populated with the page number as f'placeholder_image_page{i}.png'.
+    
+    Args:
+        question_answer_results: List of question-answer dictionaries from _create_question_answer_results_object
+        page_sizes_df: DataFrame containing page sizes
+        
+    Returns:
+        pd.DataFrame: DataFrame with columns ["image", "page", "label", "color", "xmin", "xmax", "ymin", "ymax", "text", "id"]
+    """
+    
+    
+    if not question_answer_results:
+        # Return empty DataFrame with expected schema
+        return pd.DataFrame(
+            columns=["image", "page", "label", "color", "xmin", "xmax", "ymin", "ymax", "text", "id"]
+        )
+    
+    # Prepare data for DataFrame
+    rows = list()
+    existing_ids = set()
+    
+    for i, qa_result in enumerate(question_answer_results):
+        page_num = int(qa_result.get("Page", 1))
+        page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+        page_sizes_df.dropna(subset=["page"], inplace=True)
+        if not page_sizes_df.empty:
+            page_sizes_df["page"] = page_sizes_df["page"].astype(int)
+        else:
+            print("Warning: Page sizes DataFrame became empty after processing.")
+
+        image_name = page_sizes_df.loc[page_sizes_df["page"] == page_num, "image_path"].iloc[0]
+        if pd.isna(image_name):
+            image_name = f"placeholder_image_{page_num}.png"
+        
+        # Create Question row
+        question_bbox = {
+            "Question_left": qa_result.get("Question_left", 0),
+            "Question_top": qa_result.get("Question_top", 0),
+            "Question_width": qa_result.get("Question_width", 0),
+            "Question_height": qa_result.get("Question_height", 0)
+        }
+        
+        question_row = {
+            "image": image_name,
+            "page": page_num,
+            "label": f"Question {i+1}",
+            "color": "(0,0,255)",
+            "xmin": question_bbox["Question_left"],
+            "xmax": question_bbox["Question_left"] + question_bbox["Question_width"],
+            "ymin": question_bbox["Question_top"],
+            "ymax": question_bbox["Question_top"] + question_bbox["Question_height"],
+            "text": qa_result.get("Question", ""),
+            "id": None  # Will be filled after generating IDs
+        }
+        
+        # Create Answer row
+        answer_bbox = {
+            "Answer_left": qa_result.get("Answer_left", 0),
+            "Answer_top": qa_result.get("Answer_top", 0),
+            "Answer_width": qa_result.get("Answer_width", 0),
+            "Answer_height": qa_result.get("Answer_height", 0)
+        }
+        
+        answer_row = {
+            "image": image_name,
+            "page": page_num,
+            "label": f"Answer {i+1}",
+            "color": "(0,255,0)",
+            "xmin": answer_bbox["Answer_left"],
+            "xmax": answer_bbox["Answer_left"] + answer_bbox["Answer_width"],
+            "ymin": answer_bbox["Answer_top"],
+            "ymax": answer_bbox["Answer_top"] + answer_bbox["Answer_height"],
+            "text": qa_result.get("Answer", ""),
+            "id": None  # Will be filled after generating IDs
+        }
+        
+        rows.extend([question_row, answer_row])
+    
+    # Generate unique IDs for all rows
+    num_ids_needed = len(rows)
+    unique_ids = _generate_unique_ids(num_ids_needed, existing_ids)
+    
+    # Assign IDs to rows
+    for i, row in enumerate(rows):
+        row["id"] = unique_ids[i]
+    
+    # Create DataFrame
+    df = pd.DataFrame(rows)
+    
+    # Ensure all required columns are present and in correct order
+    required_columns = ["image", "page", "label", "color", "xmin", "xmax", "ymin", "ymax", "text", "id"]
+    for col in required_columns:
+        if col not in df.columns:
+            df[col] = pd.NA
+    
+    # Reorder columns to match expected format
+    df = df.reindex(columns=required_columns, fill_value=pd.NA)
+    
+    return df
+
+
+def convert_question_answer_to_annotation_json(
+    question_answer_results: List[Dict[str, Any]], 
+    page_sizes_df: pd.DataFrame
+) -> List[Dict]:
+    """
+    Convert question-answer results directly to Gradio Annotation JSON format.
+    
+    This function combines the functionality of convert_question_answer_to_dataframe
+    and convert_review_df_to_annotation_json to directly convert question-answer
+    results to the annotation JSON format without the intermediate DataFrame step.
+    
+    Args:
+        question_answer_results: List of question-answer dictionaries from _create_question_answer_results_object
+        page_sizes_df: DataFrame containing page sizes with columns ['page', 'image_path', 'image_width', 'image_height']
+        
+    Returns:
+        List of dictionaries suitable for Gradio Annotation output, one dict per image/page.
+        Each dict has structure: {"image": image_path, "boxes": [list of annotation boxes]}
+    """
+    
+    if not question_answer_results:
+        # Return empty structure based on page_sizes_df
+        json_data = list()
+        for _, row in page_sizes_df.iterrows():
+            json_data.append({
+                "image": row.get("image_path", f"placeholder_image_{row.get('page', 1)}.png"),
+                "boxes": []
+            })
+        return json_data
+    
+    # Validate required columns in page_sizes_df
+    required_ps_cols = {"page", "image_path", "image_width", "image_height"}
+    if not required_ps_cols.issubset(page_sizes_df.columns):
+        missing = required_ps_cols - set(page_sizes_df.columns)
+        raise ValueError(f"page_sizes_df is missing required columns: {missing}")
+    
+    # Convert page sizes columns to appropriate numeric types
+    page_sizes_df = page_sizes_df.copy()  # Work with a copy to avoid modifying original
+    page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+    page_sizes_df["image_width"] = pd.to_numeric(page_sizes_df["image_width"], errors="coerce")
+    page_sizes_df["image_height"] = pd.to_numeric(page_sizes_df["image_height"], errors="coerce")
+    page_sizes_df["page"] = page_sizes_df["page"].astype("Int64")
+    
+    # Prepare data for processing
+    rows = list()
+    existing_ids = set()
+    
+    for i, qa_result in enumerate(question_answer_results):
+        page_num = int(qa_result.get("Page", 1))
+        
+        # Get image path for this page
+        page_row = page_sizes_df[page_sizes_df["page"] == page_num]
+        if not page_row.empty:
+            image_name = page_row["image_path"].iloc[0]
+        else:
+            image_name = f"placeholder_image_{page_num}.png"
+        
+        # Create Question box.
+        question_bbox = {
+            "Question_left": qa_result.get("Question_left", 0),
+            "Question_top": qa_result.get("Question_top", 0),
+            "Question_width": qa_result.get("Question_width", 0),
+            "Question_height": qa_result.get("Question_height", 0)
+        }
+        
+        question_box = {
+            "label": f"Question {i+1}",
+            "color": (0, 0, 255),  # Blue for questions
+            "xmin": question_bbox["Question_left"],
+            "xmax": question_bbox["Question_left"] + question_bbox["Question_width"],
+            "ymin": question_bbox["Question_top"],
+            "ymax": question_bbox["Question_top"] + question_bbox["Question_height"],
+            "text": qa_result.get("Question", ""),
+            "id": None  # Will be filled after generating IDs
+        }
+        
+        # Create Answer box
+        answer_bbox = {
+            "Answer_left": qa_result.get("Answer_left", 0),
+            "Answer_top": qa_result.get("Answer_top", 0),
+            "Answer_width": qa_result.get("Answer_width", 0),
+            "Answer_height": qa_result.get("Answer_height", 0)
+        }
+        
+        answer_box = {
+            "label": f"Answer {i+1}",
+            "color": (0, 255, 0),  # Green for answers
+            "xmin": answer_bbox["Answer_left"],
+            "xmax": answer_bbox["Answer_left"] + answer_bbox["Answer_width"],
+            "ymin": answer_bbox["Answer_top"],
+            "ymax": answer_bbox["Answer_top"] + answer_bbox["Answer_height"],
+            "text": qa_result.get("Answer", ""),
+            "id": None  # Will be filled after generating IDs
+        }
+        
+        rows.extend([(page_num, question_box), (page_num, answer_box)])
+    
+    # Generate unique IDs for all boxes
+    num_ids_needed = len(rows)
+    unique_ids = _generate_unique_ids(num_ids_needed, existing_ids)
+    
+    # Assign IDs to boxes
+    for i, (page_num, box) in enumerate(rows):
+        box["id"] = unique_ids[i]
+        rows[i] = (page_num, box)
+    
+    # Group boxes by page
+    boxes_by_page = {}
+    for page_num, box in rows:
+        if page_num not in boxes_by_page:
+            boxes_by_page[page_num] = list()
+        boxes_by_page[page_num].append(box)
+    
+    # Build JSON structure based on page_sizes
+    json_data = list()
+    for _, row in page_sizes_df.iterrows():
+        page_num = row["page"]
+        pdf_image_path = row["image_path"]
+        
+        # Get boxes for this page
+        annotation_boxes = boxes_by_page.get(page_num, [])
+        
+        # Append the structured data for this image/page
+        json_data.append({"image": pdf_image_path, "boxes": annotation_boxes})
+    
+    return json_data
+
+
+def convert_page_question_answer_to_custom_image_recognizer_results(
+    question_answer_results: List[Dict[str, Any]],
+    page_sizes_df: pd.DataFrame,
+    reported_page_number: int
+) -> List['CustomImageRecognizerResult']:
+    """
+    Convert question-answer results to a list of CustomImageRecognizerResult objects.
+    
+    Args:
+        question_answer_results: List of question-answer dictionaries from _create_question_answer_results_object
+        page_sizes_df: DataFrame containing page sizes with columns ['page', 'image_path', 'image_width', 'image_height']
+        reported_page_number: The page number reported by the user
+    Returns:
+        List of CustomImageRecognizerResult objects for questions and answers
+    """
+    from tools.custom_image_analyser_engine import CustomImageRecognizerResult
+    
+    if not question_answer_results:
+        return list()
+    
+    results = list()
+    
+    # Pre-process page_sizes_df once for efficiency
+    page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+    page_sizes_df.dropna(subset=["page"], inplace=True)
+    if not page_sizes_df.empty:
+        page_sizes_df["page"] = page_sizes_df["page"].astype(int)
+    else:
+        print("Warning: Page sizes DataFrame became empty after processing.")
+        return list() # Return empty list if no page sizes are available
+
+    page_row = page_sizes_df.loc[page_sizes_df["page"] == int(reported_page_number)]
+
+    if page_row.empty:
+        print(f"Warning: Page {reported_page_number} not found in page_sizes_df. Skipping this entry.")
+        return list() # Return empty list if page not found
+    
+    for i, qa_result in enumerate(question_answer_results):
+        current_page = int(qa_result.get("Page", 1))
+
+        if current_page != int(reported_page_number):
+            continue # Skip this entry if page number does not match reported page number        
+
+        # Get image dimensions safely
+        image_width = page_row["mediabox_width"].iloc[0]
+        image_height = page_row["mediabox_height"].iloc[0]
+        
+        # Get question and answer text safely
+        question_text = qa_result.get("Question", "")
+        answer_text = qa_result.get("Answer", "")
+        
+        # Get scores and handle potential type issues
+        question_score = float(qa_result.get("'Confidence Score % (Question)'", 0.0))
+        answer_score = float(qa_result.get("'Confidence Score % (Answer)'", 0.0))
+
+        # --- Process Question Bounding Box ---
+        question_bbox = {
+            "left": qa_result.get("Question_left", 0) * image_width,
+            "top": qa_result.get("Question_top", 0) * image_height,
+            "width": qa_result.get("Question_width", 0) * image_width,
+            "height": qa_result.get("Question_height", 0) * image_height
+        }
+        
+        question_result = CustomImageRecognizerResult(
+            entity_type=f"QUESTION {i+1}",
+            start=0,
+            end=len(question_text),
+            score=question_score,
+            left=float(question_bbox.get("left", 0)),
+            top=float(question_bbox.get("top", 0)),
+            width=float(question_bbox.get("width", 0)),
+            height=float(question_bbox.get("height", 0)),
+            text=question_text,
+            color=(0, 0, 255)
+        )
+        results.append(question_result)
+
+        print("question_result:", question_result)
+        
+        # --- Process Answer Bounding Box ---
+        answer_bbox = {
+            "left": qa_result.get("Answer_left", 0) * image_width,
+            "top": qa_result.get("Answer_top", 0) * image_height,
+            "width": qa_result.get("Answer_width", 0) * image_width,
+            "height": qa_result.get("Answer_height", 0) * image_height
+        }
+        
+        answer_result = CustomImageRecognizerResult(
+            entity_type=f"ANSWER {i+1}",
+            start=0,
+            end=len(answer_text),
+            score=answer_score,
+            left=float(answer_bbox.get("left", 0)),
+            top=float(answer_bbox.get("top", 0)),
+            width=float(answer_bbox.get("width", 0)),
+            height=float(answer_bbox.get("height", 0)),
+            text=answer_text,
+            color=(0, 255, 0)
+        )
+        results.append(answer_result)
+    
+    return results

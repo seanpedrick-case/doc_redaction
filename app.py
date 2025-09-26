@@ -1566,7 +1566,7 @@ with app:
                                 label="Label for new redactions", value="Redaction"
                             )
                             colour_label = gr.Textbox(
-                                label="Colour for labels (three number RGB format, max 255 with brackes)",
+                                label="Colour for labels (three number RGB format, max 255 with brackets)",
                                 value="(0, 0, 0)",
                             )
 

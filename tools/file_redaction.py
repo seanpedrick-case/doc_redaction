@@ -27,6 +27,8 @@ from tools.aws_textract import (
     analyse_page_with_textract,
     json_to_ocrresult,
     load_and_convert_textract_json,
+    convert_question_answer_to_dataframe,
+    convert_page_question_answer_to_custom_image_recognizer_results
 )
 from tools.config import (
     AWS_ACCESS_KEY,
@@ -48,9 +50,12 @@ from tools.config import (
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RETURN_PDF_END_OF_REDACTION,
     RUN_AWS_FUNCTIONS,
+    USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
+    RETURN_PDF_FOR_REVIEW,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
+    CUSTOM_BOX_COLOUR,
     aws_comprehend_language_choices,
     textract_language_choices,
 )
@@ -78,6 +83,7 @@ from tools.file_conversion import (
     remove_duplicate_images_with_blank_boxes,
     save_pdf_with_or_without_compression,
     word_level_ocr_output_to_dataframe,
+    process_single_page_for_image_conversion
 )
 from tools.helper_functions import (
     _get_env_list,
@@ -103,6 +109,8 @@ else:
 image_dpi = float(IMAGES_DPI)
 
 RETURN_PDF_END_OF_REDACTION = RETURN_PDF_END_OF_REDACTION.lower() == "true"
+USE_GUI_BOX_COLOURS_FOR_OUTPUTS = USE_GUI_BOX_COLOURS_FOR_OUTPUTS.lower() == "true"
+RETURN_PDF_FOR_REVIEW = RETURN_PDF_FOR_REVIEW.lower() == "true"
 
 if CUSTOM_ENTITIES:
     CUSTOM_ENTITIES = _get_env_list(CUSTOM_ENTITIES)
@@ -151,7 +159,7 @@ def reverse_y_coords(df: pd.DataFrame, column: str):
 
 
 def merge_page_results(data: list):
-    merged = {}
+    merged = dict()
 
     for item in data:
         page = item["page"]
@@ -290,6 +298,10 @@ def choose_and_run_redactor(
     )
     review_out_file_paths = [prepared_pdf_file_paths[0]]
     task_textbox = "redact"
+    selection_element_results_list_df = pd.DataFrame()
+    form_key_value_results_list_df = pd.DataFrame()
+    out_review_pdf_file_path = ""
+    out_redacted_pdf_file_path = ""
 
     # CLI mode may provide options to enter method names in a different format
     if text_extraction_method == "AWS Textract":
@@ -925,6 +937,8 @@ def choose_and_run_redactor(
                 comprehend_query_number,
                 all_page_line_level_ocr_results,
                 all_page_line_level_ocr_results_with_words,
+                selection_element_results_list_df,
+                form_key_value_results_list_df
             ) = redact_image_pdf(
                 file_path,
                 pdf_image_file_paths,
@@ -987,7 +1001,7 @@ def choose_and_run_redactor(
                 current_loop_page,
                 page_break_return,
                 comprehend_query_number,
-                all_page_line_level_ocr_results_with_words,
+                all_page_line_level_ocr_results_with_words
             ) = redact_text_pdf(
                 file_path,
                 language,
@@ -1052,19 +1066,45 @@ def choose_and_run_redactor(
                         img.save(
                             out_redacted_pdf_file_path, "PNG", resolution=image_dpi
                         )
-                    else:
-                        out_redacted_pdf_file_path = (
-                            output_folder + pdf_file_name_without_ext + "_redacted.pdf"
-                        )
-                        print("Saving redacted PDF file:", out_redacted_pdf_file_path)
-                        save_pdf_with_or_without_compression(
-                            pymupdf_doc, out_redacted_pdf_file_path
-                        )
 
-                    if isinstance(out_redacted_pdf_file_path, str):
-                        out_file_paths.append(out_redacted_pdf_file_path)
+                        if isinstance(out_redacted_pdf_file_path, str):
+                            out_file_paths.append(out_redacted_pdf_file_path)
+                        else:
+                            out_file_paths.append(out_redacted_pdf_file_path[0])
+
                     else:
-                        out_file_paths.append(out_redacted_pdf_file_path[0])
+                        if RETURN_PDF_FOR_REVIEW is False:
+                            out_redacted_pdf_file_path = (
+                                output_folder + pdf_file_name_without_ext + "_redacted.pdf"
+                            )                        
+                            print("Saving redacted PDF file:", out_redacted_pdf_file_path)
+
+                        if out_redacted_pdf_file_path:
+                            save_pdf_with_or_without_compression(
+                                pymupdf_doc, out_redacted_pdf_file_path
+                            )
+
+                            if isinstance(out_redacted_pdf_file_path, str):
+                                out_file_paths.append(out_redacted_pdf_file_path)
+                            else:
+                                out_file_paths.append(out_redacted_pdf_file_path[0])
+
+            # Always return a file for review if a pdf is given
+            if is_pdf(file_path) is True:
+                if RETURN_PDF_FOR_REVIEW is True:
+                    out_review_pdf_file_path = (
+                        output_folder + pdf_file_name_without_ext + "_redactions_for_review.pdf"
+                    )
+                    print("Saving PDF file for review:", out_review_pdf_file_path)
+
+                if out_review_pdf_file_path:
+                    save_pdf_with_or_without_compression(
+                        pymupdf_doc, out_review_pdf_file_path
+                    )
+                    if isinstance(out_review_pdf_file_path, str):
+                        out_file_paths.append(out_review_pdf_file_path)
+                    else:
+                        out_file_paths.append(out_review_pdf_file_path[0])
 
             if not all_page_line_level_ocr_results_df.empty:
                 all_page_line_level_ocr_results_df = all_page_line_level_ocr_results_df[
@@ -1084,7 +1124,6 @@ def choose_and_run_redactor(
                     ]
                 )
 
-            # ocr_file_path = orig_pdf_file_path + "_ocr_output.csv"
             ocr_file_path = (
                 output_folder
                 + pdf_file_name_without_ext
@@ -1217,6 +1256,41 @@ def choose_and_run_redactor(
                             all_page_line_level_ocr_results_with_words_df_file_path[0]
                         )
 
+            # Save decision process outputs
+            if not all_pages_decision_process_table.empty:
+                all_pages_decision_process_table_file_path = (
+                output_folder
+                + pdf_file_name_without_ext
+                + "_all_pages_decision_process_table_output_"
+                + file_ending
+                + ".csv"
+            )
+                all_pages_decision_process_table.to_csv(all_pages_decision_process_table_file_path, index=None, encoding="utf-8-sig")
+                log_files_output_paths.append(all_pages_decision_process_table_file_path)
+
+            # Save outputs from form analysis if they exist
+            if not selection_element_results_list_df.empty:
+                selection_element_results_list_df_file_path = (
+                output_folder
+                + pdf_file_name_without_ext
+                + "_selection_element_results_output_"
+                + file_ending
+                + ".csv"
+            )
+                selection_element_results_list_df.to_csv(selection_element_results_list_df_file_path, index=None, encoding="utf-8-sig")
+                out_file_paths.append(selection_element_results_list_df_file_path)
+
+            if not form_key_value_results_list_df.empty:
+                form_key_value_results_list_df_file_path = (
+                output_folder
+                + pdf_file_name_without_ext
+                + "_form_key_value_results_output_"
+                + file_ending
+                + ".csv"
+            )
+                form_key_value_results_list_df.to_csv(form_key_value_results_list_df_file_path, index=None, encoding="utf-8-sig")
+                out_file_paths.append(form_key_value_results_list_df_file_path)
+
             # Convert the gradio annotation boxes to relative coordinates
             progress(0.93, "Creating review file output")
             page_sizes = page_sizes_df.to_dict(orient="records")
@@ -1259,6 +1333,13 @@ def choose_and_run_redactor(
                 inplace=True,
                 errors="ignore",
             )
+
+            if pii_identification_method == NO_REDACTION_PII_OPTION and not form_key_value_results_list_df.empty:
+                print("Form outputs found with no redaction method selected. Creating review file from form outputs.")
+                review_file_state = form_key_value_results_list_df
+                annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(
+                    review_file_state, page_sizes
+                )
 
             if isinstance(review_file_path, str):
                 review_file_state.to_csv(
@@ -1589,17 +1670,18 @@ def move_page_info(file_path: str) -> str:
 
 
 def prepare_custom_image_recogniser_result_annotation_box(
-    page: Page, annot: dict, image: Image, page_sizes_df: pd.DataFrame
+    page: Page, annot: dict, image: Image, page_sizes_df: pd.DataFrame, custom_colours: bool = USE_GUI_BOX_COLOURS_FOR_OUTPUTS
 ):
     """
     Prepare an image annotation box and coordinates based on a CustomImageRecogniserResult, PyMuPDF page, and PIL Image.
     """
 
-    img_annotation_box = {}
+    img_annotation_box = dict()
 
     # For efficient lookup, set 'page' as index if it's not already
     if "page" in page_sizes_df.columns:
         page_sizes_df = page_sizes_df.set_index("page")
+
     # PyMuPDF page numbers are 0-based, DataFrame index assumed 1-based
     page_num_one_based = page.number + 1
 
@@ -1660,7 +1742,7 @@ def prepare_custom_image_recogniser_result_annotation_box(
     img_annotation_box["ymin"] = image_y1
     img_annotation_box["xmax"] = image_x2  # annot.left + annot.width
     img_annotation_box["ymax"] = image_y2  # annot.top + annot.height
-    img_annotation_box["color"] = (0, 0, 0)
+    img_annotation_box["color"] = annot.color if custom_colours is True else CUSTOM_BOX_COLOUR
     try:
         img_annotation_box["label"] = str(annot.entity_type)
     except Exception as e:
@@ -1684,12 +1766,12 @@ def convert_pikepdf_annotations_to_result_annotation_box(
     image: Image = None,
     convert_pikepdf_to_pymupdf_coords: bool = True,
     page_sizes_df: pd.DataFrame = pd.DataFrame(),
-    image_dimensions: dict = {},
+    image_dimensions: dict = dict(),
 ):
     """
     Convert redaction objects with pikepdf coordinates to annotation boxes for PyMuPDF that can then be redacted from the document. First 1. converts pikepdf to pymupdf coordinates, then 2. converts pymupdf coordinates to image coordinates if page is an image.
     """
-    img_annotation_box = {}
+    img_annotation_box = dict()
     page_no = page.number
 
     if convert_pikepdf_to_pymupdf_coords is True:
@@ -1793,12 +1875,46 @@ def redact_page_with_pymupdf(
     page: Page,
     page_annotations: dict,
     image: Image = None,
-    custom_colours: bool = False,
+    custom_colours: bool = USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
     redact_whole_page: bool = False,
     convert_pikepdf_to_pymupdf_coords: bool = True,
     original_cropbox: List[Rect] = list(),
     page_sizes_df: pd.DataFrame = pd.DataFrame(),
+    return_pdf_for_review: bool = RETURN_PDF_FOR_REVIEW
 ):
+    """
+    Applies redactions to a single PyMuPDF page based on provided annotations.
+
+    This function processes various types of annotations (Gradio, CustomImageRecognizerResult,
+    or pikepdf-like) and applies them as redactions to the given PyMuPDF page. It can also
+    redact the entire page if specified.
+
+    Args:
+        page (Page): The PyMuPDF page object to which redactions will be applied.
+        page_annotations (dict): A dictionary containing annotation data for the current page.
+                                 Expected to have a 'boxes' key with a list of annotation boxes.
+        image (Image, optional): A PIL Image object or path to an image file associated with the page.
+                                 Used for coordinate conversions if available. Defaults to None.
+        custom_colours (bool, optional): If True, custom box colors will be used for redactions.
+                                         Defaults to USE_GUI_BOX_COLOURS_FOR_OUTPUTS.
+        redact_whole_page (bool, optional): If True, the entire page will be redacted. Defaults to False.
+        convert_pikepdf_to_pymupdf_coords (bool, optional): If True, coordinates from pikepdf-like
+                                                            annotations will be converted to PyMuPDF's
+                                                            coordinate system. Defaults to True.
+        original_cropbox (List[Rect], optional): The original cropbox of the page. This is used
+                                                 to restore the cropbox after redactions. Defaults to an empty list.
+        page_sizes_df (pd.DataFrame, optional): A DataFrame containing page size and image dimension
+                                                information, used for coordinate scaling. Defaults to an empty DataFrame.
+        return_pdf_for_review (bool, optional): If True, redactions are applied in a way suitable for
+                                                review (e.g., not removing underlying text/images completely).
+                                                Defaults to RETURN_PDF_FOR_REVIEW.
+
+    Returns:
+        Tuple[Page, dict]: A tuple containing:
+            - page (Page): The PyMuPDF page object with redactions applied.
+            - out_annotation_boxes (dict): A dictionary containing the processed annotation boxes
+                                           for the page, including the image path.
+    """
 
     rect_height = page.rect.height
     rect_width = page.rect.width
@@ -1814,7 +1930,7 @@ def redact_page_with_pymupdf(
     )
 
     # Check if image dimensions for page exist in page_sizes_df
-    image_dimensions = {}
+    image_dimensions = dict()
 
     if not image and "image_width" in page_sizes_df.columns:
         page_sizes_df[["image_width"]] = page_sizes_df[["image_width"]].apply(
@@ -1832,9 +1948,9 @@ def redact_page_with_pymupdf(
         ].max()
 
         if pd.isna(image_dimensions["image_width"]):
-            image_dimensions = {}
+            image_dimensions = dict()
 
-    out_annotation_boxes = {}
+    out_annotation_boxes = dict()
     all_image_annotation_boxes = list()
 
     if isinstance(image, Image.Image):
@@ -1865,11 +1981,10 @@ def redact_page_with_pymupdf(
         page_annotations = page_annotations["boxes"]
 
     for annot in page_annotations:
-
         # Check if an Image recogniser result, or a Gradio annotation object
         if (isinstance(annot, CustomImageRecognizerResult)) | isinstance(annot, dict):
 
-            img_annotation_box = {}
+            img_annotation_box = dict()
 
             # Should already be in correct format if img_annotator_box is an input
             if isinstance(annot, dict):
@@ -1920,10 +2035,10 @@ def redact_page_with_pymupdf(
 
             # Else should be CustomImageRecognizerResult
             elif isinstance(annot, CustomImageRecognizerResult):
-                # print("annot is a CustomImageRecognizerResult")
+                #print("annot is a CustomImageRecognizerResult")
                 img_annotation_box, rect = (
                     prepare_custom_image_recogniser_result_annotation_box(
-                        page, annot, image, page_sizes_df
+                        page, annot, image, page_sizes_df, custom_colours
                     )
                 )
 
@@ -1950,7 +2065,7 @@ def redact_page_with_pymupdf(
         all_image_annotation_boxes.append(img_annotation_box)
 
         # Redact the annotations from the document
-        redact_single_box(page, rect, img_annotation_box, custom_colours)
+        redact_single_box(page, rect, img_annotation_box, custom_colours, return_pdf_for_review)
 
     # If whole page is to be redacted, do that here
     if redact_whole_page is True:
@@ -1965,7 +2080,14 @@ def redact_page_with_pymupdf(
         "boxes": all_image_annotation_boxes,
     }
 
-    page.apply_redactions(images=0, graphics=0)
+    if return_pdf_for_review is False:
+        # Remove text and all images
+        #page.apply_redactions(images=2, graphics=2)
+        page.apply_redactions(images=2, graphics=0, text=0)
+    # else:
+    #     # Just apply the box, don't remove images or text
+    #     page.apply_redactions(images=0, graphics=0, text=1)
+
     set_cropbox_safely(page, original_cropbox)
     # page.set_cropbox(original_cropbox)
     # Set CropBox to original size
@@ -2259,6 +2381,8 @@ def redact_image_pdf(
 
     file_name = get_file_name_without_type(file_path)
     comprehend_query_number_new = 0
+    selection_element_results_list_df = pd.DataFrame()
+    form_key_value_results_list_df = pd.DataFrame()
 
     # Try updating the supported languages for the spacy analyser
     try:
@@ -2369,6 +2493,8 @@ def redact_image_pdf(
     # If there's data from a previous run (passed in via the DataFrame parameters), add it
     all_line_level_ocr_results_list = list()
     all_pages_decision_process_list = list()
+    selection_element_results_list = list()
+    form_key_value_results_list = list()
 
     if not all_page_line_level_ocr_results_df.empty:
         all_line_level_ocr_results_list.extend(
@@ -2464,11 +2590,6 @@ def redact_image_pdf(
                         )
                     )
 
-                    print(
-                        "page_line_level_ocr_results_with_words:",
-                        page_line_level_ocr_results_with_words,
-                    )
-                    print("page_line_level_ocr_results:", page_line_level_ocr_results)
                 else:
                     page_word_level_ocr_results = image_analyser.perform_ocr(image_path)
 
@@ -2478,12 +2599,6 @@ def redact_image_pdf(
                     ) = combine_ocr_results(
                         page_word_level_ocr_results, page=reported_page_number
                     )
-
-                    print(
-                        "page_line_level_ocr_results_with_words:",
-                        page_line_level_ocr_results_with_words,
-                    )
-                    print("page_line_level_ocr_results:", page_line_level_ocr_results)
 
                     if all_page_line_level_ocr_results_with_words is None:
                         all_page_line_level_ocr_results_with_words = list()
@@ -2543,6 +2658,13 @@ def redact_image_pdf(
                         )
 
                         try:
+                            if not image:
+                                page_num, image_path, width, height = process_single_page_for_image_conversion(
+                                file_path,
+                                page_no)
+
+                                image = Image.open(image_path)
+
                             # Convert the image_path to bytes using an in-memory buffer
                             image_buffer = io.BytesIO()
                             image.save(
@@ -2599,6 +2721,8 @@ def redact_image_pdf(
                     page_signature_recogniser_results,
                     page_handwriting_recogniser_results,
                     page_line_level_ocr_results_with_words,
+                    selection_element_results,
+                    form_key_value_results
                 ) = json_to_ocrresult(
                     text_blocks, page_width, page_height, reported_page_number
                 )
@@ -2609,6 +2733,11 @@ def redact_image_pdf(
                 all_page_line_level_ocr_results_with_words.append(
                     page_line_level_ocr_results_with_words
                 )
+
+                if selection_element_results:
+                    selection_element_results_list.extend(selection_element_results)
+                if form_key_value_results:
+                    form_key_value_results_list.extend(form_key_value_results)
 
             # Convert to DataFrame and add to ongoing logging table
             line_level_ocr_results_df = pd.DataFrame(
@@ -2632,125 +2761,136 @@ def redact_image_pdf(
                     line_level_ocr_results_df.to_dict("records")
                 )
 
-            if pii_identification_method != NO_REDACTION_PII_OPTION:
-                # Step 2: Analyse text and identify PII
-                if chosen_redact_entities or chosen_redact_comprehend_entities:
+            if pii_identification_method != NO_REDACTION_PII_OPTION or RETURN_PDF_FOR_REVIEW is True:
+                page_redaction_bounding_boxes = list()
+                comprehend_query_number = 0
+                comprehend_query_number_new = 0
+                redact_whole_page = False
 
-                    page_redaction_bounding_boxes, comprehend_query_number_new = (
-                        image_analyser.analyze_text(
-                            page_line_level_ocr_results["results"],
-                            page_line_level_ocr_results_with_words["results"],
-                            chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
-                            pii_identification_method=pii_identification_method,
-                            comprehend_client=comprehend_client,
-                            custom_entities=chosen_redact_entities,
-                            language=language,
-                            allow_list=allow_list,
-                            score_threshold=score_threshold,
-                            nlp_analyser=nlp_analyser,
+                if pii_identification_method != NO_REDACTION_PII_OPTION:
+                    # Step 2: Analyse text and identify PII
+                    if chosen_redact_entities or chosen_redact_comprehend_entities:
+
+                        page_redaction_bounding_boxes, comprehend_query_number_new = (
+                            image_analyser.analyze_text(
+                                page_line_level_ocr_results["results"],
+                                page_line_level_ocr_results_with_words["results"],
+                                chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+                                pii_identification_method=pii_identification_method,
+                                comprehend_client=comprehend_client,
+                                custom_entities=chosen_redact_entities,
+                                language=language,
+                                allow_list=allow_list,
+                                score_threshold=score_threshold,
+                                nlp_analyser=nlp_analyser,
+                            )
                         )
-                    )
 
-                    comprehend_query_number = (
-                        comprehend_query_number + comprehend_query_number_new
+                        comprehend_query_number = (
+                            comprehend_query_number + comprehend_query_number_new
+                        )
+
+                    else:
+                        page_redaction_bounding_boxes = list()
+
+                    # Merge redaction bounding boxes that are close together
+                    page_merged_redaction_bboxes = merge_img_bboxes(
+                        page_redaction_bounding_boxes,
+                        page_line_level_ocr_results_with_words["results"],
+                        page_signature_recogniser_results,
+                        page_handwriting_recogniser_results,
+                        handwrite_signature_checkbox,
                     )
 
                 else:
-                    page_redaction_bounding_boxes = list()
+                    page_merged_redaction_bboxes = list()
 
-                # Merge redaction bounding boxes that are close together
-                page_merged_redaction_bboxes = merge_img_bboxes(
-                    page_redaction_bounding_boxes,
-                    page_line_level_ocr_results_with_words["results"],
-                    page_signature_recogniser_results,
-                    page_handwriting_recogniser_results,
-                    handwrite_signature_checkbox,
-                )
-
-            else:
-                page_merged_redaction_bboxes = list()
-
-            # 3. Draw the merged boxes
-            ## Apply annotations to pdf with pymupdf
-            if is_pdf(file_path) is True:
-                if redact_whole_page_list:
-                    int_reported_page_number = int(reported_page_number)
-                    if int_reported_page_number in redact_whole_page_list:
-                        redact_whole_page = True
+                
+                if is_pdf(file_path) is True:
+                    if redact_whole_page_list:
+                        int_reported_page_number = int(reported_page_number)
+                        if int_reported_page_number in redact_whole_page_list:
+                            redact_whole_page = True
+                        else:
+                            redact_whole_page = False
                     else:
                         redact_whole_page = False
-                else:
-                    redact_whole_page = False
 
-                pymupdf_page, page_image_annotations = redact_page_with_pymupdf(
-                    pymupdf_page,
-                    page_merged_redaction_bboxes,
-                    image_path,
-                    redact_whole_page=redact_whole_page,
-                    original_cropbox=original_cropbox,
-                    page_sizes_df=page_sizes_df,
-                )
+                    # Check if there are question answer boxes
+                    if form_key_value_results_list:
+                        page_merged_redaction_bboxes.extend(convert_page_question_answer_to_custom_image_recognizer_results(form_key_value_results_list, page_sizes_df, reported_page_number))
 
-            # If an image_path file, draw onto the image_path
-            elif is_pdf(file_path) is False:
-                if isinstance(image_path, str):
-                    if os.path.exists(image_path):
-                        image = Image.open(image_path)
-                elif isinstance(image_path, Image.Image):
-                    image = image_path
-                else:
-                    # Assume image_path is an image
-                    image = image_path
+                    # 3. Draw the merged boxes
+                    ## Apply annotations to pdf with pymupdf
+                    pymupdf_page, page_image_annotations = redact_page_with_pymupdf(
+                        pymupdf_page,
+                        page_merged_redaction_bboxes,
+                        image_path,
+                        redact_whole_page=redact_whole_page,
+                        original_cropbox=original_cropbox,
+                        page_sizes_df=page_sizes_df,
+                    )
 
-                fill = (0, 0, 0)  # Fill colour for redactions
-                draw = ImageDraw.Draw(image)
+                # If an image_path file, draw onto the image_path
+                elif is_pdf(file_path) is False:
+                    if isinstance(image_path, str):
+                        if os.path.exists(image_path):
+                            image = Image.open(image_path)
+                    elif isinstance(image_path, Image.Image):
+                        image = image_path
+                    else:
+                        # Assume image_path is an image
+                        image = image_path
 
-                all_image_annotations_boxes = list()
+                    fill = CUSTOM_BOX_COLOUR  # Fill colour for redactions
+                    draw = ImageDraw.Draw(image)
 
-                for box in page_merged_redaction_bboxes:
+                    all_image_annotations_boxes = list()
 
-                    try:
-                        x0 = box.left
-                        y0 = box.top
-                        x1 = x0 + box.width
-                        y1 = y0 + box.height
-                        label = box.entity_type  # Attempt to get the label
-                        text = box.text
-                    except AttributeError as e:
-                        print(f"Error accessing box attributes: {e}")
-                        label = "Redaction"  # Default label if there's an error
+                    for box in page_merged_redaction_bboxes:
 
-                    # Check if coordinates are valid numbers
-                    if any(v is None for v in [x0, y0, x1, y1]):
-                        print(f"Invalid coordinates for box: {box}")
-                        continue  # Skip this box if coordinates are invalid
+                        try:
+                            x0 = box.left
+                            y0 = box.top
+                            x1 = x0 + box.width
+                            y1 = y0 + box.height
+                            label = box.entity_type  # Attempt to get the label
+                            text = box.text
+                        except AttributeError as e:
+                            print(f"Error accessing box attributes: {e}")
+                            label = "Redaction"  # Default label if there's an error
 
-                    img_annotation_box = {
-                        "xmin": x0,
-                        "ymin": y0,
-                        "xmax": x1,
-                        "ymax": y1,
-                        "label": label,
-                        "color": (0, 0, 0),
-                        "text": text,
+                        # Check if coordinates are valid numbers
+                        if any(v is None for v in [x0, y0, x1, y1]):
+                            print(f"Invalid coordinates for box: {box}")
+                            continue  # Skip this box if coordinates are invalid
+
+                        img_annotation_box = {
+                            "xmin": x0,
+                            "ymin": y0,
+                            "xmax": x1,
+                            "ymax": y1,
+                            "label": label,
+                            "color": CUSTOM_BOX_COLOUR,
+                            "text": text,
+                        }
+                        img_annotation_box = fill_missing_box_ids(img_annotation_box)
+
+                        # Directly append the dictionary with the required keys
+                        all_image_annotations_boxes.append(img_annotation_box)
+
+                        # Draw the rectangle
+                        try:
+                            draw.rectangle([x0, y0, x1, y1], fill=fill)
+                        except Exception as e:
+                            print(f"Error drawing rectangle: {e}")
+
+                    page_image_annotations = {
+                        "image": file_path,
+                        "boxes": all_image_annotations_boxes,
                     }
-                    img_annotation_box = fill_missing_box_ids(img_annotation_box)
 
-                    # Directly append the dictionary with the required keys
-                    all_image_annotations_boxes.append(img_annotation_box)
-
-                    # Draw the rectangle
-                    try:
-                        draw.rectangle([x0, y0, x1, y1], fill=fill)
-                    except Exception as e:
-                        print(f"Error drawing rectangle: {e}")
-
-                page_image_annotations = {
-                    "image": file_path,
-                    "boxes": all_image_annotations_boxes,
-                }
-
-                redacted_image = image.copy()
+                    redacted_image = image.copy()
 
             # Convert decision process to table
             decision_process_table = pd.DataFrame(
@@ -2827,9 +2967,15 @@ def redact_image_pdf(
                 all_pages_decision_process_table = pd.DataFrame(
                     all_pages_decision_process_list
                 )
+
                 all_line_level_ocr_results_df = pd.DataFrame(
                     all_line_level_ocr_results_list
                 )
+                if selection_element_results_list:
+                    selection_element_results_list_df = pd.DataFrame(selection_element_results_list)
+                if form_key_value_results_list:
+                    form_key_value_results_list_df_first = pd.DataFrame(form_key_value_results_list)
+                    form_key_value_results_list_df = convert_question_answer_to_dataframe(form_key_value_results_list, page_sizes_df)
 
                 current_loop_page += 1
 
@@ -2845,6 +2991,8 @@ def redact_image_pdf(
                     comprehend_query_number,
                     all_page_line_level_ocr_results,
                     all_page_line_level_ocr_results_with_words,
+                    selection_element_results_list_df,
+                    form_key_value_results_list_df
                 )
 
         # If it's an image file
@@ -2911,15 +3059,19 @@ def redact_image_pdf(
                         all_page_line_level_ocr_results_with_words_json_file_path
                     )
 
-            # all_pages_decision_process_table = pd.concat(all_pages_decision_process_list)
-            # all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_list)
-
             all_pages_decision_process_table = pd.DataFrame(
                 all_pages_decision_process_list
             )
+
             all_line_level_ocr_results_df = pd.DataFrame(
                 all_line_level_ocr_results_list
             )
+
+            if selection_element_results_list:
+                selection_element_results_list_df = pd.DataFrame(selection_element_results_list)
+            if form_key_value_results_list:
+                form_key_value_results_list_df_first = pd.DataFrame(form_key_value_results_list)
+                form_key_value_results_list_df = convert_question_answer_to_dataframe(form_key_value_results_list, page_sizes_df)
 
             return (
                 pymupdf_doc,
@@ -2933,6 +3085,8 @@ def redact_image_pdf(
                 comprehend_query_number,
                 all_page_line_level_ocr_results,
                 all_page_line_level_ocr_results_with_words,
+                selection_element_results_list_df,
+                form_key_value_results_list_df
             )
 
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
@@ -2973,10 +3127,11 @@ def redact_image_pdf(
 
     all_pages_decision_process_table = pd.DataFrame(
         all_pages_decision_process_list
-    )  # pd.concat(all_pages_decision_process_list)
+    )
+
     all_line_level_ocr_results_df = pd.DataFrame(
         all_line_level_ocr_results_list
-    )  # pd.concat(all_line_level_ocr_results_list)
+    )
 
     # Convert decision table and ocr results to relative coordinates
     all_pages_decision_process_table = divide_coordinates_by_page_sizes(
@@ -2997,6 +3152,12 @@ def redact_image_pdf(
         ymax="height",
     )
 
+    if selection_element_results_list:
+        selection_element_results_list_df = pd.DataFrame(selection_element_results_list)
+    if form_key_value_results_list:
+        form_key_value_results_list_df_first = pd.DataFrame(form_key_value_results_list)
+        form_key_value_results_list_df = convert_question_answer_to_dataframe(form_key_value_results_list, page_sizes_df)
+
     return (
         pymupdf_doc,
         all_pages_decision_process_table,
@@ -3009,6 +3170,8 @@ def redact_image_pdf(
         comprehend_query_number,
         all_page_line_level_ocr_results,
         all_page_line_level_ocr_results_with_words,
+        selection_element_results_list_df,
+        form_key_value_results_list_df
     )
 
 
@@ -3624,7 +3787,6 @@ def redact_text_pdf(
 
                 ### REDACTION
                 if pii_identification_method != NO_REDACTION_PII_OPTION:
-
                     if chosen_redact_entities or chosen_redact_comprehend_entities:
                         page_redaction_bounding_boxes = run_page_text_redaction(
                             language,

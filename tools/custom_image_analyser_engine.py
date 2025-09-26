@@ -178,6 +178,7 @@ class CustomImageRecognizerResult:
     width: int
     height: int
     text: str
+    color: tuple = (0, 0, 0)
 
 
 class ImagePreprocessor:
@@ -1097,7 +1098,7 @@ class CustomImageAnalyzerEngine:
                                 entity_type=redaction_result.entity_type,
                                 start=start_in_line,
                                 end=end_in_line,
-                                score=redaction_result.score,
+                                score=round(redaction_result.score, 2),
                                 left=left,
                                 top=top,
                                 width=right - left,
