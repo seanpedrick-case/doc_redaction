@@ -1081,7 +1081,7 @@ with app:
                 with gr.Row(equal_height=True):
                     pii_identification_method_drop.render()
 
-            if SHOW_COSTS == "True":
+            if SHOW_COSTS is True:
                 with gr.Accordion(
                     "Estimated costs and time taken. Note that costs shown only include direct usage of AWS services and do not include other running costs (e.g. storage, run-time costs)",
                     open=True,
@@ -1124,7 +1124,7 @@ with app:
                                     interactive=False,
                                 )
 
-            if GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True":
+            if GET_COST_CODES is True or ENFORCE_COST_CODES is True:
                 with gr.Accordion("Assign task to cost code", open=True, visible=True):
                     gr.Markdown(
                         "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
@@ -1163,7 +1163,7 @@ with app:
                                 visible=True,
                             )
 
-            if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
+            if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS is True:
                 with gr.Accordion(
                     "Submit whole document to AWS Textract API (quickest text extraction for large documents)",
                     open=False,
@@ -1575,7 +1575,7 @@ with app:
 
                 with gr.Accordion("Search extracted text", open=True):
                     all_page_line_level_ocr_results_df = gr.Dataframe(
-                        value=pd.DataFrame(),
+                        value=pd.DataFrame(columns=["page", "line", "text"]),
                         headers=["page", "line", "text"],
                         col_count=(3, "fixed"),
                         row_count=(0, "dynamic"),
@@ -1587,6 +1587,7 @@ with app:
                         show_search="filter",
                         show_label=False,
                         show_copy_button=True,
+                        column_widths=["15%", "15%", "70%"],
                         max_height=400,
                     )
                     reset_all_ocr_results_btn = gr.Button(
@@ -2440,9 +2441,7 @@ with app:
         )
 
     # Allow user to select items from cost code dataframe for cost code
-    if SHOW_COSTS == "True" and (
-        GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True"
-    ):
+    if SHOW_COSTS is True and (GET_COST_CODES is True or ENFORCE_COST_CODES is True):
         cost_code_dataframe.select(
             df_select_callback_cost,
             inputs=[cost_code_dataframe],

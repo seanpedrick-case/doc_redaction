@@ -212,6 +212,12 @@ def json_to_ocrresult(
     Convert Textract JSON to structured OCR, handling lines, words, signatures,
     selection elements (associating them with lines), and question-answer form data.
     The question-answer data is sorted in a top-to-bottom, left-to-right reading order.
+
+    Args:
+        json_data (dict): The raw JSON output from AWS Textract for a specific page.
+        page_width (float): The width of the page in pixels or points.
+        page_height (float): The height of the page in pixels or points.
+        page_no (int): The 1-based page number being processed.
     """
     # --- STAGE 1: Block Mapping & Initial Data Collection ---
     # text_blocks = json_data.get("Blocks", [])
@@ -527,6 +533,11 @@ def load_and_convert_textract_json(
 ):
     """
     Loads Textract JSON from a file, detects if conversion is needed, and converts if necessary.
+
+    Args:
+        textract_json_file_path (str): The file path to the Textract JSON output.
+        log_files_output_paths (str): A list of paths to log files, used for tracking.
+        page_sizes_df (pd.DataFrame): A DataFrame containing page size information for the document.
     """
 
     if not os.path.exists(textract_json_file_path):
@@ -588,6 +599,12 @@ def restructure_textract_output(textract_output: dict, page_sizes_df: pd.DataFra
     """
     Reorganise Textract output from the bulk Textract analysis option on AWS
     into a format that works in this redaction app, reducing size.
+
+    Args:
+        textract_output (dict): The raw JSON output from AWS Textract.
+        page_sizes_df (pd.DataFrame): A Pandas DataFrame containing page size
+                                      information, including cropbox and mediabox
+                                      dimensions and offsets for each page.
     """
     pages_dict = dict()
 

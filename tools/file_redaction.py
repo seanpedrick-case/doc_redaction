@@ -49,8 +49,8 @@ from tools.config import (
     OUTPUT_FOLDER,
     PAGE_BREAK_VALUE,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
-    RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW,
+    RETURN_REDACTED_PDF,
     RUN_AWS_FUNCTIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_TEXT_EXTRACT_OPTION,
@@ -289,7 +289,7 @@ def choose_and_run_redactor(
     all_textract_request_metadata = (
         all_request_metadata_str.split("\n") if all_request_metadata_str else []
     )
-    
+
     task_textbox = "redact"
     selection_element_results_list_df = pd.DataFrame()
     form_key_value_results_list_df = pd.DataFrame()
@@ -1074,8 +1074,8 @@ def choose_and_run_redactor(
                         # Check if we have dual PDF documents to save
                         final_pymupdf_doc = None
                         from tools.config import (
-                            RETURN_REDACTED_PDF,
                             RETURN_PDF_FOR_REVIEW,
+                            RETURN_REDACTED_PDF,
                         )
 
                         if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:

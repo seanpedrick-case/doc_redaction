@@ -21,8 +21,6 @@ from tools.load_spacy_model_custom_recognisers import nlp
 from tools.secure_path_utils import secure_join
 
 
-
-
 def clean_and_stem_text_series(
     df: pd.DataFrame,
     column: str,

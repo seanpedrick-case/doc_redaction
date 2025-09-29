@@ -27,6 +27,7 @@ from tools.config import (
     CUSTOM_BOX_COLOUR,
     IMAGES_DPI,
     INPUT_FOLDER,
+    LOAD_REDACTION_ANNOTATIONS_FROM_PDF,
     LOAD_TRUNCATED_IMAGES,
     MAX_IMAGE_PIXELS,
     MAX_SIMULTANEOUS_FILES,
@@ -93,7 +94,12 @@ def is_pdf(filename):
 
 def check_image_size_and_reduce(out_path: str, image: Image):
     """
-    Check if a given image size is above around 4.5mb, and reduce size if necessary. 5mb is the maximum possible to submit to AWS Textract.
+    Check if a given image size is above around 4.5mb, and reduce size if necessary.
+    5mb is the maximum possible to submit to AWS Textract.
+
+    Args:
+        out_path (str): The file path where the image is currently saved and will be saved after resizing.
+        image (Image): The PIL Image object to be checked and potentially resized.
     """
 
     all_img_details = list()
@@ -140,6 +146,24 @@ def process_single_page_for_image_conversion(
     create_images: bool = True,
     input_folder: str = INPUT_FOLDER,
 ) -> tuple[int, str, float, float]:
+    """
+    Processes a single page of a PDF or image file for image conversion,
+    saving it as a PNG and optionally resizing it if too large.
+
+    Args:
+        pdf_path (str): The path to the input PDF or image file.
+        page_num (int): The 0-indexed page number to process.
+        image_dpi (float, optional): The DPI to use for PDF to image conversion. Defaults to image_dpi from config.
+        create_images (bool, optional): Whether to create and save the image. Defaults to True.
+        input_folder (str, optional): The folder where the converted images will be saved. Defaults to INPUT_FOLDER from config.
+
+    Returns:
+        tuple[int, str, float, float]: A tuple containing:
+            - The processed page number.
+            - The path to the saved output image.
+            - The width of the processed image.
+            - The height of the processed image.
+    """
 
     out_path_placeholder = "placeholder_image_" + str(page_num) + ".png"
 
@@ -208,6 +232,23 @@ def convert_pdf_to_images(
     num_threads: int = 8,
     input_folder: str = INPUT_FOLDER,
 ):
+    """
+    Converts a PDF document into a series of images, processing each page concurrently.
+
+    Args:
+        pdf_path (str): The path to the PDF file to convert.
+        prepare_for_review (bool, optional): If True, only the first page is processed (feature not currently used). Defaults to False.
+        page_min (int, optional): The starting page number (0-indexed) for conversion. Defaults to 0.
+        page_max (int, optional): The ending page number (exclusive, 0-indexed) for conversion. If 0, all pages up to `page_count` are processed. Defaults to 0.
+        create_images (bool, optional): If True, images are created and saved to disk. Defaults to True.
+        image_dpi (float, optional): The DPI (dots per inch) to use for converting PDF pages to images. Defaults to the global `image_dpi`.
+        num_threads (int, optional): The number of threads to use for concurrent page processing. Defaults to 8.
+        input_folder (str, optional): The base input folder, used for determining output paths. Defaults to `INPUT_FOLDER`.
+
+    Returns:
+        list: A list of tuples, where each tuple contains (page_num, image_path, width, height) for successfully processed pages.
+              For failed pages, it returns (page_num, placeholder_path, pd.NA, pd.NA).
+    """
 
     # If preparing for review, just load the first page (not currently used)
     if prepare_for_review is True:
@@ -275,6 +316,18 @@ def process_file_for_image_creation(
     input_folder: str = INPUT_FOLDER,
     create_images: bool = True,
 ):
+    """
+    Processes a given file path, determining if it's an image or a PDF,
+    and then converts it into a list of image paths, along with their dimensions.
+
+    Args:
+        file_path (str): The path to the file (image or PDF) to be processed.
+        prepare_for_review (bool, optional): If True, prepares the PDF for review
+                                             (e.g., by converting pages to images). Defaults to False.
+        input_folder (str, optional): The folder where input files are located. Defaults to INPUT_FOLDER.
+        create_images (bool, optional): If True, images will be created from PDF pages.
+                                        If False, only metadata will be extracted. Defaults to True.
+    """
     # Get the file extension
     file_extension = os.path.splitext(file_path)[1].lower()
 
@@ -402,6 +455,24 @@ def convert_color_to_range_0_1(color):
 def define_box_colour(
     custom_colours: bool, img_annotation_box: dict, CUSTOM_BOX_COLOUR: tuple
 ):
+    """
+    Determines the color for a bounding box annotation.
+
+    If `custom_colours` is True, it attempts to parse the color from `img_annotation_box['color']`.
+    It supports color strings in "(R,G,B)" format (0-255 integers) or tuples/lists of (R,G,B)
+    where components are either 0-1 floats or 0-255 integers.
+    If parsing fails or `custom_colours` is False, it defaults to `CUSTOM_BOX_COLOUR`.
+    All output colors are converted to a 0.0-1.0 float range.
+
+    Args:
+        custom_colours (bool): If True, attempts to use a custom color from `img_annotation_box`.
+        img_annotation_box (dict): A dictionary that may contain a 'color' key with the custom color.
+        CUSTOM_BOX_COLOUR (tuple): The default color to use if custom colors are not enabled or parsing fails.
+                                   Expected to be a tuple of (R, G, B) with values in the 0.0-1.0 range.
+
+    Returns:
+        tuple: A tuple (R, G, B) representing the chosen color, with components in the 0.0-1.0 float range.
+    """
     if custom_colours is True:
         color_input = img_annotation_box["color"]
         out_colour = (0, 0, 0)  # Initialize with a default black color (0.0-1.0 range)
@@ -611,11 +682,28 @@ def convert_pymupdf_to_image_coords(
     x2: float,
     y2: float,
     image: Image = None,
-    image_dimensions: dict = {},
+    image_dimensions: dict = dict(),
 ):
     """
-    Converts coordinates from pymupdf format to image coordinates,
-    accounting for mediabox dimensions and offset.
+    Converts bounding box coordinates from PyMuPDF page format to image coordinates.
+
+    This function takes coordinates (x1, y1, x2, y2) defined relative to a
+    PyMuPDF page's coordinate system and transforms them to correspond to
+    the coordinate system of a target image. It accounts for scaling differences
+    between the page's mediabox/rect and the image dimensions, as well as
+    any potential offsets.
+
+    Args:
+        pymupdf_page (Page): The PyMuPDF page object from which the coordinates originate.
+        x1 (float): The x-coordinate of the top-left corner in PyMuPDF page units.
+        y1 (float): The y-coordinate of the top-left corner in PyMuPDF page units.
+        x2 (float): The x-coordinate of the bottom-right corner in PyMuPDF page units.
+        y2 (float): The y-coordinate of the bottom-right corner in PyMuPDF page units.
+        image (Image, optional): A PIL Image object. If provided, its dimensions
+                                 are used as the target image dimensions. Defaults to None.
+        image_dimensions (dict, optional): A dictionary containing 'image_width' and
+                                           'image_height'. Used if 'image' is not provided
+                                           and 'image' is None. Defaults to an empty dictionary.
     """
     # Get rect dimensions
     rect = pymupdf_page.rect
@@ -687,6 +775,17 @@ def redact_whole_pymupdf_page(
     border: float = 5,
     redact_pdf: bool = True,
 ):
+    """
+    Redacts a whole page of a PDF document.
+
+    Args:
+        rect_height (float): The height of the page in points.
+        rect_width (float): The width of the page in points.
+        page (Page): The PyMuPDF page object to be redacted.
+        custom_colours (bool, optional): If True, uses custom colors for the redaction box.
+        border (float, optional): The border width in points. Defaults to 5.
+        redact_pdf (bool, optional): If True, redacts the PDF document. Defaults to True.
+    """
     # Small border to page that remains white
 
     # Define the coordinates for the Rect
@@ -705,7 +804,7 @@ def redact_whole_pymupdf_page(
     whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
 
     # Write whole page annotation to annotation boxes
-    whole_page_img_annotation_box = {}
+    whole_page_img_annotation_box = dict()
     whole_page_img_annotation_box["xmin"] = whole_page_x1
     whole_page_img_annotation_box["ymin"] = whole_page_y1
     whole_page_img_annotation_box["xmax"] = whole_page_x2
@@ -727,6 +826,15 @@ def create_page_size_objects(
     image_sizes_height: List[float],
     image_file_paths: List[str],
 ):
+    """
+    Creates page size objects for a PyMuPDF document.
+
+    Args:
+        pymupdf_doc (Document): The PyMuPDF document object.
+        image_sizes_width (List[float]): List of image widths.
+        image_sizes_height (List[float]): List of image heights.
+        image_file_paths (List[str]): List of image file paths.
+    """
     page_sizes = list()
     original_cropboxes = list()
 
@@ -770,6 +878,12 @@ def create_page_size_objects(
 def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
     """
     Convert a json of ocr results to a dataframe
+
+    Args:
+        ocr_results (dict): A dictionary containing OCR results.
+
+    Returns:
+        pd.DataFrame: A dataframe containing the OCR results.
     """
     rows = list()
     ocr_results[0]
@@ -806,6 +920,168 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
                 )
 
     return pd.DataFrame(rows)
+
+
+def extract_redactions(
+    doc: Document, page_sizes: List[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Extracts all redaction annotations from a PDF document and converts them
+    to Gradio Annotation JSON format.
+
+    Note: This function identifies the *markings* for redaction. It does not
+    tell you if the redaction has been *applied* (i.e., the underlying
+    content is permanently removed).
+
+    Args:
+        doc: The PyMuPDF document object.
+        page_sizes: List of dictionaries containing page information with keys:
+                   'page', 'image_path', 'image_width', 'image_height'.
+                   If None, will create placeholder structure.
+
+    Returns:
+        List of dictionaries suitable for Gradio Annotation output, one dict per image/page.
+        Each dict has structure: {"image": image_path, "boxes": [list of annotation boxes]}
+    """
+
+    # Helper function to generate unique IDs
+    def _generate_unique_ids(num_ids: int, existing_ids: set = None) -> List[str]:
+        if existing_ids is None:
+            existing_ids = set()
+
+        id_length = 12
+        character_set = string.ascii_letters + string.digits
+        unique_ids = list()
+
+        for _ in range(num_ids):
+            while True:
+                candidate_id = "".join(random.choices(character_set, k=id_length))
+                if candidate_id not in existing_ids:
+                    existing_ids.add(candidate_id)
+                    unique_ids.append(candidate_id)
+                    break
+
+        return unique_ids
+
+    # Extract redaction annotations from the document
+    redactions_by_page = dict()
+    existing_ids = set()
+
+    for page_num, page in enumerate(doc):
+        page_redactions = list()
+
+        # The page.annots() method is a generator for all annotations on the page
+        for annot in page.annots():
+            # The type of a redaction annotation is 8
+            if annot.type[0] == pymupdf.PDF_ANNOT_REDACT:
+
+                # Get annotation info with fallbacks
+                annot_info = annot.info or {}
+                annot_colors = annot.colors or {}
+
+                # Extract coordinates from the annotation rectangle
+                rect = annot.rect
+                x0, y0, x1, y1 = rect.x0, rect.y0, rect.x1, rect.y1
+
+                # Convert coordinates to relative (0-1 range) using mediabox dimensions
+                if page_sizes:
+                    # Find the page size info for this page
+                    page_size_info = None
+                    for ps in page_sizes:
+                        if ps.get("page") == page_num + 1:
+                            page_size_info = ps
+                            break
+
+                    if page_size_info:
+                        mediabox_width = page_size_info.get("mediabox_width", 1)
+                        mediabox_height = page_size_info.get("mediabox_height", 1)
+
+                        # Convert to relative coordinates
+                        rel_x0 = x0 / mediabox_width
+                        rel_y0 = y0 / mediabox_height
+                        rel_x1 = x1 / mediabox_width
+                        rel_y1 = y1 / mediabox_height
+                    else:
+                        # Fallback to absolute coordinates if page size not found
+                        rel_x0, rel_y0, rel_x1, rel_y1 = x0, y0, x1, y1
+                else:
+                    # Fallback to absolute coordinates if no page_sizes provided
+                    rel_x0, rel_y0, rel_x1, rel_y1 = x0, y0, x1, y1
+
+                # Get color and convert from 0-1 range to 0-255 range
+                fill_color = annot_colors.get(
+                    "fill", (0, 0, 0)
+                )  # Default to black if no color
+                if isinstance(fill_color, (tuple, list)) and len(fill_color) >= 3:
+                    # Convert from 0-1 range to 0-255 range
+                    color_255 = tuple(
+                        int(component * 255) if component <= 1 else int(component)
+                        for component in fill_color[:3]
+                    )
+                else:
+                    color_255 = (0, 0, 0)  # Default to black
+
+                # Create annotation box in the required format
+                redaction_box = {
+                    "label": annot_info.get(
+                        "title", f"Redaction {len(page_redactions) + 1}"
+                    ),
+                    "color": str(color_255),
+                    "xmin": rel_x0,
+                    "ymin": rel_y0,
+                    "xmax": rel_x1,
+                    "ymax": rel_y1,
+                    "text": annot_info.get("content", ""),
+                    "id": None,  # Will be filled after generating IDs
+                }
+
+                page_redactions.append(redaction_box)
+
+        if page_redactions:
+            redactions_by_page[page_num + 1] = page_redactions
+
+    # Generate unique IDs for all redaction boxes
+    all_boxes = list()
+    for page_redactions in redactions_by_page.values():
+        all_boxes.extend(page_redactions)
+
+    if all_boxes:
+        unique_ids = _generate_unique_ids(len(all_boxes), existing_ids)
+
+        # Assign IDs to boxes
+        box_idx = 0
+        for page_num, page_redactions in redactions_by_page.items():
+            for box in page_redactions:
+                box["id"] = unique_ids[box_idx]
+                box_idx += 1
+
+    # Build JSON structure based on page_sizes or create placeholder structure
+    json_data = list()
+
+    if page_sizes:
+        # Use provided page_sizes to build structure
+        for page_info in page_sizes:
+            page_num = page_info.get("page", 1)
+            image_path = page_info.get(
+                "image_path", f"placeholder_image_{page_num}.png"
+            )
+
+            # Get redactions for this page
+            annotation_boxes = redactions_by_page.get(page_num, [])
+
+            json_data.append({"image": image_path, "boxes": annotation_boxes})
+    else:
+        # Create placeholder structure based on document pages
+        for page_num in range(1, doc.page_count + 1):
+            image_path = f"placeholder_image_{page_num}.png"
+            annotation_boxes = redactions_by_page.get(page_num, [])
+
+            json_data.append({"image": image_path, "boxes": annotation_boxes})
+
+    total_redactions = sum(len(boxes) for boxes in redactions_by_page.values())
+    print(f"Found {total_redactions} redactions in the document")
+
+    return json_data
 
 
 def prepare_image_or_pdf(
@@ -1001,11 +1277,20 @@ def prepare_image_or_pdf(
                 all_annotations_object = list()
 
                 for image_path in image_file_paths:
-                    annotation = {}
+                    annotation = dict()
                     annotation["image"] = image_path
                     annotation["boxes"] = list()
 
                     all_annotations_object.append(annotation)
+
+            # If we are loading redactions from the pdf, extract the redactions
+            if (
+                LOAD_REDACTION_ANNOTATIONS_FROM_PDF is True
+                and prepare_for_review is True
+            ):
+
+                redactions_list = extract_redactions(pymupdf_doc, page_sizes)
+                all_annotations_object = redactions_list
 
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
             print(f"File {file_name_with_ext} is an image")
@@ -1067,7 +1352,6 @@ def prepare_image_or_pdf(
                 all_page_line_level_ocr_results_with_words_df = read_file(file_path)
                 json_from_csv = False
 
-        # NEW IF STATEMENT
         # If the file name ends with .json, check if we are loading for review. If yes, assume it is an annotations object, overwrite the current annotations object. If false, assume this is a Textract object, load in to Textract
 
         if (file_extension in [".json"]) | (json_from_csv is True):
@@ -1184,7 +1468,6 @@ def prepare_image_or_pdf(
                     relevant_ocr_output_with_words_found = True
                 continue
 
-            # NEW IF STATEMENT
             # If you have an annotations object from the above code
             if all_annotations_object:
 
@@ -1205,7 +1488,7 @@ def prepare_image_or_pdf(
                         if i < len(all_annotations_object):
                             annotation = all_annotations_object[i]
                         else:
-                            annotation = {}
+                            annotation = dict()
                             all_annotations_object.append(annotation)
 
                         try:
@@ -1324,7 +1607,7 @@ def prepare_image_or_pdf(
     else:
         number_of_pages = len(page_sizes)
 
-    print("Finished loading in files")
+    print(f"Finished loading in {file_path_number} file(s)")
 
     return (
         combined_out_message,
@@ -1836,7 +2119,7 @@ def do_proximity_match_by_page_for_text(df1: pd.DataFrame, df2: pd.DataFrame):
     tolerance = 0.02
 
     # Precompute KDTree for each page in df2
-    page_trees = {}
+    page_trees = dict()
     for page in df2["page"].unique():
         df2_page = df2[df2["page"] == page]
         coords = df2_page[["xmin", "ymin", "xmax", "ymax"]].values
@@ -2074,7 +2357,7 @@ def create_annotation_dicts_from_annotation_df(
     """
     # 1. Create a dictionary keyed by image path for efficient lookup & update
     # Initialize with all images from page_sizes. Use .get for safety.
-    image_dict: Dict[str, Dict[str, Any]] = {}
+    image_dict: Dict[str, Dict[str, Any]] = dict()
     for item in page_sizes:
         image_path = item.get("image_path")
         if image_path:  # Only process if image_path exists and is not None/empty

@@ -252,8 +252,36 @@ FEEDBACK_LOG_FILE_NAME = get_or_create_env_var("FEEDBACK_LOG_FILE_NAME", LOG_FIL
 
 
 ###
-# REDACTION OPTIONS
+# Gradio general app options
 ###
+
+MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
+
+MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb").lower()
+
+GRADIO_SERVER_PORT = int(get_or_create_env_var("GRADIO_SERVER_PORT", "7860"))
+
+ROOT_PATH = get_or_create_env_var("ROOT_PATH", "")
+
+DEFAULT_CONCURRENCY_LIMIT = int(get_or_create_env_var("DEFAULT_CONCURRENCY_LIMIT", "3"))
+
+# Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).
+PAGE_BREAK_VALUE = int(get_or_create_env_var("PAGE_BREAK_VALUE", "99999"))
+
+MAX_TIME_VALUE = int(get_or_create_env_var("MAX_TIME_VALUE", "999999"))
+MAX_SIMULTANEOUS_FILES = int(get_or_create_env_var("MAX_SIMULTANEOUS_FILES", "10"))
+MAX_DOC_PAGES = int(get_or_create_env_var("MAX_DOC_PAGES", "3000"))
+MAX_TABLE_ROWS = int(get_or_create_env_var("MAX_TABLE_ROWS", "250000"))
+MAX_TABLE_COLUMNS = int(get_or_create_env_var("MAX_TABLE_COLUMNS", "100"))
+MAX_OPEN_TEXT_CHARACTERS = int(
+    get_or_create_env_var("MAX_OPEN_TEXT_CHARACTERS", "50000")
+)
+
+# When loading for review, should PDFs have existing redaction annotations loaded in?
+LOAD_REDACTION_ANNOTATIONS_FROM_PDF = get_or_create_env_var(
+    "LOAD_REDACTION_ANNOTATIONS_FROM_PDF", "True"
+)
+
 
 # Create Tesseract and Poppler folders if you have installed them locally
 TESSERACT_FOLDER = get_or_create_env_var(
@@ -458,19 +486,6 @@ DEFAULT_PAGE_MIN = int(get_or_create_env_var("DEFAULT_PAGE_MIN", "0"))
 DEFAULT_PAGE_MAX = int(get_or_create_env_var("DEFAULT_PAGE_MAX", "0"))
 
 
-# Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).
-PAGE_BREAK_VALUE = int(get_or_create_env_var("PAGE_BREAK_VALUE", "99999"))
-
-MAX_TIME_VALUE = int(get_or_create_env_var("MAX_TIME_VALUE", "999999"))
-MAX_SIMULTANEOUS_FILES = int(get_or_create_env_var("MAX_SIMULTANEOUS_FILES", "10"))
-MAX_DOC_PAGES = int(get_or_create_env_var("MAX_DOC_PAGES", "3000"))
-MAX_TABLE_ROWS = int(get_or_create_env_var("MAX_TABLE_ROWS", "250000"))
-MAX_TABLE_COLUMNS = int(get_or_create_env_var("MAX_TABLE_COLUMNS", "100"))
-MAX_OPEN_TEXT_CHARACTERS = int(
-    get_or_create_env_var("MAX_OPEN_TEXT_CHARACTERS", "50000")
-)
-
-
 ### Language selection options
 
 SHOW_LANGUAGE_SELECTION = get_or_create_env_var("SHOW_LANGUAGE_SELECTION", "False")
@@ -631,6 +646,8 @@ USER_GUIDE_URL = validate_safe_url(
 SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "False")
 SHOW_AWS_EXAMPLES = get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
 
+FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))
+
 RUN_DIRECT_MODE = get_or_create_env_var("RUN_DIRECT_MODE", "0")
 
 # Direct mode configuration options
@@ -650,17 +667,6 @@ DIRECT_MODE_DUPLICATE_TYPE = get_or_create_env_var(
     "DIRECT_MODE_DUPLICATE_TYPE", "pages"
 )  # 'pages' or 'tabular'
 
-MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
-
-MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb").lower()
-
-GRADIO_SERVER_PORT = int(get_or_create_env_var("GRADIO_SERVER_PORT", "7860"))
-
-ROOT_PATH = get_or_create_env_var("ROOT_PATH", "")
-
-DEFAULT_CONCURRENCY_LIMIT = int(get_or_create_env_var("DEFAULT_CONCURRENCY_LIMIT", "3"))
-
-FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))
 
 ### ALLOW LIST
 
@@ -795,6 +801,11 @@ DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(
 ###
 # Ensure that config variables are in the correct format for subsequent use elsewhere
 
+if LOAD_REDACTION_ANNOTATIONS_FROM_PDF == "True":
+    LOAD_REDACTION_ANNOTATIONS_FROM_PDF = True
+else:
+    LOAD_REDACTION_ANNOTATIONS_FROM_PDF = False
+
 # Convert string environment variables to string or list
 if SAVE_LOGS_TO_CSV == "True":
     SAVE_LOGS_TO_CSV = True
@@ -836,6 +847,26 @@ if REMOVE_DUPLICATE_ROWS == "True":
     REMOVE_DUPLICATE_ROWS = True
 else:
     REMOVE_DUPLICATE_ROWS = False
+
+if GET_COST_CODES == "True":
+    GET_COST_CODES = True
+else:
+    GET_COST_CODES = False
+
+if ENFORCE_COST_CODES == "True":
+    ENFORCE_COST_CODES = True
+else:
+    ENFORCE_COST_CODES = False
+
+if SHOW_COSTS == "True":
+    SHOW_COSTS = True
+else:
+    SHOW_COSTS = False
+
+if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
+    SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = True
+else:
+    SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = False
 
 if CSV_ACCESS_LOG_HEADERS:
     CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
