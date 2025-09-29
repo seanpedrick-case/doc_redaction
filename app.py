@@ -11,6 +11,7 @@ from tools.config import (
     ACCESS_LOGS_FOLDER,
     ALLOW_LIST_PATH,
     AWS_ACCESS_KEY,
+    AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
     CHOSEN_COMPREHEND_ENTITIES,
@@ -54,6 +55,7 @@ from tools.config import (
     DYNAMODB_FEEDBACK_LOG_HEADERS,
     DYNAMODB_USAGE_LOG_HEADERS,
     ENFORCE_COST_CODES,
+    EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
     FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     FEEDBACK_LOG_FILE_NAME,
     FEEDBACK_LOGS_FOLDER,
@@ -81,7 +83,7 @@ from tools.config import (
     PII_DETECTION_MODELS,
     PREPROCESS_LOCAL_OCR_IMAGES,
     REMOVE_DUPLICATE_ROWS,
-    RETURN_PDF_END_OF_REDACTION,
+    RETURN_REDACTED_PDF,
     ROOT_PATH,
     RUN_AWS_FUNCTIONS,
     RUN_DIRECT_MODE,
@@ -112,6 +114,7 @@ from tools.config import (
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
     USE_GREEDY_DUPLICATE_DETECTION,
+    USER_GUIDE_URL,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
 from tools.custom_csvlogger import CSVLogger_custom
@@ -134,7 +137,6 @@ from tools.find_duplicate_tabular import (
 from tools.helper_functions import (
     LANGUAGE_CHOICES,
     MAPPED_LANGUAGE_CHOICES,
-    _get_env_list,
     calculate_aws_costs,
     calculate_time_taken,
     check_for_existing_textract_file,
@@ -200,9 +202,6 @@ from tools.textract_batch_call import (
     replace_existing_pdf_input_for_whole_document_outputs,
 )
 
-# Suppress downcasting warnings
-pd.set_option("future.no_silent_downcasting", True)
-
 # Ensure that output folders exist
 ensure_folder_exists(CONFIG_FOLDER)
 ensure_folder_exists(OUTPUT_FOLDER)
@@ -215,81 +214,6 @@ if MPLCONFIGDIR:
 ensure_folder_exists(FEEDBACK_LOGS_FOLDER)
 ensure_folder_exists(ACCESS_LOGS_FOLDER)
 ensure_folder_exists(USAGE_LOGS_FOLDER)
-
-# Convert string environment variables to string or list
-if SAVE_LOGS_TO_CSV == "True":
-    SAVE_LOGS_TO_CSV = True
-else:
-    SAVE_LOGS_TO_CSV = False
-if SAVE_LOGS_TO_DYNAMODB == "True":
-    SAVE_LOGS_TO_DYNAMODB = True
-else:
-    SAVE_LOGS_TO_DYNAMODB = False
-if SHOW_LANGUAGE_SELECTION == "True":
-    SHOW_LANGUAGE_SELECTION = True
-else:
-    SHOW_LANGUAGE_SELECTION = False
-if DISPLAY_FILE_NAMES_IN_LOGS == "True":
-    DISPLAY_FILE_NAMES_IN_LOGS = True
-else:
-    DISPLAY_FILE_NAMES_IN_LOGS = False
-if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
-    DO_INITIAL_TABULAR_DATA_CLEAN = True
-else:
-    DO_INITIAL_TABULAR_DATA_CLEAN = False
-if COMPRESS_REDACTED_PDF == "True":
-    COMPRESS_REDACTED_PDF = True
-else:
-    COMPRESS_REDACTED_PDF = False
-if RETURN_PDF_END_OF_REDACTION == "True":
-    RETURN_PDF_END_OF_REDACTION = True
-else:
-    RETURN_PDF_END_OF_REDACTION = False
-if USE_GREEDY_DUPLICATE_DETECTION == "True":
-    USE_GREEDY_DUPLICATE_DETECTION = True
-else:
-    USE_GREEDY_DUPLICATE_DETECTION = False
-if DEFAULT_COMBINE_PAGES == "True":
-    DEFAULT_COMBINE_PAGES = True
-else:
-    DEFAULT_COMBINE_PAGES = False
-if REMOVE_DUPLICATE_ROWS == "True":
-    REMOVE_DUPLICATE_ROWS = True
-else:
-    REMOVE_DUPLICATE_ROWS = False
-
-if CSV_ACCESS_LOG_HEADERS:
-    CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
-if CSV_FEEDBACK_LOG_HEADERS:
-    CSV_FEEDBACK_LOG_HEADERS = _get_env_list(CSV_FEEDBACK_LOG_HEADERS)
-if CSV_USAGE_LOG_HEADERS:
-    CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
-
-if DYNAMODB_ACCESS_LOG_HEADERS:
-    DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
-if DYNAMODB_FEEDBACK_LOG_HEADERS:
-    DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
-if DYNAMODB_USAGE_LOG_HEADERS:
-    DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
-
-if CHOSEN_COMPREHEND_ENTITIES:
-    CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
-if FULL_COMPREHEND_ENTITY_LIST:
-    FULL_COMPREHEND_ENTITY_LIST = _get_env_list(FULL_COMPREHEND_ENTITY_LIST)
-if CHOSEN_REDACT_ENTITIES:
-    CHOSEN_REDACT_ENTITIES = _get_env_list(CHOSEN_REDACT_ENTITIES)
-if FULL_ENTITY_LIST:
-    FULL_ENTITY_LIST = _get_env_list(FULL_ENTITY_LIST)
-
-if DEFAULT_TEXT_COLUMNS:
-    DEFAULT_TEXT_COLUMNS = _get_env_list(DEFAULT_TEXT_COLUMNS)
-if DEFAULT_EXCEL_SHEETS:
-    DEFAULT_EXCEL_SHEETS = _get_env_list(DEFAULT_EXCEL_SHEETS)
-
-if DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX:
-    DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = _get_env_list(
-        DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX
-    )
 
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
@@ -305,7 +229,7 @@ in_doc_files = gr.File(
 )
 
 text_extract_method_radio = gr.Radio(
-    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £2.66 ($3.50) per 1,000 pages with signature detection (default), £1.14 ($1.50) without. Change the settings in the tab below (AWS Textract signature detection) to change this.""",
+    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
     value=DEFAULT_TEXT_EXTRACTION_MODEL,
     choices=TEXT_EXTRACTION_MODELS,
 )
@@ -997,9 +921,9 @@ with app:
     ###
 
     gr.Markdown(
-        """# Document redaction
+        f"""# Document redaction
 
-    Redact personally identifiable information (PII) from documents (PDF, images), Word files (.docx), or tabular data (XLSX/CSV/Parquet). Please see the [User Guide](https://github.com/seanpedrick-case/doc_redaction/blob/main/README.md) for a walkthrough on how to use the app. Below is a very brief overview.
+    Redact personally identifiable information (PII) from documents (PDF, images), Word files (.docx), or tabular data (XLSX/CSV/Parquet). Please see the [User Guide]({USER_GUIDE_URL}) for a walkthrough on how to use the app. Below is a very brief overview.
     
     To identify text in documents, the 'Local' text/OCR image analysis uses spaCy/Tesseract, and works well only for documents with typed text. If available, choose 'AWS Textract' to redact more complex elements e.g. signatures or handwriting. Then, choose a method for PII identification. 'Local' is quick and gives good results if you are primarily looking for a custom list of terms to redact (see Redaction settings). If available, AWS Comprehend gives better results at a small cost.
     
@@ -1125,38 +1049,37 @@ with app:
                 )
 
         with gr.Accordion("Redact document", open=True):
-            # in_doc_files = gr.File(
-            #     label="Choose a PDF document or image file (PDF, JPG, PNG)",
-            #     file_count="multiple",
-            #     file_types=[".pdf", ".jpg", ".png", ".json", ".zip"],
-            #     height=FILE_INPUT_HEIGHT,
-            # )
             in_doc_files.render()
 
-            # text_extract_method_radio = gr.Radio(
-            #     label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £2.66 ($3.50) per 1,000 pages with signature detection (default), £1.14 ($1.50) without. Change the settings in the tab below (AWS Textract signature detection) to change this.""",
-            #     value=DEFAULT_TEXT_EXTRACTION_MODEL,
-            #     choices=TEXT_EXTRACTION_MODELS,
-            # )
-            text_extract_method_radio.render()
+            if DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION:
+                textract_text = " AWS Textract has a cost per page."
+            else:
+                textract_text = ""
+            if DEFAULT_PII_DETECTION_MODEL == AWS_PII_OPTION:
+                comprehend_text = " AWS Comprehend has a cost per character processed."
+            else:
+                comprehend_text = ""
+            if textract_text or comprehend_text:
+                open_tab_text = " Open tab to see more details."
+            if textract_text and comprehend_text:
+                default_text = ""
+            else:
+                default_text = f" The default text extraction method is {DEFAULT_TEXT_EXTRACTION_MODEL}, and the default personal information detection method is {DEFAULT_PII_DETECTION_MODEL}. "
 
             with gr.Accordion(
-                "Enable AWS Textract signature detection (default is off)", open=False
+                label=f"Change default redaction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
+                open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
             ):
-                # handwrite_signature_checkbox = gr.CheckboxGroup(
-                #     label="AWS Textract extraction settings",
-                #     choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
-                #     value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
-                # )
-                handwrite_signature_checkbox.render()
+                text_extract_method_radio.render()
 
-            with gr.Row(equal_height=True):
-                # pii_identification_method_drop = gr.Radio(
-                #     label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
-                #     value=DEFAULT_PII_DETECTION_MODEL,
-                #     choices=PII_DETECTION_MODELS,
-                # )
-                pii_identification_method_drop.render()
+                with gr.Accordion(
+                    "Enable AWS Textract signature detection (default is off)",
+                    open=False,
+                ):
+                    handwrite_signature_checkbox.render()
+
+                with gr.Row(equal_height=True):
+                    pii_identification_method_drop.render()
 
             if SHOW_COSTS == "True":
                 with gr.Accordion(
@@ -1207,23 +1130,31 @@ with app:
                         "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
                     )
                     with gr.Row():
-                        cost_code_dataframe = gr.Dataframe(
-                            value=pd.DataFrame(),
-                            row_count=(0, "dynamic"),
-                            label="Existing cost codes",
-                            type="pandas",
-                            interactive=True,
-                            show_fullscreen_button=True,
-                            show_copy_button=True,
-                            show_search="filter",
-                            visible=True,
-                            wrap=True,
-                            max_height=200,
-                        )
                         with gr.Column():
-                            reset_cost_code_dataframe_button = gr.Button(
-                                value="Reset code code table filter"
-                            )
+                            with gr.Accordion(
+                                "View and filter cost code table",
+                                open=False,
+                                visible=True,
+                            ):
+                                cost_code_dataframe = gr.Dataframe(
+                                    value=pd.DataFrame(
+                                        columns=["Cost code", "Description"]
+                                    ),
+                                    row_count=(0, "dynamic"),
+                                    label="Existing cost codes",
+                                    type="pandas",
+                                    interactive=True,
+                                    show_fullscreen_button=True,
+                                    show_copy_button=True,
+                                    show_search="filter",
+                                    visible=True,
+                                    wrap=True,
+                                    max_height=200,
+                                )
+                                reset_cost_code_dataframe_button = gr.Button(
+                                    value="Reset code code table filter"
+                                )
+                        with gr.Column():
                             cost_code_choice_drop = gr.Dropdown(
                                 value=DEFAULT_COST_CODE,
                                 label="Choose cost code for analysis",
@@ -1698,9 +1629,6 @@ with app:
         )
 
         # Examples for duplicate page detection
-        # ... existing code ...
-
-        # Examples for duplicate page detection
         if SHOW_EXAMPLES == "True":
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Identify duplicate pages/subdocuments' button:"
@@ -1753,34 +1681,14 @@ with app:
                 )
 
         with gr.Accordion("Step 1: Configure and run analysis", open=True):
-            # in_duplicate_pages = gr.File(
-            #     label="Upload one or multiple 'ocr_output.csv' files to find duplicate pages and subdocuments",
-            #     file_count="multiple",
-            #     height=FILE_INPUT_HEIGHT,
-            #     file_types=[".csv"],
-            # )
             in_duplicate_pages.render()
 
             with gr.Accordion("Duplicate matching parameters", open=False):
                 with gr.Row():
-                    # duplicate_threshold_input = gr.Number(
-                    #     value=DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
-                    #     label="Similarity threshold",
-                    #     info="Score (0-1) to consider pages a match.",
-                    # )
                     duplicate_threshold_input.render()
 
-                    # min_word_count_input = gr.Number(
-                    #     value=DEFAULT_MIN_WORD_COUNT,
-                    #     label="Minimum word count",
-                    #     info="Pages with fewer words than this value are ignored.",
-                    # )
                     min_word_count_input.render()
 
-                    # combine_page_text_for_duplicates_bool = gr.Checkbox(
-                    #     value=True,
-                    #     label="Analyse duplicate text by page (off for by line)",
-                    # )
                     combine_page_text_for_duplicates_bool.render()
 
                 gr.Markdown("#### Matching Strategy")
@@ -1969,12 +1877,6 @@ with app:
 
         with gr.Accordion("Redact Word or Excel/csv files", open=True):
             with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
-                # in_data_files = gr.File(
-                #     label="Choose Excel or csv files",
-                #     file_count="multiple",
-                #     file_types=[".xlsx", ".xls", ".csv", ".parquet", ".docx"],
-                #     height=FILE_INPUT_HEIGHT,
-                # )
                 in_data_files.render()
             with gr.Accordion("Redact open text", open=False):
                 in_text = gr.Textbox(
@@ -1991,19 +1893,8 @@ with app:
                 allow_custom_value=True,
             )
 
-            # in_colnames = gr.Dropdown(
-            #     choices=["Choose columns to anonymise"],
-            #     multiselect=True,
-            #     allow_custom_value=True,
-            #     label="Select columns that you want to anonymise (showing columns present across all files).",
-            # )
             in_colnames.render()
 
-            # pii_identification_method_drop_tabular = gr.Radio(
-            #     label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
-            #     value=DEFAULT_PII_DETECTION_MODEL,
-            #     choices=TABULAR_PII_DETECTION_MODELS,
-            # )
             pii_identification_method_drop_tabular.render()
 
             with gr.Accordion(
@@ -2011,17 +1902,6 @@ with app:
                 open=False,
             ):
                 with gr.Row():
-                    # anon_strategy = gr.Radio(
-                    #     choices=[
-                    #         "replace with 'REDACTED'",
-                    #         "replace with <ENTITY_NAME>",
-                    #         "redact completely",
-                    #         "hash",
-                    #         "mask",
-                    #     ],
-                    #     label="Select an anonymisation method.",
-                    #     value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
-                    # )  # , "encrypt", "fake_first_name" are also available, but are not currently included as not that useful in current form
                     anon_strategy.render()
 
                     do_initial_clean = gr.Checkbox(
@@ -2052,12 +1932,6 @@ with app:
             )
 
             with gr.Accordion("Step 1: Upload files and configure analysis", open=True):
-                # in_tabular_duplicate_files = gr.File(
-                #     label="Upload CSV, Excel, or Parquet files to find duplicate cells/rows. Note that the app will remove duplicates from later cells/files that are found in earlier cells/files and not vice versa.",
-                #     file_count="multiple",
-                #     file_types=[".csv", ".xlsx", ".xls", ".parquet"],
-                #     height=FILE_INPUT_HEIGHT,
-                # )
                 in_tabular_duplicate_files.render()
 
                 with gr.Row(equal_height=True):
@@ -2089,12 +1963,6 @@ with app:
                         allow_custom_value=True,
                     )
 
-                    # tabular_text_columns = gr.Dropdown(
-                    #     choices=DEFAULT_TEXT_COLUMNS,
-                    #     multiselect=True,
-                    #     label="Select specific columns to analyse (leave empty to analyse all text columns simultaneously - i.e. all text is joined together)",
-                    #     info="If no columns selected, all text columns will combined together and analysed",
-                    # )
                     tabular_text_columns.render()
 
                 find_tabular_duplicates_btn = gr.Button(
@@ -2259,18 +2127,6 @@ with app:
                         )
 
         with gr.Accordion("Select entity types to redact", open=True):
-            # in_redact_entities = gr.Dropdown(
-            #     value=CHOSEN_REDACT_ENTITIES,
-            #     choices=FULL_ENTITY_LIST,
-            #     multiselect=True,
-            #     label="Local PII identification model (click empty space in box for full list)",
-            # )
-            # in_redact_comprehend_entities = gr.Dropdown(
-            #     value=CHOSEN_COMPREHEND_ENTITIES,
-            #     choices=FULL_COMPREHEND_ENTITY_LIST,
-            #     multiselect=True,
-            #     label="AWS Comprehend PII identification model (click empty space in box for full list)",
-            # )
             in_redact_entities.render()
             in_redact_comprehend_entities.render()
 
@@ -6433,7 +6289,7 @@ if __name__ == "__main__":
             "chosen_local_ocr_model": CHOSEN_LOCAL_OCR_MODEL,
             "preprocess_local_ocr_images": PREPROCESS_LOCAL_OCR_IMAGES,
             "compress_redacted_pdf": COMPRESS_REDACTED_PDF,
-            "return_pdf_end_of_redaction": RETURN_PDF_END_OF_REDACTION,
+            "return_pdf_end_of_redaction": RETURN_REDACTED_PDF,
             "allow_list_file": ALLOW_LIST_PATH,
             "deny_list_file": DENY_LIST_PATH,
             "redact_whole_page_file": WHOLE_PAGE_REDACTION_LIST_PATH,

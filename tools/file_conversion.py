@@ -31,11 +31,12 @@ from tools.config import (
     MAX_IMAGE_PIXELS,
     MAX_SIMULTANEOUS_FILES,
     OUTPUT_FOLDER,
+    RETURN_PDF_FOR_REVIEW,
+    RETURN_REDACTED_PDF,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
-    RETURN_PDF_FOR_REVIEW,
 )
 from tools.helper_functions import get_file_name_without_type, read_file
 from tools.secure_path_utils import secure_file_read, secure_join
@@ -51,8 +52,8 @@ if not MAX_IMAGE_PIXELS:
     Image.MAX_IMAGE_PIXELS = None
 else:
     Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
-COMPRESS_REDACTED_PDF = COMPRESS_REDACTED_PDF.lower() == "true"
 
 
 def is_pdf_or_image(filename):
@@ -397,7 +398,10 @@ def get_input_file_names(file_input: List[str]):
 def convert_color_to_range_0_1(color):
     return tuple(component / 255 for component in color)
 
-def define_box_colour(custom_colours:bool, img_annotation_box: dict, CUSTOM_BOX_COLOUR: tuple):
+
+def define_box_colour(
+    custom_colours: bool, img_annotation_box: dict, CUSTOM_BOX_COLOUR: tuple
+):
     if custom_colours is True:
         color_input = img_annotation_box["color"]
         out_colour = (0, 0, 0)  # Initialize with a default black color (0.0-1.0 range)
@@ -410,14 +414,22 @@ def define_box_colour(custom_colours:bool, img_annotation_box: dict, CUSTOM_BOX_
                 colour_tuple_int = tuple(int(c.strip()) for c in components_str)
 
                 # Validate the parsed integer tuple
-                if len(colour_tuple_int) == 3 and not all(0 <= c <= 1 for c in colour_tuple_int):
+                if len(colour_tuple_int) == 3 and not all(
+                    0 <= c <= 1 for c in colour_tuple_int
+                ):
                     out_colour = convert_color_to_range_0_1(colour_tuple_int)
-                elif len(colour_tuple_int) == 3 and all(0 <= c <= 1 for c in colour_tuple_int):
+                elif len(colour_tuple_int) == 3 and all(
+                    0 <= c <= 1 for c in colour_tuple_int
+                ):
                     out_colour = colour_tuple_int
                 else:
-                    print(f"Warning: Invalid color string values or length for '{color_input}'. Expected (R,G,B) with R,G,B in 0-255. Defaulting to black.")
+                    print(
+                        f"Warning: Invalid color string values or length for '{color_input}'. Expected (R,G,B) with R,G,B in 0-255. Defaulting to black."
+                    )
             except (ValueError, IndexError):
-                print(f"Warning: Could not parse color string '{color_input}'. Expected '(R,G,B)' format. Defaulting to black.")
+                print(
+                    f"Warning: Could not parse color string '{color_input}'. Expected '(R,G,B)' format. Defaulting to black."
+                )
         elif isinstance(color_input, (tuple, list)) and len(color_input) == 3:
             # Expected formats: (R,G,B) where R,G,B are either 0-1 floats or 0-255 integers
             if all(isinstance(c, (int, float)) for c in color_input):
@@ -425,39 +437,73 @@ def define_box_colour(custom_colours:bool, img_annotation_box: dict, CUSTOM_BOX_
                 if all(isinstance(c, float) and 0.0 <= c <= 1.0 for c in color_input):
                     out_colour = tuple(color_input)
                 # Case 2: Components are 0-255 integers
-                elif not all(isinstance(c, float) and 0.0 <= c <= 1.0 for c in color_input):
+                elif not all(
+                    isinstance(c, float) and 0.0 <= c <= 1.0 for c in color_input
+                ):
                     out_colour = convert_color_to_range_0_1(color_input)
                 else:
                     # Numeric values but not in expected 0-1 float or 0-255 integer ranges
-                    print(f"Warning: Invalid color tuple/list values {color_input}. Expected (R,G,B) with R,G,B in 0-1 floats or 0-255 integers. Defaulting to black.")
+                    print(
+                        f"Warning: Invalid color tuple/list values {color_input}. Expected (R,G,B) with R,G,B in 0-1 floats or 0-255 integers. Defaulting to black."
+                    )
             else:
                 # Contains non-numeric values (e.g., (1, 'a', 3))
-                print(f"Warning: Color tuple/list {color_input} contains non-numeric values. Defaulting to black.")
+                print(
+                    f"Warning: Color tuple/list {color_input} contains non-numeric values. Defaulting to black."
+                )
         else:
             # Catch-all for any other unexpected format (e.g., None, dict, etc.)
-            print(f"Warning: Unexpected color format for {color_input}. Expected string '(R,G,B)' or tuple/list (R,G,B). Defaulting to black.")
+            print(
+                f"Warning: Unexpected color format for {color_input}. Expected string '(R,G,B)' or tuple/list (R,G,B). Defaulting to black."
+            )
 
         # Final safeguard: Ensure out_colour is always a valid PyMuPDF color tuple (3 floats 0.0-1.0)
-        if not (isinstance(out_colour, tuple) and len(out_colour) == 3 and all(isinstance(c, float) and 0.0 <= c <= 1.0 for c in out_colour)):
-            out_colour = (0, 0, 0) # Fallback to black if any previous logic resulted in an invalid state
+        if not (
+            isinstance(out_colour, tuple)
+            and len(out_colour) == 3
+            and all(isinstance(c, float) and 0.0 <= c <= 1.0 for c in out_colour)
+        ):
+            out_colour = (
+                0,
+                0,
+                0,
+            )  # Fallback to black if any previous logic resulted in an invalid state
             out_colour = img_annotation_box["color"]
     else:
         if CUSTOM_BOX_COLOUR:
-            out_colour = CUSTOM_BOX_COLOUR # Should be a tuple of three integers between 0 and 1 from config
+            out_colour = CUSTOM_BOX_COLOUR  # Should be a tuple of three integers between 0 and 1 from config
         else:
             out_colour = (0, 0, 0)
 
     return out_colour
+
 
 def redact_single_box(
     pymupdf_page: Page,
     pymupdf_rect: Rect,
     img_annotation_box: dict,
     custom_colours: bool = USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
-    retain_text: bool = RETURN_PDF_FOR_REVIEW,  # New parameter to control text retention
+    retain_text: bool = RETURN_PDF_FOR_REVIEW,
+    return_pdf_end_of_redaction: bool = RETURN_REDACTED_PDF,
 ):
     """
     Commit redaction boxes to a PyMuPDF page.
+
+    Args:
+        pymupdf_page (Page): The PyMuPDF page object to which the redaction will be applied.
+        pymupdf_rect (Rect): The PyMuPDF rectangle defining the bounds of the redaction box.
+        img_annotation_box (dict): A dictionary containing annotation details, such as label, text, and color.
+        custom_colours (bool, optional): If True, uses custom colors for the redaction box.
+                                        Defaults to USE_GUI_BOX_COLOURS_FOR_OUTPUTS.
+        retain_text (bool, optional): If True, adds a redaction annotation but retains the underlying text.
+                                      If False, the text within the redaction area is deleted.
+                                      Defaults to RETURN_PDF_FOR_REVIEW.
+        return_pdf_end_of_redaction (bool, optional): If True, returns both review and final redacted page objects.
+                                                      Defaults to RETURN_REDACTED_PDF.
+
+    Returns:
+        Page or Tuple[Page, Page]: If return_pdf_end_of_redaction is True and retain_text is True,
+                                  returns a tuple of (review_page, final_page). Otherwise returns a single Page.
     """
 
     pymupdf_x1 = pymupdf_rect[0]
@@ -467,10 +513,69 @@ def redact_single_box(
 
     full_size_redaction_box = Rect(pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2)
 
-    out_colour = define_box_colour(custom_colours, img_annotation_box, CUSTOM_BOX_COLOUR)
+    out_colour = define_box_colour(
+        custom_colours, img_annotation_box, CUSTOM_BOX_COLOUR
+    )
 
-    # Only add redaction annotation if we want to delete text
-    if retain_text is False:
+    # Create a copy of the page for final redaction if needed
+    final_page = None
+    if return_pdf_end_of_redaction and retain_text:
+        # Create a deep copy of the page for final redaction
+        import fitz
+
+        final_page = fitz.open()
+        final_page.insert_pdf(
+            pymupdf_page.parent,
+            from_page=pymupdf_page.number,
+            to_page=pymupdf_page.number,
+        )
+        final_page = final_page[0]
+
+    # Handle review page (retain_text = True)
+    if retain_text is True:
+        annot = pymupdf_page.add_redact_annot(full_size_redaction_box)
+        annot.set_colors(stroke=out_colour, fill=out_colour, colors=out_colour)
+        annot.set_name(img_annotation_box["label"])
+        annot.set_info(
+            info=img_annotation_box["label"],
+            title=img_annotation_box["label"],
+            subject=img_annotation_box["label"],
+            content=img_annotation_box["text"],
+            creationDate=datetime.now().strftime("%Y%m%d%H%M%S"),
+        )
+        annot.update(opacity=0.5, cross_out=False)
+
+        # If we need both review and final pages, apply final redaction to the copy
+        if return_pdf_end_of_redaction and final_page is not None:
+            # Apply final redaction to the copy
+            redact_bottom_y = pymupdf_y1 + 2
+            redact_top_y = pymupdf_y2 - 2
+
+            # Calculate the middle y value and set a small height if default values are too close together
+            if (redact_top_y - redact_bottom_y) < 1:
+                middle_y = (pymupdf_y1 + pymupdf_y2) / 2
+                redact_bottom_y = middle_y - 1
+                redact_top_y = middle_y + 1
+
+            rect_small_pixel_height = Rect(
+                pymupdf_x1, redact_bottom_y, pymupdf_x2, redact_top_y
+            )  # Slightly smaller than outside box
+
+            # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
+            final_page.add_redact_annot(rect_small_pixel_height)
+
+            # Only create a box over the whole rect if we want to delete the text
+            shape = final_page.new_shape()
+            shape.draw_rect(pymupdf_rect)
+
+            # Use solid fill for normal redaction
+            shape.finish(color=out_colour, fill=out_colour)
+            shape.commit()
+
+            return pymupdf_page, final_page
+        else:
+            return pymupdf_page
+    else:
         # Calculate area to actually remove text from the pdf (different from black box size)
         redact_bottom_y = pymupdf_y1 + 2
         redact_top_y = pymupdf_y2 - 2
@@ -493,14 +598,11 @@ def redact_single_box(
         shape.draw_rect(pymupdf_rect)
 
         # Use solid fill for normal redaction
-        shape.finish(color=out_colour, fill=out_colour)        
+        shape.finish(color=out_colour, fill=out_colour)
         shape.commit()
-    else:
-        annot = pymupdf_page.add_redact_annot(full_size_redaction_box)
-        annot.set_colors(stroke=out_colour, fill=out_colour, colors=out_colour)        
-        annot.set_name(img_annotation_box["label"])
-        annot.set_info(info=img_annotation_box["label"], title=img_annotation_box["label"], subject=img_annotation_box["label"], content=img_annotation_box["text"], creationDate=datetime.now().strftime("%Y%m%d%H%M%S"))
-        annot.update(opacity=0.5, cross_out=False)
+
+        return pymupdf_page
+
 
 def convert_pymupdf_to_image_coords(
     pymupdf_page: Page,
@@ -1860,7 +1962,18 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
         # Return an empty DataFrame with the expected schema if input is empty
         print("No annotations found, returning empty dataframe")
         return pd.DataFrame(
-            columns=["image", "page", "label", "color", "xmin", "xmax", "ymin", "ymax", "text", "id"]
+            columns=[
+                "image",
+                "page",
+                "label",
+                "color",
+                "xmin",
+                "xmax",
+                "ymin",
+                "ymax",
+                "text",
+                "id",
+            ]
         )
 
     # 1. Create initial DataFrame from the list of annotations

@@ -3,7 +3,8 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 import boto3
 import pandas as pd
 import pikepdf
@@ -16,8 +17,8 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
 )
 from tools.custom_image_analyser_engine import CustomImageRecognizerResult, OCRResult
-from tools.secure_path_utils import secure_file_read
 from tools.helper_functions import _generate_unique_ids
+from tools.secure_path_utils import secure_file_read
 
 
 def extract_textract_metadata(response: object):
@@ -208,13 +209,13 @@ def json_to_ocrresult(
     json_data: dict, page_width: float, page_height: float, page_no: int
 ):
     """
-    Convert Textract JSON to structured OCR, handling lines, words, signatures, 
+    Convert Textract JSON to structured OCR, handling lines, words, signatures,
     selection elements (associating them with lines), and question-answer form data.
     The question-answer data is sorted in a top-to-bottom, left-to-right reading order.
     """
     # --- STAGE 1: Block Mapping & Initial Data Collection ---
-    #text_blocks = json_data.get("Blocks", [])
-     # Find the specific page data
+    # text_blocks = json_data.get("Blocks", [])
+    # Find the specific page data
     page_json_data = json_data  # next((page for page in json_data["pages"] if page["page_no"] == page_no), None)
 
     if "Blocks" in page_json_data:
@@ -226,7 +227,7 @@ def json_to_ocrresult(
     else:
         text_blocks = []
 
-    block_map = {block['Id']: block for block in text_blocks}
+    block_map = {block["Id"]: block for block in text_blocks}
 
     lines_data = list()
     selections_data = list()
@@ -248,123 +249,266 @@ def json_to_ocrresult(
                                 text_parts.append(f"[{child['SelectionStatus']}]")
         return " ".join(text_parts)
 
-    # text_line_number = 1  
+    # text_line_number = 1
 
     # is_signature = False
     # is_handwriting = False
 
     for block in text_blocks:
         block_type = block.get("BlockType")
-        
+
         if block_type == "LINE":
             bbox = block["Geometry"]["BoundingBox"]
             line_info = {
-                "id": block["Id"], "text": block.get("Text", ""), "confidence": round(block.get("Confidence", 0.0), 0), "words": [],
-                "geometry": { "left": int(bbox["Left"] * page_width), "top": int(bbox["Top"] * page_height), "width": int(bbox["Width"] * page_width), "height": int(bbox["Height"] * page_height)}
+                "id": block["Id"],
+                "text": block.get("Text", ""),
+                "confidence": round(block.get("Confidence", 0.0), 0),
+                "words": [],
+                "geometry": {
+                    "left": int(bbox["Left"] * page_width),
+                    "top": int(bbox["Top"] * page_height),
+                    "width": int(bbox["Width"] * page_width),
+                    "height": int(bbox["Height"] * page_height),
+                },
             }
             if "Relationships" in block:
                 for rel in block.get("Relationships", []):
-                    if rel['Type'] == 'CHILD':
-                        for child_id in rel['Ids']:
+                    if rel["Type"] == "CHILD":
+                        for child_id in rel["Ids"]:
                             word_block = block_map.get(child_id)
-                            if word_block and word_block['BlockType'] == 'WORD':
+                            if word_block and word_block["BlockType"] == "WORD":
                                 w_bbox = word_block["Geometry"]["BoundingBox"]
-                                line_info["words"].append({
-                                    "text": word_block.get("Text", ""), "confidence": round(word_block.get("Confidence", 0.0), 0),
-                                    "bounding_box": (
-                                        int(w_bbox["Left"] * page_width), int(w_bbox["Top"] * page_height),
-                                        int((w_bbox["Left"] + w_bbox["Width"]) * page_width), int((w_bbox["Top"] + w_bbox["Height"]) * page_height)
-                                    )
-                                })
+                                line_info["words"].append(
+                                    {
+                                        "text": word_block.get("Text", ""),
+                                        "confidence": round(
+                                            word_block.get("Confidence", 0.0), 0
+                                        ),
+                                        "bounding_box": (
+                                            int(w_bbox["Left"] * page_width),
+                                            int(w_bbox["Top"] * page_height),
+                                            int(
+                                                (w_bbox["Left"] + w_bbox["Width"])
+                                                * page_width
+                                            ),
+                                            int(
+                                                (w_bbox["Top"] + w_bbox["Height"])
+                                                * page_height
+                                            ),
+                                        ),
+                                    }
+                                )
                                 if word_block.get("TextType") == "HANDWRITING":
-                                    rec_res = CustomImageRecognizerResult(entity_type="HANDWRITING", text=word_block.get("Text", ""), score=round(word_block.get("Confidence", 0.0), 0), start=0, end=len(word_block.get("Text", "")), left=int(w_bbox["Left"] * page_width), top=int(w_bbox["Top"] * page_height), width=int(w_bbox["Width"] * page_width), height=int(w_bbox["Height"] * page_height))
+                                    rec_res = CustomImageRecognizerResult(
+                                        entity_type="HANDWRITING",
+                                        text=word_block.get("Text", ""),
+                                        score=round(
+                                            word_block.get("Confidence", 0.0), 0
+                                        ),
+                                        start=0,
+                                        end=len(word_block.get("Text", "")),
+                                        left=int(w_bbox["Left"] * page_width),
+                                        top=int(w_bbox["Top"] * page_height),
+                                        width=int(w_bbox["Width"] * page_width),
+                                        height=int(w_bbox["Height"] * page_height),
+                                    )
                                     handwriting_recogniser_results.append(rec_res)
-                                    signature_or_handwriting_recogniser_results.append(rec_res)
+                                    signature_or_handwriting_recogniser_results.append(
+                                        rec_res
+                                    )
             lines_data.append(line_info)
 
         elif block_type == "SELECTION_ELEMENT":
             bbox = block["Geometry"]["BoundingBox"]
-            selections_data.append({
-                "id": block["Id"], "status": block.get("SelectionStatus", "UNKNOWN"), "confidence": round(block.get("Confidence", 0.0), 0),
-                "geometry": { "left": int(bbox["Left"]*page_width), "top": int(bbox["Top"]*page_height), "width": int(bbox["Width"]*page_width), "height": int(bbox["Height"]*page_height)}
-            })
+            selections_data.append(
+                {
+                    "id": block["Id"],
+                    "status": block.get("SelectionStatus", "UNKNOWN"),
+                    "confidence": round(block.get("Confidence", 0.0), 0),
+                    "geometry": {
+                        "left": int(bbox["Left"] * page_width),
+                        "top": int(bbox["Top"] * page_height),
+                        "width": int(bbox["Width"] * page_width),
+                        "height": int(bbox["Height"] * page_height),
+                    },
+                }
+            )
 
         elif block_type == "SIGNATURE":
             bbox = block["Geometry"]["BoundingBox"]
-            rec_res = CustomImageRecognizerResult(entity_type="SIGNATURE", text="SIGNATURE", score=round(block.get("Confidence", 0.0), 0), start=0, end=9, left=int(bbox["Left"] * page_width), top=int(bbox["Top"] * page_height), width=int(bbox["Width"] * page_width), height=int(bbox["Height"] * page_height))
+            rec_res = CustomImageRecognizerResult(
+                entity_type="SIGNATURE",
+                text="SIGNATURE",
+                score=round(block.get("Confidence", 0.0), 0),
+                start=0,
+                end=9,
+                left=int(bbox["Left"] * page_width),
+                top=int(bbox["Top"] * page_height),
+                width=int(bbox["Width"] * page_width),
+                height=int(bbox["Height"] * page_height),
+            )
             signature_recogniser_results.append(rec_res)
             signature_or_handwriting_recogniser_results.append(rec_res)
 
     # --- STAGE 2: Question-Answer Pair Extraction & Sorting ---
     def _create_question_answer_results_object(text_blocks):
         question_answer_results = list()
-        key_blocks = [b for b in text_blocks if b.get("BlockType") == "KEY_VALUE_SET" and "KEY" in b.get("EntityTypes", [])]
+        key_blocks = [
+            b
+            for b in text_blocks
+            if b.get("BlockType") == "KEY_VALUE_SET"
+            and "KEY" in b.get("EntityTypes", [])
+        ]
         for question_block in key_blocks:
-            answer_block = next((block_map.get(rel["Ids"][0]) for rel in question_block.get("Relationships", []) if rel["Type"] == "VALUE"), None)
-            
+            answer_block = next(
+                (
+                    block_map.get(rel["Ids"][0])
+                    for rel in question_block.get("Relationships", [])
+                    if rel["Type"] == "VALUE"
+                ),
+                None,
+            )
+
             # The check for value_block now happens BEFORE we try to access its properties.
             if answer_block:
                 question_bbox = question_block["Geometry"]["BoundingBox"]
                 # We also get the answer_bbox safely inside this block.
                 answer_bbox = answer_block["Geometry"]["BoundingBox"]
 
-                question_answer_results.append({
-                    # Data for final output
-                    "Page": page_no,
-                    "Question": _get_text_from_block(question_block, block_map),
-                    "Answer": _get_text_from_block(answer_block, block_map),
-                    "Confidence Score % (Question)": round(question_block.get("Confidence", 0.0), 0),
-                    "Confidence Score % (Answer)": round(answer_block.get("Confidence", 0.0), 0),
-                    "Question_left": round(question_bbox["Left"], 5),
-                    "Question_top": round(question_bbox["Top"], 5),
-                    "Question_width": round(question_bbox["Width"], 5),
-                    "Question_height": round(question_bbox["Height"], 5),
-                    "Answer_left": round(answer_bbox["Left"], 5),
-                    "Answer_top": round(answer_bbox["Top"], 5),
-                    "Answer_width": round(answer_bbox["Width"], 5),
-                    "Answer_height": round(answer_bbox["Height"], 5),
-                })
-        
-        question_answer_results.sort(key=lambda item: (item["Question_top"], item["Question_left"]))
+                question_answer_results.append(
+                    {
+                        # Data for final output
+                        "Page": page_no,
+                        "Question": _get_text_from_block(question_block, block_map),
+                        "Answer": _get_text_from_block(answer_block, block_map),
+                        "Confidence Score % (Question)": round(
+                            question_block.get("Confidence", 0.0), 0
+                        ),
+                        "Confidence Score % (Answer)": round(
+                            answer_block.get("Confidence", 0.0), 0
+                        ),
+                        "Question_left": round(question_bbox["Left"], 5),
+                        "Question_top": round(question_bbox["Top"], 5),
+                        "Question_width": round(question_bbox["Width"], 5),
+                        "Question_height": round(question_bbox["Height"], 5),
+                        "Answer_left": round(answer_bbox["Left"], 5),
+                        "Answer_top": round(answer_bbox["Top"], 5),
+                        "Answer_width": round(answer_bbox["Width"], 5),
+                        "Answer_height": round(answer_bbox["Height"], 5),
+                    }
+                )
+
+        question_answer_results.sort(
+            key=lambda item: (item["Question_top"], item["Question_left"])
+        )
 
         return question_answer_results
-    
+
     question_answer_results = _create_question_answer_results_object(text_blocks)
 
     # --- STAGE 3: Association of Selection Elements to Lines ---
     unmatched_selections = list()
     for selection in selections_data:
-        best_match_line = None; min_dist = float('inf')
-        sel_geom = selection["geometry"]; sel_y_center = sel_geom["top"] + sel_geom["height"] / 2
+        best_match_line = None
+        min_dist = float("inf")
+        sel_geom = selection["geometry"]
+        sel_y_center = sel_geom["top"] + sel_geom["height"] / 2
         for line in lines_data:
-            line_geom = line["geometry"]; line_y_center = line_geom["top"] + line_geom["height"] / 2
+            line_geom = line["geometry"]
+            line_y_center = line_geom["top"] + line_geom["height"] / 2
             if abs(sel_y_center - line_y_center) < line_geom["height"]:
                 dist = 0
-                if sel_geom["left"] > (line_geom["left"] + line_geom["width"]): dist = sel_geom["left"] - (line_geom["left"] + line_geom["width"])
-                elif line_geom["left"] > (sel_geom["left"] + sel_geom["width"]): dist = line_geom["left"] - (sel_geom["left"] + sel_geom["width"])
-                if dist < min_dist: min_dist = dist; best_match_line = line
+                if sel_geom["left"] > (line_geom["left"] + line_geom["width"]):
+                    dist = sel_geom["left"] - (line_geom["left"] + line_geom["width"])
+                elif line_geom["left"] > (sel_geom["left"] + sel_geom["width"]):
+                    dist = line_geom["left"] - (sel_geom["left"] + sel_geom["width"])
+                if dist < min_dist:
+                    min_dist = dist
+                    best_match_line = line
         if best_match_line and min_dist < (best_match_line["geometry"]["height"] * 5):
-            selection_as_word = {"text": f"[{selection['status']}]", "confidence": round(selection["confidence"], 0), "bounding_box": (sel_geom["left"], sel_geom["top"], sel_geom["left"] + sel_geom["width"], sel_geom["top"] + sel_geom["height"])}
+            selection_as_word = {
+                "text": f"[{selection['status']}]",
+                "confidence": round(selection["confidence"], 0),
+                "bounding_box": (
+                    sel_geom["left"],
+                    sel_geom["top"],
+                    sel_geom["left"] + sel_geom["width"],
+                    sel_geom["top"] + sel_geom["height"],
+                ),
+            }
             best_match_line["words"].append(selection_as_word)
             best_match_line["words"].sort(key=lambda w: w["bounding_box"][0])
-        else: unmatched_selections.append(selection)
+        else:
+            unmatched_selections.append(selection)
 
     # --- STAGE 4: Final Output Generation ---
-    all_ocr_results = list(); ocr_results_with_words = dict(); selection_element_results = list()
+    all_ocr_results = list()
+    ocr_results_with_words = dict()
+    selection_element_results = list()
     for i, line in enumerate(lines_data):
-        line_num = i + 1; line_geom = line["geometry"]; reconstructed_text = " ".join(w["text"] for w in line["words"])
-        all_ocr_results.append(OCRResult(reconstructed_text, line_geom["left"], line_geom["top"], line_geom["width"], line_geom["height"], round(line["confidence"], 0), line_num))
-        ocr_results_with_words[f"text_line_{line_num}"] = {"line": line_num, "text": reconstructed_text, "confidence": line["confidence"], "bounding_box": (line_geom["left"], line_geom["top"], line_geom["left"] + line_geom["width"], line_geom["top"] + line_geom["height"]), "words": line["words"], "page": page_no}
+        line_num = i + 1
+        line_geom = line["geometry"]
+        reconstructed_text = " ".join(w["text"] for w in line["words"])
+        all_ocr_results.append(
+            OCRResult(
+                reconstructed_text,
+                line_geom["left"],
+                line_geom["top"],
+                line_geom["width"],
+                line_geom["height"],
+                round(line["confidence"], 0),
+                line_num,
+            )
+        )
+        ocr_results_with_words[f"text_line_{line_num}"] = {
+            "line": line_num,
+            "text": reconstructed_text,
+            "confidence": line["confidence"],
+            "bounding_box": (
+                line_geom["left"],
+                line_geom["top"],
+                line_geom["left"] + line_geom["width"],
+                line_geom["top"] + line_geom["height"],
+            ),
+            "words": line["words"],
+            "page": page_no,
+        }
     for selection in unmatched_selections:
-        sel_geom = selection["geometry"]; sel_text = f"[{selection['status']}]"
-        all_ocr_results.append(OCRResult(sel_text, sel_geom["left"], sel_geom["top"], sel_geom["width"], sel_geom["height"], round(selection["confidence"], 0), -1))
+        sel_geom = selection["geometry"]
+        sel_text = f"[{selection['status']}]"
+        all_ocr_results.append(
+            OCRResult(
+                sel_text,
+                sel_geom["left"],
+                sel_geom["top"],
+                sel_geom["width"],
+                sel_geom["height"],
+                round(selection["confidence"], 0),
+                -1,
+            )
+        )
     for selection in selections_data:
         sel_geom = selection["geometry"]
-        selection_element_results.append({"status": selection["status"], "confidence": round(selection["confidence"], 0), "bounding_box": (sel_geom["left"], sel_geom["top"], sel_geom["left"] + sel_geom["width"], sel_geom["top"] + sel_geom["height"]), "page": page_no})
+        selection_element_results.append(
+            {
+                "status": selection["status"],
+                "confidence": round(selection["confidence"], 0),
+                "bounding_box": (
+                    sel_geom["left"],
+                    sel_geom["top"],
+                    sel_geom["left"] + sel_geom["width"],
+                    sel_geom["top"] + sel_geom["height"],
+                ),
+                "page": page_no,
+            }
+        )
 
     all_ocr_results_with_page = {"page": page_no, "results": all_ocr_results}
-    ocr_results_with_words_with_page = {"page": page_no, "results": ocr_results_with_words}
-    
+    ocr_results_with_words_with_page = {
+        "page": page_no,
+        "results": ocr_results_with_words,
+    }
+
     return (
         all_ocr_results_with_page,
         signature_or_handwriting_recogniser_results,
@@ -374,6 +518,7 @@ def json_to_ocrresult(
         selection_element_results,
         question_answer_results,
     )
+
 
 def load_and_convert_textract_json(
     textract_json_file_path: str,
@@ -539,32 +684,44 @@ def restructure_textract_output(textract_output: dict, page_sizes_df: pd.DataFra
     return structured_output
 
 
-def convert_question_answer_to_dataframe(question_answer_results: List[Dict[str, Any]], page_sizes_df: pd.DataFrame) -> pd.DataFrame:
+def convert_question_answer_to_dataframe(
+    question_answer_results: List[Dict[str, Any]], page_sizes_df: pd.DataFrame
+) -> pd.DataFrame:
     """
     Convert question-answer results to DataFrame format matching convert_annotation_data_to_dataframe.
-    
+
     Each Question and Answer will be on separate lines in the resulting dataframe.
     The 'image' column will be populated with the page number as f'placeholder_image_page{i}.png'.
-    
+
     Args:
         question_answer_results: List of question-answer dictionaries from _create_question_answer_results_object
         page_sizes_df: DataFrame containing page sizes
-        
+
     Returns:
         pd.DataFrame: DataFrame with columns ["image", "page", "label", "color", "xmin", "xmax", "ymin", "ymax", "text", "id"]
     """
-    
-    
+
     if not question_answer_results:
         # Return empty DataFrame with expected schema
         return pd.DataFrame(
-            columns=["image", "page", "label", "color", "xmin", "xmax", "ymin", "ymax", "text", "id"]
+            columns=[
+                "image",
+                "page",
+                "label",
+                "color",
+                "xmin",
+                "xmax",
+                "ymin",
+                "ymax",
+                "text",
+                "id",
+            ]
         )
-    
+
     # Prepare data for DataFrame
     rows = list()
     existing_ids = set()
-    
+
     for i, qa_result in enumerate(question_answer_results):
         page_num = int(qa_result.get("Page", 1))
         page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
@@ -574,18 +731,20 @@ def convert_question_answer_to_dataframe(question_answer_results: List[Dict[str,
         else:
             print("Warning: Page sizes DataFrame became empty after processing.")
 
-        image_name = page_sizes_df.loc[page_sizes_df["page"] == page_num, "image_path"].iloc[0]
+        image_name = page_sizes_df.loc[
+            page_sizes_df["page"] == page_num, "image_path"
+        ].iloc[0]
         if pd.isna(image_name):
             image_name = f"placeholder_image_{page_num}.png"
-        
+
         # Create Question row
         question_bbox = {
             "Question_left": qa_result.get("Question_left", 0),
             "Question_top": qa_result.get("Question_top", 0),
             "Question_width": qa_result.get("Question_width", 0),
-            "Question_height": qa_result.get("Question_height", 0)
+            "Question_height": qa_result.get("Question_height", 0),
         }
-        
+
         question_row = {
             "image": image_name,
             "page": page_num,
@@ -596,17 +755,17 @@ def convert_question_answer_to_dataframe(question_answer_results: List[Dict[str,
             "ymin": question_bbox["Question_top"],
             "ymax": question_bbox["Question_top"] + question_bbox["Question_height"],
             "text": qa_result.get("Question", ""),
-            "id": None  # Will be filled after generating IDs
+            "id": None,  # Will be filled after generating IDs
         }
-        
+
         # Create Answer row
         answer_bbox = {
             "Answer_left": qa_result.get("Answer_left", 0),
             "Answer_top": qa_result.get("Answer_top", 0),
             "Answer_width": qa_result.get("Answer_width", 0),
-            "Answer_height": qa_result.get("Answer_height", 0)
+            "Answer_height": qa_result.get("Answer_height", 0),
         }
-        
+
         answer_row = {
             "image": image_name,
             "page": page_num,
@@ -617,99 +776,117 @@ def convert_question_answer_to_dataframe(question_answer_results: List[Dict[str,
             "ymin": answer_bbox["Answer_top"],
             "ymax": answer_bbox["Answer_top"] + answer_bbox["Answer_height"],
             "text": qa_result.get("Answer", ""),
-            "id": None  # Will be filled after generating IDs
+            "id": None,  # Will be filled after generating IDs
         }
-        
+
         rows.extend([question_row, answer_row])
-    
+
     # Generate unique IDs for all rows
     num_ids_needed = len(rows)
     unique_ids = _generate_unique_ids(num_ids_needed, existing_ids)
-    
+
     # Assign IDs to rows
     for i, row in enumerate(rows):
         row["id"] = unique_ids[i]
-    
+
     # Create DataFrame
     df = pd.DataFrame(rows)
-    
+
     # Ensure all required columns are present and in correct order
-    required_columns = ["image", "page", "label", "color", "xmin", "xmax", "ymin", "ymax", "text", "id"]
+    required_columns = [
+        "image",
+        "page",
+        "label",
+        "color",
+        "xmin",
+        "xmax",
+        "ymin",
+        "ymax",
+        "text",
+        "id",
+    ]
     for col in required_columns:
         if col not in df.columns:
             df[col] = pd.NA
-    
+
     # Reorder columns to match expected format
     df = df.reindex(columns=required_columns, fill_value=pd.NA)
-    
+
     return df
 
 
 def convert_question_answer_to_annotation_json(
-    question_answer_results: List[Dict[str, Any]], 
-    page_sizes_df: pd.DataFrame
+    question_answer_results: List[Dict[str, Any]], page_sizes_df: pd.DataFrame
 ) -> List[Dict]:
     """
     Convert question-answer results directly to Gradio Annotation JSON format.
-    
+
     This function combines the functionality of convert_question_answer_to_dataframe
     and convert_review_df_to_annotation_json to directly convert question-answer
     results to the annotation JSON format without the intermediate DataFrame step.
-    
+
     Args:
         question_answer_results: List of question-answer dictionaries from _create_question_answer_results_object
         page_sizes_df: DataFrame containing page sizes with columns ['page', 'image_path', 'image_width', 'image_height']
-        
+
     Returns:
         List of dictionaries suitable for Gradio Annotation output, one dict per image/page.
         Each dict has structure: {"image": image_path, "boxes": [list of annotation boxes]}
     """
-    
+
     if not question_answer_results:
         # Return empty structure based on page_sizes_df
         json_data = list()
         for _, row in page_sizes_df.iterrows():
-            json_data.append({
-                "image": row.get("image_path", f"placeholder_image_{row.get('page', 1)}.png"),
-                "boxes": []
-            })
+            json_data.append(
+                {
+                    "image": row.get(
+                        "image_path", f"placeholder_image_{row.get('page', 1)}.png"
+                    ),
+                    "boxes": [],
+                }
+            )
         return json_data
-    
+
     # Validate required columns in page_sizes_df
     required_ps_cols = {"page", "image_path", "image_width", "image_height"}
     if not required_ps_cols.issubset(page_sizes_df.columns):
         missing = required_ps_cols - set(page_sizes_df.columns)
         raise ValueError(f"page_sizes_df is missing required columns: {missing}")
-    
+
     # Convert page sizes columns to appropriate numeric types
     page_sizes_df = page_sizes_df.copy()  # Work with a copy to avoid modifying original
     page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
-    page_sizes_df["image_width"] = pd.to_numeric(page_sizes_df["image_width"], errors="coerce")
-    page_sizes_df["image_height"] = pd.to_numeric(page_sizes_df["image_height"], errors="coerce")
+    page_sizes_df["image_width"] = pd.to_numeric(
+        page_sizes_df["image_width"], errors="coerce"
+    )
+    page_sizes_df["image_height"] = pd.to_numeric(
+        page_sizes_df["image_height"], errors="coerce"
+    )
     page_sizes_df["page"] = page_sizes_df["page"].astype("Int64")
-    
+
     # Prepare data for processing
     rows = list()
     existing_ids = set()
-    
+
     for i, qa_result in enumerate(question_answer_results):
         page_num = int(qa_result.get("Page", 1))
-        
+
         # Get image path for this page
         page_row = page_sizes_df[page_sizes_df["page"] == page_num]
         if not page_row.empty:
-            image_name = page_row["image_path"].iloc[0]
+            page_row["image_path"].iloc[0]
         else:
-            image_name = f"placeholder_image_{page_num}.png"
-        
+            pass
+
         # Create Question box.
         question_bbox = {
             "Question_left": qa_result.get("Question_left", 0),
             "Question_top": qa_result.get("Question_top", 0),
             "Question_width": qa_result.get("Question_width", 0),
-            "Question_height": qa_result.get("Question_height", 0)
+            "Question_height": qa_result.get("Question_height", 0),
         }
-        
+
         question_box = {
             "label": f"Question {i+1}",
             "color": (0, 0, 255),  # Blue for questions
@@ -718,17 +895,17 @@ def convert_question_answer_to_annotation_json(
             "ymin": question_bbox["Question_top"],
             "ymax": question_bbox["Question_top"] + question_bbox["Question_height"],
             "text": qa_result.get("Question", ""),
-            "id": None  # Will be filled after generating IDs
+            "id": None,  # Will be filled after generating IDs
         }
-        
+
         # Create Answer box
         answer_bbox = {
             "Answer_left": qa_result.get("Answer_left", 0),
             "Answer_top": qa_result.get("Answer_top", 0),
             "Answer_width": qa_result.get("Answer_width", 0),
-            "Answer_height": qa_result.get("Answer_height", 0)
+            "Answer_height": qa_result.get("Answer_height", 0),
         }
-        
+
         answer_box = {
             "label": f"Answer {i+1}",
             "color": (0, 255, 0),  # Green for answers
@@ -737,50 +914,50 @@ def convert_question_answer_to_annotation_json(
             "ymin": answer_bbox["Answer_top"],
             "ymax": answer_bbox["Answer_top"] + answer_bbox["Answer_height"],
             "text": qa_result.get("Answer", ""),
-            "id": None  # Will be filled after generating IDs
+            "id": None,  # Will be filled after generating IDs
         }
-        
+
         rows.extend([(page_num, question_box), (page_num, answer_box)])
-    
+
     # Generate unique IDs for all boxes
     num_ids_needed = len(rows)
     unique_ids = _generate_unique_ids(num_ids_needed, existing_ids)
-    
+
     # Assign IDs to boxes
     for i, (page_num, box) in enumerate(rows):
         box["id"] = unique_ids[i]
         rows[i] = (page_num, box)
-    
+
     # Group boxes by page
     boxes_by_page = {}
     for page_num, box in rows:
         if page_num not in boxes_by_page:
             boxes_by_page[page_num] = list()
         boxes_by_page[page_num].append(box)
-    
+
     # Build JSON structure based on page_sizes
     json_data = list()
     for _, row in page_sizes_df.iterrows():
         page_num = row["page"]
         pdf_image_path = row["image_path"]
-        
+
         # Get boxes for this page
         annotation_boxes = boxes_by_page.get(page_num, [])
-        
+
         # Append the structured data for this image/page
         json_data.append({"image": pdf_image_path, "boxes": annotation_boxes})
-    
+
     return json_data
 
 
 def convert_page_question_answer_to_custom_image_recognizer_results(
     question_answer_results: List[Dict[str, Any]],
     page_sizes_df: pd.DataFrame,
-    reported_page_number: int
-) -> List['CustomImageRecognizerResult']:
+    reported_page_number: int,
+) -> List["CustomImageRecognizerResult"]:
     """
     Convert question-answer results to a list of CustomImageRecognizerResult objects.
-    
+
     Args:
         question_answer_results: List of question-answer dictionaries from _create_question_answer_results_object
         page_sizes_df: DataFrame containing page sizes with columns ['page', 'image_path', 'image_width', 'image_height']
@@ -789,12 +966,12 @@ def convert_page_question_answer_to_custom_image_recognizer_results(
         List of CustomImageRecognizerResult objects for questions and answers
     """
     from tools.custom_image_analyser_engine import CustomImageRecognizerResult
-    
+
     if not question_answer_results:
         return list()
-    
+
     results = list()
-    
+
     # Pre-process page_sizes_df once for efficiency
     page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
     page_sizes_df.dropna(subset=["page"], inplace=True)
@@ -802,28 +979,30 @@ def convert_page_question_answer_to_custom_image_recognizer_results(
         page_sizes_df["page"] = page_sizes_df["page"].astype(int)
     else:
         print("Warning: Page sizes DataFrame became empty after processing.")
-        return list() # Return empty list if no page sizes are available
+        return list()  # Return empty list if no page sizes are available
 
     page_row = page_sizes_df.loc[page_sizes_df["page"] == int(reported_page_number)]
 
     if page_row.empty:
-        print(f"Warning: Page {reported_page_number} not found in page_sizes_df. Skipping this entry.")
-        return list() # Return empty list if page not found
-    
+        print(
+            f"Warning: Page {reported_page_number} not found in page_sizes_df. Skipping this entry."
+        )
+        return list()  # Return empty list if page not found
+
     for i, qa_result in enumerate(question_answer_results):
         current_page = int(qa_result.get("Page", 1))
 
         if current_page != int(reported_page_number):
-            continue # Skip this entry if page number does not match reported page number        
+            continue  # Skip this entry if page number does not match reported page number
 
         # Get image dimensions safely
         image_width = page_row["mediabox_width"].iloc[0]
         image_height = page_row["mediabox_height"].iloc[0]
-        
+
         # Get question and answer text safely
         question_text = qa_result.get("Question", "")
         answer_text = qa_result.get("Answer", "")
-        
+
         # Get scores and handle potential type issues
         question_score = float(qa_result.get("'Confidence Score % (Question)'", 0.0))
         answer_score = float(qa_result.get("'Confidence Score % (Answer)'", 0.0))
@@ -833,9 +1012,9 @@ def convert_page_question_answer_to_custom_image_recognizer_results(
             "left": qa_result.get("Question_left", 0) * image_width,
             "top": qa_result.get("Question_top", 0) * image_height,
             "width": qa_result.get("Question_width", 0) * image_width,
-            "height": qa_result.get("Question_height", 0) * image_height
+            "height": qa_result.get("Question_height", 0) * image_height,
         }
-        
+
         question_result = CustomImageRecognizerResult(
             entity_type=f"QUESTION {i+1}",
             start=0,
@@ -846,20 +1025,20 @@ def convert_page_question_answer_to_custom_image_recognizer_results(
             width=float(question_bbox.get("width", 0)),
             height=float(question_bbox.get("height", 0)),
             text=question_text,
-            color=(0, 0, 255)
+            color=(0, 0, 255),
         )
         results.append(question_result)
 
         print("question_result:", question_result)
-        
+
         # --- Process Answer Bounding Box ---
         answer_bbox = {
             "left": qa_result.get("Answer_left", 0) * image_width,
             "top": qa_result.get("Answer_top", 0) * image_height,
             "width": qa_result.get("Answer_width", 0) * image_width,
-            "height": qa_result.get("Answer_height", 0) * image_height
+            "height": qa_result.get("Answer_height", 0) * image_height,
         }
-        
+
         answer_result = CustomImageRecognizerResult(
             entity_type=f"ANSWER {i+1}",
             start=0,
@@ -870,8 +1049,8 @@ def convert_page_question_answer_to_custom_image_recognizer_results(
             width=float(answer_bbox.get("width", 0)),
             height=float(answer_bbox.get("height", 0)),
             text=answer_text,
-            color=(0, 255, 0)
+            color=(0, 255, 0),
         )
         results.append(answer_result)
-    
+
     return results

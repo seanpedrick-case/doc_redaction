@@ -1,10 +1,11 @@
 import os
+import random
 import string
 import unicodedata
 from math import ceil
 from pathlib import Path
 from typing import List, Set
-import random
+
 import boto3
 import gradio as gr
 import numpy as np
@@ -599,6 +600,7 @@ def clean_unicode_text(text: str):
 
     return cleaned_text
 
+
 # --- Helper Function for ID Generation ---
 # This function encapsulates your ID logic in a performant, batch-oriented way.
 def _generate_unique_ids(
@@ -637,6 +639,7 @@ def _generate_unique_ids(
             newly_generated_ids.add(candidate_id)
 
     return list(newly_generated_ids)
+
 
 def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:
     """Get the file paths of all files in the given folder."""

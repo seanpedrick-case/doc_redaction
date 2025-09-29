@@ -1,7 +1,7 @@
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 import defusedxml
@@ -22,10 +22,10 @@ from pymupdf import Document, Rect
 
 from tools.config import (
     COMPRESS_REDACTED_PDF,
+    CUSTOM_BOX_COLOUR,
     INPUT_FOLDER,
     MAX_IMAGE_PIXELS,
     OUTPUT_FOLDER,
-    CUSTOM_BOX_COLOUR
 )
 from tools.file_conversion import (
     convert_annotation_data_to_dataframe,
@@ -40,7 +40,11 @@ from tools.file_conversion import (
     save_pdf_with_or_without_compression,
 )
 from tools.file_redaction import redact_page_with_pymupdf
-from tools.helper_functions import detect_file_type, get_file_name_without_type, _generate_unique_ids
+from tools.helper_functions import (
+    _generate_unique_ids,
+    detect_file_type,
+    get_file_name_without_type,
+)
 from tools.secure_path_utils import (
     secure_file_write,
 )
@@ -1666,7 +1670,9 @@ def apply_redactions_to_review_df_and_files(
                             fill = CUSTOM_BOX_COLOUR  # Default to black if invalid
                     else:
                         print(f"Invalid fill format: {fill}. Defaulting to black.")
-                        fill = CUSTOM_BOX_COLOUR  # Default to black if not a valid tuple
+                        fill = (
+                            CUSTOM_BOX_COLOUR  # Default to black if not a valid tuple
+                        )
 
                         # Ensure the image is in RGB mode
                     if image.mode not in ("RGB", "RGBA"):
@@ -1726,9 +1732,7 @@ def apply_redactions_to_review_df_and_files(
                         except Exception:
                             image = None
 
-                    pymupdf_page = pdf_doc.load_page(
-                        i
-                    )
+                    pymupdf_page = pdf_doc.load_page(i)
                     original_cropboxes.append(pymupdf_page.cropbox)
                     pymupdf_page.set_cropbox(pymupdf_page.mediabox)
 
@@ -1738,14 +1742,13 @@ def apply_redactions_to_review_df_and_files(
                         image=image,
                         original_cropbox=original_cropboxes[-1],
                         page_sizes_df=page_sizes_df,
-                        return_pdf_for_review=False
+                        return_pdf_for_review=False,
                     )
             else:
                 print("File type not recognised.")
 
             progress(0.9, "Saving output files")
 
-            
             if pdf_doc:
                 out_pdf_file_path = (
                     output_folder + file_name_without_ext + "_redacted.pdf"

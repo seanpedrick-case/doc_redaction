@@ -2,6 +2,7 @@ import logging
 import os
 import socket
 import tempfile
+import urllib.parse
 from datetime import datetime
 from typing import List
 
@@ -270,6 +271,11 @@ if TESSERACT_FOLDER:
 if POPPLER_FOLDER:
     add_folder_to_path(POPPLER_FOLDER)
 
+# Extraction and PII options open by default:
+EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = get_or_create_env_var(
+    "EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT", "True"
+)
+
 # List of models to use for text extraction and PII detection
 # Text extraction models
 SELECTABLE_TEXT_EXTRACT_OPTION = get_or_create_env_var(
@@ -303,9 +309,9 @@ if (
 ):
     SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = "True"
 
-local_model_options = []
-aws_model_options = []
-text_extraction_models = []
+local_model_options = list()
+aws_model_options = list()
+text_extraction_models = list()
 
 if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS == "True":
     local_model_options.append(SELECTABLE_TEXT_EXTRACT_OPTION)
@@ -333,8 +339,8 @@ if (
     SHOW_LOCAL_PII_DETECTION_OPTIONS = "True"
 
 local_model_options = [NO_REDACTION_PII_OPTION]
-aws_model_options = []
-pii_detection_models = []
+aws_model_options = list()
+pii_detection_models = list()
 
 if SHOW_LOCAL_PII_DETECTION_OPTIONS == "True":
     local_model_options.append(LOCAL_PII_OPTION)
@@ -464,26 +470,6 @@ MAX_OPEN_TEXT_CHARACTERS = int(
     get_or_create_env_var("MAX_OPEN_TEXT_CHARACTERS", "50000")
 )
 
-USE_GUI_BOX_COLOURS_FOR_OUTPUTS = get_or_create_env_var(
-    "USE_GUI_BOX_COLOURS_FOR_OUTPUTS", "False"
-)
-
-# This is the colour of the output pdf redaction boxes. Should be a tuple of three integers between 0 and 1
-CUSTOM_BOX_COLOUR = get_or_create_env_var(
-    "CUSTOM_BOX_COLOUR", "(0, 0, 0)"
-)  
-
-if CUSTOM_BOX_COLOUR == "grey":
-    # only "grey" is currently supported as a custom box colour by name, or a tuple of three integers between 0 and 1
-    CUSTOM_BOX_COLOUR = (0.5, 0.5, 0.5)
-else:
-    components_str = CUSTOM_BOX_COLOUR.strip("()").split(",")
-    CUSTOM_BOX_COLOUR = tuple(int(c.strip()) for c in components_str) # Always gives a tuple of three integers between 0 and 255
-
-# If you don't want to redact the text, but instead just draw a box over it, set this to True
-RETURN_PDF_FOR_REVIEW = get_or_create_env_var(
-    "RETURN_PDF_FOR_REVIEW", "False"
-)
 
 ### Language selection options
 
@@ -538,8 +524,37 @@ REMOVE_DUPLICATE_ROWS = get_or_create_env_var("REMOVE_DUPLICATE_ROWS", "False")
 ###
 # File output options
 ###
-RETURN_PDF_END_OF_REDACTION = get_or_create_env_var(
-    "RETURN_PDF_END_OF_REDACTION", "True"
+# Should the output pdf redaction boxes be drawn using the custom box colour?
+USE_GUI_BOX_COLOURS_FOR_OUTPUTS = get_or_create_env_var(
+    "USE_GUI_BOX_COLOURS_FOR_OUTPUTS", "False"
+)
+
+# This is the colour of the output pdf redaction boxes. Should be a tuple of three integers between 0 and 1
+CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "(0, 0, 0)")
+
+if CUSTOM_BOX_COLOUR == "grey":
+    # only "grey" is currently supported as a custom box colour by name, or a tuple of three integers between 0 and 1
+    CUSTOM_BOX_COLOUR = (0.5, 0.5, 0.5)
+else:
+    try:
+        components_str = CUSTOM_BOX_COLOUR.strip("()").split(",")
+        CUSTOM_BOX_COLOUR = tuple(
+            int(c.strip()) for c in components_str
+        )  # Always gives a tuple of three integers between 0 and 255
+    except Exception as e:
+        print(f"Error initialising CUSTOM_BOX_COLOUR: {e}, returning default black")
+        CUSTOM_BOX_COLOUR = (
+            0,
+            0,
+            0,
+        )  # Default to black if the custom box colour is not a valid tuple of three integers between 0 and 255
+
+
+# If you don't want to redact the text, but instead just draw a box over it, set this to True
+RETURN_PDF_FOR_REVIEW = get_or_create_env_var("RETURN_PDF_FOR_REVIEW", "False")
+
+RETURN_REDACTED_PDF = get_or_create_env_var(
+    "RETURN_REDACTED_PDF", "True"
 )  # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
 
 COMPRESS_REDACTED_PDF = get_or_create_env_var(
@@ -547,7 +562,7 @@ COMPRESS_REDACTED_PDF = get_or_create_env_var(
 )  # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
 
 ###
-# APP RUN OPTIONS
+# APP RUN / GUI OPTIONS
 ###
 
 TLDEXTRACT_CACHE = get_or_create_env_var("TLDEXTRACT_CACHE", "tmp/tld/")
@@ -559,6 +574,59 @@ except Exception as e:
 
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "0")
+
+
+# Link to user guide - ensure it is a valid URL
+def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
+    """
+    Validate and return a safe URL with enhanced security checks.
+    """
+    if allowed_domains is None:
+        allowed_domains = [
+            "seanpedrick-case.github.io",
+            "github.io",
+            "github.com",
+            "sharepoint.com",
+        ]
+
+    try:
+        parsed = urllib.parse.urlparse(url_candidate)
+
+        # Basic structure validation
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("Invalid URL structure")
+
+        # Security checks
+        if parsed.scheme not in ["https"]:  # Only allow HTTPS
+            raise ValueError("Only HTTPS URLs are allowed for security")
+
+        # Domain validation
+        domain = parsed.netloc.lower()
+        if not any(domain.endswith(allowed) for allowed in allowed_domains):
+            raise ValueError(f"Domain not in allowed list: {domain}")
+
+        # Additional security checks
+        if any(
+            suspicious in domain for suspicious in ["..", "//", "javascript:", "data:"]
+        ):
+            raise ValueError("Suspicious URL patterns detected")
+
+        # Path validation (prevent path traversal)
+        if ".." in parsed.path or "//" in parsed.path:
+            raise ValueError("Path traversal attempts detected")
+
+        return url_candidate
+
+    except Exception as e:
+        print(f"URL validation failed: {e}")
+        return "https://seanpedrick-case.github.io/doc_redaction"  # Safe fallback
+
+
+USER_GUIDE_URL = validate_safe_url(
+    get_or_create_env_var(
+        "USER_GUIDE_URL", "https://seanpedrick-case.github.io/doc_redaction"
+    )
+)
 
 SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "False")
 SHOW_AWS_EXAMPLES = get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
@@ -720,3 +788,105 @@ TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var(
 DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(
     get_or_create_env_var("DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS", "7")
 )  # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.
+
+
+###
+# Config vars output format
+###
+# Ensure that config variables are in the correct format for subsequent use elsewhere
+
+# Convert string environment variables to string or list
+if SAVE_LOGS_TO_CSV == "True":
+    SAVE_LOGS_TO_CSV = True
+else:
+    SAVE_LOGS_TO_CSV = False
+if SAVE_LOGS_TO_DYNAMODB == "True":
+    SAVE_LOGS_TO_DYNAMODB = True
+else:
+    SAVE_LOGS_TO_DYNAMODB = False
+if SHOW_LANGUAGE_SELECTION == "True":
+    SHOW_LANGUAGE_SELECTION = True
+else:
+    SHOW_LANGUAGE_SELECTION = False
+if DISPLAY_FILE_NAMES_IN_LOGS == "True":
+    DISPLAY_FILE_NAMES_IN_LOGS = True
+else:
+    DISPLAY_FILE_NAMES_IN_LOGS = False
+if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
+    DO_INITIAL_TABULAR_DATA_CLEAN = True
+else:
+    DO_INITIAL_TABULAR_DATA_CLEAN = False
+if COMPRESS_REDACTED_PDF == "True":
+    COMPRESS_REDACTED_PDF = True
+else:
+    COMPRESS_REDACTED_PDF = False
+if RETURN_REDACTED_PDF == "True":
+    RETURN_REDACTED_PDF = True
+else:
+    RETURN_REDACTED_PDF = False
+if USE_GREEDY_DUPLICATE_DETECTION == "True":
+    USE_GREEDY_DUPLICATE_DETECTION = True
+else:
+    USE_GREEDY_DUPLICATE_DETECTION = False
+if DEFAULT_COMBINE_PAGES == "True":
+    DEFAULT_COMBINE_PAGES = True
+else:
+    DEFAULT_COMBINE_PAGES = False
+if REMOVE_DUPLICATE_ROWS == "True":
+    REMOVE_DUPLICATE_ROWS = True
+else:
+    REMOVE_DUPLICATE_ROWS = False
+
+if CSV_ACCESS_LOG_HEADERS:
+    CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
+if CSV_FEEDBACK_LOG_HEADERS:
+    CSV_FEEDBACK_LOG_HEADERS = _get_env_list(CSV_FEEDBACK_LOG_HEADERS)
+if CSV_USAGE_LOG_HEADERS:
+    CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
+
+if DYNAMODB_ACCESS_LOG_HEADERS:
+    DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
+if DYNAMODB_FEEDBACK_LOG_HEADERS:
+    DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
+if DYNAMODB_USAGE_LOG_HEADERS:
+    DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
+
+if CHOSEN_COMPREHEND_ENTITIES:
+    CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
+if FULL_COMPREHEND_ENTITY_LIST:
+    FULL_COMPREHEND_ENTITY_LIST = _get_env_list(FULL_COMPREHEND_ENTITY_LIST)
+if CHOSEN_REDACT_ENTITIES:
+    CHOSEN_REDACT_ENTITIES = _get_env_list(CHOSEN_REDACT_ENTITIES)
+if FULL_ENTITY_LIST:
+    FULL_ENTITY_LIST = _get_env_list(FULL_ENTITY_LIST)
+
+if DEFAULT_TEXT_COLUMNS:
+    DEFAULT_TEXT_COLUMNS = _get_env_list(DEFAULT_TEXT_COLUMNS)
+if DEFAULT_EXCEL_SHEETS:
+    DEFAULT_EXCEL_SHEETS = _get_env_list(DEFAULT_EXCEL_SHEETS)
+
+if CUSTOM_ENTITIES:
+    CUSTOM_ENTITIES = _get_env_list(CUSTOM_ENTITIES)
+
+if DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX:
+    DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = _get_env_list(
+        DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX
+    )
+
+USE_GUI_BOX_COLOURS_FOR_OUTPUTS = USE_GUI_BOX_COLOURS_FOR_OUTPUTS.lower() == "true"
+RETURN_PDF_FOR_REVIEW = RETURN_PDF_FOR_REVIEW.lower() == "true"
+
+if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
+    DO_INITIAL_TABULAR_DATA_CLEAN = True
+else:
+    DO_INITIAL_TABULAR_DATA_CLEAN = False
+
+if REMOVE_DUPLICATE_ROWS == "True":
+    REMOVE_DUPLICATE_ROWS = True
+else:
+    REMOVE_DUPLICATE_ROWS = False
+
+if EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT == "True":
+    EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = True
+else:
+    EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = False

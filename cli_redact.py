@@ -38,7 +38,7 @@ from tools.config import (
     OUTPUT_FOLDER,
     PREPROCESS_LOCAL_OCR_IMAGES,
     REMOVE_DUPLICATE_ROWS,
-    RETURN_PDF_END_OF_REDACTION,
+    RETURN_REDACTED_PDF,
     RUN_AWS_FUNCTIONS,
     S3_USAGE_LOGS_FOLDER,
     SAVE_LOGS_TO_CSV,
@@ -123,23 +123,6 @@ def _get_env_list(env_var_name: str) -> list[str]:
     # Split by comma and filter out any empty strings that might result from extra commas
     return [s.strip() for s in value.split(",") if s.strip()]
 
-
-# --- Constants and Configuration ---
-
-if CHOSEN_COMPREHEND_ENTITIES:
-    CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
-if FULL_COMPREHEND_ENTITY_LIST:
-    FULL_COMPREHEND_ENTITY_LIST = _get_env_list(FULL_COMPREHEND_ENTITY_LIST)
-if CHOSEN_REDACT_ENTITIES:
-    CHOSEN_REDACT_ENTITIES = _get_env_list(CHOSEN_REDACT_ENTITIES)
-if FULL_ENTITY_LIST:
-    FULL_ENTITY_LIST = _get_env_list(FULL_ENTITY_LIST)
-if CUSTOM_ENTITIES:
-    CUSTOM_ENTITIES = _get_env_list(CUSTOM_ENTITIES)
-if DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX:
-    DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = _get_env_list(
-        DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX
-    )
 
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
 CHOSEN_COMPREHEND_ENTITIES.extend(CUSTOM_ENTITIES)
@@ -399,7 +382,7 @@ python cli_redact.py --task textract --textract_action list
     )
     pdf_group.add_argument(
         "--return_pdf_end_of_redaction",
-        default=RETURN_PDF_END_OF_REDACTION,
+        default=RETURN_REDACTED_PDF,
         help="Return PDF at end of redaction process.",
     )
     pdf_group.add_argument(

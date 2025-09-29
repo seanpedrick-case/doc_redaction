@@ -40,7 +40,6 @@ from tools.config import (
     aws_comprehend_language_choices,
 )
 from tools.helper_functions import (
-    _get_env_list,
     detect_file_type,
     get_file_name_without_type,
     read_file,
@@ -57,14 +56,6 @@ from tools.load_spacy_model_custom_recognisers import (
 # Use custom version of analyze_dict to be able to track progress
 from tools.presidio_analyzer_custom import analyze_dict
 from tools.secure_path_utils import secure_join
-
-if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
-    DO_INITIAL_TABULAR_DATA_CLEAN = True
-else:
-    DO_INITIAL_TABULAR_DATA_CLEAN = False
-
-if CUSTOM_ENTITIES:
-    CUSTOM_ENTITIES = _get_env_list(CUSTOM_ENTITIES)
 
 custom_entities = CUSTOM_ENTITIES
 
