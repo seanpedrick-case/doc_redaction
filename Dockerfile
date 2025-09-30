@@ -55,7 +55,9 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     USAGE_LOGS_FOLDER=$APP_HOME/app/usage/ \
     CONFIG_FOLDER=$APP_HOME/app/config/ \
     XDG_CACHE_HOME=/tmp/xdg_cache/user_1000 \
-    TESSERACT_DATA_FOLDER=/usr/share/tessdata
+    TESSERACT_DATA_FOLDER=/usr/share/tessdata \
+    GRADIO_SERVER_NAME=0.0.0.0 \
+    GRADIO_SERVER_PORT=7860
 
 # Create the base application directory and set its ownership
 RUN mkdir -p ${APP_HOME}/app && chown user:user ${APP_HOME}/app
@@ -131,16 +133,18 @@ VOLUME ["/usr/share/tessdata"]
 VOLUME ["/tmp"]
 VOLUME ["/var/tmp"]
 
+EXPOSE $GRADIO_SERVER_PORT
+
 # Set runtime environment
 ENV PATH=$APP_HOME/.local/bin:$PATH \
     PYTHONPATH=$APP_HOME/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     GRADIO_ALLOW_FLAGGING=never \
-    GRADIO_NUM_PORTS=1 \
-    GRADIO_SERVER_NAME=0.0.0.0 \
-    GRADIO_SERVER_PORT=7860 \
-    GRADIO_ANALYTICS_ENABLED=False 
+    GRADIO_NUM_PORTS=1 \    
+    GRADIO_ANALYTICS_ENABLED=False \
+    DEFAULT_CONCURRENCY_LIMIT=3 \
+    RUN_FASTAPI=1
 
 
 ENTRYPOINT ["/entrypoint.sh"]

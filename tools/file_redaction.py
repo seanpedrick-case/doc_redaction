@@ -389,10 +389,13 @@ def choose_and_run_redactor(
         total_textract_query_number = 0
         comprehend_query_number = 0
 
-    if not file_paths or prepared_pdf_file_paths:
+    if not file_paths:
         raise Exception("No files to redact")
 
-    review_out_file_paths = [prepared_pdf_file_paths[0]]
+    if prepared_pdf_file_paths:
+        review_out_file_paths = [prepared_pdf_file_paths[0]]
+    else:
+        review_out_file_paths = []
 
     # Choose the correct file to prepare
     if isinstance(file_paths, str):

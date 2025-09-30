@@ -2,6 +2,7 @@ import os
 
 import gradio as gr
 import pandas as pd
+from fastapi import FastAPI
 from gradio_image_annotation import image_annotator
 
 from tools.auth import authenticate_user
@@ -10,6 +11,7 @@ from tools.config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACCESS_LOGS_FOLDER,
     ALLOW_LIST_PATH,
+    ALLOWED_ORIGINS,
     AWS_ACCESS_KEY,
     AWS_PII_OPTION,
     AWS_REGION,
@@ -24,6 +26,7 @@ from tools.config import (
     CSV_ACCESS_LOG_HEADERS,
     CSV_FEEDBACK_LOG_HEADERS,
     CSV_USAGE_LOG_HEADERS,
+    CUSTOM_BOX_COLOUR,
     DEFAULT_COMBINE_PAGES,
     DEFAULT_CONCURRENCY_LIMIT,
     DEFAULT_COST_CODE,
@@ -64,6 +67,7 @@ from tools.config import (
     FULL_ENTITY_LIST,
     GET_COST_CODES,
     GET_DEFAULT_ALLOW_LIST,
+    GRADIO_SERVER_NAME,
     GRADIO_SERVER_PORT,
     GRADIO_TEMP_DIR,
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
@@ -87,6 +91,7 @@ from tools.config import (
     ROOT_PATH,
     RUN_AWS_FUNCTIONS,
     RUN_DIRECT_MODE,
+    RUN_FASTAPI,
     S3_ACCESS_LOGS_FOLDER,
     S3_ALLOW_LIST_PATH,
     S3_COST_CODES_PATH,
@@ -219,6 +224,16 @@ ensure_folder_exists(USAGE_LOGS_FOLDER)
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 
+###
+# Load in FastAPI app
+###
+app = FastAPI()
+from fastapi.middleware.cors import CORSMiddleware
+
+###
+# Load in Gradio app components
+###
+
 # Load some components outside of blocks context that are used for examples
 ## Redaction examples
 in_doc_files = gr.File(
@@ -331,11 +346,11 @@ tabular_text_columns = gr.Dropdown(
 )
 
 # Create the gradio interface
-app = gr.Blocks(
+blocks = gr.Blocks(
     theme=gr.themes.Default(primary_hue="blue"), fill_width=True
 )  # gr.themes.Base()
 
-with app:
+with blocks:
 
     ###
     # STATE VARIABLES
@@ -1274,12 +1289,13 @@ with app:
             with gr.Row(equal_height=True):
                 with gr.Column(scale=2):
                     input_pdf_for_review = gr.File(
-                        label="Upload original PDF to begin review process.",
+                        label="Upload original or '..._for_review.pdf' PDF to begin review process.",
                         file_count="multiple",
                         height=FILE_INPUT_HEIGHT,
                     )
                     upload_pdf_for_review_btn = gr.Button(
-                        "1. Upload original PDF", variant="secondary"
+                        "1. Load in original PDF or review PDF with redactions",
+                        variant="secondary",
                     )
                 with gr.Column(scale=1):
                     input_review_files = gr.File(
@@ -1498,7 +1514,7 @@ with app:
                             )
                             colour_label = gr.Textbox(
                                 label="Colour for labels (three number RGB format, max 255 with brackets)",
-                                value="(0, 0, 0)",
+                                value=CUSTOM_BOX_COLOUR,
                             )
 
                         all_page_line_level_ocr_results_with_words_df = gr.Dataframe(
@@ -5551,7 +5567,7 @@ with app:
     # Get connection details on app load
 
     if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
-        app.load(
+        blocks.load(
             get_connection_params,
             inputs=[
                 output_folder_textbox,
@@ -5582,7 +5598,7 @@ with app:
             outputs=[textract_job_detail_df],
         )
     else:
-        app.load(
+        blocks.load(
             get_connection_params,
             inputs=[
                 output_folder_textbox,
@@ -5606,14 +5622,14 @@ with app:
         )
 
     # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location
-    if GET_DEFAULT_ALLOW_LIST == "True" and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
+    if GET_DEFAULT_ALLOW_LIST is True and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
         if (
             not os.path.exists(ALLOW_LIST_PATH)
             and S3_ALLOW_LIST_PATH
             and RUN_AWS_FUNCTIONS == "1"
         ):
             print("Downloading allow list from S3")
-            app.load(
+            blocks.load(
                 download_file_from_s3,
                 inputs=[
                     s3_default_bucket,
@@ -5631,7 +5647,7 @@ with app:
                 "Loading allow list from default allow list output path location:",
                 ALLOW_LIST_PATH,
             )
-            app.load(
+            blocks.load(
                 load_in_default_allow_list,
                 inputs=[default_allow_list_output_folder_location],
                 outputs=[in_allow_list],
@@ -5640,14 +5656,14 @@ with app:
             print("Could not load in default allow list")
 
     # If relevant environment variable is set, load in the default cost code file from S3 or locally
-    if GET_COST_CODES == "True" and (COST_CODES_PATH or S3_COST_CODES_PATH):
+    if GET_COST_CODES is True and (COST_CODES_PATH or S3_COST_CODES_PATH):
         if (
             not os.path.exists(COST_CODES_PATH)
             and S3_COST_CODES_PATH
             and RUN_AWS_FUNCTIONS == "1"
         ):
             print("Downloading cost codes from S3")
-            app.load(
+            blocks.load(
                 download_file_from_s3,
                 inputs=[
                     s3_default_bucket,
@@ -5672,7 +5688,7 @@ with app:
                 "Loading cost codes from default cost codes path location:",
                 COST_CODES_PATH,
             )
-            app.load(
+            blocks.load(
                 load_in_default_cost_codes,
                 inputs=[
                     default_cost_codes_output_folder_location,
@@ -6222,154 +6238,182 @@ with app:
             outputs=[s3_logs_output_textbox],
         )
 
-if __name__ == "__main__":
-    if RUN_DIRECT_MODE == "0":
+    blocks.queue(
+        max_size=int(MAX_QUEUE_SIZE),
+        default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT),
+    )
 
-        if COGNITO_AUTH == "1":
-            app.queue(
-                max_size=int(MAX_QUEUE_SIZE),
-                default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT),
-            ).launch(
+    if RUN_DIRECT_MODE == "0":
+        # If running through command line with uvicorn
+        if RUN_FASTAPI == "1":
+            if ALLOWED_ORIGINS:
+                print(f"CORS enabled. Allowing origins: {ALLOWED_ORIGINS}")
+                app.add_middleware(
+                    CORSMiddleware,
+                    allow_origins=ALLOWED_ORIGINS,  # The list of allowed origins
+                    allow_credentials=True,  # Allow cookies to be included in cross-origin requests
+                    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
+                    allow_headers=["*"],  # Allow all headers
+                )
+
+            app = gr.mount_gradio_app(
+                app,
+                blocks,
                 show_error=True,
-                inbrowser=True,
-                auth=authenticate_user,
+                auth=authenticate_user if COGNITO_AUTH == "1" else None,
                 max_file_size=MAX_FILE_SIZE,
-                server_port=GRADIO_SERVER_PORT,
                 root_path=ROOT_PATH,
+                path="/",
             )
+
+            # Example command to run in uvicorn: uvicorn.run("app:app", host=GRADIO_SERVER_NAME, port=GRADIO_SERVER_PORT)
+
         else:
-            app.queue(
-                max_size=int(MAX_QUEUE_SIZE),
-                default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT),
-            ).launch(
-                show_error=True,
-                inbrowser=True,
-                max_file_size=MAX_FILE_SIZE,
-                server_port=GRADIO_SERVER_PORT,
-                root_path=ROOT_PATH,
-            )
+            if __name__ == "__main__":
+                if COGNITO_AUTH == "1":
+                    blocks.launch(
+                        show_error=True,
+                        inbrowser=True,
+                        auth=authenticate_user,
+                        max_file_size=MAX_FILE_SIZE,
+                        server_name=GRADIO_SERVER_NAME,
+                        server_port=GRADIO_SERVER_PORT,
+                        root_path=ROOT_PATH,
+                    )
+                else:
+                    blocks.launch(
+                        show_error=True,
+                        inbrowser=True,
+                        max_file_size=MAX_FILE_SIZE,
+                        server_name=GRADIO_SERVER_NAME,
+                        server_port=GRADIO_SERVER_PORT,
+                        root_path=ROOT_PATH,
+                    )
 
     else:
-        from cli_redact import main
+        if __name__ == "__main__":
+            from cli_redact import main
 
-        # Validate required direct mode configuration
-        if not DIRECT_MODE_INPUT_FILE:
-            print(
-                "Error: DIRECT_MODE_INPUT_FILE environment variable must be set for direct mode."
+            # Validate required direct mode configuration
+            if not DIRECT_MODE_INPUT_FILE:
+                print(
+                    "Error: DIRECT_MODE_INPUT_FILE environment variable must be set for direct mode."
+                )
+                print(
+                    "Please set DIRECT_MODE_INPUT_FILE to the path of your input file."
+                )
+                exit(1)
+
+            # Prepare direct mode arguments based on environment variables
+            direct_mode_args = {
+                "task": DIRECT_MODE_TASK,
+                "input_file": DIRECT_MODE_INPUT_FILE,
+                "output_dir": DIRECT_MODE_OUTPUT_DIR,
+                "input_dir": INPUT_FOLDER,
+                "language": DEFAULT_LANGUAGE,
+                "allow_list": ALLOW_LIST_PATH,
+                "pii_detector": LOCAL_PII_OPTION,
+                "username": DIRECT_MODE_DEFAULT_USER,
+                "save_to_user_folders": SESSION_OUTPUT_FOLDER,
+                "aws_access_key": AWS_ACCESS_KEY,
+                "aws_secret_key": AWS_SECRET_KEY,
+                "aws_region": AWS_REGION,
+                "s3_bucket": DOCUMENT_REDACTION_BUCKET,
+                "do_initial_clean": DO_INITIAL_TABULAR_DATA_CLEAN,
+                "save_logs_to_csv": SAVE_LOGS_TO_CSV,
+                "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,
+                "display_file_names_in_logs": DISPLAY_FILE_NAMES_IN_LOGS,
+                "upload_logs_to_s3": RUN_AWS_FUNCTIONS == "1",
+                "s3_logs_prefix": S3_USAGE_LOGS_FOLDER,
+                "ocr_method": TESSERACT_TEXT_EXTRACT_OPTION,
+                "page_min": DEFAULT_PAGE_MIN,
+                "page_max": DEFAULT_PAGE_MAX,
+                "images_dpi": IMAGES_DPI,
+                "chosen_local_ocr_model": CHOSEN_LOCAL_OCR_MODEL,
+                "preprocess_local_ocr_images": PREPROCESS_LOCAL_OCR_IMAGES,
+                "compress_redacted_pdf": COMPRESS_REDACTED_PDF,
+                "return_pdf_end_of_redaction": RETURN_REDACTED_PDF,
+                "allow_list_file": ALLOW_LIST_PATH,
+                "deny_list_file": DENY_LIST_PATH,
+                "redact_whole_page_file": WHOLE_PAGE_REDACTION_LIST_PATH,
+                "handwrite_signature_extraction": DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+                "extract_forms": False,
+                "extract_tables": False,
+                "extract_layout": False,
+                "anon_strategy": DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
+                "excel_sheets": DEFAULT_EXCEL_SHEETS,
+                "fuzzy_mistakes": DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+                "match_fuzzy_whole_phrase_bool": "True",  # Default value
+                "duplicate_type": DIRECT_MODE_DUPLICATE_TYPE,
+                "similarity_threshold": DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
+                "min_word_count": DEFAULT_MIN_WORD_COUNT,
+                "min_consecutive_pages": DEFAULT_MIN_CONSECUTIVE_PAGES,
+                "greedy_match": USE_GREEDY_DUPLICATE_DETECTION,
+                "combine_pages": DEFAULT_COMBINE_PAGES,
+                "search_query": DEFAULT_SEARCH_QUERY,
+                "text_columns": DEFAULT_TEXT_COLUMNS,
+                "remove_duplicate_rows": REMOVE_DUPLICATE_ROWS,
+                # Textract specific arguments (with defaults)
+                "textract_action": "",
+                "job_id": "",
+                "extract_signatures": False,
+                "textract_bucket": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
+                "textract_input_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
+                "textract_output_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
+                "s3_textract_document_logs_subfolder": TEXTRACT_JOBS_S3_LOC,
+                "local_textract_document_logs_subfolder": TEXTRACT_JOBS_LOCAL_LOC,
+                "poll_interval": 30,
+                "max_poll_attempts": 120,
+                # General arguments that might be missing
+                "local_redact_entities": CHOSEN_REDACT_ENTITIES,
+                "aws_redact_entities": CHOSEN_COMPREHEND_ENTITIES,
+                "cost_code": DEFAULT_COST_CODE,
+            }
+
+            print(f"Running in direct mode with task: {DIRECT_MODE_TASK}")
+            print(f"Input file: {DIRECT_MODE_INPUT_FILE}")
+            print(f"Output directory: {DIRECT_MODE_OUTPUT_DIR}")
+
+            if DIRECT_MODE_TASK == "deduplicate":
+                print(f"Duplicate type: {DIRECT_MODE_DUPLICATE_TYPE}")
+                print(f"Similarity threshold: {DEFAULT_DUPLICATE_DETECTION_THRESHOLD}")
+                print(f"Min word count: {DEFAULT_MIN_WORD_COUNT}")
+                if DEFAULT_SEARCH_QUERY:
+                    print(f"Search query: {DEFAULT_SEARCH_QUERY}")
+                if DEFAULT_TEXT_COLUMNS:
+                    print(f"Text columns: {DEFAULT_TEXT_COLUMNS}")
+                print(f"Remove duplicate rows: {REMOVE_DUPLICATE_ROWS}")
+
+            # Combine extraction options
+            extraction_options = (
+                list(direct_mode_args["handwrite_signature_extraction"])
+                if direct_mode_args["handwrite_signature_extraction"]
+                else []
             )
-            print("Please set DIRECT_MODE_INPUT_FILE to the path of your input file.")
-            exit(1)
+            if direct_mode_args["extract_forms"]:
+                extraction_options.append("Extract forms")
+            if direct_mode_args["extract_tables"]:
+                extraction_options.append("Extract tables")
+            if direct_mode_args["extract_layout"]:
+                extraction_options.append("Extract layout")
+            direct_mode_args["handwrite_signature_extraction"] = extraction_options
 
-        # Prepare direct mode arguments based on environment variables
-        direct_mode_args = {
-            "task": DIRECT_MODE_TASK,
-            "input_file": DIRECT_MODE_INPUT_FILE,
-            "output_dir": DIRECT_MODE_OUTPUT_DIR,
-            "input_dir": INPUT_FOLDER,
-            "language": DEFAULT_LANGUAGE,
-            "allow_list": ALLOW_LIST_PATH,
-            "pii_detector": LOCAL_PII_OPTION,
-            "username": DIRECT_MODE_DEFAULT_USER,
-            "save_to_user_folders": SESSION_OUTPUT_FOLDER,
-            "aws_access_key": AWS_ACCESS_KEY,
-            "aws_secret_key": AWS_SECRET_KEY,
-            "aws_region": AWS_REGION,
-            "s3_bucket": DOCUMENT_REDACTION_BUCKET,
-            "do_initial_clean": DO_INITIAL_TABULAR_DATA_CLEAN,
-            "save_logs_to_csv": SAVE_LOGS_TO_CSV,
-            "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,
-            "display_file_names_in_logs": DISPLAY_FILE_NAMES_IN_LOGS,
-            "upload_logs_to_s3": RUN_AWS_FUNCTIONS == "1",
-            "s3_logs_prefix": S3_USAGE_LOGS_FOLDER,
-            "ocr_method": TESSERACT_TEXT_EXTRACT_OPTION,
-            "page_min": DEFAULT_PAGE_MIN,
-            "page_max": DEFAULT_PAGE_MAX,
-            "images_dpi": IMAGES_DPI,
-            "chosen_local_ocr_model": CHOSEN_LOCAL_OCR_MODEL,
-            "preprocess_local_ocr_images": PREPROCESS_LOCAL_OCR_IMAGES,
-            "compress_redacted_pdf": COMPRESS_REDACTED_PDF,
-            "return_pdf_end_of_redaction": RETURN_REDACTED_PDF,
-            "allow_list_file": ALLOW_LIST_PATH,
-            "deny_list_file": DENY_LIST_PATH,
-            "redact_whole_page_file": WHOLE_PAGE_REDACTION_LIST_PATH,
-            "handwrite_signature_extraction": DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
-            "extract_forms": False,
-            "extract_tables": False,
-            "extract_layout": False,
-            "anon_strategy": DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
-            "excel_sheets": DEFAULT_EXCEL_SHEETS,
-            "fuzzy_mistakes": DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
-            "match_fuzzy_whole_phrase_bool": "True",  # Default value
-            "duplicate_type": DIRECT_MODE_DUPLICATE_TYPE,
-            "similarity_threshold": DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
-            "min_word_count": DEFAULT_MIN_WORD_COUNT,
-            "min_consecutive_pages": DEFAULT_MIN_CONSECUTIVE_PAGES,
-            "greedy_match": USE_GREEDY_DUPLICATE_DETECTION,
-            "combine_pages": DEFAULT_COMBINE_PAGES,
-            "search_query": DEFAULT_SEARCH_QUERY,
-            "text_columns": DEFAULT_TEXT_COLUMNS,
-            "remove_duplicate_rows": REMOVE_DUPLICATE_ROWS,
-            # Textract specific arguments (with defaults)
-            "textract_action": "",
-            "job_id": "",
-            "extract_signatures": False,
-            "textract_bucket": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
-            "textract_input_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
-            "textract_output_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
-            "s3_textract_document_logs_subfolder": TEXTRACT_JOBS_S3_LOC,
-            "local_textract_document_logs_subfolder": TEXTRACT_JOBS_LOCAL_LOC,
-            "poll_interval": 30,
-            "max_poll_attempts": 120,
-            # General arguments that might be missing
-            "local_redact_entities": CHOSEN_REDACT_ENTITIES,
-            "aws_redact_entities": CHOSEN_COMPREHEND_ENTITIES,
-            "cost_code": DEFAULT_COST_CODE,
-        }
+            # Run the CLI main function with direct mode arguments
+            main(direct_mode_args=direct_mode_args)
 
-        print(f"Running in direct mode with task: {DIRECT_MODE_TASK}")
-        print(f"Input file: {DIRECT_MODE_INPUT_FILE}")
-        print(f"Output directory: {DIRECT_MODE_OUTPUT_DIR}")
+            # Combine extraction options
+            extraction_options = (
+                list(direct_mode_args["handwrite_signature_extraction"])
+                if direct_mode_args["handwrite_signature_extraction"]
+                else []
+            )
+            if direct_mode_args["extract_forms"]:
+                extraction_options.append("Extract forms")
+            if direct_mode_args["extract_tables"]:
+                extraction_options.append("Extract tables")
+            if direct_mode_args["extract_layout"]:
+                extraction_options.append("Extract layout")
+            direct_mode_args["handwrite_signature_extraction"] = extraction_options
 
-        if DIRECT_MODE_TASK == "deduplicate":
-            print(f"Duplicate type: {DIRECT_MODE_DUPLICATE_TYPE}")
-            print(f"Similarity threshold: {DEFAULT_DUPLICATE_DETECTION_THRESHOLD}")
-            print(f"Min word count: {DEFAULT_MIN_WORD_COUNT}")
-            if DEFAULT_SEARCH_QUERY:
-                print(f"Search query: {DEFAULT_SEARCH_QUERY}")
-            if DEFAULT_TEXT_COLUMNS:
-                print(f"Text columns: {DEFAULT_TEXT_COLUMNS}")
-            print(f"Remove duplicate rows: {REMOVE_DUPLICATE_ROWS}")
-
-        # Combine extraction options
-        extraction_options = (
-            list(direct_mode_args["handwrite_signature_extraction"])
-            if direct_mode_args["handwrite_signature_extraction"]
-            else []
-        )
-        if direct_mode_args["extract_forms"]:
-            extraction_options.append("Extract forms")
-        if direct_mode_args["extract_tables"]:
-            extraction_options.append("Extract tables")
-        if direct_mode_args["extract_layout"]:
-            extraction_options.append("Extract layout")
-        direct_mode_args["handwrite_signature_extraction"] = extraction_options
-
-        # Run the CLI main function with direct mode arguments
-        main(direct_mode_args=direct_mode_args)
-
-        # Combine extraction options
-        extraction_options = (
-            list(direct_mode_args["handwrite_signature_extraction"])
-            if direct_mode_args["handwrite_signature_extraction"]
-            else []
-        )
-        if direct_mode_args["extract_forms"]:
-            extraction_options.append("Extract forms")
-        if direct_mode_args["extract_tables"]:
-            extraction_options.append("Extract tables")
-        if direct_mode_args["extract_layout"]:
-            extraction_options.append("Extract layout")
-        direct_mode_args["handwrite_signature_extraction"] = extraction_options
-
-        # Run the CLI main function with direct mode arguments
-        main(direct_mode_args=direct_mode_args)
+            # Run the CLI main function with direct mode arguments
+            main(direct_mode_args=direct_mode_args)

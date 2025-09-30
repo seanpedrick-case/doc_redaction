@@ -255,11 +255,19 @@ FEEDBACK_LOG_FILE_NAME = get_or_create_env_var("FEEDBACK_LOG_FILE_NAME", LOG_FIL
 # Gradio general app options
 ###
 
+RUN_FASTAPI = get_or_create_env_var("RUN_FASTAPI", "0")
+
 MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
 
 MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb").lower()
 
+GRADIO_SERVER_NAME = get_or_create_env_var("GRADIO_SERVER_NAME", "0.0.0.0")
+
 GRADIO_SERVER_PORT = int(get_or_create_env_var("GRADIO_SERVER_PORT", "7860"))
+
+ALLOWED_ORIGINS = get_or_create_env_var(
+    "ALLOWED_ORIGINS", ""
+)  # should be a list of allowed origins e.g. ['https://example.com', 'https://www.example.com']
 
 ROOT_PATH = get_or_create_env_var("ROOT_PATH", "")
 
@@ -863,6 +871,11 @@ if SHOW_COSTS == "True":
 else:
     SHOW_COSTS = False
 
+if GET_DEFAULT_ALLOW_LIST == "True":
+    GET_DEFAULT_ALLOW_LIST = True
+else:
+    GET_DEFAULT_ALLOW_LIST = False
+
 if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = True
 else:
@@ -903,6 +916,9 @@ if DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX:
     DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = _get_env_list(
         DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX
     )
+
+if ALLOWED_ORIGINS:
+    ALLOWED_ORIGINS = _get_env_list(ALLOWED_ORIGINS)
 
 USE_GUI_BOX_COLOURS_FOR_OUTPUTS = USE_GUI_BOX_COLOURS_FOR_OUTPUTS.lower() == "true"
 RETURN_PDF_FOR_REVIEW = RETURN_PDF_FOR_REVIEW.lower() == "true"
