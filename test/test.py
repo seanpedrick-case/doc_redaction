@@ -914,17 +914,17 @@ class TestGUIApp(unittest.TestCase):
 
             # Check if the app object exists and is a Gradio Blocks object
             self.assertTrue(
-                hasattr(app, "app"), "App object should exist in the module"
+                hasattr(app, "blocks"), "App object should exist in the module"
             )
 
             # Check if it's a Gradio Blocks instance
             import gradio as gr
 
             self.assertIsInstance(
-                app.app, gr.Blocks, "App should be a Gradio Blocks instance"
+                app.blocks, gr.Blocks, "App should be a Gradio Blocks instance"
             )
 
-            print("✅ GUI app import and initialization passed")
+            print("✅ GUI app import and initialisation passed")
 
         except ImportError as e:
             error_msg = f"Failed to import app module: {e}"
