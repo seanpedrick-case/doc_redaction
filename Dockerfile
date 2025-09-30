@@ -108,6 +108,9 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 
+# Copy installed CLI binaries (e.g. gunicorn)
+COPY --from=builder /install/bin /usr/local/bin/
+
 # Copy app code and entrypoint with correct ownership
 COPY --chown=user . $APP_HOME/app
 
