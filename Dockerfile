@@ -26,9 +26,13 @@ COPY entrypoint.sh .
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm
 
-# Set build-time and runtime environment variable
+# Set build-time and runtime environment variable for whether to run in Gradio mode or Lambda mode
 ARG APP_MODE=gradio
 ENV APP_MODE=${APP_MODE}
+
+# Set build-time and runtime environment variable for whether to run in FastAPI mode
+ARG RUN_FASTAPI=0
+ENV RUN_FASTAPI=${RUN_FASTAPI}
 
 # Install runtime dependencies
 RUN apt-get update \
@@ -143,9 +147,7 @@ ENV PATH=$APP_HOME/.local/bin:$PATH \
     GRADIO_ALLOW_FLAGGING=never \
     GRADIO_NUM_PORTS=1 \    
     GRADIO_ANALYTICS_ENABLED=False \
-    DEFAULT_CONCURRENCY_LIMIT=3 \
-    RUN_FASTAPI=0
-
+    DEFAULT_CONCURRENCY_LIMIT=3
 
 ENTRYPOINT ["/entrypoint.sh"]
 
