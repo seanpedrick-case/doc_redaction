@@ -2061,9 +2061,12 @@ def redact_page_with_pymupdf(
         image_path = move_page_info(str(page))
         image.save(image_path)
     elif isinstance(image, str):
-        # Validate path safety before checking existence
-        if validate_path_safety(image) and os.path.exists(image):
-            image_path = image
+        # Normalize and validate path safety before checking existence
+        normalized_path = os.path.normpath(os.path.abspath(image))
+        if validate_path_safety(normalized_path, INPUT_FOLDER) and os.path.exists(
+            normalized_path
+        ):
+            image_path = normalized_path
             image = Image.open(image_path)
         elif "image_path" in page_sizes_df.columns:
             try:
@@ -2669,9 +2672,12 @@ def redact_image_pdf(
         if page_no >= page_min and page_no < page_max:
             # Need image size to convert OCR outputs to the correct sizes
             if isinstance(image_path, str):
-                # Validate path safety before checking existence
-                if validate_path_safety(image_path) and os.path.exists(image_path):
-                    image = Image.open(image_path)
+                # Normalize and validate path safety before checking existence
+                normalized_path = os.path.normpath(os.path.abspath(image_path))
+                if validate_path_safety(
+                    normalized_path, INPUT_FOLDER
+                ) and os.path.exists(normalized_path):
+                    image = Image.open(normalized_path)
                     page_width, page_height = image.size
                 else:
                     # print("Image path does not exist, using mediabox coordinates as page sizes")
@@ -3002,11 +3008,12 @@ def redact_image_pdf(
                 # If an image_path file, draw onto the image_path
                 elif is_pdf(file_path) is False:
                     if isinstance(image_path, str):
-                        # Validate path safety before checking existence
-                        if validate_path_safety(image_path) and os.path.exists(
-                            image_path
-                        ):
-                            image = Image.open(image_path)
+                        # Normalize and validate path safety before checking existence
+                        normalized_path = os.path.normpath(os.path.abspath(image_path))
+                        if validate_path_safety(
+                            normalized_path, INPUT_FOLDER
+                        ) and os.path.exists(normalized_path):
+                            image = Image.open(normalized_path)
                     elif isinstance(image_path, Image.Image):
                         image = image_path
                     else:

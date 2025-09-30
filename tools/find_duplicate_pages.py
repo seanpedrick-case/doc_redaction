@@ -660,6 +660,12 @@ def save_results_and_redaction_lists(
     # Use secure path operations to prevent path injection
     try:
         output_folder_path = Path(output_folder).resolve()
+        # Validate that the resolved path is within the trusted OUTPUT_FOLDER
+        safe_output_folder = Path(OUTPUT_FOLDER).resolve()
+        if not str(output_folder_path).startswith(str(safe_output_folder)):
+            raise ValueError(
+                f"Output folder path {output_folder} is outside the trusted directory {OUTPUT_FOLDER}"
+            )
         output_folder_path.mkdir(parents=True, exist_ok=True)
     except (OSError, PermissionError) as e:
         raise ValueError(f"Cannot create output directory {output_folder}: {e}")

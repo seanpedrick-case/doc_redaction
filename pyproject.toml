@@ -38,6 +38,7 @@ dependencies = [
     "python-docx==1.2.0",
     "polars==1.33.1",
     "defusedxml==0.7.1",
+    "gunicorn==23.0.0",
     #"paddlepaddle==3.2.0", # Optional paddle imports - only if you want to use hybrid OCR mode with tesseract and paddleOCR
     #"paddleocr==3.2.0"    
 ]

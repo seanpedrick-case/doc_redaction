@@ -574,7 +574,7 @@ else:
 
 
 # If you don't want to redact the text, but instead just draw a box over it, set this to True
-RETURN_PDF_FOR_REVIEW = get_or_create_env_var("RETURN_PDF_FOR_REVIEW", "False")
+RETURN_PDF_FOR_REVIEW = get_or_create_env_var("RETURN_PDF_FOR_REVIEW", "True")
 
 RETURN_REDACTED_PDF = get_or_create_env_var(
     "RETURN_REDACTED_PDF", "True"
