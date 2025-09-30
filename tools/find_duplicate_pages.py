@@ -457,8 +457,14 @@ def combine_ocr_dataframes(
     # --- Save Output ---
     output_files = list()
     if output_folder and output_filename:
+        # Validate path safety before creating directories and files
+        if not validate_path_safety(output_folder):
+            raise ValueError(f"Unsafe output folder path: {output_folder}")
+        if not validate_path_safety(output_filename):
+            raise ValueError(f"Unsafe output filename: {output_filename}")
+
         os.makedirs(output_folder, exist_ok=True)
-        output_path = os.path.join(output_folder, output_filename)
+        output_path = secure_path_join(output_folder, output_filename)
         combined_df.to_csv(output_path, index=False)
         output_files.append(output_path)
         print(f"Successfully combined data and saved to: {output_path}")

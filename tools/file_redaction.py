@@ -98,7 +98,7 @@ from tools.load_spacy_model_custom_recognisers import (
     nlp_analyser,
     score_threshold,
 )
-from tools.secure_path_utils import secure_file_write
+from tools.secure_path_utils import secure_file_write, validate_path_safety
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
 if not MAX_IMAGE_PIXELS:
@@ -1060,7 +1060,13 @@ def choose_and_run_redactor(
                         )
                         # pymupdf_doc is an image list in this case
                         if isinstance(pymupdf_doc[-1], str):
-                            img = Image.open(pymupdf_doc[-1])
+                            # Validate path safety before opening image
+                            if validate_path_safety(pymupdf_doc[-1]):
+                                img = Image.open(pymupdf_doc[-1])
+                            else:
+                                raise ValueError(
+                                    f"Unsafe image path detected: {pymupdf_doc[-1]}"
+                                )
                         # Otherwise could be an image object
                         else:
                             img = pymupdf_doc[-1]
@@ -1637,8 +1643,12 @@ def convert_pikepdf_decision_output_to_image_coords(
     pymupdf_page: Document, pikepdf_decision_ouput_data: List[dict], image: Image
 ):
     if isinstance(image, str):
-        image_path = image
-        image = Image.open(image_path)
+        # Validate path safety before opening image
+        if validate_path_safety(image):
+            image_path = image
+            image = Image.open(image_path)
+        else:
+            raise ValueError(f"Unsafe image path detected: {image}")
 
     # Loop through each item in the data
     for item in pikepdf_decision_ouput_data:
@@ -2051,7 +2061,8 @@ def redact_page_with_pymupdf(
         image_path = move_page_info(str(page))
         image.save(image_path)
     elif isinstance(image, str):
-        if os.path.exists(image):
+        # Validate path safety before checking existence
+        if validate_path_safety(image) and os.path.exists(image):
             image_path = image
             image = Image.open(image_path)
         elif "image_path" in page_sizes_df.columns:
@@ -2658,7 +2669,8 @@ def redact_image_pdf(
         if page_no >= page_min and page_no < page_max:
             # Need image size to convert OCR outputs to the correct sizes
             if isinstance(image_path, str):
-                if os.path.exists(image_path):
+                # Validate path safety before checking existence
+                if validate_path_safety(image_path) and os.path.exists(image_path):
                     image = Image.open(image_path)
                     page_width, page_height = image.size
                 else:
@@ -2793,7 +2805,13 @@ def redact_image_pdf(
                                     )
                                 )
 
-                                image = Image.open(image_path)
+                                # Validate path safety before opening image
+                                if validate_path_safety(image_path):
+                                    image = Image.open(image_path)
+                                else:
+                                    raise ValueError(
+                                        f"Unsafe image path detected: {image_path}"
+                                    )
 
                             # Convert the image_path to bytes using an in-memory buffer
                             image_buffer = io.BytesIO()
@@ -2984,7 +3002,10 @@ def redact_image_pdf(
                 # If an image_path file, draw onto the image_path
                 elif is_pdf(file_path) is False:
                     if isinstance(image_path, str):
-                        if os.path.exists(image_path):
+                        # Validate path safety before checking existence
+                        if validate_path_safety(image_path) and os.path.exists(
+                            image_path
+                        ):
                             image = Image.open(image_path)
                     elif isinstance(image_path, Image.Image):
                         image = image_path
