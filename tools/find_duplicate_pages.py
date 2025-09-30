@@ -19,7 +19,7 @@ from tools.file_conversion import (
 )
 from tools.helper_functions import OUTPUT_FOLDER
 from tools.load_spacy_model_custom_recognisers import nlp
-from tools.secure_path_utils import secure_path_join, validate_path_safety
+from tools.secure_path_utils import secure_path_join, validate_path_safety, validate_path_containment, validate_folder_containment
 
 number_of_zeros_to_add_to_index = 7  # Number of zeroes to add between page number and line numbers to get a unique page/line index value
 ID_MULTIPLIER = 100000
@@ -458,7 +458,7 @@ def combine_ocr_dataframes(
     output_files = list()
     if output_folder and output_filename:
         # Validate path safety before creating directories and files
-        if not validate_path_safety(output_folder):
+        if not validate_folder_containment(output_folder, OUTPUT_FOLDER):
             raise ValueError(f"Unsafe output folder path: {output_folder}")
         if not validate_path_safety(output_filename):
             raise ValueError(f"Unsafe output filename: {output_filename}")
@@ -652,7 +652,7 @@ def save_results_and_redaction_lists(
         list: A list of paths to all generated files.
     """
     # Validate the output_folder path for security
-    if not validate_path_safety(output_folder):
+    if not validate_folder_containment(output_folder, OUTPUT_FOLDER):
         raise ValueError(f"Invalid or unsafe output folder path: {output_folder}")
 
     output_paths = list()
@@ -660,9 +660,8 @@ def save_results_and_redaction_lists(
     # Use secure path operations to prevent path injection
     try:
         output_folder_path = Path(output_folder).resolve()
-        # Validate that the resolved path is within the trusted OUTPUT_FOLDER
-        safe_output_folder = Path(OUTPUT_FOLDER).resolve()
-        if not str(output_folder_path).startswith(str(safe_output_folder)):
+        # Validate that the resolved path is within the trusted OUTPUT_FOLDER using robust containment check
+        if not validate_path_containment(str(output_folder_path), OUTPUT_FOLDER):
             raise ValueError(
                 f"Output folder path {output_folder} is outside the trusted directory {OUTPUT_FOLDER}"
             )

@@ -224,6 +224,82 @@ def validate_path_safety(
         return False
 
 
+def validate_path_containment(
+    path: Union[str, Path], base_path: Union[str, Path]
+) -> bool:
+    """
+    Robustly validate that a path is strictly contained within a base directory.
+    Uses os.path.commonpath for more reliable containment checking.
+
+    Args:
+        path: The path to validate
+        base_path: The trusted base directory
+
+    Returns:
+        True if the path is strictly contained within base_path, False otherwise
+    """
+    try:
+        # Normalize both paths to absolute paths
+        normalized_path = os.path.normpath(os.path.abspath(str(path)))
+        normalized_base = os.path.normpath(os.path.abspath(str(base_path)))
+        
+        # Ensure the base path exists and is a directory
+        if not os.path.exists(normalized_base) or not os.path.isdir(normalized_base):
+            return False
+            
+        # Check if the path exists and is a file (not a directory)
+        if not os.path.exists(normalized_path) or not os.path.isfile(normalized_path):
+            return False
+            
+        # Use commonpath to check containment
+        try:
+            common_path = os.path.commonpath([normalized_path, normalized_base])
+            # The common path must be exactly the base path for strict containment
+            return common_path == normalized_base
+        except ValueError:
+            # commonpath raises ValueError if paths are on different drives (Windows)
+            return False
+            
+    except Exception:
+        return False
+
+
+def validate_folder_containment(
+    path: Union[str, Path], base_path: Union[str, Path]
+) -> bool:
+    """
+    Robustly validate that a folder path is strictly contained within a base directory.
+    Uses os.path.commonpath for more reliable containment checking.
+
+    Args:
+        path: The folder path to validate
+        base_path: The trusted base directory
+
+    Returns:
+        True if the folder path is strictly contained within base_path, False otherwise
+    """
+    try:
+        # Normalize both paths to absolute paths
+        normalized_path = os.path.normpath(os.path.abspath(str(path)))
+        normalized_base = os.path.normpath(os.path.abspath(str(base_path)))
+        
+        # Ensure the base path exists and is a directory
+        if not os.path.exists(normalized_base) or not os.path.isdir(normalized_base):
+            return False
+            
+        # Use commonpath to check containment
+        try:
+            common_path = os.path.commonpath([normalized_path, normalized_base])
+            # The common path must be exactly the base path for strict containment
+            return common_path == normalized_base
+        except ValueError:
+            # commonpath raises ValueError if paths are on different drives (Windows)
+            return False
+            
+    except Exception:
+        return False
+
+
 # Backward compatibility functions that maintain the same interface as os.path
 def secure_join(*paths: str) -> str:
     """

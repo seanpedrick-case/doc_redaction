@@ -121,6 +121,7 @@ from tools.config import (
     USE_GREEDY_DUPLICATE_DETECTION,
     USER_GUIDE_URL,
     WHOLE_PAGE_REDACTION_LIST_PATH,
+    FASTAPI_ROOT_PATH,
 )
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.data_anonymise import anonymise_files_with_open_text
@@ -6263,7 +6264,7 @@ with blocks:
                 auth=authenticate_user if COGNITO_AUTH == "1" else None,
                 max_file_size=MAX_FILE_SIZE,
                 root_path=ROOT_PATH,
-                path="/",
+                path=FASTAPI_ROOT_PATH,
             )
 
             # Example command to run in uvicorn: uvicorn.run("app:app", host=GRADIO_SERVER_NAME, port=GRADIO_SERVER_PORT)

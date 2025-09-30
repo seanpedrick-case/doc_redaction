@@ -98,7 +98,7 @@ from tools.load_spacy_model_custom_recognisers import (
     nlp_analyser,
     score_threshold,
 )
-from tools.secure_path_utils import secure_file_write, validate_path_safety
+from tools.secure_path_utils import secure_file_write, validate_path_safety, validate_path_containment
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
 if not MAX_IMAGE_PIXELS:
@@ -1060,9 +1060,10 @@ def choose_and_run_redactor(
                         )
                         # pymupdf_doc is an image list in this case
                         if isinstance(pymupdf_doc[-1], str):
-                            # Validate path safety before opening image
-                            if validate_path_safety(pymupdf_doc[-1]):
-                                img = Image.open(pymupdf_doc[-1])
+                            # Normalize and validate path safety before opening image
+                            normalized_path = os.path.normpath(os.path.abspath(pymupdf_doc[-1]))
+                            if validate_path_containment(normalized_path, INPUT_FOLDER):
+                                img = Image.open(normalized_path)
                             else:
                                 raise ValueError(
                                     f"Unsafe image path detected: {pymupdf_doc[-1]}"
@@ -1643,9 +1644,10 @@ def convert_pikepdf_decision_output_to_image_coords(
     pymupdf_page: Document, pikepdf_decision_ouput_data: List[dict], image: Image
 ):
     if isinstance(image, str):
-        # Validate path safety before opening image
-        if validate_path_safety(image):
-            image_path = image
+        # Normalize and validate path safety before opening image
+        normalized_path = os.path.normpath(os.path.abspath(image))
+        if validate_path_containment(normalized_path, INPUT_FOLDER):
+            image_path = normalized_path
             image = Image.open(image_path)
         else:
             raise ValueError(f"Unsafe image path detected: {image}")
@@ -2063,9 +2065,7 @@ def redact_page_with_pymupdf(
     elif isinstance(image, str):
         # Normalize and validate path safety before checking existence
         normalized_path = os.path.normpath(os.path.abspath(image))
-        if validate_path_safety(normalized_path, INPUT_FOLDER) and os.path.exists(
-            normalized_path
-        ):
+        if validate_path_containment(normalized_path, INPUT_FOLDER):
             image_path = normalized_path
             image = Image.open(image_path)
         elif "image_path" in page_sizes_df.columns:
@@ -2674,9 +2674,7 @@ def redact_image_pdf(
             if isinstance(image_path, str):
                 # Normalize and validate path safety before checking existence
                 normalized_path = os.path.normpath(os.path.abspath(image_path))
-                if validate_path_safety(
-                    normalized_path, INPUT_FOLDER
-                ) and os.path.exists(normalized_path):
+                if validate_path_containment(normalized_path, INPUT_FOLDER):
                     image = Image.open(normalized_path)
                     page_width, page_height = image.size
                 else:
@@ -2811,9 +2809,10 @@ def redact_image_pdf(
                                     )
                                 )
 
-                                # Validate path safety before opening image
-                                if validate_path_safety(image_path):
-                                    image = Image.open(image_path)
+                                # Normalize and validate path safety before opening image
+                                normalized_path = os.path.normpath(os.path.abspath(image_path))
+                                if validate_path_containment(normalized_path, INPUT_FOLDER):
+                                    image = Image.open(normalized_path)
                                 else:
                                     raise ValueError(
                                         f"Unsafe image path detected: {image_path}"
@@ -3010,9 +3009,7 @@ def redact_image_pdf(
                     if isinstance(image_path, str):
                         # Normalize and validate path safety before checking existence
                         normalized_path = os.path.normpath(os.path.abspath(image_path))
-                        if validate_path_safety(
-                            normalized_path, INPUT_FOLDER
-                        ) and os.path.exists(normalized_path):
+                        if validate_path_containment(normalized_path, INPUT_FOLDER):
                             image = Image.open(normalized_path)
                     elif isinstance(image_path, Image.Image):
                         image = image_path

@@ -270,6 +270,7 @@ ALLOWED_ORIGINS = get_or_create_env_var(
 )  # should be a list of allowed origins e.g. ['https://example.com', 'https://www.example.com']
 
 ROOT_PATH = get_or_create_env_var("ROOT_PATH", "")
+FASTAPI_ROOT_PATH = get_or_create_env_var("FASTAPI_ROOT_PATH", "/")
 
 DEFAULT_CONCURRENCY_LIMIT = int(get_or_create_env_var("DEFAULT_CONCURRENCY_LIMIT", "3"))
 
