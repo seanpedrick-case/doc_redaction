@@ -269,6 +269,8 @@ ALLOWED_ORIGINS = get_or_create_env_var(
     "ALLOWED_ORIGINS", ""
 )  # should be a list of allowed origins e.g. ['https://example.com', 'https://www.example.com']
 
+ALLOWED_HOSTS = get_or_create_env_var("ALLOWED_HOSTS", "")
+
 ROOT_PATH = get_or_create_env_var("ROOT_PATH", "")
 FASTAPI_ROOT_PATH = get_or_create_env_var("FASTAPI_ROOT_PATH", "/")
 
@@ -920,6 +922,9 @@ if DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX:
 
 if ALLOWED_ORIGINS:
     ALLOWED_ORIGINS = _get_env_list(ALLOWED_ORIGINS)
+
+if ALLOWED_HOSTS:
+    ALLOWED_HOSTS = _get_env_list(ALLOWED_HOSTS)
 
 USE_GUI_BOX_COLOURS_FOR_OUTPUTS = USE_GUI_BOX_COLOURS_FOR_OUTPUTS.lower() == "true"
 RETURN_PDF_FOR_REVIEW = RETURN_PDF_FOR_REVIEW.lower() == "true"

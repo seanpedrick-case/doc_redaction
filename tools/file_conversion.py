@@ -604,6 +604,10 @@ def redact_single_box(
 
     # Handle review page (retain_text = True)
     if retain_text is True:
+
+        img_annotation_box["text"] = img_annotation_box.get("text") or ""
+        img_annotation_box["label"] = img_annotation_box.get("label") or "Redaction"
+
         annot = pymupdf_page.add_redact_annot(full_size_redaction_box)
         annot.set_colors(stroke=out_colour, fill=out_colour, colors=out_colour)
         annot.set_name(img_annotation_box["label"])

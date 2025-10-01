@@ -39,12 +39,15 @@ def clean_and_stem_text_series(
         ]
         return " ".join(lemmatized_words)
 
+    # Always create text_clean column first
     if do_initial_clean_dup:
         df["text_clean"] = initial_clean(df[column])
+    else:
+        df["text_clean"] = df[column]
 
     df["text_clean"] = df["text_clean"].apply(_apply_lemmatization)
     df["text_clean"] = df[
-        column
+        "text_clean"
     ].str.lower()  # .str.replace(r'[^\w\s]', '', regex=True)
 
     return df

@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import boto3
 import gradio as gr
 import pandas as pd
+import pymupdf
 from gradio import Progress
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import (
@@ -217,8 +218,10 @@ def choose_and_run_redactor(
     all_page_line_level_ocr_results_with_words_df: pd.DataFrame = None,
     chosen_local_model: str = "tesseract",
     language: str = DEFAULT_LANGUAGE,
+    ocr_review_files: list = list(),
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
+    RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
     progress=gr.Progress(track_tqdm=True),
 ):
     """
@@ -274,10 +277,11 @@ def choose_and_run_redactor(
     - chosen_local_model (str): Which local model is being used for OCR on images - "tesseract", "paddle" for PaddleOCR, or "hybrid" to combine both.
     - language (str, optional): The language of the text in the files. Defaults to English.
     - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
+    - ocr_review_files (list, optional): A list of OCR review files to be used for the redaction process. Defaults to an empty list.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - RETURN_REDACTED_PDF (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
-
+    - RETURN_PDF_FOR_REVIEW (bool, optional): Boolean to determine whether to return a review PDF at the end of the redaction process.
     The function returns a redacted document along with processing logs. If both RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF
     are True, the function will return both a review PDF (with annotation boxes for review) and a final redacted PDF (with text permanently removed).
     """
@@ -298,6 +302,8 @@ def choose_and_run_redactor(
     form_key_value_results_list_df = pd.DataFrame()
     out_review_pdf_file_path = ""
     out_redacted_pdf_file_path = ""
+    if not ocr_review_files:
+        ocr_review_files = list()
 
     # CLI mode may provide options to enter method names in a different format
     if text_extraction_method == "AWS Textract":
@@ -523,6 +529,7 @@ def choose_and_run_redactor(
             all_page_line_level_ocr_results_with_words_df,
             review_file_state,
             task_textbox,
+            ocr_review_files,
         )
 
     # if first_loop_state == False:
@@ -670,6 +677,7 @@ def choose_and_run_redactor(
             all_page_line_level_ocr_results_with_words_df,
             review_file_state,
             task_textbox,
+            ocr_review_files,
         )
 
     ### Load/create allow list, deny list, and whole page redaction list
@@ -1088,50 +1096,105 @@ def choose_and_run_redactor(
                     else:
                         # Check if we have dual PDF documents to save
                         final_pymupdf_doc = None
-                        from tools.config import (
-                            RETURN_PDF_FOR_REVIEW,
-                            RETURN_REDACTED_PDF,
-                        )
 
                         if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
                             if (
                                 hasattr(redact_image_pdf, "_final_pages")
                                 and redact_image_pdf._final_pages
                             ):
-                                # Create final document from collected final pages
-                                import fitz
 
-                                final_pymupdf_doc = fitz.open()
-                                for final_page in redact_image_pdf._final_pages:
-                                    final_pymupdf_doc.insert_pdf(
-                                        final_page.parent,
-                                        from_page=final_page.number,
-                                        to_page=final_page.number,
-                                    )
-                                    # Apply redactions to the final page
-                                    final_pymupdf_doc[
-                                        final_pymupdf_doc.page_count - 1
-                                    ].apply_redactions(images=2, graphics=0, text=0)
+                                # Create final document by copying the original document and replacing specific pages
+                                final_pymupdf_doc = pymupdf.open()
+                                final_pymupdf_doc.insert_pdf(pymupdf_doc)
+
+                                # Create a mapping of original page numbers to final pages
+                                final_pages_map = {}
+                                for final_page_data in redact_image_pdf._final_pages:
+                                    if isinstance(final_page_data, tuple):
+                                        final_page, original_page_number = (
+                                            final_page_data
+                                        )
+                                        final_pages_map[original_page_number] = (
+                                            final_page
+                                        )
+                                    else:
+                                        final_page = final_page_data
+                                        final_pages_map[0] = (
+                                            final_page  # Default to page 0 if no original number
+                                        )
+
+                                # Replace pages in the final document with their final versions
+                                for (
+                                    original_page_number,
+                                    final_page,
+                                ) in final_pages_map.items():
+                                    if (
+                                        original_page_number
+                                        < final_pymupdf_doc.page_count
+                                    ):
+                                        # Remove the original page and insert the final page
+                                        final_pymupdf_doc.delete_page(
+                                            original_page_number
+                                        )
+                                        final_pymupdf_doc.insert_pdf(
+                                            final_page.parent,
+                                            from_page=final_page.number,
+                                            to_page=final_page.number,
+                                            start_at=original_page_number,
+                                        )
+                                        # Apply redactions to the final page
+                                        final_pymupdf_doc[
+                                            original_page_number
+                                        ].apply_redactions(images=2, graphics=0, text=0)
                                 # Clear the stored final pages
                                 delattr(redact_image_pdf, "_final_pages")
                             elif (
                                 hasattr(redact_text_pdf, "_final_pages")
                                 and redact_text_pdf._final_pages
                             ):
-                                # Create final document from collected final pages
-                                import fitz
+                                # Create final document by copying the original document and replacing specific pages
+                                final_pymupdf_doc = pymupdf.open()
+                                final_pymupdf_doc.insert_pdf(pymupdf_doc)
 
-                                final_pymupdf_doc = fitz.open()
-                                for final_page in redact_text_pdf._final_pages:
-                                    final_pymupdf_doc.insert_pdf(
-                                        final_page.parent,
-                                        from_page=final_page.number,
-                                        to_page=final_page.number,
-                                    )
-                                    # Apply redactions to the final page
-                                    final_pymupdf_doc[
-                                        final_pymupdf_doc.page_count - 1
-                                    ].apply_redactions(images=2, graphics=0, text=0)
+                                # Create a mapping of original page numbers to final pages
+                                final_pages_map = {}
+                                for final_page_data in redact_text_pdf._final_pages:
+                                    if isinstance(final_page_data, tuple):
+                                        final_page, original_page_number = (
+                                            final_page_data
+                                        )
+                                        final_pages_map[original_page_number] = (
+                                            final_page
+                                        )
+                                    else:
+                                        final_page = final_page_data
+                                        final_pages_map[0] = (
+                                            final_page  # Default to page 0 if no original number
+                                        )
+
+                                # Replace pages in the final document with their final versions
+                                for (
+                                    original_page_number,
+                                    final_page,
+                                ) in final_pages_map.items():
+                                    if (
+                                        original_page_number
+                                        < final_pymupdf_doc.page_count
+                                    ):
+                                        # Remove the original page and insert the final page
+                                        final_pymupdf_doc.delete_page(
+                                            original_page_number
+                                        )
+                                        final_pymupdf_doc.insert_pdf(
+                                            final_page.parent,
+                                            from_page=final_page.number,
+                                            to_page=final_page.number,
+                                            start_at=original_page_number,
+                                        )
+                                        # Apply redactions to the final page
+                                        final_pymupdf_doc[
+                                            original_page_number
+                                        ].apply_redactions(images=2, graphics=0, text=0)
                                 # Clear the stored final pages
                                 delattr(redact_text_pdf, "_final_pages")
 
@@ -1517,6 +1580,24 @@ def choose_and_run_redactor(
     log_files_output_paths = sorted(list(set(log_files_output_paths)))
     out_file_paths = sorted(list(set(out_file_paths)))
 
+    # Create OCR review files list for input_review_files component
+
+    if ocr_file_path:
+        if isinstance(ocr_file_path, str):
+            ocr_review_files.append(ocr_file_path)
+        else:
+            ocr_review_files.append(ocr_file_path[0])
+
+    if all_page_line_level_ocr_results_with_words_df_file_path:
+        if isinstance(all_page_line_level_ocr_results_with_words_df_file_path, str):
+            ocr_review_files.append(
+                all_page_line_level_ocr_results_with_words_df_file_path
+            )
+        else:
+            ocr_review_files.append(
+                all_page_line_level_ocr_results_with_words_df_file_path[0]
+            )
+
     # Output file paths
     if not review_file_path:
         review_out_file_paths = [prepared_pdf_file_paths[-1]]
@@ -1561,6 +1642,7 @@ def choose_and_run_redactor(
         all_page_line_level_ocr_results_with_words_df,
         review_file_state,
         task_textbox,
+        ocr_review_files,
     )
 
 
@@ -1930,7 +2012,7 @@ def set_cropbox_safely(page: Page, original_cropbox: Optional[Rect]):
     """
     Sets the cropbox of a PyMuPDF page safely and defensively.
 
-    If the 'original_cropbox' is valid (i.e., a fitz.Rect instance, not None, not empty,
+    If the 'original_cropbox' is valid (i.e., a pymupdf.Rect instance, not None, not empty,
     not infinite, and fully contained within the page's mediabox), it is set as the cropbox.
 
     Otherwise, the page's mediabox is used, and a warning is printed to explain why.
@@ -1947,7 +2029,7 @@ def set_cropbox_safely(page: Page, original_cropbox: Optional[Rect]):
         reason_for_defaulting = "the original cropbox is None."
     # Check for incorrect type
     elif not isinstance(original_cropbox, Rect):
-        reason_for_defaulting = f"the original cropbox is not a fitz.Rect instance (got {type(original_cropbox)})."
+        reason_for_defaulting = f"the original cropbox is not a pymupdf.Rect instance (got {type(original_cropbox)})."
     else:
         # Normalise the cropbox (ensures x0 < x1 and y0 < y1)
         original_cropbox.normalize()
@@ -2206,6 +2288,31 @@ def redact_page_with_pymupdf(
         )
         all_image_annotation_boxes.append(whole_page_img_annotation_box)
 
+        # Handle dual page objects for whole page redaction if needed
+        if return_pdf_end_of_redaction and return_pdf_for_review:
+            # Create a copy of the page for final redaction using the same approach as redact_single_box
+
+            final_page_doc = pymupdf.open()
+            final_page_doc.insert_pdf(
+                page.parent,
+                from_page=page.number,
+                to_page=page.number,
+            )
+            final_page = final_page_doc[0]
+
+            # Apply the whole page redaction to the final page as well
+            redact_whole_pymupdf_page(
+                rect_height, rect_width, final_page, custom_colours, border=5
+            )
+
+            # Store the final page with its original page number for later use
+            if not hasattr(redact_page_with_pymupdf, "_final_page"):
+                redact_page_with_pymupdf._final_page = (final_page, page.number)
+            else:
+                # If we already have a final page, we need to handle multiple pages
+                # For now, we'll use the last final page
+                redact_page_with_pymupdf._final_page = (final_page, page.number)
+
     out_annotation_boxes = {
         "image": image_path,  # Image.open(image_path), #image_path,
         "boxes": all_image_annotation_boxes,
@@ -2230,7 +2337,13 @@ def redact_page_with_pymupdf(
         and return_pdf_for_review
         and hasattr(redact_page_with_pymupdf, "_final_page")
     ):
-        final_page = redact_page_with_pymupdf._final_page
+        final_page_data = redact_page_with_pymupdf._final_page
+        # Handle both tuple format (new) and single page format (backward compatibility)
+        if isinstance(final_page_data, tuple):
+            final_page, original_page_number = final_page_data
+        else:
+            final_page = final_page_data
+
         # Apply redactions to final page
         if return_pdf_for_review is False:
             final_page.apply_redactions(images=2, graphics=0, text=0)
@@ -3006,10 +3119,12 @@ def redact_image_pdf(
                         (pymupdf_page, pymupdf_final_page), page_image_annotations = (
                             redact_result
                         )
-                        # Store the final page for later use
+                        # Store the final page with its original page number for later use
                         if not hasattr(redact_image_pdf, "_final_pages"):
                             redact_image_pdf._final_pages = []
-                        redact_image_pdf._final_pages.append(pymupdf_final_page)
+                        redact_image_pdf._final_pages.append(
+                            (pymupdf_final_page, page_no)
+                        )
                     else:
                         pymupdf_page, page_image_annotations = redact_result
 
@@ -3017,14 +3132,33 @@ def redact_image_pdf(
                 elif is_pdf(file_path) is False:
                     if isinstance(image_path, str):
                         # Normalize and validate path safety before checking existence
+                        print("image_path:", image_path)
                         normalized_path = os.path.normpath(os.path.abspath(image_path))
-                        if validate_path_containment(normalized_path, INPUT_FOLDER):
+                        print("normalized_path:", normalized_path)
+
+                        # Check if it's a Gradio temporary file
+                        is_gradio_temp = (
+                            "gradio" in normalized_path.lower()
+                            and "temp" in normalized_path.lower()
+                        )
+
+                        if is_gradio_temp or validate_path_containment(
+                            normalized_path, INPUT_FOLDER
+                        ):
                             image = Image.open(normalized_path)
+                            print("image after validation:", image)
+                        else:
+                            print(f"Path validation failed for: {normalized_path}")
+                            print(f"INPUT_FOLDER: {INPUT_FOLDER}")
+                            # You might want to handle this case differently
+                            continue  # or raise an exception
                     elif isinstance(image_path, Image.Image):
                         image = image_path
                     else:
                         # Assume image_path is an image
                         image = image_path
+
+                    print("image:", image)
 
                     fill = CUSTOM_BOX_COLOUR  # Fill colour for redactions
                     draw = ImageDraw.Draw(image)
@@ -4032,10 +4166,12 @@ def redact_text_pdf(
                         (pymupdf_page, pymupdf_final_page), page_image_annotations = (
                             redact_result
                         )
-                        # Store the final page for later use
+                        # Store the final page with its original page number for later use
                         if not hasattr(redact_text_pdf, "_final_pages"):
                             redact_text_pdf._final_pages = []
-                        redact_text_pdf._final_pages.append(pymupdf_final_page)
+                        redact_text_pdf._final_pages.append(
+                            (pymupdf_final_page, page_no)
+                        )
                     else:
                         pymupdf_page, page_image_annotations = redact_result
 

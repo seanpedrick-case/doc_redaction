@@ -11,6 +11,7 @@ from tools.config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACCESS_LOGS_FOLDER,
     ALLOW_LIST_PATH,
+    ALLOWED_HOSTS,
     ALLOWED_ORIGINS,
     AWS_ACCESS_KEY,
     AWS_PII_OPTION,
@@ -230,6 +231,7 @@ FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 ###
 app = FastAPI()
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 ###
 # Load in Gradio app components
@@ -344,6 +346,12 @@ tabular_text_columns = gr.Dropdown(
     label="Choose columns to deduplicate",
     multiselect=True,
     allow_custom_value=True,
+)
+
+tabular_min_word_count = gr.Number(
+    value=DEFAULT_MIN_WORD_COUNT,
+    label="Minimum word count",
+    info="Cells with fewer words than this are ignored.",
 )
 
 # Create the gradio interface
@@ -981,6 +989,7 @@ with blocks:
                         CHOSEN_REDACT_ENTITIES,
                         CHOSEN_COMPREHEND_ENTITIES,
                         [example_files[0]],
+                        example_files[0],
                     ]
                 )
                 example_labels.append("PDF with selectable text redaction")
@@ -995,6 +1004,7 @@ with blocks:
                         CHOSEN_REDACT_ENTITIES,
                         CHOSEN_COMPREHEND_ENTITIES,
                         [example_files[1]],
+                        example_files[1],
                     ]
                 )
                 example_labels.append("Image redaction with local OCR")
@@ -1009,6 +1019,7 @@ with blocks:
                         ["TITLES", "PERSON", "DATE_TIME"],
                         CHOSEN_COMPREHEND_ENTITIES,
                         [example_files[2]],
+                        example_files[2],
                     ]
                 )
                 example_labels.append(
@@ -1026,6 +1037,7 @@ with blocks:
                             CHOSEN_REDACT_ENTITIES,
                             CHOSEN_COMPREHEND_ENTITIES,
                             [example_files[3]],
+                            example_files[3],
                         ]
                     )
                     example_labels.append(
@@ -1043,6 +1055,7 @@ with blocks:
                     in_redact_entities,
                     in_redact_comprehend_entities,
                     prepared_pdf_state,
+                    doc_full_file_name_textbox,
                 ):
                     gr.Info(
                         "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
@@ -1058,6 +1071,7 @@ with blocks:
                         in_redact_entities,
                         in_redact_comprehend_entities,
                         prepared_pdf_state,
+                        doc_full_file_name_textbox,
                     ],
                     example_labels=example_labels,
                     fn=show_info_box_on_click,
@@ -1827,6 +1841,7 @@ with blocks:
                         "replace with 'REDACTED'",
                         [tabular_example_files[0]],
                         ["Case Note"],
+                        3,
                     ]
                 )
                 tabular_example_labels.append(
@@ -1842,6 +1857,7 @@ with blocks:
                         "replace with 'REDACTED'",
                         [],
                         [],
+                        3,
                     ]
                 )
                 tabular_example_labels.append(
@@ -1857,6 +1873,7 @@ with blocks:
                         "replace with 'REDACTED'",
                         [tabular_example_files[2]],
                         ["text"],
+                        3,
                     ]
                 )
                 tabular_example_labels.append(
@@ -1873,6 +1890,7 @@ with blocks:
                     anon_strategy,
                     in_tabular_duplicate_files,
                     tabular_text_columns,
+                    tabular_min_word_count,
                 ):
                     gr.Info(
                         "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' below to run the example."
@@ -1887,6 +1905,7 @@ with blocks:
                         anon_strategy,
                         in_tabular_duplicate_files,
                         tabular_text_columns,
+                        tabular_min_word_count,
                     ],
                     example_labels=tabular_example_labels,
                     fn=show_tabular_info_box_on_click,
@@ -1946,7 +1965,7 @@ with blocks:
         ###
         with gr.Accordion(label="Find duplicate cells in tabular data", open=False):
             gr.Markdown(
-                """Find duplicate cells or rows in CSV, Excel, or Parquet files. This tool analyzes text content across all columns to identify similar or identical entries that may be duplicates. You can review the results and choose to remove duplicate rows from your files."""
+                """Find duplicate cells or rows in CSV, Excel, or Parquet files. This tool analyses text content across all columns to identify similar or identical entries that may be duplicates. You can review the results and choose to remove duplicate rows from your files."""
             )
 
             with gr.Accordion("Step 1: Upload files and configure analysis", open=True):
@@ -1958,11 +1977,9 @@ with blocks:
                         label="Similarity threshold",
                         info="Score (0-1) to consider cells a match. 1 = perfect match.",
                     )
-                    tabular_min_word_count = gr.Number(
-                        value=DEFAULT_MIN_WORD_COUNT,
-                        label="Minimum word count",
-                        info="Cells with fewer words than this are ignored.",
-                    )
+
+                    tabular_min_word_count.render()
+
                     do_initial_clean_dup = gr.Checkbox(
                         label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
                         value=DO_INITIAL_TABULAR_DATA_CLEAN,
@@ -2558,6 +2575,7 @@ with blocks:
             is_a_textract_api_call,
             textract_query_number,
             all_page_line_level_ocr_results_with_words,
+            input_review_files,
         ],
     ).success(
         fn=enforce_cost_codes,
@@ -2617,6 +2635,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
             chosen_local_model_textbox,
             chosen_language_drop,
+            input_review_files,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -2651,9 +2670,41 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
             backup_review_state,
             task_textbox,
+            input_review_files,
         ],
         api_name="redact_doc",
         show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            page_min,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
     )
 
     # If a file has been completed, the function will continue onto the next document
@@ -2708,6 +2759,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
             chosen_local_model_textbox,
             chosen_language_drop,
+            input_review_files,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -2742,6 +2794,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
             backup_review_state,
             task_textbox,
+            input_review_files,
         ],
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
@@ -3038,6 +3091,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
             chosen_local_model_textbox,
             chosen_language_drop,
+            input_review_files,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3072,6 +3126,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
             backup_review_state,
             task_textbox,
+            input_review_files,
         ],
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
@@ -6256,6 +6311,9 @@ with blocks:
                     allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
                     allow_headers=["*"],  # Allow all headers
                 )
+
+            if ALLOWED_HOSTS:
+                app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
             @app.get("/health", status_code=status.HTTP_200_OK)
             def health_check():

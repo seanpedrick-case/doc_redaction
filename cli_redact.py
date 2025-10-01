@@ -767,6 +767,7 @@ python cli_redact.py --task textract --textract_action list
                     _,
                     _,
                     _,
+                    _,
                 ) = choose_and_run_redactor(
                     file_paths=args.input_file,
                     prepared_pdf_file_paths=prepared_pdf_paths,

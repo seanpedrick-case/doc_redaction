@@ -22,7 +22,6 @@ from tools.load_spacy_model_custom_recognisers import nlp
 from tools.secure_path_utils import (
     secure_path_join,
     validate_folder_containment,
-    validate_path_containment,
     validate_path_safety,
 )
 
@@ -666,7 +665,7 @@ def save_results_and_redaction_lists(
     try:
         output_folder_path = Path(output_folder).resolve()
         # Validate that the resolved path is within the trusted OUTPUT_FOLDER using robust containment check
-        if not validate_path_containment(str(output_folder_path), OUTPUT_FOLDER):
+        if not validate_folder_containment(str(output_folder_path), OUTPUT_FOLDER):
             raise ValueError(
                 f"Output folder path {output_folder} is outside the trusted directory {OUTPUT_FOLDER}"
             )

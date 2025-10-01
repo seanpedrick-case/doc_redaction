@@ -26,6 +26,7 @@ from tools.config import (
     INPUT_FOLDER,
     MAX_IMAGE_PIXELS,
     OUTPUT_FOLDER,
+    RETURN_PDF_FOR_REVIEW,
 )
 from tools.file_conversion import (
     convert_annotation_data_to_dataframe,
@@ -1109,6 +1110,9 @@ def replace_placeholder_image_with_real_image(
 ):
     """If image path is still not valid, load in a new image an overwrite it. Then replace all items in the image annotation object for all pages based on the updated information."""
 
+    if page_num_reported <= 0:
+        page_num_reported = 1
+
     page_num_reported_zero_indexed = page_num_reported - 1
 
     if not os.path.exists(current_image_path):
@@ -1472,6 +1476,21 @@ def update_annotator_object_and_filter_df(
             value=None, interactive=False
         )  # Present blank/non-interactive
     else:
+        if current_page_image_annotator_object["image"].startswith("placeholder_image"):
+
+            print(
+                "current_page_image_annotator_object['image'] is None. Replacing with real image."
+            )
+            current_page_image_annotator_object["image"], page_sizes_df = (
+                replace_placeholder_image_with_real_image(
+                    doc_full_file_name_textbox,
+                    current_page_image_annotator_object["image"],
+                    page_sizes_df,
+                    gradio_annotator_current_page_number,
+                    input_folder,
+                )
+            )
+
         out_image_annotator = image_annotator(
             value=current_page_image_annotator_object,
             boxes_alpha=0.1,
@@ -1704,6 +1723,11 @@ def apply_redactions_to_review_df_and_files(
                 number_of_pages = pdf_doc.page_count
                 original_cropboxes = list()
 
+                # Create review PDF document if RETURN_PDF_FOR_REVIEW is True
+                review_pdf_doc = None
+                if RETURN_PDF_FOR_REVIEW:
+                    review_pdf_doc = pymupdf.open(file_path)
+
                 page_sizes_df = pd.DataFrame(page_sizes)
                 page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
                     pd.to_numeric, errors="coerce"
@@ -1736,6 +1760,23 @@ def apply_redactions_to_review_df_and_files(
                     original_cropboxes.append(pymupdf_page.cropbox)
                     pymupdf_page.set_cropbox(pymupdf_page.mediabox)
 
+                    # Handle review PDF page if needed
+                    if RETURN_PDF_FOR_REVIEW and review_pdf_doc:
+                        review_pymupdf_page = review_pdf_doc.load_page(i)
+                        review_pymupdf_page.set_cropbox(review_pymupdf_page.mediabox)
+
+                        # Apply redactions to review page (with annotations visible)
+                        review_pymupdf_page = redact_page_with_pymupdf(
+                            page=review_pymupdf_page,
+                            page_annotations=all_image_annotations[i],
+                            image=image,
+                            original_cropbox=original_cropboxes[-1],
+                            page_sizes_df=page_sizes_df,
+                            return_pdf_for_review=True,
+                            return_pdf_end_of_redaction=False,
+                        )
+
+                    # Apply redactions to final page (with text removed)
                     pymupdf_page = redact_page_with_pymupdf(
                         page=pymupdf_page,
                         page_annotations=all_image_annotations[i],
@@ -1743,6 +1784,7 @@ def apply_redactions_to_review_df_and_files(
                         original_cropbox=original_cropboxes[-1],
                         page_sizes_df=page_sizes_df,
                         return_pdf_for_review=False,
+                        return_pdf_end_of_redaction=False,
                     )
             else:
                 print("File type not recognised.")
@@ -1750,6 +1792,7 @@ def apply_redactions_to_review_df_and_files(
             progress(0.9, "Saving output files")
 
             if pdf_doc:
+                # Save final redacted PDF
                 out_pdf_file_path = (
                     output_folder + file_name_without_ext + "_redacted.pdf"
                 )
@@ -1757,6 +1800,19 @@ def apply_redactions_to_review_df_and_files(
                     pdf_doc, out_pdf_file_path, COMPRESS_REDACTED_PDF
                 )
                 output_files.append(out_pdf_file_path)
+
+                # Save review PDF if RETURN_PDF_FOR_REVIEW is True
+                if RETURN_PDF_FOR_REVIEW and review_pdf_doc:
+                    out_review_pdf_file_path = (
+                        output_folder
+                        + file_name_without_ext
+                        + "_redactions_for_review.pdf"
+                    )
+                    print("Saving PDF file for review:", out_review_pdf_file_path)
+                    save_pdf_with_or_without_compression(
+                        review_pdf_doc, out_review_pdf_file_path, COMPRESS_REDACTED_PDF
+                    )
+                    output_files.append(out_review_pdf_file_path)
 
             else:
                 print("PDF input not found. Outputs not saved to PDF.")

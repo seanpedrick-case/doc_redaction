@@ -368,8 +368,25 @@ def run_cli_redact(
             print(stderr)
         print("---------------------")
 
-        if result.returncode == 0:
-            print("✅ Script executed successfully.")
+        # Analyze the output for errors and success indicators
+        analysis = analyze_test_output(stdout, stderr)
+
+        if analysis["has_errors"]:
+            print("❌ Errors detected in output:")
+            for i, error_type in enumerate(analysis["error_types"]):
+                print(f"   {i+1}. {error_type}")
+            if analysis["error_messages"]:
+                print("   Error messages:")
+                for msg in analysis["error_messages"][
+                    :3
+                ]:  # Show first 3 error messages
+                    print(f"     - {msg}")
+            return False
+        elif result.returncode == 0:
+            success_msg = "✅ Script executed successfully."
+            if analysis["success_indicators"]:
+                success_msg += f" (Success indicators: {', '.join(analysis['success_indicators'][:3])})"
+            print(success_msg)
             return True
         else:
             print(f"❌ Command failed with return code {result.returncode}")
@@ -382,6 +399,83 @@ def run_cli_redact(
     except Exception as e:
         print(f"❌ An unexpected error occurred: {e}")
         return False
+
+
+def analyze_test_output(stdout: str, stderr: str) -> dict:
+    """
+    Analyze test output to provide detailed error information.
+
+    Args:
+        stdout (str): Standard output from the test
+        stderr (str): Standard error from the test
+
+    Returns:
+        dict: Analysis results with error details
+    """
+    combined_output = (stdout or "") + (stderr or "")
+
+    analysis = {
+        "has_errors": False,
+        "error_types": [],
+        "error_messages": [],
+        "success_indicators": [],
+        "warning_indicators": [],
+    }
+
+    # Error patterns
+    error_patterns = {
+        "An error occurred": "General error message",
+        "Error:": "Error prefix",
+        "Exception:": "Exception occurred",
+        "Traceback": "Python traceback",
+        "Failed to": "Operation failure",
+        "Cannot": "Operation not possible",
+        "Unable to": "Operation not possible",
+        "KeyError:": "Missing key/dictionary error",
+        "AttributeError:": "Missing attribute error",
+        "TypeError:": "Type mismatch error",
+        "ValueError:": "Invalid value error",
+        "FileNotFoundError:": "File not found",
+        "ImportError:": "Import failure",
+        "ModuleNotFoundError:": "Module not found",
+    }
+
+    # Success indicators
+    success_patterns = [
+        "Successfully",
+        "Completed",
+        "Finished",
+        "Processed",
+        "Redacted",
+        "Extracted",
+    ]
+
+    # Warning indicators
+    warning_patterns = ["Warning:", "WARNING:", "Deprecated", "DeprecationWarning"]
+
+    # Check for errors
+    for pattern, description in error_patterns.items():
+        if pattern.lower() in combined_output.lower():
+            analysis["has_errors"] = True
+            analysis["error_types"].append(description)
+
+            # Extract the actual error message
+            lines = combined_output.split("\n")
+            for line in lines:
+                if pattern.lower() in line.lower():
+                    analysis["error_messages"].append(line.strip())
+
+    # Check for success indicators
+    for pattern in success_patterns:
+        if pattern.lower() in combined_output.lower():
+            analysis["success_indicators"].append(pattern)
+
+    # Check for warnings
+    for pattern in warning_patterns:
+        if pattern.lower() in combined_output.lower():
+            analysis["warning_indicators"].append(pattern)
+
+    return analysis
 
 
 class TestCLIRedactExamples(unittest.TestCase):
