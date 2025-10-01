@@ -500,6 +500,18 @@ class TestCLIRedactExamples(unittest.TestCase):
         print(f"Example data directory: {cls.example_data_dir}")
         print(f"Temp output directory: {cls.temp_output_dir}")
 
+        # Debug: Check if example data directory exists and list contents
+        if os.path.exists(cls.example_data_dir):
+            print("Example data directory exists. Contents:")
+            for item in os.listdir(cls.example_data_dir):
+                item_path = os.path.join(cls.example_data_dir, item)
+                if os.path.isfile(item_path):
+                    print(f"  File: {item} ({os.path.getsize(item_path)} bytes)")
+                else:
+                    print(f"  Directory: {item}")
+        else:
+            print(f"Example data directory does not exist: {cls.example_data_dir}")
+
     @classmethod
     def tearDownClass(cls):
         """Clean up test environment after running tests."""

@@ -5,6 +5,7 @@ Creates dummy test files when example data is not available.
 """
 
 import os
+import sys
 
 import pandas as pd
 
@@ -19,7 +20,7 @@ def create_directories():
 
 
 def create_dummy_pdf():
-    """Create a dummy PDF for testing."""
+    """Create dummy PDFs for testing."""
 
     # Install reportlab if not available
     try:
@@ -33,9 +34,12 @@ def create_dummy_pdf():
         from reportlab.pdfgen import canvas
 
     try:
+        # Create the main test PDF
         pdf_path = (
             "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
         )
+        print(f"Creating PDF: {pdf_path}")
+        print(f"Directory exists: {os.path.exists('example_data')}")
 
         c = canvas.Canvas(pdf_path, pagesize=letter)
         c.drawString(100, 750, "This is a test document for redaction testing.")
@@ -53,15 +57,69 @@ def create_dummy_pdf():
 
         print(f"Created dummy PDF: {pdf_path}")
 
+        # Create Partnership Agreement Toolkit PDF
+        partnership_pdf_path = "example_data/Partnership-Agreement-Toolkit_0_0.pdf"
+        print(f"Creating PDF: {partnership_pdf_path}")
+        c = canvas.Canvas(partnership_pdf_path, pagesize=letter)
+        c.drawString(100, 750, "Partnership Agreement Toolkit")
+        c.drawString(100, 700, "This is a test partnership agreement document.")
+        c.drawString(100, 650, "Contact: partnership@example.com")
+        c.drawString(100, 600, "Phone: (555) 123-4567")
+        c.drawString(100, 550, "Address: 123 Partnership Street, City, State 12345")
+        c.showPage()
+
+        # Add second page
+        c.drawString(100, 750, "Page 2 - Partnership Details")
+        c.drawString(100, 700, "More partnership information here.")
+        c.drawString(100, 650, "Contact: info@partnership.org")
+        c.showPage()
+
+        # Add third page
+        c.drawString(100, 750, "Page 3 - Terms and Conditions")
+        c.drawString(100, 700, "Terms and conditions content.")
+        c.drawString(100, 650, "Legal contact: legal@partnership.org")
+        c.save()
+
+        print(f"Created dummy PDF: {partnership_pdf_path}")
+
+        # Create Graduate Job Cover Letter PDF
+        cover_letter_pdf_path = "example_data/graduate-job-example-cover-letter.pdf"
+        print(f"Creating PDF: {cover_letter_pdf_path}")
+        c = canvas.Canvas(cover_letter_pdf_path, pagesize=letter)
+        c.drawString(100, 750, "Cover Letter Example")
+        c.drawString(100, 700, "Dear Hiring Manager,")
+        c.drawString(100, 650, "I am writing to apply for the position.")
+        c.drawString(100, 600, "Contact: applicant@example.com")
+        c.drawString(100, 550, "Phone: (555) 987-6543")
+        c.drawString(100, 500, "Address: 456 Job Street, Employment City, EC 54321")
+        c.drawString(100, 450, "Sincerely,")
+        c.drawString(100, 400, "John Applicant")
+        c.save()
+
+        print(f"Created dummy PDF: {cover_letter_pdf_path}")
+
     except ImportError:
         print("ReportLab not available, skipping PDF creation")
-        # Create a simple text file instead
+        # Create simple text files instead
         with open(
             "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
             "w",
         ) as f:
             f.write("This is a dummy PDF file for testing")
-        print("Created dummy text file instead of PDF")
+
+        with open(
+            "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+            "w",
+        ) as f:
+            f.write("This is a dummy Partnership Agreement PDF file for testing")
+
+        with open(
+            "example_data/graduate-job-example-cover-letter.pdf",
+            "w",
+        ) as f:
+            f.write("This is a dummy cover letter PDF file for testing")
+
+        print("Created dummy text files instead of PDFs")
 
 
 def create_dummy_csv():
@@ -209,6 +267,8 @@ def create_dummy_image():
 def main():
     """Main setup function."""
     print("Setting up test data for GitHub Actions...")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Python version: {sys.version}")
 
     create_directories()
     create_dummy_pdf()
@@ -222,7 +282,29 @@ def main():
     print("Created files:")
     for root, dirs, files in os.walk("example_data"):
         for file in files:
-            print(f"  {os.path.join(root, file)}")
+            file_path = os.path.join(root, file)
+            print(f"  {file_path}")
+            # Verify the file exists and has content
+            if os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
+                print(f"    Size: {file_size} bytes")
+            else:
+                print("    WARNING: File does not exist!")
+
+    # Verify critical files exist
+    critical_files = [
+        "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+        "example_data/graduate-job-example-cover-letter.pdf",
+        "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
+    ]
+
+    print("\nVerifying critical test files:")
+    for file_path in critical_files:
+        if os.path.exists(file_path):
+            file_size = os.path.getsize(file_path)
+            print(f"✅ {file_path} exists ({file_size} bytes)")
+        else:
+            print(f"❌ {file_path} MISSING!")
 
 
 if __name__ == "__main__":

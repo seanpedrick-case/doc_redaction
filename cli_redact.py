@@ -636,6 +636,21 @@ python cli_redact.py --task textract --textract_action list
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
 
+            # Debug: Print file path information
+            input_file_path = args.input_file[0]
+            print(f"Debug: Input file path: {input_file_path}")
+            print(f"Debug: File exists: {os.path.exists(input_file_path)}")
+            print(f"Debug: Absolute path: {os.path.abspath(input_file_path)}")
+            if os.path.exists(input_file_path):
+                print(f"Debug: File size: {os.path.getsize(input_file_path)} bytes")
+            else:
+                print(
+                    f"Debug: File not found! Current working directory: {os.getcwd()}"
+                )
+                print(
+                    f"Debug: Directory contents: {os.listdir(os.path.dirname(input_file_path) if os.path.dirname(input_file_path) else '.')}"
+                )
+
             _, file_extension = os.path.splitext(args.input_file[0])
             file_extension = file_extension.lower()
         else:

@@ -45,6 +45,17 @@ jobs:
     - name: Setup test data
       run: |
         python .github/scripts/setup_test_data.py
+        echo "Setup script completed. Checking results:"
+        ls -la example_data/ || echo "example_data directory not found"
+    
+    - name: Verify test data files
+      run: |
+        echo "Checking if critical test files exist:"
+        ls -la example_data/
+        echo "Checking for specific PDF files:"
+        ls -la example_data/*.pdf || echo "No PDF files found"
+        echo "Checking file sizes:"
+        find example_data -name "*.pdf" -exec ls -lh {} \;
     
     - name: Run CLI tests
       run: |
