@@ -98,7 +98,10 @@ from tools.load_spacy_model_custom_recognisers import (
     nlp_analyser,
     score_threshold,
 )
-from tools.secure_path_utils import secure_file_write, validate_path_safety, validate_path_containment
+from tools.secure_path_utils import (
+    secure_file_write,
+    validate_path_containment,
+)
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
 if not MAX_IMAGE_PIXELS:
@@ -1061,7 +1064,9 @@ def choose_and_run_redactor(
                         # pymupdf_doc is an image list in this case
                         if isinstance(pymupdf_doc[-1], str):
                             # Normalize and validate path safety before opening image
-                            normalized_path = os.path.normpath(os.path.abspath(pymupdf_doc[-1]))
+                            normalized_path = os.path.normpath(
+                                os.path.abspath(pymupdf_doc[-1])
+                            )
                             if validate_path_containment(normalized_path, INPUT_FOLDER):
                                 img = Image.open(normalized_path)
                             else:
@@ -2810,8 +2815,12 @@ def redact_image_pdf(
                                 )
 
                                 # Normalize and validate path safety before opening image
-                                normalized_path = os.path.normpath(os.path.abspath(image_path))
-                                if validate_path_containment(normalized_path, INPUT_FOLDER):
+                                normalized_path = os.path.normpath(
+                                    os.path.abspath(image_path)
+                                )
+                                if validate_path_containment(
+                                    normalized_path, INPUT_FOLDER
+                                ):
                                     image = Image.open(normalized_path)
                                 else:
                                     raise ValueError(

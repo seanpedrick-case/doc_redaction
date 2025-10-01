@@ -19,7 +19,12 @@ from tools.file_conversion import (
 )
 from tools.helper_functions import OUTPUT_FOLDER
 from tools.load_spacy_model_custom_recognisers import nlp
-from tools.secure_path_utils import secure_path_join, validate_path_safety, validate_path_containment, validate_folder_containment
+from tools.secure_path_utils import (
+    secure_path_join,
+    validate_folder_containment,
+    validate_path_containment,
+    validate_path_safety,
+)
 
 number_of_zeros_to_add_to_index = 7  # Number of zeroes to add between page number and line numbers to get a unique page/line index value
 ID_MULTIPLIER = 100000

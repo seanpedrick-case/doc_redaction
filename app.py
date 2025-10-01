@@ -59,6 +59,7 @@ from tools.config import (
     DYNAMODB_USAGE_LOG_HEADERS,
     ENFORCE_COST_CODES,
     EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+    FASTAPI_ROOT_PATH,
     FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     FEEDBACK_LOG_FILE_NAME,
     FEEDBACK_LOGS_FOLDER,
@@ -121,7 +122,6 @@ from tools.config import (
     USE_GREEDY_DUPLICATE_DETECTION,
     USER_GUIDE_URL,
     WHOLE_PAGE_REDACTION_LIST_PATH,
-    FASTAPI_ROOT_PATH,
 )
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.data_anonymise import anonymise_files_with_open_text

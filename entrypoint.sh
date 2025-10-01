@@ -14,22 +14,18 @@ else
 
     if [ "$RUN_FASTAPI" = "1" ]; then
         echo "Starting in FastAPI mode..."
-        # Set default values for Gunicorn configuration if they are not provided
-        # This makes your container more flexible.
-        GUNICORN_HOST=${GRADIO_SERVER_NAME:-0.0.0.0}
-        GUNICORN_PORT=${GRADIO_SERVER_PORT:-7860}
-        GUNICORN_WORKERS=${DEFAULT_CONCURRENCY_LIMIT:-3}
+        
+        GRADIO_SERVER_NAME=${GRADIO_SERVER_NAME:-0.0.0.0}
+        GRADIO_SERVER_PORT=${GRADIO_SERVER_PORT:-7860}
+        GRADIO_ROOT_PATH=${GRADIO_ROOT_PATH:-/}
 
-        echo "Starting Gunicorn with $GUNICORN_WORKERS workers, binding to $GUNICORN_HOST:$GUNICORN_PORT"
-
-        # Start the Gunicorn server managing Uvicorn workers
-        # `exec` is important as it replaces the shell process with the Gunicorn process,
-        # allowing it to receive signals (like SIGTERM for shutdown) correctly.
-        exec gunicorn \
-            --workers "$GUNICORN_WORKERS" \
-            --worker-class "uvicorn.workers.UvicornWorker" \
-            --bind "$GUNICORN_HOST:$GUNICORN_PORT" \
-            app:app
+        # Start uvicorn server.
+        echo "Starting with Uvicorn on $GRADIO_SERVER_NAME:$GRADIO_SERVER_PORT with root path $GRADIO_ROOT_PATH"
+        exec uvicorn app:app \
+            --host $GRADIO_SERVER_NAME \
+            --port $GRADIO_SERVER_PORT \
+            --proxy-headers \
+            --root-path $GRADIO_ROOT_PATH
     else
         echo "Starting in Gradio mode..."
         exec python app.py
