@@ -5,18 +5,7 @@ set -e
 
 echo "Starting in APP_MODE: $APP_MODE"
 
-# --- STEP 1: Load environment file from S3 ---
-if [ -n "$CONFIG_ENV_S3_URI" ]; then
-    echo "Downloading environment config from $CONFIG_ENV_S3_URI"
-    aws s3 cp "$CONFIG_ENV_S3_URI" /tmp/config.env
-    set -a  # Automatically export all variables
-    . /tmp/config.env
-    set +a
-else
-    echo "No CONFIG_ENV_S3_URI provided; using default env vars"
-fi
-
-# --- STEP 2: Start the app based on mode ---
+# --- Start the app based on mode ---
 
 if [ "$APP_MODE" = "lambda" ]; then
     echo "Starting in Lambda mode..."
