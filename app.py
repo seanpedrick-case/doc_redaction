@@ -277,6 +277,47 @@ in_redact_comprehend_entities = gr.Dropdown(
     label="AWS Comprehend PII identification model (click empty space in box for full list)",
 )
 
+in_deny_list = gr.File(
+                        label="Import custom deny list - csv table with one column of a different word/phrase on each row (case insensitive). Terms in this file will always be redacted.",
+                        file_count="multiple",
+                        height=FILE_INPUT_HEIGHT,
+                    )
+
+in_deny_list_state = gr.Dataframe(
+                        value=pd.DataFrame(),
+                        headers=["deny_list"],
+                        col_count=(1, "fixed"),
+                        row_count=(0, "dynamic"),
+                        label="Deny list",
+                        visible=True,
+                        type="pandas",
+                        interactive=True,
+                        show_fullscreen_button=True,
+                        show_copy_button=True,
+                        wrap=True,
+                    )
+
+in_fully_redacted_list = gr.File(
+                        label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.",
+                        file_count="multiple",
+                        height=FILE_INPUT_HEIGHT,
+                    )
+
+in_fully_redacted_list_state = gr.Dataframe(
+                        value=pd.DataFrame(),
+                        headers=["fully_redacted_pages_list"],
+                        col_count=(1, "fixed"),
+                        row_count=(0, "dynamic"),
+                        label="Fully redacted pages",
+                        visible=True,
+                        type="pandas",
+                        interactive=True,
+                        show_fullscreen_button=True,
+                        show_copy_button=True,
+                        wrap=True,
+                    )
+
+
 ## Deduplication examples
 in_duplicate_pages = gr.File(
     label="Upload one or multiple 'ocr_output.csv' files to find duplicate pages and subdocuments",
@@ -973,6 +1014,8 @@ with blocks:
                 "example_data/example_complaint_letter.jpg",
                 "example_data/graduate-job-example-cover-letter.pdf",
                 "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+                "example_data/partnership_toolkit_redact_custom_deny_list.csv",
+                "example_data/partnership_toolkit_redact_some_pages.csv",
             ]
 
             available_examples = list()
@@ -990,6 +1033,10 @@ with blocks:
                         CHOSEN_COMPREHEND_ENTITIES,
                         [example_files[0]],
                         example_files[0],
+                        [],
+                        pd.DataFrame(),
+                        [],
+                        pd.DataFrame(),
                     ]
                 )
                 example_labels.append("PDF with selectable text redaction")
@@ -1005,6 +1052,10 @@ with blocks:
                         CHOSEN_COMPREHEND_ENTITIES,
                         [example_files[1]],
                         example_files[1],
+                        [],
+                        pd.DataFrame(),
+                        [],
+                        pd.DataFrame(),
                     ]
                 )
                 example_labels.append("Image redaction with local OCR")
@@ -1020,6 +1071,10 @@ with blocks:
                         CHOSEN_COMPREHEND_ENTITIES,
                         [example_files[2]],
                         example_files[2],
+                        [],
+                        pd.DataFrame(),
+                        [],
+                        pd.DataFrame(),
                     ]
                 )
                 example_labels.append(
@@ -1038,11 +1093,37 @@ with blocks:
                             CHOSEN_COMPREHEND_ENTITIES,
                             [example_files[3]],
                             example_files[3],
+                            [],
+                            pd.DataFrame(),
+                            [],
+                            pd.DataFrame(),
                         ]
                     )
                     example_labels.append(
                         "PDF redaction with AWS services and signature detection"
-                    )
+                    )                     
+
+            # Add new example for custom deny list and whole page redaction
+            if os.path.exists(example_files[3]) and os.path.exists(example_files[4]) and os.path.exists(example_files[5]):
+                available_examples.append(
+                    [
+                        [example_files[3]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Local",
+                        [],
+                        ["CUSTOM"],  # Use CUSTOM entity to enable deny list functionality
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        [example_files[3]],
+                        example_files[3],
+                        [example_files[4]],
+                        pd.DataFrame(data={"deny_list": ["Sister", "Sister City", "Sister Cities", "Friendship City"]}),
+                        [example_files[5]],
+                        pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
+                    ]
+                )
+                example_labels.append(
+                    "PDF redaction with custom deny list and whole page redaction"
+                )
 
             # Only create examples if we have available files
             if available_examples:
@@ -1056,6 +1137,10 @@ with blocks:
                     in_redact_comprehend_entities,
                     prepared_pdf_state,
                     doc_full_file_name_textbox,
+                    in_deny_list,                    
+                    in_deny_list_state,
+                    in_fully_redacted_list,
+                    in_fully_redacted_list_state,
                 ):
                     gr.Info(
                         "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
@@ -1072,6 +1157,10 @@ with blocks:
                         in_redact_comprehend_entities,
                         prepared_pdf_state,
                         doc_full_file_name_textbox,
+                        in_deny_list,
+                        in_deny_list_state,
+                        in_fully_redacted_list,
+                        in_fully_redacted_list_state,
                     ],
                     example_labels=example_labels,
                     fn=show_info_box_on_click,
@@ -2091,19 +2180,11 @@ with blocks:
                     in_allow_list_text = gr.Textbox(
                         label="Custom allow list load status"
                     )
-                with gr.Column():
-                    in_deny_list = gr.File(
-                        label="Import custom deny list - csv table with one column of a different word/phrase on each row (case insensitive). Terms in this file will always be redacted.",
-                        file_count="multiple",
-                        height=FILE_INPUT_HEIGHT,
-                    )
+                with gr.Column():                    
+                    in_deny_list.render() # Defined at beginning of file
                     in_deny_list_text = gr.Textbox(label="Custom deny list load status")
                 with gr.Column():
-                    in_fully_redacted_list = gr.File(
-                        label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.",
-                        file_count="multiple",
-                        height=FILE_INPUT_HEIGHT,
-                    )
+                    in_fully_redacted_list.render() # Defined at beginning of file
                     in_fully_redacted_list_text = gr.Textbox(
                         label="Fully redacted page list load status"
                     )
@@ -2125,33 +2206,10 @@ with blocks:
                         show_copy_button=True,
                         wrap=True,
                     )
-                    in_deny_list_state = gr.Dataframe(
-                        value=pd.DataFrame(),
-                        headers=["deny_list"],
-                        col_count=(1, "fixed"),
-                        row_count=(0, "dynamic"),
-                        label="Deny list",
-                        visible=True,
-                        type="pandas",
-                        interactive=True,
-                        show_fullscreen_button=True,
-                        show_copy_button=True,
-                        wrap=True,
-                    )
-                    in_fully_redacted_list_state = gr.Dataframe(
-                        value=pd.DataFrame(),
-                        headers=["fully_redacted_pages_list"],
-                        col_count=(1, "fixed"),
-                        row_count=(0, "dynamic"),
-                        label="Fully redacted pages",
-                        visible=True,
-                        type="pandas",
-                        interactive=True,
-                        show_fullscreen_button=True,
-                        show_copy_button=True,
-                        datatype="number",
-                        wrap=True,
-                    )
+                    
+                    in_deny_list_state.render() # Defined at beginning of file
+                    
+                    in_fully_redacted_list_state.render() # Defined at beginning of file
                 with gr.Row():
                     with gr.Column(scale=2):
                         markdown_placeholder = gr.Markdown("")

@@ -311,14 +311,6 @@ def validate_folder_containment(
         path_str = str(normalized_path).lower()
         base_str = str(normalized_base).lower()
 
-        print(
-            f"DEBUG: validate_folder_containment called with path='{path}' base_path='{base_path}'"
-        )
-        print(
-            f"DEBUG: normalized_path='{normalized_path}' normalized_base='{normalized_base}'"
-        )
-        print(f"DEBUG: path_str='{path_str}' base_str='{base_str}'")
-
         # Check if this is a test scenario
         is_test_path = any(
             test_pattern in path_str

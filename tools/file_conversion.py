@@ -574,7 +574,7 @@ def redact_single_box(
 
     Returns:
         Page or Tuple[Page, Page]: If return_pdf_end_of_redaction is True and retain_text is True,
-                                  returns a tuple of (review_page, final_page). Otherwise returns a single Page.
+                                  returns a tuple of (review_page, applied_redaction_page). Otherwise returns a single Page.
     """
 
     pymupdf_x1 = pymupdf_rect[0]
@@ -582,31 +582,45 @@ def redact_single_box(
     pymupdf_x2 = pymupdf_rect[2]
     pymupdf_y2 = pymupdf_rect[3]
 
-    full_size_redaction_box = Rect(pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2)
+    # Full size redaction box for covering all the text of a word
+    full_size_redaction_box = Rect(pymupdf_x1-1, pymupdf_y1-1, pymupdf_x2+1, pymupdf_y2+1)
+
+    # Calculate tiny height redaction box so that it doesn't delete text from adjacent lines
+    redact_bottom_y = pymupdf_y1 + 2
+    redact_top_y = pymupdf_y2 - 2
+
+    # Calculate the middle y value and set a small height if default values are too close together
+    if (redact_top_y - redact_bottom_y) < 1:
+        middle_y = (pymupdf_y1 + pymupdf_y2) / 2
+        redact_bottom_y = middle_y - 1
+        redact_top_y = middle_y + 1
+
+    rect_small_pixel_height = Rect(
+        pymupdf_x1 + 2, redact_bottom_y, pymupdf_x2 - 2, redact_top_y
+    )  # Slightly smaller than outside box
 
     out_colour = define_box_colour(
         custom_colours, img_annotation_box, CUSTOM_BOX_COLOUR
     )
 
+    img_annotation_box["text"] = img_annotation_box.get("text") or ""
+    img_annotation_box["label"] = img_annotation_box.get("label") or "Redaction"
+
     # Create a copy of the page for final redaction if needed
-    final_page = None
+    applied_redaction_page = None
     if return_pdf_end_of_redaction and retain_text:
         # Create a deep copy of the page for final redaction
-        import fitz
 
-        final_page = fitz.open()
-        final_page.insert_pdf(
+        applied_redaction_page = pymupdf.open()
+        applied_redaction_page.insert_pdf(
             pymupdf_page.parent,
             from_page=pymupdf_page.number,
             to_page=pymupdf_page.number,
         )
-        final_page = final_page[0]
+        applied_redaction_page = applied_redaction_page[0]
 
-    # Handle review page (retain_text = True)
-    if retain_text is True:
-
-        img_annotation_box["text"] = img_annotation_box.get("text") or ""
-        img_annotation_box["label"] = img_annotation_box.get("label") or "Redaction"
+    # Handle review page first, then deal with final redacted page (retain_text = True)
+    if retain_text is True:       
 
         annot = pymupdf_page.add_redact_annot(full_size_redaction_box)
         annot.set_colors(stroke=out_colour, fill=out_colour, colors=out_colour)
@@ -620,51 +634,27 @@ def redact_single_box(
         )
         annot.update(opacity=0.5, cross_out=False)
 
-        # If we need both review and final pages, apply final redaction to the copy
-        if return_pdf_end_of_redaction and final_page is not None:
-            # Apply final redaction to the copy
-            redact_bottom_y = pymupdf_y1 + 2
-            redact_top_y = pymupdf_y2 - 2
-
-            # Calculate the middle y value and set a small height if default values are too close together
-            if (redact_top_y - redact_bottom_y) < 1:
-                middle_y = (pymupdf_y1 + pymupdf_y2) / 2
-                redact_bottom_y = middle_y - 1
-                redact_top_y = middle_y + 1
-
-            rect_small_pixel_height = Rect(
-                pymupdf_x1, redact_bottom_y, pymupdf_x2, redact_top_y
-            )  # Slightly smaller than outside box
+        # If we need both review and final pages, and the applied redaction page has been prepared, apply final redaction to the copy
+        if return_pdf_end_of_redaction and applied_redaction_page is not None:
+            # Apply final redaction to the copy            
 
             # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
-            final_page.add_redact_annot(rect_small_pixel_height)
+            applied_redaction_page.add_redact_annot(rect_small_pixel_height)
 
             # Only create a box over the whole rect if we want to delete the text
-            shape = final_page.new_shape()
+            shape = applied_redaction_page.new_shape()
             shape.draw_rect(pymupdf_rect)
 
             # Use solid fill for normal redaction
             shape.finish(color=out_colour, fill=out_colour)
             shape.commit()
 
-            return pymupdf_page, final_page
+            return pymupdf_page, applied_redaction_page
         else:
             return pymupdf_page
-    else:
-        # Calculate area to actually remove text from the pdf (different from black box size)
-        redact_bottom_y = pymupdf_y1 + 2
-        redact_top_y = pymupdf_y2 - 2
 
-        # Calculate the middle y value and set a small height if default values are too close together
-        if (redact_top_y - redact_bottom_y) < 1:
-            middle_y = (pymupdf_y1 + pymupdf_y2) / 2
-            redact_bottom_y = middle_y - 1
-            redact_top_y = middle_y + 1
-
-        rect_small_pixel_height = Rect(
-            pymupdf_x1, redact_bottom_y, pymupdf_x2, redact_top_y
-        )  # Slightly smaller than outside box
-
+    # If we don't need to retain the text, we only have one page which is the applied redaction page, so just apply the redaction to the page
+    else: 
         # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
         pymupdf_page.add_redact_annot(rect_small_pixel_height)
 
@@ -792,27 +782,30 @@ def redact_whole_pymupdf_page(
     """
     # Small border to page that remains white
 
-    # Define the coordinates for the Rect
+    # Define the coordinates for the Rect (PDF coordinates for actual redaction)
     whole_page_x1, whole_page_y1 = 0 + border, 0 + border  # Bottom-left corner
-
-    # If border is a tiny value, assume that we want relative values
-    if border < 0.1:
-        whole_page_x2, whole_page_y2 = 1 - border, 1 - border  # Top-right corner
-    else:
-        whole_page_x2, whole_page_y2 = (
-            rect_width - border,
-            rect_height - border,
-        )  # Top-right corner
+    whole_page_x2, whole_page_y2 = (
+        rect_width - border,
+        rect_height - border,
+    )  # Top-right corner
 
     # Create new image annotation element based on whole page coordinates
     whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
 
-    # Write whole page annotation to annotation boxes
+    # Calculate relative coordinates for the annotation box (0-1 range)
+    # This ensures the coordinates are already in relative format for output files
+    relative_border = border / min(rect_width, rect_height)  # Scale border proportionally
+    relative_x1 = relative_border
+    relative_y1 = relative_border
+    relative_x2 = 1 - relative_border
+    relative_y2 = 1 - relative_border
+
+    # Write whole page annotation to annotation boxes using relative coordinates
     whole_page_img_annotation_box = dict()
-    whole_page_img_annotation_box["xmin"] = whole_page_x1
-    whole_page_img_annotation_box["ymin"] = whole_page_y1
-    whole_page_img_annotation_box["xmax"] = whole_page_x2
-    whole_page_img_annotation_box["ymax"] = whole_page_y2
+    whole_page_img_annotation_box["xmin"] = relative_x1
+    whole_page_img_annotation_box["ymin"] = relative_y1
+    whole_page_img_annotation_box["xmax"] = relative_x2
+    whole_page_img_annotation_box["ymax"] = relative_y2
     whole_page_img_annotation_box["color"] = (0, 0, 0)
     whole_page_img_annotation_box["label"] = "Whole page"
 

@@ -404,7 +404,7 @@ def choose_and_run_redactor(
     if prepared_pdf_file_paths:
         review_out_file_paths = [prepared_pdf_file_paths[0]]
     else:
-        review_out_file_paths = []
+        review_out_file_paths = list()
 
     # Choose the correct file to prepare
     if isinstance(file_paths, str):
@@ -1095,111 +1095,111 @@ def choose_and_run_redactor(
 
                     else:
                         # Check if we have dual PDF documents to save
-                        final_pymupdf_doc = None
+                        applied_redaction_pymupdf_doc = None
 
                         if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
                             if (
-                                hasattr(redact_image_pdf, "_final_pages")
-                                and redact_image_pdf._final_pages
+                                hasattr(redact_image_pdf, "_applied_redaction_pages")
+                                and redact_image_pdf._applied_redaction_pages
                             ):
 
                                 # Create final document by copying the original document and replacing specific pages
-                                final_pymupdf_doc = pymupdf.open()
-                                final_pymupdf_doc.insert_pdf(pymupdf_doc)
+                                applied_redaction_pymupdf_doc = pymupdf.open()
+                                applied_redaction_pymupdf_doc.insert_pdf(pymupdf_doc)
 
                                 # Create a mapping of original page numbers to final pages
-                                final_pages_map = {}
-                                for final_page_data in redact_image_pdf._final_pages:
-                                    if isinstance(final_page_data, tuple):
-                                        final_page, original_page_number = (
-                                            final_page_data
+                                applied_redaction_pages_map = {}
+                                for applied_redaction_page_data in redact_image_pdf._applied_redaction_pages:
+                                    if isinstance(applied_redaction_page_data, tuple):
+                                        applied_redaction_page, original_page_number = (
+                                            applied_redaction_page_data
                                         )
-                                        final_pages_map[original_page_number] = (
-                                            final_page
+                                        applied_redaction_pages_map[original_page_number] = (
+                                            applied_redaction_page
                                         )
                                     else:
-                                        final_page = final_page_data
-                                        final_pages_map[0] = (
-                                            final_page  # Default to page 0 if no original number
+                                        applied_redaction_page = applied_redaction_page_data
+                                        applied_redaction_pages_map[0] = (
+                                            applied_redaction_page  # Default to page 0 if no original number
                                         )
 
                                 # Replace pages in the final document with their final versions
                                 for (
                                     original_page_number,
-                                    final_page,
-                                ) in final_pages_map.items():
+                                    applied_redaction_page,
+                                ) in applied_redaction_pages_map.items():
                                     if (
                                         original_page_number
-                                        < final_pymupdf_doc.page_count
+                                        < applied_redaction_pymupdf_doc.page_count
                                     ):
                                         # Remove the original page and insert the final page
-                                        final_pymupdf_doc.delete_page(
+                                        applied_redaction_pymupdf_doc.delete_page(
                                             original_page_number
                                         )
-                                        final_pymupdf_doc.insert_pdf(
-                                            final_page.parent,
-                                            from_page=final_page.number,
-                                            to_page=final_page.number,
+                                        applied_redaction_pymupdf_doc.insert_pdf(
+                                            applied_redaction_page.parent,
+                                            from_page=applied_redaction_page.number,
+                                            to_page=applied_redaction_page.number,
                                             start_at=original_page_number,
                                         )
-                                        # Apply redactions to the final page
-                                        final_pymupdf_doc[
+                                        # Remove text. Graphic text is effectively removed by the overlapping rectangle shape that becomes an embedded part of the document.
+                                        applied_redaction_pymupdf_doc[
                                             original_page_number
-                                        ].apply_redactions(images=2, graphics=0, text=0)
+                                        ].apply_redactions(images=0, graphics=0, text=0)
                                 # Clear the stored final pages
-                                delattr(redact_image_pdf, "_final_pages")
+                                delattr(redact_image_pdf, "_applied_redaction_pages")
                             elif (
-                                hasattr(redact_text_pdf, "_final_pages")
-                                and redact_text_pdf._final_pages
+                                hasattr(redact_text_pdf, "_applied_redaction_pages")
+                                and redact_text_pdf._applied_redaction_pages
                             ):
                                 # Create final document by copying the original document and replacing specific pages
-                                final_pymupdf_doc = pymupdf.open()
-                                final_pymupdf_doc.insert_pdf(pymupdf_doc)
+                                applied_redaction_pymupdf_doc = pymupdf.open()
+                                applied_redaction_pymupdf_doc.insert_pdf(pymupdf_doc)
 
                                 # Create a mapping of original page numbers to final pages
-                                final_pages_map = {}
-                                for final_page_data in redact_text_pdf._final_pages:
-                                    if isinstance(final_page_data, tuple):
-                                        final_page, original_page_number = (
-                                            final_page_data
+                                applied_redaction_pages_map = {}
+                                for applied_redaction_page_data in redact_text_pdf._applied_redaction_pages:
+                                    if isinstance(applied_redaction_page_data, tuple):
+                                        applied_redaction_page, original_page_number = (
+                                            applied_redaction_page_data
                                         )
-                                        final_pages_map[original_page_number] = (
-                                            final_page
+                                        applied_redaction_pages_map[original_page_number] = (
+                                            applied_redaction_page
                                         )
                                     else:
-                                        final_page = final_page_data
-                                        final_pages_map[0] = (
-                                            final_page  # Default to page 0 if no original number
+                                        applied_redaction_page = applied_redaction_page_data
+                                        applied_redaction_pages_map[0] = (
+                                            applied_redaction_page  # Default to page 0 if no original number
                                         )
 
                                 # Replace pages in the final document with their final versions
                                 for (
                                     original_page_number,
-                                    final_page,
-                                ) in final_pages_map.items():
+                                    applied_redaction_page,
+                                ) in applied_redaction_pages_map.items():
                                     if (
                                         original_page_number
-                                        < final_pymupdf_doc.page_count
+                                        < applied_redaction_pymupdf_doc.page_count
                                     ):
                                         # Remove the original page and insert the final page
-                                        final_pymupdf_doc.delete_page(
+                                        applied_redaction_pymupdf_doc.delete_page(
                                             original_page_number
                                         )
-                                        final_pymupdf_doc.insert_pdf(
-                                            final_page.parent,
-                                            from_page=final_page.number,
-                                            to_page=final_page.number,
+                                        applied_redaction_pymupdf_doc.insert_pdf(
+                                            applied_redaction_page.parent,
+                                            from_page=applied_redaction_page.number,
+                                            to_page=applied_redaction_page.number,
                                             start_at=original_page_number,
                                         )
-                                        # Apply redactions to the final page
-                                        final_pymupdf_doc[
+                                        # Remove text. Graphic text is effectively removed by the overlapping rectangle shape that becomes an embedded part of the document.
+                                        applied_redaction_pymupdf_doc[
                                             original_page_number
-                                        ].apply_redactions(images=2, graphics=0, text=0)
+                                        ].apply_redactions(images=0, graphics=0, text=0)
                                 # Clear the stored final pages
-                                delattr(redact_text_pdf, "_final_pages")
+                                delattr(redact_text_pdf, "_applied_redaction_pages")
 
                         # Save final redacted PDF if we have dual outputs or if RETURN_PDF_FOR_REVIEW is False
-                        if RETURN_PDF_FOR_REVIEW is False or final_pymupdf_doc:
+                        if RETURN_PDF_FOR_REVIEW is False or applied_redaction_pymupdf_doc:
                             out_redacted_pdf_file_path = (
                                 output_folder
                                 + pdf_file_name_without_ext
@@ -1211,7 +1211,7 @@ def choose_and_run_redactor(
 
                             # Use final document if available, otherwise use main document
                             doc_to_save = (
-                                final_pymupdf_doc if final_pymupdf_doc else pymupdf_doc
+                                applied_redaction_pymupdf_doc if applied_redaction_pymupdf_doc else pymupdf_doc
                             )
 
                             if out_redacted_pdf_file_path:
@@ -2104,7 +2104,7 @@ def redact_page_with_pymupdf(
         Tuple[Page, dict] or Tuple[Tuple[Page, Page], dict]: A tuple containing:
             - page (Page or Tuple[Page, Page]): The PyMuPDF page object(s) with redactions applied.
                                                If return_pdf_end_of_redaction is True and return_pdf_for_review is True,
-                                               returns a tuple of (review_page, final_page).
+                                               returns a tuple of (review_page, applied_redaction_page).
             - out_annotation_boxes (dict): A dictionary containing the processed annotation boxes
                                            for the page, including the image path.
     """
@@ -2271,14 +2271,14 @@ def redact_page_with_pymupdf(
 
         # Handle dual page objects if returned
         if isinstance(redact_result, tuple):
-            page, final_page = redact_result
+            page, applied_redaction_page = redact_result
             # Store the final page for later use
-            if not hasattr(redact_page_with_pymupdf, "_final_page"):
-                redact_page_with_pymupdf._final_page = final_page
+            if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
+                redact_page_with_pymupdf._applied_redaction_page = applied_redaction_page
             else:
                 # If we already have a final page, we need to handle multiple pages
                 # For now, we'll use the last final page
-                redact_page_with_pymupdf._final_page = final_page
+                redact_page_with_pymupdf._applied_redaction_page = applied_redaction_page
 
     # If whole page is to be redacted, do that here
     if redact_whole_page is True:
@@ -2286,72 +2286,71 @@ def redact_page_with_pymupdf(
         whole_page_img_annotation_box = redact_whole_pymupdf_page(
             rect_height, rect_width, page, custom_colours, border=5
         )
+        # Ensure the whole page annotation box has a unique ID
+        whole_page_img_annotation_box = fill_missing_box_ids(whole_page_img_annotation_box)
         all_image_annotation_boxes.append(whole_page_img_annotation_box)
 
         # Handle dual page objects for whole page redaction if needed
         if return_pdf_end_of_redaction and return_pdf_for_review:
             # Create a copy of the page for final redaction using the same approach as redact_single_box
 
-            final_page_doc = pymupdf.open()
-            final_page_doc.insert_pdf(
+            applied_redaction_doc = pymupdf.open()
+            applied_redaction_doc.insert_pdf(
                 page.parent,
                 from_page=page.number,
                 to_page=page.number,
             )
-            final_page = final_page_doc[0]
+            applied_redaction_page = applied_redaction_doc[0]
 
             # Apply the whole page redaction to the final page as well
             redact_whole_pymupdf_page(
-                rect_height, rect_width, final_page, custom_colours, border=5
+                rect_height, rect_width, applied_redaction_page, custom_colours, border=5
             )
 
             # Store the final page with its original page number for later use
-            if not hasattr(redact_page_with_pymupdf, "_final_page"):
-                redact_page_with_pymupdf._final_page = (final_page, page.number)
+            if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
+                redact_page_with_pymupdf._applied_redaction_page = (applied_redaction_page, page.number)
             else:
                 # If we already have a final page, we need to handle multiple pages
                 # For now, we'll use the last final page
-                redact_page_with_pymupdf._final_page = (final_page, page.number)
+                redact_page_with_pymupdf._applied_redaction_page = (applied_redaction_page, page.number)
 
     out_annotation_boxes = {
         "image": image_path,  # Image.open(image_path), #image_path,
         "boxes": all_image_annotation_boxes,
     }
 
+    # If we are not returning the review page, can directly remove text and all images
     if return_pdf_for_review is False:
-        # Remove text and all images
-        # page.apply_redactions(images=2, graphics=2)
-        page.apply_redactions(images=2, graphics=0, text=0)
-    # else:
-    #     # Just apply the box, don't remove images or text
-    #     page.apply_redactions(images=0, graphics=0, text=1)
+        # Remove text. Graphic text is effectively removed by the overlapping rectangle shape that becomes an embedded part of the document.
+        page.apply_redactions(images=0, graphics=0, text=0)
 
     set_cropbox_safely(page, original_cropbox)
-    # page.set_cropbox(original_cropbox)
-    # Set CropBox to original size
     page.clean_contents()
 
     # Handle dual page objects if we have a final page
     if (
         return_pdf_end_of_redaction
         and return_pdf_for_review
-        and hasattr(redact_page_with_pymupdf, "_final_page")
+        and hasattr(redact_page_with_pymupdf, "_applied_redaction_page")
     ):
-        final_page_data = redact_page_with_pymupdf._final_page
+        applied_redaction_page_data = redact_page_with_pymupdf._applied_redaction_page
         # Handle both tuple format (new) and single page format (backward compatibility)
-        if isinstance(final_page_data, tuple):
-            final_page, original_page_number = final_page_data
+        if isinstance(applied_redaction_page_data, tuple):
+            applied_redaction_page, original_page_number = applied_redaction_page_data
         else:
-            final_page = final_page_data
+            applied_redaction_page = applied_redaction_page_data
 
-        # Apply redactions to final page
-        if return_pdf_for_review is False:
-            final_page.apply_redactions(images=2, graphics=0, text=0)
-        set_cropbox_safely(final_page, original_cropbox)
-        final_page.clean_contents()
+        # Apply redactions to applied redaction page only
+        # Remove text. Graphic text is effectively removed by the overlapping rectangle shape that becomes an embedded part of the document.
+        applied_redaction_page.apply_redactions(images=0, graphics=0, text=0)
+
+        set_cropbox_safely(applied_redaction_page, original_cropbox)
+        applied_redaction_page.clean_contents()
         # Clear the stored final page
-        delattr(redact_page_with_pymupdf, "_final_page")
-        return (page, final_page), out_annotation_boxes
+        delattr(redact_page_with_pymupdf, "_applied_redaction_page")
+        return (page, applied_redaction_page), out_annotation_boxes
+
     else:
         return page, out_annotation_boxes
 
@@ -3116,14 +3115,14 @@ def redact_image_pdf(
 
                     # Handle dual page objects if returned
                     if isinstance(redact_result[0], tuple):
-                        (pymupdf_page, pymupdf_final_page), page_image_annotations = (
+                        (pymupdf_page, pymupdf_applied_redaction_page), page_image_annotations = (
                             redact_result
                         )
                         # Store the final page with its original page number for later use
-                        if not hasattr(redact_image_pdf, "_final_pages"):
-                            redact_image_pdf._final_pages = []
-                        redact_image_pdf._final_pages.append(
-                            (pymupdf_final_page, page_no)
+                        if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
+                            redact_image_pdf._applied_redaction_pages = list()
+                        redact_image_pdf._applied_redaction_pages.append(
+                            (pymupdf_applied_redaction_page, page_no)
                         )
                     else:
                         pymupdf_page, page_image_annotations = redact_result
@@ -4178,14 +4177,14 @@ def redact_text_pdf(
 
                     # Handle dual page objects if returned
                     if isinstance(redact_result[0], tuple):
-                        (pymupdf_page, pymupdf_final_page), page_image_annotations = (
+                        (pymupdf_page, pymupdf_applied_redaction_page), page_image_annotations = (
                             redact_result
                         )
                         # Store the final page with its original page number for later use
-                        if not hasattr(redact_text_pdf, "_final_pages"):
-                            redact_text_pdf._final_pages = []
-                        redact_text_pdf._final_pages.append(
-                            (pymupdf_final_page, page_no)
+                        if not hasattr(redact_text_pdf, "_applied_redaction_pages"):
+                            redact_text_pdf._applied_redaction_pages = list()
+                        redact_text_pdf._applied_redaction_pages.append(
+                            (pymupdf_applied_redaction_page, page_no)
                         )
                     else:
                         pymupdf_page, page_image_annotations = redact_result
@@ -4205,7 +4204,6 @@ def redact_text_pdf(
                 # Else, user chose not to run redaction
                 else:
                     pass
-                    # print("Not redacting page:", page_no)
 
                 # Join extracted text outputs for all lines together
                 if not page_text_ocr_outputs.empty:

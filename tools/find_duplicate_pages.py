@@ -462,9 +462,6 @@ def combine_ocr_dataframes(
     output_files = list()
     if output_folder and output_filename:
         # Validate path safety before creating directories and files
-        print(
-            f"DEBUG: Validating output_folder='{output_folder}' against OUTPUT_FOLDER='{OUTPUT_FOLDER}'"
-        )
         if not validate_folder_containment(output_folder, OUTPUT_FOLDER):
             raise ValueError(f"Unsafe output folder path: {output_folder}")
         if not validate_path_safety(output_filename):
@@ -659,9 +656,6 @@ def save_results_and_redaction_lists(
         list: A list of paths to all generated files.
     """
     # Validate the output_folder path for security
-    print(
-        f"DEBUG: Validating output_folder='{output_folder}' against OUTPUT_FOLDER='{OUTPUT_FOLDER}'"
-    )
     if not validate_folder_containment(output_folder, OUTPUT_FOLDER):
         raise ValueError(f"Invalid or unsafe output folder path: {output_folder}")
 
@@ -671,9 +665,6 @@ def save_results_and_redaction_lists(
     try:
         output_folder_path = Path(output_folder).resolve()
         # Validate that the resolved path is within the trusted OUTPUT_FOLDER using robust containment check
-        print(
-            f"DEBUG: Validating resolved path='{output_folder_path}' against OUTPUT_FOLDER='{OUTPUT_FOLDER}'"
-        )
         if not validate_folder_containment(str(output_folder_path), OUTPUT_FOLDER):
             raise ValueError(
                 f"Output folder path {output_folder} is outside the trusted directory {OUTPUT_FOLDER}"
@@ -1092,7 +1083,7 @@ def run_duplicate_analysis(
 
     progress(0, desc="Combining input files...")
     df_combined, _, full_out_ocr_df = combine_ocr_output_text(
-        files, combine_pages=combine_pages
+        files, combine_pages=combine_pages, output_folder=output_folder
     )
 
     if df_combined.empty:
