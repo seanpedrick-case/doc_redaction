@@ -2,7 +2,7 @@ import os
 
 import gradio as gr
 import pandas as pd
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from gradio_image_annotation import image_annotator
 
 from tools.auth import authenticate_user
@@ -6257,13 +6257,18 @@ with blocks:
                     allow_headers=["*"],  # Allow all headers
                 )
 
+            @app.get("/health", status_code=status.HTTP_200_OK)
+            def health_check():
+                """Simple health check endpoint."""
+                return {"status": "ok"}
+
             app = gr.mount_gradio_app(
                 app,
                 blocks,
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH == "1" else None,
                 max_file_size=MAX_FILE_SIZE,
-                root_path=ROOT_PATH,
+                # root_path=ROOT_PATH, # Not necessary
                 path=FASTAPI_ROOT_PATH,
             )
 
