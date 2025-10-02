@@ -1186,7 +1186,10 @@ with blocks:
 
         with gr.Accordion("Redact document", open=True):
             in_doc_files.render()
-
+            open_tab_text = ""
+            default_text = ""
+            textract_text = ""
+            comprehend_text = ""
             if DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION:
                 textract_text = " AWS Textract has a cost per page."
             else:
