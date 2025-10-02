@@ -110,8 +110,7 @@ COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
 COPY --from=builder /install/bin /usr/local/bin/
 
 # Copy app code and entrypoint with correct ownership
-COPY --chown=user lambda_entrypoint.py $APP_HOME/app/
-COPY --chown=user app.py $APP_HOME/app/
+COPY --chown=user . $APP_HOME/app
 
 # Copy the entrypoint script to its final destination
 COPY entrypoint.sh /entrypoint.sh
