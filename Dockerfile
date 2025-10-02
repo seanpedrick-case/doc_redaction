@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS builder
 
 # Install system dependencies
 RUN apt-get update \
@@ -25,7 +25,7 @@ COPY lambda_entrypoint.py .
 COPY entrypoint.sh .
 
 # Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm
+FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie
 
 # Set build-time and runtime environment variable for whether to run in Gradio mode or Lambda mode
 ARG APP_MODE=gradio
@@ -108,7 +108,7 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
     && chmod 755 /usr/share/tessdata
 
 # Copy installed packages from builder stage
-COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
+COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
 
 # Copy installed CLI binaries (e.g. gunicorn)
 COPY --from=builder /install/bin /usr/local/bin/

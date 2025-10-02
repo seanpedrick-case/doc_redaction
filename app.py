@@ -3526,6 +3526,7 @@ with blocks:
         fn=decrease_page,
         inputs=[annotate_current_page, all_image_annotations_state],
         outputs=[annotate_current_page, annotate_current_page_bottom],
+        show_progress_on=[all_image_annotations_state],
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -3598,6 +3599,7 @@ with blocks:
         fn=increase_page,
         inputs=[annotate_current_page, all_image_annotations_state],
         outputs=[annotate_current_page, annotate_current_page_bottom],
+        show_progress_on=[all_image_annotations_state],
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -3670,6 +3672,7 @@ with blocks:
         fn=decrease_page,
         inputs=[annotate_current_page, all_image_annotations_state],
         outputs=[annotate_current_page, annotate_current_page_bottom],
+        show_progress_on=[all_image_annotations_state],
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -3742,6 +3745,7 @@ with blocks:
         fn=increase_page,
         inputs=[annotate_current_page, all_image_annotations_state],
         outputs=[annotate_current_page, annotate_current_page_bottom],
+        show_progress_on=[all_image_annotations_state],
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
