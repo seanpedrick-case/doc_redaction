@@ -575,6 +575,17 @@ else:
             0,
         )  # Default to black if the custom box colour is not a valid tuple of three integers between 0 and 255
 
+# Apply redactions defaults to images, graphics, and text, from: https://pymupdf.readthedocs.io/en/latest/page.html#Page.apply_redactions
+# For images, the default is set to 0, to ignore. Text presented in images is effectively removed by the overlapping rectangle shape that becomes an embedded part of the document (see the redact_single_box function in file_redaction.py).
+APPLY_REDACTIONS_IMAGES = int(
+    get_or_create_env_var("APPLY_REDACTIONS_IMAGES", "0")
+)  # The default (2) blanks out overlapping pixels. PDF_REDACT_IMAGE_NONE | 0 ignores, and PDF_REDACT_IMAGE_REMOVE | 1 completely removes images overlapping any redaction annotation. Option PDF_REDACT_IMAGE_REMOVE_UNLESS_INVISIBLE | 3 only removes images that are actually visible.
+APPLY_REDACTIONS_GRAPHICS = int(
+    get_or_create_env_var("APPLY_REDACTIONS_GRAPHICS", "0")
+)  # How to redact overlapping vector graphics (also called “line-art” or “drawings”). The default (2) removes any overlapping vector graphics. PDF_REDACT_LINE_ART_NONE | 0 ignores, and PDF_REDACT_LINE_ART_REMOVE_IF_COVERED | 1 removes graphics fully contained in a redaction annotation.
+APPLY_REDACTIONS_TEXT = int(
+    get_or_create_env_var("APPLY_REDACTIONS_TEXT", "0")
+)  # The default PDF_REDACT_TEXT_REMOVE | 0 removes all characters whose boundary box overlaps any redaction rectangle. This complies with the original legal / data protection intentions of redaction annotations. Other use cases however may require to keep text while redacting vector graphics or images. This can be achieved by setting text=True|PDF_REDACT_TEXT_NONE | 1. This does not comply with the data protection intentions of redaction annotations. Do so at your own risk.
 
 # If you don't want to redact the text, but instead just draw a box over it, set this to True
 RETURN_PDF_FOR_REVIEW = get_or_create_env_var("RETURN_PDF_FOR_REVIEW", "True")
@@ -654,7 +665,7 @@ USER_GUIDE_URL = validate_safe_url(
     )
 )
 
-SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "False")
+SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "True")
 SHOW_AWS_EXAMPLES = get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
 
 FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))

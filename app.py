@@ -1557,14 +1557,13 @@ with blocks:
                                     "id": list(),
                                 }
                             ),
-                            col_count=(4, "fixed"),
+                            row_count=(0, "dynamic"),
                             type="pandas",
                             label="Click table row to select and go to page",
                             headers=["page", "label", "text", "id"],
                             show_fullscreen_button=True,
                             wrap=True,
                             max_height=400,
-                            static_columns=[0, 1, 2, 3],
                         )
 
                         with gr.Row(equal_height=True):
@@ -1582,7 +1581,7 @@ with blocks:
                                         "id": list(),
                                     }
                                 ),
-                                col_count=4,
+                                row_count=(0, "dynamic"),
                                 type="pandas",
                                 visible=True,
                                 headers=["page", "label", "text", "id"],
@@ -1648,6 +1647,7 @@ with blocks:
                                     "word_y1": list(),
                                 }
                             ),
+                            row_count=(0, "dynamic"),
                             type="pandas",
                             label="Click table row to select and go to page",
                             headers=[
@@ -1685,6 +1685,7 @@ with blocks:
                                         "word_y1": list(),
                                     }
                                 ),
+                                row_count=(0, "dynamic"),
                                 type="pandas",
                                 headers=[
                                     "page",
@@ -1712,7 +1713,6 @@ with blocks:
                     all_page_line_level_ocr_results_df = gr.Dataframe(
                         value=pd.DataFrame(columns=["page", "line", "text"]),
                         headers=["page", "line", "text"],
-                        col_count=(3, "fixed"),
                         row_count=(0, "dynamic"),
                         label="All OCR results",
                         visible=True,

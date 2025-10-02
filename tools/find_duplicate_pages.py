@@ -15,8 +15,8 @@ from tools.config import MAX_SIMULTANEOUS_FILES
 from tools.file_conversion import (
     convert_annotation_data_to_dataframe,
     fill_missing_box_ids_each_box,
-    redact_whole_pymupdf_page,
 )
+from tools.file_redaction import redact_whole_pymupdf_page
 from tools.helper_functions import OUTPUT_FOLDER
 from tools.load_spacy_model_custom_recognisers import nlp
 from tools.secure_path_utils import (

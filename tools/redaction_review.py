@@ -201,13 +201,11 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
         recogniser_dataframe_out_gr = gr.Dataframe(
             review_dataframe[["page", "label", "text", "id"]],
             show_search="filter",
-            col_count=(4, "fixed"),
             type="pandas",
             headers=["page", "label", "text", "id"],
             show_fullscreen_button=True,
             wrap=True,
             max_height=400,
-            static_columns=[0, 1, 2, 3],
         )
 
         recogniser_dataframe_out = review_dataframe[["page", "label", "text", "id"]]
@@ -333,13 +331,11 @@ def update_recogniser_dataframes(
         recogniser_dataframe_out_gr = gr.Dataframe(
             review_dataframe[["page", "label", "text", "id"]],
             show_search="filter",
-            col_count=(4, "fixed"),
             type="pandas",
             headers=["page", "label", "text", "id"],
             show_fullscreen_button=True,
             wrap=True,
             max_height=400,
-            static_columns=[0, 1, 2, 3],
         )
 
         recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(

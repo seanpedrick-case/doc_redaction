@@ -8,7 +8,6 @@ import time
 import zipfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -18,13 +17,12 @@ import pymupdf
 from gradio import Progress
 from pdf2image import convert_from_path, pdfinfo_from_path
 from PIL import Image, ImageFile
-from pymupdf import Document, Page, Rect
+from pymupdf import Document, Page
 from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 from tools.config import (
     COMPRESS_REDACTED_PDF,
-    CUSTOM_BOX_COLOUR,
     IMAGES_DPI,
     INPUT_FOLDER,
     LOAD_REDACTION_ANNOTATIONS_FROM_PDF,
@@ -32,12 +30,9 @@ from tools.config import (
     MAX_IMAGE_PIXELS,
     MAX_SIMULTANEOUS_FILES,
     OUTPUT_FOLDER,
-    RETURN_PDF_FOR_REVIEW,
-    RETURN_REDACTED_PDF,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
-    USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
 )
 from tools.helper_functions import get_file_name_without_type, read_file
 from tools.secure_path_utils import secure_file_read, secure_join
@@ -448,229 +443,6 @@ def get_input_file_names(file_input: List[str]):
     )
 
 
-def convert_color_to_range_0_1(color):
-    return tuple(component / 255 for component in color)
-
-
-def define_box_colour(
-    custom_colours: bool, img_annotation_box: dict, CUSTOM_BOX_COLOUR: tuple
-):
-    """
-    Determines the color for a bounding box annotation.
-
-    If `custom_colours` is True, it attempts to parse the color from `img_annotation_box['color']`.
-    It supports color strings in "(R,G,B)" format (0-255 integers) or tuples/lists of (R,G,B)
-    where components are either 0-1 floats or 0-255 integers.
-    If parsing fails or `custom_colours` is False, it defaults to `CUSTOM_BOX_COLOUR`.
-    All output colors are converted to a 0.0-1.0 float range.
-
-    Args:
-        custom_colours (bool): If True, attempts to use a custom color from `img_annotation_box`.
-        img_annotation_box (dict): A dictionary that may contain a 'color' key with the custom color.
-        CUSTOM_BOX_COLOUR (tuple): The default color to use if custom colors are not enabled or parsing fails.
-                                   Expected to be a tuple of (R, G, B) with values in the 0.0-1.0 range.
-
-    Returns:
-        tuple: A tuple (R, G, B) representing the chosen color, with components in the 0.0-1.0 float range.
-    """
-    if custom_colours is True:
-        color_input = img_annotation_box["color"]
-        out_colour = (0, 0, 0)  # Initialize with a default black color (0.0-1.0 range)
-
-        if isinstance(color_input, str):
-            # Expected format: "(R,G,B)" where R,G,B are integers 0-255 (e.g., "(255,0,0)")
-            try:
-                # Remove parentheses and split by comma, then convert to integers
-                components_str = color_input.strip().strip("()").split(",")
-                colour_tuple_int = tuple(int(c.strip()) for c in components_str)
-
-                # Validate the parsed integer tuple
-                if len(colour_tuple_int) == 3 and not all(
-                    0 <= c <= 1 for c in colour_tuple_int
-                ):
-                    out_colour = convert_color_to_range_0_1(colour_tuple_int)
-                elif len(colour_tuple_int) == 3 and all(
-                    0 <= c <= 1 for c in colour_tuple_int
-                ):
-                    out_colour = colour_tuple_int
-                else:
-                    print(
-                        f"Warning: Invalid color string values or length for '{color_input}'. Expected (R,G,B) with R,G,B in 0-255. Defaulting to black."
-                    )
-            except (ValueError, IndexError):
-                print(
-                    f"Warning: Could not parse color string '{color_input}'. Expected '(R,G,B)' format. Defaulting to black."
-                )
-        elif isinstance(color_input, (tuple, list)) and len(color_input) == 3:
-            # Expected formats: (R,G,B) where R,G,B are either 0-1 floats or 0-255 integers
-            if all(isinstance(c, (int, float)) for c in color_input):
-                # Case 1: Components are already 0.0-1.0 floats
-                if all(isinstance(c, float) and 0.0 <= c <= 1.0 for c in color_input):
-                    out_colour = tuple(color_input)
-                # Case 2: Components are 0-255 integers
-                elif not all(
-                    isinstance(c, float) and 0.0 <= c <= 1.0 for c in color_input
-                ):
-                    out_colour = convert_color_to_range_0_1(color_input)
-                else:
-                    # Numeric values but not in expected 0-1 float or 0-255 integer ranges
-                    print(
-                        f"Warning: Invalid color tuple/list values {color_input}. Expected (R,G,B) with R,G,B in 0-1 floats or 0-255 integers. Defaulting to black."
-                    )
-            else:
-                # Contains non-numeric values (e.g., (1, 'a', 3))
-                print(
-                    f"Warning: Color tuple/list {color_input} contains non-numeric values. Defaulting to black."
-                )
-        else:
-            # Catch-all for any other unexpected format (e.g., None, dict, etc.)
-            print(
-                f"Warning: Unexpected color format for {color_input}. Expected string '(R,G,B)' or tuple/list (R,G,B). Defaulting to black."
-            )
-
-        # Final safeguard: Ensure out_colour is always a valid PyMuPDF color tuple (3 floats 0.0-1.0)
-        if not (
-            isinstance(out_colour, tuple)
-            and len(out_colour) == 3
-            and all(isinstance(c, float) and 0.0 <= c <= 1.0 for c in out_colour)
-        ):
-            out_colour = (
-                0,
-                0,
-                0,
-            )  # Fallback to black if any previous logic resulted in an invalid state
-            out_colour = img_annotation_box["color"]
-    else:
-        if CUSTOM_BOX_COLOUR:
-            out_colour = CUSTOM_BOX_COLOUR  # Should be a tuple of three integers between 0 and 1 from config
-        else:
-            out_colour = (0, 0, 0)
-
-    return out_colour
-
-
-def redact_single_box(
-    pymupdf_page: Page,
-    pymupdf_rect: Rect,
-    img_annotation_box: dict,
-    custom_colours: bool = USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
-    retain_text: bool = RETURN_PDF_FOR_REVIEW,
-    return_pdf_end_of_redaction: bool = RETURN_REDACTED_PDF,
-):
-    """
-    Commit redaction boxes to a PyMuPDF page.
-
-    Args:
-        pymupdf_page (Page): The PyMuPDF page object to which the redaction will be applied.
-        pymupdf_rect (Rect): The PyMuPDF rectangle defining the bounds of the redaction box.
-        img_annotation_box (dict): A dictionary containing annotation details, such as label, text, and color.
-        custom_colours (bool, optional): If True, uses custom colors for the redaction box.
-                                        Defaults to USE_GUI_BOX_COLOURS_FOR_OUTPUTS.
-        retain_text (bool, optional): If True, adds a redaction annotation but retains the underlying text.
-                                      If False, the text within the redaction area is deleted.
-                                      Defaults to RETURN_PDF_FOR_REVIEW.
-        return_pdf_end_of_redaction (bool, optional): If True, returns both review and final redacted page objects.
-                                                      Defaults to RETURN_REDACTED_PDF.
-
-    Returns:
-        Page or Tuple[Page, Page]: If return_pdf_end_of_redaction is True and retain_text is True,
-                                  returns a tuple of (review_page, applied_redaction_page). Otherwise returns a single Page.
-    """
-
-    pymupdf_x1 = pymupdf_rect[0]
-    pymupdf_y1 = pymupdf_rect[1]
-    pymupdf_x2 = pymupdf_rect[2]
-    pymupdf_y2 = pymupdf_rect[3]
-
-    # Full size redaction box for covering all the text of a word
-    full_size_redaction_box = Rect(
-        pymupdf_x1 - 1, pymupdf_y1 - 1, pymupdf_x2 + 1, pymupdf_y2 + 1
-    )
-
-    # Calculate tiny height redaction box so that it doesn't delete text from adjacent lines
-    redact_bottom_y = pymupdf_y1 + 2
-    redact_top_y = pymupdf_y2 - 2
-
-    # Calculate the middle y value and set a small height if default values are too close together
-    if (redact_top_y - redact_bottom_y) < 1:
-        middle_y = (pymupdf_y1 + pymupdf_y2) / 2
-        redact_bottom_y = middle_y - 1
-        redact_top_y = middle_y + 1
-
-    rect_small_pixel_height = Rect(
-        pymupdf_x1 + 2, redact_bottom_y, pymupdf_x2 - 2, redact_top_y
-    )  # Slightly smaller than outside box
-
-    out_colour = define_box_colour(
-        custom_colours, img_annotation_box, CUSTOM_BOX_COLOUR
-    )
-
-    img_annotation_box["text"] = img_annotation_box.get("text") or ""
-    img_annotation_box["label"] = img_annotation_box.get("label") or "Redaction"
-
-    # Create a copy of the page for final redaction if needed
-    applied_redaction_page = None
-    if return_pdf_end_of_redaction and retain_text:
-        # Create a deep copy of the page for final redaction
-
-        applied_redaction_page = pymupdf.open()
-        applied_redaction_page.insert_pdf(
-            pymupdf_page.parent,
-            from_page=pymupdf_page.number,
-            to_page=pymupdf_page.number,
-        )
-        applied_redaction_page = applied_redaction_page[0]
-
-    # Handle review page first, then deal with final redacted page (retain_text = True)
-    if retain_text is True:
-
-        annot = pymupdf_page.add_redact_annot(full_size_redaction_box)
-        annot.set_colors(stroke=out_colour, fill=out_colour, colors=out_colour)
-        annot.set_name(img_annotation_box["label"])
-        annot.set_info(
-            info=img_annotation_box["label"],
-            title=img_annotation_box["label"],
-            subject=img_annotation_box["label"],
-            content=img_annotation_box["text"],
-            creationDate=datetime.now().strftime("%Y%m%d%H%M%S"),
-        )
-        annot.update(opacity=0.5, cross_out=False)
-
-        # If we need both review and final pages, and the applied redaction page has been prepared, apply final redaction to the copy
-        if return_pdf_end_of_redaction and applied_redaction_page is not None:
-            # Apply final redaction to the copy
-
-            # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
-            applied_redaction_page.add_redact_annot(rect_small_pixel_height)
-
-            # Only create a box over the whole rect if we want to delete the text
-            shape = applied_redaction_page.new_shape()
-            shape.draw_rect(pymupdf_rect)
-
-            # Use solid fill for normal redaction
-            shape.finish(color=out_colour, fill=out_colour)
-            shape.commit()
-
-            return pymupdf_page, applied_redaction_page
-        else:
-            return pymupdf_page
-
-    # If we don't need to retain the text, we only have one page which is the applied redaction page, so just apply the redaction to the page
-    else:
-        # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
-        pymupdf_page.add_redact_annot(rect_small_pixel_height)
-
-        # Only create a box over the whole rect if we want to delete the text
-        shape = pymupdf_page.new_shape()
-        shape.draw_rect(pymupdf_rect)
-
-        # Use solid fill for normal redaction
-        shape.finish(color=out_colour, fill=out_colour)
-        shape.commit()
-
-        return pymupdf_page
-
-
 def convert_pymupdf_to_image_coords(
     pymupdf_page: Page,
     x1: float,
@@ -761,64 +533,6 @@ def convert_pymupdf_to_image_coords(
         y2_image *= mediabox_to_rect_y_scale
 
     return x1_image, y1_image, x2_image, y2_image
-
-
-def redact_whole_pymupdf_page(
-    rect_height: float,
-    rect_width: float,
-    page: Page,
-    custom_colours: bool = False,
-    border: float = 5,
-    redact_pdf: bool = True,
-):
-    """
-    Redacts a whole page of a PDF document.
-
-    Args:
-        rect_height (float): The height of the page in points.
-        rect_width (float): The width of the page in points.
-        page (Page): The PyMuPDF page object to be redacted.
-        custom_colours (bool, optional): If True, uses custom colors for the redaction box.
-        border (float, optional): The border width in points. Defaults to 5.
-        redact_pdf (bool, optional): If True, redacts the PDF document. Defaults to True.
-    """
-    # Small border to page that remains white
-
-    # Define the coordinates for the Rect (PDF coordinates for actual redaction)
-    whole_page_x1, whole_page_y1 = 0 + border, 0 + border  # Bottom-left corner
-    whole_page_x2, whole_page_y2 = (
-        rect_width - border,
-        rect_height - border,
-    )  # Top-right corner
-
-    # Create new image annotation element based on whole page coordinates
-    whole_page_rect = Rect(whole_page_x1, whole_page_y1, whole_page_x2, whole_page_y2)
-
-    # Calculate relative coordinates for the annotation box (0-1 range)
-    # This ensures the coordinates are already in relative format for output files
-    relative_border = border / min(
-        rect_width, rect_height
-    )  # Scale border proportionally
-    relative_x1 = relative_border
-    relative_y1 = relative_border
-    relative_x2 = 1 - relative_border
-    relative_y2 = 1 - relative_border
-
-    # Write whole page annotation to annotation boxes using relative coordinates
-    whole_page_img_annotation_box = dict()
-    whole_page_img_annotation_box["xmin"] = relative_x1
-    whole_page_img_annotation_box["ymin"] = relative_y1
-    whole_page_img_annotation_box["xmax"] = relative_x2
-    whole_page_img_annotation_box["ymax"] = relative_y2
-    whole_page_img_annotation_box["color"] = (0, 0, 0)
-    whole_page_img_annotation_box["label"] = "Whole page"
-
-    if redact_pdf is True:
-        redact_single_box(
-            page, whole_page_rect, whole_page_img_annotation_box, custom_colours
-        )
-
-    return whole_page_img_annotation_box
 
 
 def create_page_size_objects(
@@ -1525,33 +1239,34 @@ def prepare_image_or_pdf(
 
                         all_annotations_object[i] = annotation
 
-                if isinstance(in_fully_redacted_list, list):
-                    in_fully_redacted_list = pd.DataFrame(
-                        data={"fully_redacted_pages_list": in_fully_redacted_list}
-                    )
+                # Does not redact whole pages on load as user may not expect this behaviour
+                # if isinstance(in_fully_redacted_list, list):
+                #     in_fully_redacted_list = pd.DataFrame(
+                #         data={"fully_redacted_pages_list": in_fully_redacted_list}
+                #     )
 
-                # Get list of pages that are to be fully redacted and redact them
-                if not in_fully_redacted_list.empty:
-                    print("Redacting whole pages")
+                # # Get list of pages that are to be fully redacted and redact them
+                # if not in_fully_redacted_list.empty:
+                #     print("Redacting whole pages")
 
-                    for i, image in enumerate(image_file_paths):
-                        page = pymupdf_doc.load_page(i)
-                        rect_height = page.rect.height
-                        rect_width = page.rect.width
-                        whole_page_img_annotation_box = redact_whole_pymupdf_page(
-                            rect_height,
-                            rect_width,
-                            image,
-                            page,
-                            custom_colours=False,
-                            border=5,
-                            image_dimensions={
-                                "image_width": image_sizes_width[i],
-                                "image_height": image_sizes_height[i],
-                            },
-                        )
+                #     for i, image in enumerate(image_file_paths):
+                #         page = pymupdf_doc.load_page(i)
+                #         rect_height = page.rect.height
+                #         rect_width = page.rect.width
+                #         whole_page_img_annotation_box = redact_whole_pymupdf_page(
+                #             rect_height,
+                #             rect_width,
+                #             image,
+                #             page,
+                #             custom_colours=False,
+                #             border=5,
+                #             image_dimensions={
+                #                 "image_width": image_sizes_width[i],
+                #                 "image_height": image_sizes_height[i],
+                #             },
+                #         )
 
-                        all_annotations_object.append(whole_page_img_annotation_box)
+                #         all_annotations_object.append(whole_page_img_annotation_box)
 
                 # Write the response to a JSON file in output folder
                 out_folder = output_folder + file_path_without_ext + ".json"
