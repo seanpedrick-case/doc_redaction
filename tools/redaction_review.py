@@ -1680,20 +1680,47 @@ def apply_redactions_to_review_df_and_files(
 
                     fill = img_annotation_box["color"]
 
-                    # Ensure fill is a valid RGB tuple
-                    if isinstance(fill, tuple) and len(fill) == 3:
-                        # Check if all elements are integers in the range 0-255
-                        if all(isinstance(c, int) and 0 <= c <= 255 for c in fill):
-                            pass
+                    # Ensure fill is a valid RGB tuple with integer values 0-255
+                    # Handle both list and tuple formats, and convert float values to proper RGB
+                    if isinstance(fill, (list, tuple)) and len(fill) == 3:
+                        # Convert to tuple if it's a list
+                        if isinstance(fill, list):
+                            fill = tuple(fill)
 
+                        # Check if all elements are valid RGB values
+                        valid_rgb = True
+                        converted_fill = []
+
+                        for c in fill:
+                            if isinstance(c, (int, float)):
+                                # If it's a float between 0-1, convert to 0-255 range
+                                if isinstance(c, float) and 0 <= c <= 1:
+                                    converted_fill.append(int(c * 255))
+                                # If it's already an integer 0-255, use as is
+                                elif isinstance(c, int) and 0 <= c <= 255:
+                                    converted_fill.append(c)
+                                # If it's a float > 1, assume it's already in 0-255 range
+                                elif isinstance(c, float) and c > 1:
+                                    converted_fill.append(int(c))
+                                else:
+                                    valid_rgb = False
+                                    break
+                            else:
+                                valid_rgb = False
+                                break
+
+                        if valid_rgb:
+                            fill = tuple(converted_fill)
                         else:
-                            print(f"Invalid color values: {fill}. Defaulting to black.")
-                            fill = CUSTOM_BOX_COLOUR  # Default to black if invalid
+                            print(
+                                f"Invalid color values: {fill}. Defaulting to CUSTOM_BOX_COLOUR."
+                            )
+                            fill = CUSTOM_BOX_COLOUR
                     else:
-                        print(f"Invalid fill format: {fill}. Defaulting to black.")
-                        fill = (
-                            CUSTOM_BOX_COLOUR  # Default to black if not a valid tuple
+                        print(
+                            f"Invalid fill format: {fill}. Defaulting to CUSTOM_BOX_COLOUR."
                         )
+                        fill = CUSTOM_BOX_COLOUR
 
                         # Ensure the image is in RGB mode
                     if image.mode not in ("RGB", "RGBA"):

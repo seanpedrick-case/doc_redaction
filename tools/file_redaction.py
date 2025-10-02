@@ -2175,9 +2175,22 @@ def define_box_colour(
             out_colour = img_annotation_box["color"]
     else:
         if CUSTOM_BOX_COLOUR:
-            out_colour = CUSTOM_BOX_COLOUR  # Should be a tuple of three integers between 0 and 1 from config
+            # Should be a tuple of three integers between 0 and 255 from config
+            if (
+                isinstance(CUSTOM_BOX_COLOUR, (tuple, list))
+                and len(CUSTOM_BOX_COLOUR) >= 3
+            ):
+                # Convert from 0-255 range to 0-1 range
+                out_colour = tuple(
+                    float(component / 255) if component >= 1 else float(component)
+                    for component in CUSTOM_BOX_COLOUR[:3]
+                )
         else:
-            out_colour = (0, 0, 0)
+            out_colour = (
+                0,
+                0,
+                0,
+            )  # Fallback to black if no custom box colour is provided
 
     return out_colour
 

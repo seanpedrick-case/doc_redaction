@@ -555,12 +555,12 @@ USE_GUI_BOX_COLOURS_FOR_OUTPUTS = get_or_create_env_var(
     "USE_GUI_BOX_COLOURS_FOR_OUTPUTS", "False"
 )
 
-# This is the colour of the output pdf redaction boxes. Should be a tuple of three integers between 0 and 1
+# This is the colour of the output pdf redaction boxes. Should be a tuple of three integers between 0 and 255
 CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "(0, 0, 0)")
 
 if CUSTOM_BOX_COLOUR == "grey":
-    # only "grey" is currently supported as a custom box colour by name, or a tuple of three integers between 0 and 1
-    CUSTOM_BOX_COLOUR = (0.5, 0.5, 0.5)
+    # only "grey" is currently supported as a custom box colour by name, or a tuple of three integers between 0 and 255
+    CUSTOM_BOX_COLOUR = (128, 128, 128)
 else:
     try:
         components_str = CUSTOM_BOX_COLOUR.strip("()").split(",")
