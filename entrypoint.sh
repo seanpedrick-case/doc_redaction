@@ -21,7 +21,7 @@ else
         GRADIO_SERVER_PORT=${GRADIO_SERVER_PORT:-7860}
 
         # Start uvicorn server.
-        echo "Starting with Uvicorn on $GRADIO_SERVER_NAME:$GRADIO_SERVER_PORT with root path $ROOT_PATH"
+        echo "Starting with Uvicorn on $GRADIO_SERVER_NAME:$GRADIO_SERVER_PORT"
         exec uvicorn app:app \
             --host $GRADIO_SERVER_NAME \
             --port $GRADIO_SERVER_PORT \

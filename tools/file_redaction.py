@@ -985,6 +985,7 @@ def choose_and_run_redactor(
                 log_files_output_paths=log_files_output_paths,
                 nlp_analyser=nlp_analyser,
                 output_folder=output_folder,
+                input_folder=input_folder,
             )
 
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
@@ -1040,6 +1041,7 @@ def choose_and_run_redactor(
                 document_cropboxes,
                 text_extraction_only,
                 output_folder=output_folder,
+                input_folder=input_folder,
             )
         else:
             out_message = "No redaction method selected"
@@ -1372,9 +1374,6 @@ def choose_and_run_redactor(
                         log_files_output_paths.append(
                             all_page_line_level_ocr_results_with_words_json_file_path[0]
                         )
-                    log_files_output_paths.append(
-                        all_page_line_level_ocr_results_with_words_json_file_path
-                    )
 
                 if (
                     all_page_line_level_ocr_results_with_words_df_file_path
@@ -2083,6 +2082,7 @@ def redact_page_with_pymupdf(
     page_sizes_df: pd.DataFrame = pd.DataFrame(),
     return_pdf_for_review: bool = RETURN_PDF_FOR_REVIEW,
     return_pdf_end_of_redaction: bool = RETURN_REDACTED_PDF,
+    input_folder: str = INPUT_FOLDER,
 ):
     """
     Applies redactions to a single PyMuPDF page based on provided annotations.
@@ -2160,8 +2160,17 @@ def redact_page_with_pymupdf(
     all_image_annotation_boxes = list()
 
     if isinstance(image, Image.Image):
-        image_path = move_page_info(str(page))
-        image.save(image_path)
+        # Create an image path using the input folder with PDF filename
+        # Get the PDF filename from the page's parent document
+        pdf_filename = (
+            os.path.basename(page.parent.name)
+            if hasattr(page.parent, "name") and page.parent.name
+            else "document"
+        )
+        # pdf_name_without_ext = os.path.splitext(pdf_filename)[0]
+        image_path = os.path.join(input_folder, f"{pdf_filename}_{page.number}.png")
+        if not os.path.exists(image_path):
+            image.save(image_path)
     elif isinstance(image, str):
         # Normalize and validate path safety before checking existence
         normalized_path = os.path.normpath(os.path.abspath(image))
@@ -2620,6 +2629,7 @@ def redact_image_pdf(
     max_time: int = int(MAX_TIME_VALUE),
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     output_folder: str = OUTPUT_FOLDER,
+    input_folder: str = INPUT_FOLDER,
     progress=Progress(track_tqdm=True),
 ):
     """
@@ -2661,7 +2671,7 @@ def redact_image_pdf(
     - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
     - output_folder (str, optional): The folder for file outputs.
     - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
-
+    - input_folder (str, optional): The folder for file inputs.
     The function returns a redacted PDF document along with processing output objects.
     """
 
@@ -3140,6 +3150,7 @@ def redact_image_pdf(
                         redact_whole_page=redact_whole_page,
                         original_cropbox=original_cropbox,
                         page_sizes_df=page_sizes_df,
+                        input_folder=input_folder,
                     )
 
                     # Handle dual page objects if returned
@@ -3901,6 +3912,7 @@ def redact_text_pdf(
     original_cropboxes: List[dict] = list(),
     text_extraction_only: bool = False,
     output_folder: str = OUTPUT_FOLDER,
+    input_folder: str = INPUT_FOLDER,
     page_break_val: int = int(PAGE_BREAK_VALUE),  # Value for page break
     max_time: int = int(MAX_TIME_VALUE),
     nlp_analyser: AnalyzerEngine = nlp_analyser,
@@ -3936,6 +3948,7 @@ def redact_text_pdf(
     - text_extraction_only (bool, optional): Should the function only extract text, or also do redaction.
     - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
     - output_folder (str, optional): The output folder for the function
+    - input_folder (str, optional): The folder for file inputs.
     - page_break_val: Value for page break
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
     - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
@@ -4203,6 +4216,7 @@ def redact_text_pdf(
                         convert_pikepdf_to_pymupdf_coords=True,
                         original_cropbox=original_cropboxes[page_no],
                         page_sizes_df=page_sizes_df,
+                        input_folder=input_folder,
                     )
 
                     # Handle dual page objects if returned

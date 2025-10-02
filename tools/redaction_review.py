@@ -1594,6 +1594,7 @@ def apply_redactions_to_review_df_and_files(
     save_pdf: bool = True,
     page_sizes: List[dict] = list(),
     COMPRESS_REDACTED_PDF: bool = COMPRESS_REDACTED_PDF,
+    input_folder: str = INPUT_FOLDER,
     progress=gr.Progress(track_tqdm=True),
 ):
     """
@@ -1619,6 +1620,8 @@ def apply_redactions_to_review_df_and_files(
                                            Defaults to an empty list.
         COMPRESS_REDACTED_PDF (bool, optional): If True, the output PDF will be compressed.
                                                 Defaults to COMPRESS_REDACTED_PDF.
+        input_folder (str, optional): The directory where input files are located and where
+                                     page images should be saved. Defaults to INPUT_FOLDER.
         progress (gr.Progress, optional): Gradio progress object for tracking task progress.
                                           Defaults to gr.Progress(track_tqdm=True).
 
@@ -1635,6 +1638,9 @@ def apply_redactions_to_review_df_and_files(
     output_log_files = list()
     pdf_doc = list()
     review_df = review_file_state
+
+    # Always use the provided input_folder parameter
+    # This ensures images are created in the specified input folder, not in example_data
 
     page_image_annotator_object = all_image_annotations[current_page - 1]
 
@@ -1774,6 +1780,7 @@ def apply_redactions_to_review_df_and_files(
                             page_sizes_df=page_sizes_df,
                             return_pdf_for_review=True,
                             return_pdf_end_of_redaction=False,
+                            input_folder=input_folder,
                         )
 
                     # Apply redactions to final page (with text removed)
@@ -1785,6 +1792,7 @@ def apply_redactions_to_review_df_and_files(
                         page_sizes_df=page_sizes_df,
                         return_pdf_for_review=False,
                         return_pdf_end_of_redaction=False,
+                        input_folder=input_folder,
                     )
             else:
                 print("File type not recognised.")
