@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import gradio as gr
 import pandas as pd
@@ -61,6 +62,7 @@ from tools.config import (
     ENFORCE_COST_CODES,
     EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
     FASTAPI_ROOT_PATH,
+    FAVICON_PATH,
     FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     FEEDBACK_LOG_FILE_NAME,
     FEEDBACK_LOGS_FOLDER,
@@ -6403,11 +6405,12 @@ with blocks:
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH == "1" else None,
                 max_file_size=MAX_FILE_SIZE,
-                # root_path=ROOT_PATH, # Not necessary
                 path=FASTAPI_ROOT_PATH,
+                favicon_path=Path(FAVICON_PATH),
             )
 
-            # Example command to run in uvicorn: uvicorn.run("app:app", host=GRADIO_SERVER_NAME, port=GRADIO_SERVER_PORT)
+            # Example command to run in uvicorn (in python): uvicorn.run("app:app", host=GRADIO_SERVER_NAME, port=GRADIO_SERVER_PORT)
+            # In command line something like: uvicorn app:app --host=0.0.0.0 --port=7860
 
         else:
             if __name__ == "__main__":
@@ -6420,6 +6423,7 @@ with blocks:
                         server_name=GRADIO_SERVER_NAME,
                         server_port=GRADIO_SERVER_PORT,
                         root_path=ROOT_PATH,
+                        favicon_path=Path(FAVICON_PATH),
                     )
                 else:
                     blocks.launch(
@@ -6429,6 +6433,7 @@ with blocks:
                         server_name=GRADIO_SERVER_NAME,
                         server_port=GRADIO_SERVER_PORT,
                         root_path=ROOT_PATH,
+                        favicon_path=Path(FAVICON_PATH),
                     )
 
     else:
