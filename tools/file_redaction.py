@@ -3481,10 +3481,8 @@ def redact_image_pdf(
                 # If an image_path file, draw onto the image_path
                 elif is_pdf(file_path) is False:
                     if isinstance(image_path, str):
-                        # Normalize and validate path safety before checking existence
-                        print("image_path:", image_path)
+                        # Normalise and validate path safety before checking existence
                         normalized_path = os.path.normpath(os.path.abspath(image_path))
-                        print("normalized_path:", normalized_path)
 
                         # Check if it's a Gradio temporary file
                         is_gradio_temp = (
@@ -3496,10 +3494,8 @@ def redact_image_pdf(
                             normalized_path, INPUT_FOLDER
                         ):
                             image = Image.open(normalized_path)
-                            print("image after validation:", image)
                         else:
                             print(f"Path validation failed for: {normalized_path}")
-                            print(f"INPUT_FOLDER: {INPUT_FOLDER}")
                             # You might want to handle this case differently
                             continue  # or raise an exception
                     elif isinstance(image_path, Image.Image):
@@ -3507,8 +3503,6 @@ def redact_image_pdf(
                     else:
                         # Assume image_path is an image
                         image = image_path
-
-                    print("image:", image)
 
                     fill = CUSTOM_BOX_COLOUR  # Fill colour for redactions
                     draw = ImageDraw.Draw(image)
