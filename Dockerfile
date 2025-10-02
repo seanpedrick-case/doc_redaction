@@ -3,7 +3,8 @@ FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm AS builder
 
 # Install system dependencies
 RUN apt-get update \
-    && apt-get install -y \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         g++ \
         make \
         cmake \
@@ -36,7 +37,8 @@ ENV RUN_FASTAPI=${RUN_FASTAPI}
 
 # Install runtime dependencies
 RUN apt-get update \
-    && apt-get install -y \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         tesseract-ocr \
         poppler-utils \
         libgl1-mesa-glx \
