@@ -1,9 +1,7 @@
 import os
-import random
-import string
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 import defusedxml
@@ -24,9 +22,11 @@ from pymupdf import Document, Rect
 
 from tools.config import (
     COMPRESS_REDACTED_PDF,
+    CUSTOM_BOX_COLOUR,
     INPUT_FOLDER,
     MAX_IMAGE_PIXELS,
     OUTPUT_FOLDER,
+    RETURN_PDF_FOR_REVIEW,
 )
 from tools.file_conversion import (
     convert_annotation_data_to_dataframe,
@@ -41,7 +41,11 @@ from tools.file_conversion import (
     save_pdf_with_or_without_compression,
 )
 from tools.file_redaction import redact_page_with_pymupdf
-from tools.helper_functions import detect_file_type, get_file_name_without_type
+from tools.helper_functions import (
+    _generate_unique_ids,
+    detect_file_type,
+    get_file_name_without_type,
+)
 from tools.secure_path_utils import (
     secure_file_write,
 )
@@ -197,13 +201,11 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
         recogniser_dataframe_out_gr = gr.Dataframe(
             review_dataframe[["page", "label", "text", "id"]],
             show_search="filter",
-            col_count=(4, "fixed"),
             type="pandas",
             headers=["page", "label", "text", "id"],
             show_fullscreen_button=True,
             wrap=True,
             max_height=400,
-            static_columns=[0, 1, 2, 3],
         )
 
         recogniser_dataframe_out = review_dataframe[["page", "label", "text", "id"]]
@@ -329,13 +331,11 @@ def update_recogniser_dataframes(
         recogniser_dataframe_out_gr = gr.Dataframe(
             review_dataframe[["page", "label", "text", "id"]],
             show_search="filter",
-            col_count=(4, "fixed"),
             type="pandas",
             headers=["page", "label", "text", "id"],
             show_fullscreen_button=True,
             wrap=True,
             max_height=400,
-            static_columns=[0, 1, 2, 3],
         )
 
         recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(
@@ -667,46 +667,6 @@ def update_annotator_page_from_review_df(
         review_df,  # review_df might have its 'page' column type changed, keep it as is or revert if necessary
         annotate_previous_page,
     )  # The original page number from selected_recogniser_entity_df_row
-
-
-# --- Helper Function for ID Generation ---
-# This function encapsulates your ID logic in a performant, batch-oriented way.
-def _generate_unique_ids(
-    num_ids_to_generate: int, existing_ids_set: Set[str]
-) -> List[str]:
-    """
-    Generates a specified number of unique, 12-character alphanumeric IDs.
-
-    This is a batch-oriented, performant version of the original
-    `fill_missing_ids_in_list` logic, designed to work efficiently
-    with DataFrames.
-
-    Args:
-        num_ids_to_generate (int): The number of unique IDs to create.
-        existing_ids_set (Set[str]): A set of IDs that are already in use and
-                                     should be avoided.
-
-    Returns:
-        List[str]: A list of newly generated unique IDs.
-    """
-    id_length = 12
-    character_set = string.ascii_letters + string.digits
-
-    newly_generated_ids = set()
-
-    # The while loop ensures we generate exactly the number of IDs required,
-    # automatically handling the astronomically rare case of a collision.
-    while len(newly_generated_ids) < num_ids_to_generate:
-        candidate_id = "".join(random.choices(character_set, k=id_length))
-
-        # Check against both pre-existing IDs and IDs generated in this batch
-        if (
-            candidate_id not in existing_ids_set
-            and candidate_id not in newly_generated_ids
-        ):
-            newly_generated_ids.add(candidate_id)
-
-    return list(newly_generated_ids)
 
 
 def _merge_horizontally_adjacent_boxes(
@@ -1146,6 +1106,9 @@ def replace_placeholder_image_with_real_image(
 ):
     """If image path is still not valid, load in a new image an overwrite it. Then replace all items in the image annotation object for all pages based on the updated information."""
 
+    if page_num_reported <= 0:
+        page_num_reported = 1
+
     page_num_reported_zero_indexed = page_num_reported - 1
 
     if not os.path.exists(current_image_path):
@@ -1509,6 +1472,21 @@ def update_annotator_object_and_filter_df(
             value=None, interactive=False
         )  # Present blank/non-interactive
     else:
+        if current_page_image_annotator_object["image"].startswith("placeholder_image"):
+
+            print(
+                "current_page_image_annotator_object['image'] is None. Replacing with real image."
+            )
+            current_page_image_annotator_object["image"], page_sizes_df = (
+                replace_placeholder_image_with_real_image(
+                    doc_full_file_name_textbox,
+                    current_page_image_annotator_object["image"],
+                    page_sizes_df,
+                    gradio_annotator_current_page_number,
+                    input_folder,
+                )
+            )
+
         out_image_annotator = image_annotator(
             value=current_page_image_annotator_object,
             boxes_alpha=0.1,
@@ -1612,16 +1590,53 @@ def apply_redactions_to_review_df_and_files(
     save_pdf: bool = True,
     page_sizes: List[dict] = list(),
     COMPRESS_REDACTED_PDF: bool = COMPRESS_REDACTED_PDF,
+    input_folder: str = INPUT_FOLDER,
     progress=gr.Progress(track_tqdm=True),
 ):
     """
-    Apply modified redactions to a pymupdf and export review files.
+    Applies the modified redaction annotations from the UI to the PyMuPDF document
+    and exports the updated review files, including the redacted PDF and associated logs.
+
+    Args:
+        page_image_annotator_object (AnnotatedImageData): The annotation data for the current page,
+                                                          potentially including user modifications.
+        file_paths (List[str]): A list of file paths associated with the document, typically
+                                including the original PDF and any generated image paths.
+        doc (Document): The PyMuPDF Document object representing the PDF file.
+        all_image_annotations (List[AnnotatedImageData]): A list containing annotation data
+                                                          for all pages of the document.
+        current_page (int): The 1-based index of the page currently being processed or viewed.
+        review_file_state (pd.DataFrame): A Pandas DataFrame holding the current state of
+                                          redaction reviews, reflecting user selections.
+        output_folder (str, optional): The directory where output files (redacted PDFs,
+                                       log files) will be saved. Defaults to OUTPUT_FOLDER.
+        save_pdf (bool, optional): If True, the redacted PDF will be saved. Defaults to True.
+        page_sizes (List[dict], optional): A list of dictionaries, each containing size
+                                           information (e.g., width, height) for a page.
+                                           Defaults to an empty list.
+        COMPRESS_REDACTED_PDF (bool, optional): If True, the output PDF will be compressed.
+                                                Defaults to COMPRESS_REDACTED_PDF.
+        input_folder (str, optional): The directory where input files are located and where
+                                     page images should be saved. Defaults to INPUT_FOLDER.
+        progress (gr.Progress, optional): Gradio progress object for tracking task progress.
+                                          Defaults to gr.Progress(track_tqdm=True).
+
+    Returns:
+        Tuple[Document, List[AnnotatedImageData], List[str], List[str], pd.DataFrame]:
+            - doc: The updated PyMuPDF Document object (potentially redacted).
+            - all_image_annotations: The updated list of all image annotations.
+            - output_files: A list of paths to the generated output files (e.g., redacted PDF).
+            - output_log_files: A list of paths to any generated log files.
+            - review_df: The final Pandas DataFrame representing the review state.
     """
 
     output_files = list()
     output_log_files = list()
     pdf_doc = list()
     review_df = review_file_state
+
+    # Always use the provided input_folder parameter
+    # This ensures images are created in the specified input folder, not in example_data
 
     page_image_annotator_object = all_image_annotations[current_page - 1]
 
@@ -1665,18 +1680,47 @@ def apply_redactions_to_review_df_and_files(
 
                     fill = img_annotation_box["color"]
 
-                    # Ensure fill is a valid RGB tuple
-                    if isinstance(fill, tuple) and len(fill) == 3:
-                        # Check if all elements are integers in the range 0-255
-                        if all(isinstance(c, int) and 0 <= c <= 255 for c in fill):
-                            pass
+                    # Ensure fill is a valid RGB tuple with integer values 0-255
+                    # Handle both list and tuple formats, and convert float values to proper RGB
+                    if isinstance(fill, (list, tuple)) and len(fill) == 3:
+                        # Convert to tuple if it's a list
+                        if isinstance(fill, list):
+                            fill = tuple(fill)
 
+                        # Check if all elements are valid RGB values
+                        valid_rgb = True
+                        converted_fill = []
+
+                        for c in fill:
+                            if isinstance(c, (int, float)):
+                                # If it's a float between 0-1, convert to 0-255 range
+                                if isinstance(c, float) and 0 <= c <= 1:
+                                    converted_fill.append(int(c * 255))
+                                # If it's already an integer 0-255, use as is
+                                elif isinstance(c, int) and 0 <= c <= 255:
+                                    converted_fill.append(c)
+                                # If it's a float > 1, assume it's already in 0-255 range
+                                elif isinstance(c, float) and c > 1:
+                                    converted_fill.append(int(c))
+                                else:
+                                    valid_rgb = False
+                                    break
+                            else:
+                                valid_rgb = False
+                                break
+
+                        if valid_rgb:
+                            fill = tuple(converted_fill)
                         else:
-                            print(f"Invalid color values: {fill}. Defaulting to black.")
-                            fill = (0, 0, 0)  # Default to black if invalid
+                            print(
+                                f"Invalid color values: {fill}. Defaulting to CUSTOM_BOX_COLOUR."
+                            )
+                            fill = CUSTOM_BOX_COLOUR
                     else:
-                        print(f"Invalid fill format: {fill}. Defaulting to black.")
-                        fill = (0, 0, 0)  # Default to black if not a valid tuple
+                        print(
+                            f"Invalid fill format: {fill}. Defaulting to CUSTOM_BOX_COLOUR."
+                        )
+                        fill = CUSTOM_BOX_COLOUR
 
                         # Ensure the image is in RGB mode
                     if image.mode not in ("RGB", "RGBA"):
@@ -1708,6 +1752,11 @@ def apply_redactions_to_review_df_and_files(
                 number_of_pages = pdf_doc.page_count
                 original_cropboxes = list()
 
+                # Create review PDF document if RETURN_PDF_FOR_REVIEW is True
+                review_pdf_doc = None
+                if RETURN_PDF_FOR_REVIEW:
+                    review_pdf_doc = pymupdf.open(file_path)
+
                 page_sizes_df = pd.DataFrame(page_sizes)
                 page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
                     pd.to_numeric, errors="coerce"
@@ -1736,26 +1785,45 @@ def apply_redactions_to_review_df_and_files(
                         except Exception:
                             image = None
 
-                    pymupdf_page = pdf_doc.load_page(
-                        i
-                    )  # doc.load_page(current_page -1)
+                    pymupdf_page = pdf_doc.load_page(i)
                     original_cropboxes.append(pymupdf_page.cropbox)
                     pymupdf_page.set_cropbox(pymupdf_page.mediabox)
 
+                    # Handle review PDF page if needed
+                    if RETURN_PDF_FOR_REVIEW and review_pdf_doc:
+                        review_pymupdf_page = review_pdf_doc.load_page(i)
+                        review_pymupdf_page.set_cropbox(review_pymupdf_page.mediabox)
+
+                        # Apply redactions to review page (with annotations visible)
+                        review_pymupdf_page = redact_page_with_pymupdf(
+                            page=review_pymupdf_page,
+                            page_annotations=all_image_annotations[i],
+                            image=image,
+                            original_cropbox=original_cropboxes[-1],
+                            page_sizes_df=page_sizes_df,
+                            return_pdf_for_review=True,
+                            return_pdf_end_of_redaction=False,
+                            input_folder=input_folder,
+                        )
+
+                    # Apply redactions to final page (with text removed)
                     pymupdf_page = redact_page_with_pymupdf(
                         page=pymupdf_page,
                         page_annotations=all_image_annotations[i],
                         image=image,
                         original_cropbox=original_cropboxes[-1],
                         page_sizes_df=page_sizes_df,
-                    )  # image=image,
+                        return_pdf_for_review=False,
+                        return_pdf_end_of_redaction=False,
+                        input_folder=input_folder,
+                    )
             else:
                 print("File type not recognised.")
 
             progress(0.9, "Saving output files")
 
-            # try:
             if pdf_doc:
+                # Save final redacted PDF
                 out_pdf_file_path = (
                     output_folder + file_name_without_ext + "_redacted.pdf"
                 )
@@ -1763,6 +1831,19 @@ def apply_redactions_to_review_df_and_files(
                     pdf_doc, out_pdf_file_path, COMPRESS_REDACTED_PDF
                 )
                 output_files.append(out_pdf_file_path)
+
+                # Save review PDF if RETURN_PDF_FOR_REVIEW is True
+                if RETURN_PDF_FOR_REVIEW and review_pdf_doc:
+                    out_review_pdf_file_path = (
+                        output_folder
+                        + file_name_without_ext
+                        + "_redactions_for_review.pdf"
+                    )
+                    print("Saving PDF file for review:", out_review_pdf_file_path)
+                    save_pdf_with_or_without_compression(
+                        review_pdf_doc, out_review_pdf_file_path, COMPRESS_REDACTED_PDF
+                    )
+                    output_files.append(out_review_pdf_file_path)
 
             else:
                 print("PDF input not found. Outputs not saved to PDF.")

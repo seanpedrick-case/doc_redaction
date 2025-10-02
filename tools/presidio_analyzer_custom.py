@@ -58,7 +58,7 @@ def analyze_iterator_custom(
         self.analyzer_engine.nlp_engine.process_batch(texts=texts, language=language)
     )
 
-    list_results = []
+    list_results = list()
 
     # Uncomment this if you want to show progress within a file
     # for text, nlp_artifacts in progress.tqdm(nlp_artifacts_batch, total = list_length, desc = "Analysing text for personal information", unit = "rows"):
@@ -94,13 +94,13 @@ def analyze_dict(
     See `AnalyzerEngine.analyze` for the full list.
     """
 
-    context = []
+    context = list()
     if "context" in kwargs:
         context = kwargs["context"]
         del kwargs["context"]
 
     if not keys_to_skip:
-        keys_to_skip = []
+        keys_to_skip = list()
 
     for key, value in input_dict.items():
         if not value or key in keys_to_skip:

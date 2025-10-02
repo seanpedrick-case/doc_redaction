@@ -1,8 +1,10 @@
 import os
+import random
+import string
 import unicodedata
 from math import ceil
 from pathlib import Path
-from typing import List
+from typing import List, Set
 
 import boto3
 import gradio as gr
@@ -85,6 +87,7 @@ def reset_state_vars():
         "",
         False,
         0,
+        [],
         [],
     )
 
@@ -597,6 +600,46 @@ def clean_unicode_text(text: str):
     cleaned_text = safe_remove_non_ascii(normalized_text)
 
     return cleaned_text
+
+
+# --- Helper Function for ID Generation ---
+# This function encapsulates your ID logic in a performant, batch-oriented way.
+def _generate_unique_ids(
+    num_ids_to_generate: int, existing_ids_set: Set[str]
+) -> List[str]:
+    """
+    Generates a specified number of unique, 12-character alphanumeric IDs.
+
+    This is a batch-oriented, performant version of the original
+    `fill_missing_ids_in_list` logic, designed to work efficiently
+    with DataFrames.
+
+    Args:
+        num_ids_to_generate (int): The number of unique IDs to create.
+        existing_ids_set (Set[str]): A set of IDs that are already in use and
+                                     should be avoided.
+
+    Returns:
+        List[str]: A list of newly generated unique IDs.
+    """
+    id_length = 12
+    character_set = string.ascii_letters + string.digits
+
+    newly_generated_ids = set()
+
+    # The while loop ensures we generate exactly the number of IDs required,
+    # automatically handling the astronomically rare case of a collision.
+    while len(newly_generated_ids) < num_ids_to_generate:
+        candidate_id = "".join(random.choices(character_set, k=id_length))
+
+        # Check against both pre-existing IDs and IDs generated in this batch
+        if (
+            candidate_id not in existing_ids_set
+            and candidate_id not in newly_generated_ids
+        ):
+            newly_generated_ids.add(candidate_id)
+
+    return list(newly_generated_ids)
 
 
 def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:

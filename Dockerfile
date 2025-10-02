@@ -1,9 +1,10 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS builder
 
 # Install system dependencies
 RUN apt-get update \
-    && apt-get install -y \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         g++ \
         make \
         cmake \
@@ -19,23 +20,24 @@ COPY requirements.txt .
 
 RUN pip install --verbose --no-cache-dir --target=/install -r requirements.txt && rm requirements.txt
 
-# Add lambda entrypoint and script
-COPY lambda_entrypoint.py .
-COPY entrypoint.sh .
-
 # Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm
+FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie
 
-# Set build-time and runtime environment variable
+# Set build-time and runtime environment variable for whether to run in Gradio mode or Lambda mode
 ARG APP_MODE=gradio
 ENV APP_MODE=${APP_MODE}
 
+# Set build-time and runtime environment variable for whether to run in FastAPI mode
+ARG RUN_FASTAPI=0
+ENV RUN_FASTAPI=${RUN_FASTAPI}
+
 # Install runtime dependencies
 RUN apt-get update \
-    && apt-get install -y \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         tesseract-ocr \
         poppler-utils \
-        libgl1-mesa-glx \
+        libgl1 \
         libglib2.0-0 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -55,7 +57,9 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     USAGE_LOGS_FOLDER=$APP_HOME/app/usage/ \
     CONFIG_FOLDER=$APP_HOME/app/config/ \
     XDG_CACHE_HOME=/tmp/xdg_cache/user_1000 \
-    TESSERACT_DATA_FOLDER=/usr/share/tessdata
+    TESSERACT_DATA_FOLDER=/usr/share/tessdata \
+    GRADIO_SERVER_NAME=0.0.0.0 \
+    GRADIO_SERVER_PORT=7860
 
 # Create the base application directory and set its ownership
 RUN mkdir -p ${APP_HOME}/app && chown user:user ${APP_HOME}/app
@@ -100,14 +104,17 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
     && chmod 755 /usr/share/tessdata
 
 # Copy installed packages from builder stage
-COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
+COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
+
+# Copy installed CLI binaries (e.g. uvicorn)
+COPY --from=builder /install/bin /usr/local/bin/
 
 # Copy app code and entrypoint with correct ownership
 COPY --chown=user . $APP_HOME/app
 
-# Copy and chmod entrypoint
+# Copy the entrypoint script to its final destination
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod 755 /entrypoint.sh
 
 # Switch to user
 USER user
@@ -131,17 +138,17 @@ VOLUME ["/usr/share/tessdata"]
 VOLUME ["/tmp"]
 VOLUME ["/var/tmp"]
 
+EXPOSE $GRADIO_SERVER_PORT
+
 # Set runtime environment
 ENV PATH=$APP_HOME/.local/bin:$PATH \
     PYTHONPATH=$APP_HOME/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     GRADIO_ALLOW_FLAGGING=never \
-    GRADIO_NUM_PORTS=1 \
-    GRADIO_SERVER_NAME=0.0.0.0 \
-    GRADIO_SERVER_PORT=7860 \
-    GRADIO_ANALYTICS_ENABLED=False 
-
+    GRADIO_NUM_PORTS=1 \    
+    GRADIO_ANALYTICS_ENABLED=False \
+    DEFAULT_CONCURRENCY_LIMIT=3
 
 ENTRYPOINT ["/entrypoint.sh"]
 

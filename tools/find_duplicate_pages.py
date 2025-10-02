@@ -15,10 +15,15 @@ from tools.config import MAX_SIMULTANEOUS_FILES
 from tools.file_conversion import (
     convert_annotation_data_to_dataframe,
     fill_missing_box_ids_each_box,
-    redact_whole_pymupdf_page,
 )
+from tools.file_redaction import redact_whole_pymupdf_page
 from tools.helper_functions import OUTPUT_FOLDER
 from tools.load_spacy_model_custom_recognisers import nlp
+from tools.secure_path_utils import (
+    secure_path_join,
+    validate_folder_containment,
+    validate_path_safety,
+)
 
 number_of_zeros_to_add_to_index = 7  # Number of zeroes to add between page number and line numbers to get a unique page/line index value
 ID_MULTIPLIER = 100000
@@ -456,8 +461,14 @@ def combine_ocr_dataframes(
     # --- Save Output ---
     output_files = list()
     if output_folder and output_filename:
+        # Validate path safety before creating directories and files
+        if not validate_folder_containment(output_folder, OUTPUT_FOLDER):
+            raise ValueError(f"Unsafe output folder path: {output_folder}")
+        if not validate_path_safety(output_filename):
+            raise ValueError(f"Unsafe output filename: {output_filename}")
+
         os.makedirs(output_folder, exist_ok=True)
-        output_path = os.path.join(output_folder, output_filename)
+        output_path = secure_path_join(output_folder, output_filename)
         combined_df.to_csv(output_path, index=False)
         output_files.append(output_path)
         print(f"Successfully combined data and saved to: {output_path}")
@@ -644,16 +655,32 @@ def save_results_and_redaction_lists(
     Returns:
         list: A list of paths to all generated files.
     """
+    # Validate the output_folder path for security
+    if not validate_folder_containment(output_folder, OUTPUT_FOLDER):
+        raise ValueError(f"Invalid or unsafe output folder path: {output_folder}")
+
     output_paths = list()
-    output_folder_path = Path(output_folder)
-    output_folder_path.mkdir(exist_ok=True)
+
+    # Use secure path operations to prevent path injection
+    try:
+        output_folder_path = Path(output_folder).resolve()
+        # Validate that the resolved path is within the trusted OUTPUT_FOLDER using robust containment check
+        if not validate_folder_containment(str(output_folder_path), OUTPUT_FOLDER):
+            raise ValueError(
+                f"Output folder path {output_folder} is outside the trusted directory {OUTPUT_FOLDER}"
+            )
+        output_folder_path.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as e:
+        raise ValueError(f"Cannot create output directory {output_folder}: {e}")
 
     if final_df.empty:
         print("No matches to save.")
         return []
 
-    # 1. Save the main results DataFrame
-    similarity_file_output_path = output_folder_path / "page_similarity_results.csv"
+    # 1. Save the main results DataFrame using secure path operations
+    similarity_file_output_path = secure_path_join(
+        output_folder_path, "page_similarity_results.csv"
+    )
     final_df.to_csv(similarity_file_output_path, index=False, encoding="utf-8-sig")
 
     output_paths.append(str(similarity_file_output_path))
@@ -669,9 +696,11 @@ def save_results_and_redaction_lists(
             return output_paths
 
         for redact_file, group in final_df.groupby(grouping_col):
+            # Sanitize the filename to prevent path injection
             output_file_name_stem = Path(redact_file).stem
-            output_file_path = (
-                output_folder_path / f"{output_file_name_stem}_pages_to_redact.csv"
+            # Use secure path operations for the output file
+            output_file_path = secure_path_join(
+                output_folder_path, f"{output_file_name_stem}_pages_to_redact.csv"
             )
 
             all_pages_to_redact = set()
@@ -1054,7 +1083,7 @@ def run_duplicate_analysis(
 
     progress(0, desc="Combining input files...")
     df_combined, _, full_out_ocr_df = combine_ocr_output_text(
-        files, combine_pages=combine_pages
+        files, combine_pages=combine_pages, output_folder=output_folder
     )
 
     if df_combined.empty:

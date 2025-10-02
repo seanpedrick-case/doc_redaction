@@ -2,6 +2,7 @@ import logging
 import os
 import socket
 import tempfile
+import urllib.parse
 from datetime import datetime
 from typing import List
 
@@ -251,8 +252,49 @@ FEEDBACK_LOG_FILE_NAME = get_or_create_env_var("FEEDBACK_LOG_FILE_NAME", LOG_FIL
 
 
 ###
-# REDACTION OPTIONS
+# Gradio general app options
 ###
+
+FAVICON_PATH = get_or_create_env_var("FAVICON_PATH", "favicon.ico")
+
+RUN_FASTAPI = get_or_create_env_var("RUN_FASTAPI", "0")
+
+MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
+
+MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb").lower()
+
+GRADIO_SERVER_NAME = get_or_create_env_var("GRADIO_SERVER_NAME", "0.0.0.0")
+
+GRADIO_SERVER_PORT = int(get_or_create_env_var("GRADIO_SERVER_PORT", "7860"))
+
+ALLOWED_ORIGINS = get_or_create_env_var(
+    "ALLOWED_ORIGINS", ""
+)  # should be a list of allowed origins e.g. ['https://example.com', 'https://www.example.com']
+
+ALLOWED_HOSTS = get_or_create_env_var("ALLOWED_HOSTS", "")
+
+ROOT_PATH = get_or_create_env_var("ROOT_PATH", "")
+FASTAPI_ROOT_PATH = get_or_create_env_var("FASTAPI_ROOT_PATH", "/")
+
+DEFAULT_CONCURRENCY_LIMIT = int(get_or_create_env_var("DEFAULT_CONCURRENCY_LIMIT", "3"))
+
+# Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).
+PAGE_BREAK_VALUE = int(get_or_create_env_var("PAGE_BREAK_VALUE", "99999"))
+
+MAX_TIME_VALUE = int(get_or_create_env_var("MAX_TIME_VALUE", "999999"))
+MAX_SIMULTANEOUS_FILES = int(get_or_create_env_var("MAX_SIMULTANEOUS_FILES", "10"))
+MAX_DOC_PAGES = int(get_or_create_env_var("MAX_DOC_PAGES", "3000"))
+MAX_TABLE_ROWS = int(get_or_create_env_var("MAX_TABLE_ROWS", "250000"))
+MAX_TABLE_COLUMNS = int(get_or_create_env_var("MAX_TABLE_COLUMNS", "100"))
+MAX_OPEN_TEXT_CHARACTERS = int(
+    get_or_create_env_var("MAX_OPEN_TEXT_CHARACTERS", "50000")
+)
+
+# When loading for review, should PDFs have existing redaction annotations loaded in?
+LOAD_REDACTION_ANNOTATIONS_FROM_PDF = get_or_create_env_var(
+    "LOAD_REDACTION_ANNOTATIONS_FROM_PDF", "True"
+)
+
 
 # Create Tesseract and Poppler folders if you have installed them locally
 TESSERACT_FOLDER = get_or_create_env_var(
@@ -269,6 +311,11 @@ if TESSERACT_FOLDER:
     add_folder_to_path(TESSERACT_FOLDER)
 if POPPLER_FOLDER:
     add_folder_to_path(POPPLER_FOLDER)
+
+# Extraction and PII options open by default:
+EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = get_or_create_env_var(
+    "EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT", "True"
+)
 
 # List of models to use for text extraction and PII detection
 # Text extraction models
@@ -303,9 +350,9 @@ if (
 ):
     SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = "True"
 
-local_model_options = []
-aws_model_options = []
-text_extraction_models = []
+local_model_options = list()
+aws_model_options = list()
+text_extraction_models = list()
 
 if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS == "True":
     local_model_options.append(SELECTABLE_TEXT_EXTRACT_OPTION)
@@ -333,8 +380,8 @@ if (
     SHOW_LOCAL_PII_DETECTION_OPTIONS = "True"
 
 local_model_options = [NO_REDACTION_PII_OPTION]
-aws_model_options = []
-pii_detection_models = []
+aws_model_options = list()
+pii_detection_models = list()
 
 if SHOW_LOCAL_PII_DETECTION_OPTIONS == "True":
     local_model_options.append(LOCAL_PII_OPTION)
@@ -449,24 +496,8 @@ DEFAULT_FUZZY_SPELLING_MISTAKES_NUM = int(
 
 DEFAULT_PAGE_MIN = int(get_or_create_env_var("DEFAULT_PAGE_MIN", "0"))
 
-DEFAULT_PAGE_MAX = int(get_or_create_env_var("DEFAULT_PAGE_MAX", "999"))
+DEFAULT_PAGE_MAX = int(get_or_create_env_var("DEFAULT_PAGE_MAX", "0"))
 
-
-# Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).
-PAGE_BREAK_VALUE = int(get_or_create_env_var("PAGE_BREAK_VALUE", "99999"))
-
-MAX_TIME_VALUE = int(get_or_create_env_var("MAX_TIME_VALUE", "999999"))
-MAX_SIMULTANEOUS_FILES = int(get_or_create_env_var("MAX_SIMULTANEOUS_FILES", "10"))
-MAX_DOC_PAGES = int(get_or_create_env_var("MAX_DOC_PAGES", "3000"))
-MAX_TABLE_ROWS = int(get_or_create_env_var("MAX_TABLE_ROWS", "250000"))
-MAX_TABLE_COLUMNS = int(get_or_create_env_var("MAX_TABLE_COLUMNS", "100"))
-MAX_OPEN_TEXT_CHARACTERS = int(
-    get_or_create_env_var("MAX_OPEN_TEXT_CHARACTERS", "50000")
-)
-
-CUSTOM_BOX_COLOUR = get_or_create_env_var(
-    "CUSTOM_BOX_COLOUR", ""
-)  # only "grey" is currently supported as a custom box colour
 
 ### Language selection options
 
@@ -521,8 +552,48 @@ REMOVE_DUPLICATE_ROWS = get_or_create_env_var("REMOVE_DUPLICATE_ROWS", "False")
 ###
 # File output options
 ###
-RETURN_PDF_END_OF_REDACTION = get_or_create_env_var(
-    "RETURN_PDF_END_OF_REDACTION", "True"
+# Should the output pdf redaction boxes be drawn using the custom box colour?
+USE_GUI_BOX_COLOURS_FOR_OUTPUTS = get_or_create_env_var(
+    "USE_GUI_BOX_COLOURS_FOR_OUTPUTS", "False"
+)
+
+# This is the colour of the output pdf redaction boxes. Should be a tuple of three integers between 0 and 255
+CUSTOM_BOX_COLOUR = get_or_create_env_var("CUSTOM_BOX_COLOUR", "(0, 0, 0)")
+
+if CUSTOM_BOX_COLOUR == "grey":
+    # only "grey" is currently supported as a custom box colour by name, or a tuple of three integers between 0 and 255
+    CUSTOM_BOX_COLOUR = (128, 128, 128)
+else:
+    try:
+        components_str = CUSTOM_BOX_COLOUR.strip("()").split(",")
+        CUSTOM_BOX_COLOUR = tuple(
+            int(c.strip()) for c in components_str
+        )  # Always gives a tuple of three integers between 0 and 255
+    except Exception as e:
+        print(f"Error initialising CUSTOM_BOX_COLOUR: {e}, returning default black")
+        CUSTOM_BOX_COLOUR = (
+            0,
+            0,
+            0,
+        )  # Default to black if the custom box colour is not a valid tuple of three integers between 0 and 255
+
+# Apply redactions defaults to images, graphics, and text, from: https://pymupdf.readthedocs.io/en/latest/page.html#Page.apply_redactions
+# For images, the default is set to 0, to ignore. Text presented in images is effectively removed by the overlapping rectangle shape that becomes an embedded part of the document (see the redact_single_box function in file_redaction.py).
+APPLY_REDACTIONS_IMAGES = int(
+    get_or_create_env_var("APPLY_REDACTIONS_IMAGES", "0")
+)  # The default (2) blanks out overlapping pixels. PDF_REDACT_IMAGE_NONE | 0 ignores, and PDF_REDACT_IMAGE_REMOVE | 1 completely removes images overlapping any redaction annotation. Option PDF_REDACT_IMAGE_REMOVE_UNLESS_INVISIBLE | 3 only removes images that are actually visible.
+APPLY_REDACTIONS_GRAPHICS = int(
+    get_or_create_env_var("APPLY_REDACTIONS_GRAPHICS", "0")
+)  # How to redact overlapping vector graphics (also called “line-art” or “drawings”). The default (2) removes any overlapping vector graphics. PDF_REDACT_LINE_ART_NONE | 0 ignores, and PDF_REDACT_LINE_ART_REMOVE_IF_COVERED | 1 removes graphics fully contained in a redaction annotation.
+APPLY_REDACTIONS_TEXT = int(
+    get_or_create_env_var("APPLY_REDACTIONS_TEXT", "0")
+)  # The default PDF_REDACT_TEXT_REMOVE | 0 removes all characters whose boundary box overlaps any redaction rectangle. This complies with the original legal / data protection intentions of redaction annotations. Other use cases however may require to keep text while redacting vector graphics or images. This can be achieved by setting text=True|PDF_REDACT_TEXT_NONE | 1. This does not comply with the data protection intentions of redaction annotations. Do so at your own risk.
+
+# If you don't want to redact the text, but instead just draw a box over it, set this to True
+RETURN_PDF_FOR_REVIEW = get_or_create_env_var("RETURN_PDF_FOR_REVIEW", "True")
+
+RETURN_REDACTED_PDF = get_or_create_env_var(
+    "RETURN_REDACTED_PDF", "True"
 )  # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
 
 COMPRESS_REDACTED_PDF = get_or_create_env_var(
@@ -530,7 +601,7 @@ COMPRESS_REDACTED_PDF = get_or_create_env_var(
 )  # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
 
 ###
-# APP RUN OPTIONS
+# APP RUN / GUI OPTIONS
 ###
 
 TLDEXTRACT_CACHE = get_or_create_env_var("TLDEXTRACT_CACHE", "tmp/tld/")
@@ -543,8 +614,63 @@ except Exception as e:
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "0")
 
-SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "False")
+
+# Link to user guide - ensure it is a valid URL
+def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
+    """
+    Validate and return a safe URL with enhanced security checks.
+    """
+    if allowed_domains is None:
+        allowed_domains = [
+            "seanpedrick-case.github.io",
+            "github.io",
+            "github.com",
+            "sharepoint.com",
+        ]
+
+    try:
+        parsed = urllib.parse.urlparse(url_candidate)
+
+        # Basic structure validation
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("Invalid URL structure")
+
+        # Security checks
+        if parsed.scheme not in ["https"]:  # Only allow HTTPS
+            raise ValueError("Only HTTPS URLs are allowed for security")
+
+        # Domain validation
+        domain = parsed.netloc.lower()
+        if not any(domain.endswith(allowed) for allowed in allowed_domains):
+            raise ValueError(f"Domain not in allowed list: {domain}")
+
+        # Additional security checks
+        if any(
+            suspicious in domain for suspicious in ["..", "//", "javascript:", "data:"]
+        ):
+            raise ValueError("Suspicious URL patterns detected")
+
+        # Path validation (prevent path traversal)
+        if ".." in parsed.path or "//" in parsed.path:
+            raise ValueError("Path traversal attempts detected")
+
+        return url_candidate
+
+    except Exception as e:
+        print(f"URL validation failed: {e}")
+        return "https://seanpedrick-case.github.io/doc_redaction"  # Safe fallback
+
+
+USER_GUIDE_URL = validate_safe_url(
+    get_or_create_env_var(
+        "USER_GUIDE_URL", "https://seanpedrick-case.github.io/doc_redaction"
+    )
+)
+
+SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "True")
 SHOW_AWS_EXAMPLES = get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
+
+FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))
 
 RUN_DIRECT_MODE = get_or_create_env_var("RUN_DIRECT_MODE", "0")
 
@@ -565,17 +691,6 @@ DIRECT_MODE_DUPLICATE_TYPE = get_or_create_env_var(
     "DIRECT_MODE_DUPLICATE_TYPE", "pages"
 )  # 'pages' or 'tabular'
 
-MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
-
-MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb").lower()
-
-GRADIO_SERVER_PORT = int(get_or_create_env_var("GRADIO_SERVER_PORT", "7860"))
-
-ROOT_PATH = get_or_create_env_var("ROOT_PATH", "")
-
-DEFAULT_CONCURRENCY_LIMIT = int(get_or_create_env_var("DEFAULT_CONCURRENCY_LIMIT", "3"))
-
-FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))
 
 ### ALLOW LIST
 
@@ -703,3 +818,141 @@ TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var(
 DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(
     get_or_create_env_var("DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS", "7")
 )  # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.
+
+
+###
+# Config vars output format
+###
+# Ensure that config variables are in the correct format for subsequent use elsewhere
+
+if LOAD_REDACTION_ANNOTATIONS_FROM_PDF == "True":
+    LOAD_REDACTION_ANNOTATIONS_FROM_PDF = True
+else:
+    LOAD_REDACTION_ANNOTATIONS_FROM_PDF = False
+
+# Convert string environment variables to string or list
+if SAVE_LOGS_TO_CSV == "True":
+    SAVE_LOGS_TO_CSV = True
+else:
+    SAVE_LOGS_TO_CSV = False
+if SAVE_LOGS_TO_DYNAMODB == "True":
+    SAVE_LOGS_TO_DYNAMODB = True
+else:
+    SAVE_LOGS_TO_DYNAMODB = False
+if SHOW_LANGUAGE_SELECTION == "True":
+    SHOW_LANGUAGE_SELECTION = True
+else:
+    SHOW_LANGUAGE_SELECTION = False
+if DISPLAY_FILE_NAMES_IN_LOGS == "True":
+    DISPLAY_FILE_NAMES_IN_LOGS = True
+else:
+    DISPLAY_FILE_NAMES_IN_LOGS = False
+if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
+    DO_INITIAL_TABULAR_DATA_CLEAN = True
+else:
+    DO_INITIAL_TABULAR_DATA_CLEAN = False
+if COMPRESS_REDACTED_PDF == "True":
+    COMPRESS_REDACTED_PDF = True
+else:
+    COMPRESS_REDACTED_PDF = False
+if RETURN_REDACTED_PDF == "True":
+    RETURN_REDACTED_PDF = True
+else:
+    RETURN_REDACTED_PDF = False
+if USE_GREEDY_DUPLICATE_DETECTION == "True":
+    USE_GREEDY_DUPLICATE_DETECTION = True
+else:
+    USE_GREEDY_DUPLICATE_DETECTION = False
+if DEFAULT_COMBINE_PAGES == "True":
+    DEFAULT_COMBINE_PAGES = True
+else:
+    DEFAULT_COMBINE_PAGES = False
+if REMOVE_DUPLICATE_ROWS == "True":
+    REMOVE_DUPLICATE_ROWS = True
+else:
+    REMOVE_DUPLICATE_ROWS = False
+
+if GET_COST_CODES == "True":
+    GET_COST_CODES = True
+else:
+    GET_COST_CODES = False
+
+if ENFORCE_COST_CODES == "True":
+    ENFORCE_COST_CODES = True
+else:
+    ENFORCE_COST_CODES = False
+
+if SHOW_COSTS == "True":
+    SHOW_COSTS = True
+else:
+    SHOW_COSTS = False
+
+if GET_DEFAULT_ALLOW_LIST == "True":
+    GET_DEFAULT_ALLOW_LIST = True
+else:
+    GET_DEFAULT_ALLOW_LIST = False
+
+if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
+    SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = True
+else:
+    SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = False
+
+if CSV_ACCESS_LOG_HEADERS:
+    CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
+if CSV_FEEDBACK_LOG_HEADERS:
+    CSV_FEEDBACK_LOG_HEADERS = _get_env_list(CSV_FEEDBACK_LOG_HEADERS)
+if CSV_USAGE_LOG_HEADERS:
+    CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
+
+if DYNAMODB_ACCESS_LOG_HEADERS:
+    DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
+if DYNAMODB_FEEDBACK_LOG_HEADERS:
+    DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
+if DYNAMODB_USAGE_LOG_HEADERS:
+    DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
+
+if CHOSEN_COMPREHEND_ENTITIES:
+    CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
+if FULL_COMPREHEND_ENTITY_LIST:
+    FULL_COMPREHEND_ENTITY_LIST = _get_env_list(FULL_COMPREHEND_ENTITY_LIST)
+if CHOSEN_REDACT_ENTITIES:
+    CHOSEN_REDACT_ENTITIES = _get_env_list(CHOSEN_REDACT_ENTITIES)
+if FULL_ENTITY_LIST:
+    FULL_ENTITY_LIST = _get_env_list(FULL_ENTITY_LIST)
+
+if DEFAULT_TEXT_COLUMNS:
+    DEFAULT_TEXT_COLUMNS = _get_env_list(DEFAULT_TEXT_COLUMNS)
+if DEFAULT_EXCEL_SHEETS:
+    DEFAULT_EXCEL_SHEETS = _get_env_list(DEFAULT_EXCEL_SHEETS)
+
+if CUSTOM_ENTITIES:
+    CUSTOM_ENTITIES = _get_env_list(CUSTOM_ENTITIES)
+
+if DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX:
+    DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = _get_env_list(
+        DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX
+    )
+
+if ALLOWED_ORIGINS:
+    ALLOWED_ORIGINS = _get_env_list(ALLOWED_ORIGINS)
+
+if ALLOWED_HOSTS:
+    ALLOWED_HOSTS = _get_env_list(ALLOWED_HOSTS)
+
+USE_GUI_BOX_COLOURS_FOR_OUTPUTS = USE_GUI_BOX_COLOURS_FOR_OUTPUTS.lower() == "true"
+RETURN_PDF_FOR_REVIEW = RETURN_PDF_FOR_REVIEW.lower() == "true"
+
+if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
+    DO_INITIAL_TABULAR_DATA_CLEAN = True
+else:
+    DO_INITIAL_TABULAR_DATA_CLEAN = False
+
+if REMOVE_DUPLICATE_ROWS == "True":
+    REMOVE_DUPLICATE_ROWS = True
+else:
+    REMOVE_DUPLICATE_ROWS = False
+
+if EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT == "True":
+    EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = True
+else:
+    EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = False
