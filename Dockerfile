@@ -20,10 +20,6 @@ COPY requirements.txt .
 
 RUN pip install --verbose --no-cache-dir --target=/install -r requirements.txt && rm requirements.txt
 
-# Add lambda entrypoint and script
-COPY lambda_entrypoint.py .
-COPY entrypoint.sh .
-
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie
 
@@ -110,15 +106,16 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
 
-# Copy installed CLI binaries (e.g. gunicorn)
+# Copy installed CLI binaries (e.g. uvicorn)
 COPY --from=builder /install/bin /usr/local/bin/
 
 # Copy app code and entrypoint with correct ownership
-COPY --chown=user . $APP_HOME/app
+COPY --chown=user lambda_entrypoint.py $APP_HOME/app/
+COPY --chown=user app.py $APP_HOME/app/
 
-# Copy and chmod entrypoint
+# Copy the entrypoint script to its final destination
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod 755 /entrypoint.sh
 
 # Switch to user
 USER user
