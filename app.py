@@ -278,44 +278,44 @@ in_redact_comprehend_entities = gr.Dropdown(
 )
 
 in_deny_list = gr.File(
-                        label="Import custom deny list - csv table with one column of a different word/phrase on each row (case insensitive). Terms in this file will always be redacted.",
-                        file_count="multiple",
-                        height=FILE_INPUT_HEIGHT,
-                    )
+    label="Import custom deny list - csv table with one column of a different word/phrase on each row (case insensitive). Terms in this file will always be redacted.",
+    file_count="multiple",
+    height=FILE_INPUT_HEIGHT,
+)
 
 in_deny_list_state = gr.Dataframe(
-                        value=pd.DataFrame(),
-                        headers=["deny_list"],
-                        col_count=(1, "fixed"),
-                        row_count=(0, "dynamic"),
-                        label="Deny list",
-                        visible=True,
-                        type="pandas",
-                        interactive=True,
-                        show_fullscreen_button=True,
-                        show_copy_button=True,
-                        wrap=True,
-                    )
+    value=pd.DataFrame(),
+    headers=["deny_list"],
+    col_count=(1, "fixed"),
+    row_count=(0, "dynamic"),
+    label="Deny list",
+    visible=True,
+    type="pandas",
+    interactive=True,
+    show_fullscreen_button=True,
+    show_copy_button=True,
+    wrap=True,
+)
 
 in_fully_redacted_list = gr.File(
-                        label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.",
-                        file_count="multiple",
-                        height=FILE_INPUT_HEIGHT,
-                    )
+    label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.",
+    file_count="multiple",
+    height=FILE_INPUT_HEIGHT,
+)
 
 in_fully_redacted_list_state = gr.Dataframe(
-                        value=pd.DataFrame(),
-                        headers=["fully_redacted_pages_list"],
-                        col_count=(1, "fixed"),
-                        row_count=(0, "dynamic"),
-                        label="Fully redacted pages",
-                        visible=True,
-                        type="pandas",
-                        interactive=True,
-                        show_fullscreen_button=True,
-                        show_copy_button=True,
-                        wrap=True,
-                    )
+    value=pd.DataFrame(),
+    headers=["fully_redacted_pages_list"],
+    col_count=(1, "fixed"),
+    row_count=(0, "dynamic"),
+    label="Fully redacted pages",
+    visible=True,
+    type="pandas",
+    interactive=True,
+    show_fullscreen_button=True,
+    show_copy_button=True,
+    wrap=True,
+)
 
 
 ## Deduplication examples
@@ -1101,22 +1101,37 @@ with blocks:
                     )
                     example_labels.append(
                         "PDF redaction with AWS services and signature detection"
-                    )                     
+                    )
 
             # Add new example for custom deny list and whole page redaction
-            if os.path.exists(example_files[3]) and os.path.exists(example_files[4]) and os.path.exists(example_files[5]):
+            if (
+                os.path.exists(example_files[3])
+                and os.path.exists(example_files[4])
+                and os.path.exists(example_files[5])
+            ):
                 available_examples.append(
                     [
                         [example_files[3]],
                         "Local OCR model - PDFs without selectable text",
                         "Local",
                         [],
-                        ["CUSTOM"],  # Use CUSTOM entity to enable deny list functionality
+                        [
+                            "CUSTOM"
+                        ],  # Use CUSTOM entity to enable deny list functionality
                         CHOSEN_COMPREHEND_ENTITIES,
                         [example_files[3]],
                         example_files[3],
                         [example_files[4]],
-                        pd.DataFrame(data={"deny_list": ["Sister", "Sister City", "Sister Cities", "Friendship City"]}),
+                        pd.DataFrame(
+                            data={
+                                "deny_list": [
+                                    "Sister",
+                                    "Sister City",
+                                    "Sister Cities",
+                                    "Friendship City",
+                                ]
+                            }
+                        ),
                         [example_files[5]],
                         pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
                     ]
@@ -1137,7 +1152,7 @@ with blocks:
                     in_redact_comprehend_entities,
                     prepared_pdf_state,
                     doc_full_file_name_textbox,
-                    in_deny_list,                    
+                    in_deny_list,
                     in_deny_list_state,
                     in_fully_redacted_list,
                     in_fully_redacted_list_state,
@@ -2153,7 +2168,7 @@ with blocks:
             value="## Please give feedback", visible=False
         )
         data_feedback_radio = gr.Radio(
-            label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 60% of personally identifiable information in a given (typed) document.",
+            label="Please give some feedback about the results of the redaction.",
             choices=["The results were good", "The results were not good"],
             visible=False,
             show_label=True,
@@ -2180,11 +2195,11 @@ with blocks:
                     in_allow_list_text = gr.Textbox(
                         label="Custom allow list load status"
                     )
-                with gr.Column():                    
-                    in_deny_list.render() # Defined at beginning of file
+                with gr.Column():
+                    in_deny_list.render()  # Defined at beginning of file
                     in_deny_list_text = gr.Textbox(label="Custom deny list load status")
                 with gr.Column():
-                    in_fully_redacted_list.render() # Defined at beginning of file
+                    in_fully_redacted_list.render()  # Defined at beginning of file
                     in_fully_redacted_list_text = gr.Textbox(
                         label="Fully redacted page list load status"
                     )
@@ -2206,10 +2221,10 @@ with blocks:
                         show_copy_button=True,
                         wrap=True,
                     )
-                    
-                    in_deny_list_state.render() # Defined at beginning of file
-                    
-                    in_fully_redacted_list_state.render() # Defined at beginning of file
+
+                    in_deny_list_state.render()  # Defined at beginning of file
+
+                    in_fully_redacted_list_state.render()  # Defined at beginning of file
                 with gr.Row():
                     with gr.Column(scale=2):
                         markdown_placeholder = gr.Markdown("")

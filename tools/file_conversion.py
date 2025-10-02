@@ -583,7 +583,9 @@ def redact_single_box(
     pymupdf_y2 = pymupdf_rect[3]
 
     # Full size redaction box for covering all the text of a word
-    full_size_redaction_box = Rect(pymupdf_x1-1, pymupdf_y1-1, pymupdf_x2+1, pymupdf_y2+1)
+    full_size_redaction_box = Rect(
+        pymupdf_x1 - 1, pymupdf_y1 - 1, pymupdf_x2 + 1, pymupdf_y2 + 1
+    )
 
     # Calculate tiny height redaction box so that it doesn't delete text from adjacent lines
     redact_bottom_y = pymupdf_y1 + 2
@@ -620,7 +622,7 @@ def redact_single_box(
         applied_redaction_page = applied_redaction_page[0]
 
     # Handle review page first, then deal with final redacted page (retain_text = True)
-    if retain_text is True:       
+    if retain_text is True:
 
         annot = pymupdf_page.add_redact_annot(full_size_redaction_box)
         annot.set_colors(stroke=out_colour, fill=out_colour, colors=out_colour)
@@ -636,7 +638,7 @@ def redact_single_box(
 
         # If we need both review and final pages, and the applied redaction page has been prepared, apply final redaction to the copy
         if return_pdf_end_of_redaction and applied_redaction_page is not None:
-            # Apply final redaction to the copy            
+            # Apply final redaction to the copy
 
             # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
             applied_redaction_page.add_redact_annot(rect_small_pixel_height)
@@ -654,7 +656,7 @@ def redact_single_box(
             return pymupdf_page
 
     # If we don't need to retain the text, we only have one page which is the applied redaction page, so just apply the redaction to the page
-    else: 
+    else:
         # Add the annotation to the middle of the character line, so that it doesn't delete text from adjacent lines
         pymupdf_page.add_redact_annot(rect_small_pixel_height)
 
@@ -794,7 +796,9 @@ def redact_whole_pymupdf_page(
 
     # Calculate relative coordinates for the annotation box (0-1 range)
     # This ensures the coordinates are already in relative format for output files
-    relative_border = border / min(rect_width, rect_height)  # Scale border proportionally
+    relative_border = border / min(
+        rect_width, rect_height
+    )  # Scale border proportionally
     relative_x1 = relative_border
     relative_y1 = relative_border
     relative_x2 = 1 - relative_border

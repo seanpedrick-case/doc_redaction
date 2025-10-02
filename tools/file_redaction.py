@@ -1109,16 +1109,20 @@ def choose_and_run_redactor(
 
                                 # Create a mapping of original page numbers to final pages
                                 applied_redaction_pages_map = {}
-                                for applied_redaction_page_data in redact_image_pdf._applied_redaction_pages:
+                                for (
+                                    applied_redaction_page_data
+                                ) in redact_image_pdf._applied_redaction_pages:
                                     if isinstance(applied_redaction_page_data, tuple):
                                         applied_redaction_page, original_page_number = (
                                             applied_redaction_page_data
                                         )
-                                        applied_redaction_pages_map[original_page_number] = (
-                                            applied_redaction_page
-                                        )
+                                        applied_redaction_pages_map[
+                                            original_page_number
+                                        ] = applied_redaction_page
                                     else:
-                                        applied_redaction_page = applied_redaction_page_data
+                                        applied_redaction_page = (
+                                            applied_redaction_page_data
+                                        )
                                         applied_redaction_pages_map[0] = (
                                             applied_redaction_page  # Default to page 0 if no original number
                                         )
@@ -1158,16 +1162,20 @@ def choose_and_run_redactor(
 
                                 # Create a mapping of original page numbers to final pages
                                 applied_redaction_pages_map = {}
-                                for applied_redaction_page_data in redact_text_pdf._applied_redaction_pages:
+                                for (
+                                    applied_redaction_page_data
+                                ) in redact_text_pdf._applied_redaction_pages:
                                     if isinstance(applied_redaction_page_data, tuple):
                                         applied_redaction_page, original_page_number = (
                                             applied_redaction_page_data
                                         )
-                                        applied_redaction_pages_map[original_page_number] = (
-                                            applied_redaction_page
-                                        )
+                                        applied_redaction_pages_map[
+                                            original_page_number
+                                        ] = applied_redaction_page
                                     else:
-                                        applied_redaction_page = applied_redaction_page_data
+                                        applied_redaction_page = (
+                                            applied_redaction_page_data
+                                        )
                                         applied_redaction_pages_map[0] = (
                                             applied_redaction_page  # Default to page 0 if no original number
                                         )
@@ -1199,7 +1207,10 @@ def choose_and_run_redactor(
                                 delattr(redact_text_pdf, "_applied_redaction_pages")
 
                         # Save final redacted PDF if we have dual outputs or if RETURN_PDF_FOR_REVIEW is False
-                        if RETURN_PDF_FOR_REVIEW is False or applied_redaction_pymupdf_doc:
+                        if (
+                            RETURN_PDF_FOR_REVIEW is False
+                            or applied_redaction_pymupdf_doc
+                        ):
                             out_redacted_pdf_file_path = (
                                 output_folder
                                 + pdf_file_name_without_ext
@@ -1211,7 +1222,9 @@ def choose_and_run_redactor(
 
                             # Use final document if available, otherwise use main document
                             doc_to_save = (
-                                applied_redaction_pymupdf_doc if applied_redaction_pymupdf_doc else pymupdf_doc
+                                applied_redaction_pymupdf_doc
+                                if applied_redaction_pymupdf_doc
+                                else pymupdf_doc
                             )
 
                             if out_redacted_pdf_file_path:
@@ -2274,11 +2287,15 @@ def redact_page_with_pymupdf(
             page, applied_redaction_page = redact_result
             # Store the final page for later use
             if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
-                redact_page_with_pymupdf._applied_redaction_page = applied_redaction_page
+                redact_page_with_pymupdf._applied_redaction_page = (
+                    applied_redaction_page
+                )
             else:
                 # If we already have a final page, we need to handle multiple pages
                 # For now, we'll use the last final page
-                redact_page_with_pymupdf._applied_redaction_page = applied_redaction_page
+                redact_page_with_pymupdf._applied_redaction_page = (
+                    applied_redaction_page
+                )
 
     # If whole page is to be redacted, do that here
     if redact_whole_page is True:
@@ -2287,7 +2304,9 @@ def redact_page_with_pymupdf(
             rect_height, rect_width, page, custom_colours, border=5
         )
         # Ensure the whole page annotation box has a unique ID
-        whole_page_img_annotation_box = fill_missing_box_ids(whole_page_img_annotation_box)
+        whole_page_img_annotation_box = fill_missing_box_ids(
+            whole_page_img_annotation_box
+        )
         all_image_annotation_boxes.append(whole_page_img_annotation_box)
 
         # Handle dual page objects for whole page redaction if needed
@@ -2304,16 +2323,26 @@ def redact_page_with_pymupdf(
 
             # Apply the whole page redaction to the final page as well
             redact_whole_pymupdf_page(
-                rect_height, rect_width, applied_redaction_page, custom_colours, border=5
+                rect_height,
+                rect_width,
+                applied_redaction_page,
+                custom_colours,
+                border=5,
             )
 
             # Store the final page with its original page number for later use
             if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
-                redact_page_with_pymupdf._applied_redaction_page = (applied_redaction_page, page.number)
+                redact_page_with_pymupdf._applied_redaction_page = (
+                    applied_redaction_page,
+                    page.number,
+                )
             else:
                 # If we already have a final page, we need to handle multiple pages
                 # For now, we'll use the last final page
-                redact_page_with_pymupdf._applied_redaction_page = (applied_redaction_page, page.number)
+                redact_page_with_pymupdf._applied_redaction_page = (
+                    applied_redaction_page,
+                    page.number,
+                )
 
     out_annotation_boxes = {
         "image": image_path,  # Image.open(image_path), #image_path,
@@ -3115,9 +3144,10 @@ def redact_image_pdf(
 
                     # Handle dual page objects if returned
                     if isinstance(redact_result[0], tuple):
-                        (pymupdf_page, pymupdf_applied_redaction_page), page_image_annotations = (
-                            redact_result
-                        )
+                        (
+                            pymupdf_page,
+                            pymupdf_applied_redaction_page,
+                        ), page_image_annotations = redact_result
                         # Store the final page with its original page number for later use
                         if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
                             redact_image_pdf._applied_redaction_pages = list()
@@ -4177,9 +4207,10 @@ def redact_text_pdf(
 
                     # Handle dual page objects if returned
                     if isinstance(redact_result[0], tuple):
-                        (pymupdf_page, pymupdf_applied_redaction_page), page_image_annotations = (
-                            redact_result
-                        )
+                        (
+                            pymupdf_page,
+                            pymupdf_applied_redaction_page,
+                        ), page_image_annotations = redact_result
                         # Store the final page with its original page number for later use
                         if not hasattr(redact_text_pdf, "_applied_redaction_pages"):
                             redact_text_pdf._applied_redaction_pages = list()
