@@ -20,11 +20,6 @@ from tools.helper_functions import OUTPUT_FOLDER, read_file
 from tools.load_spacy_model_custom_recognisers import nlp
 from tools.secure_path_utils import secure_join
 
-if REMOVE_DUPLICATE_ROWS == "True":
-    REMOVE_DUPLICATE_ROWS = True
-else:
-    REMOVE_DUPLICATE_ROWS = False
-
 
 def clean_and_stem_text_series(
     df: pd.DataFrame,
@@ -44,12 +39,15 @@ def clean_and_stem_text_series(
         ]
         return " ".join(lemmatized_words)
 
+    # Always create text_clean column first
     if do_initial_clean_dup:
         df["text_clean"] = initial_clean(df[column])
+    else:
+        df["text_clean"] = df[column]
 
     df["text_clean"] = df["text_clean"].apply(_apply_lemmatization)
     df["text_clean"] = df[
-        column
+        "text_clean"
     ].str.lower()  # .str.replace(r'[^\w\s]', '', regex=True)
 
     return df

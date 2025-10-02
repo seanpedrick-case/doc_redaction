@@ -253,7 +253,7 @@ def upload_log_file_to_s3(
     final_out_message = []
     final_out_message_str = ""
 
-    if RUN_AWS_FUNCTIONS == "1" and SAVE_LOGS_TO_CSV == "True":
+    if RUN_AWS_FUNCTIONS == "1" and SAVE_LOGS_TO_CSV is True:
         try:
             if s3_bucket and s3_key and local_file_paths:
 

@@ -2,9 +2,9 @@ name: Simple Test Run
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ dev ]
   pull_request:
-    branches: [ main, dev ]
+    branches: [ dev ]
 
 permissions:
   contents: read
@@ -17,10 +17,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python 3.11
+    - name: Set up Python 3.12
       uses: actions/setup-python@v4
       with:
-        python-version: "3.11"
+        python-version: "3.12"
     
     - name: Install system dependencies
       run: |
@@ -45,6 +45,17 @@ jobs:
     - name: Setup test data
       run: |
         python .github/scripts/setup_test_data.py
+        echo "Setup script completed. Checking results:"
+        ls -la example_data/ || echo "example_data directory not found"
+    
+    - name: Verify test data files
+      run: |
+        echo "Checking if critical test files exist:"
+        ls -la example_data/
+        echo "Checking for specific PDF files:"
+        ls -la example_data/*.pdf || echo "No PDF files found"
+        echo "Checking file sizes:"
+        find example_data -name "*.pdf" -exec ls -lh {} \;
     
     - name: Run CLI tests
       run: |

@@ -70,8 +70,9 @@ def safe_extract_page_number_from_filename(filename: str) -> Optional[int]:
     if not filename or not isinstance(filename, str):
         return None
 
-    # Use a simple, safe pattern
-    pattern = r"(\d+)\.png$"
+    # Use a more specific, secure pattern that avoids potential ReDoS
+    # Match 1-10 digits followed by .png at the end of string
+    pattern = r"(\d{1,10})\.png$"
     match = re.search(pattern, filename)
 
     if match:
@@ -85,7 +86,7 @@ def safe_extract_page_number_from_filename(filename: str) -> Optional[int]:
 
 def safe_extract_page_number_from_path(path: str) -> Optional[int]:
     """
-    Safely extract page number from path containing _(\d+).png pattern.
+    Safely extract page number from path containing _(\\d+).png pattern.
 
     Args:
         path: The path to extract page number from
@@ -96,8 +97,9 @@ def safe_extract_page_number_from_path(path: str) -> Optional[int]:
     if not path or not isinstance(path, str):
         return None
 
-    # Use a simple, safe pattern
-    pattern = r"_(\d+)\.png$"
+    # Use a more specific, secure pattern that avoids potential ReDoS
+    # Match underscore followed by 1-10 digits and .png at the end
+    pattern = r"_(\d{1,10})\.png$"
     match = re.search(pattern, path)
 
     if match:
@@ -250,8 +252,8 @@ def safe_extract_latest_number_from_filename(filename: str) -> Optional[int]:
     if not filename or not isinstance(filename, str):
         return None
 
-    # Use a simple pattern to find all numbers
-    pattern = r"\d+"
+    # Use a safe pattern to find all numbers (limit to reasonable length)
+    pattern = r"\d{1,10}"
     matches = re.findall(pattern, filename)
 
     if not matches:

@@ -1,0 +1,109 @@
+name: Multi-OS Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest] # windows-latest, not included as tesseract cannot be installed silently
+        python-version: ["3.11", "3.12", "3.13"]
+        exclude:
+          # Exclude some combinations to reduce CI time
+          #- os: windows-latest
+          #  python-version: ["3.12", "3.13"]
+          - os: macos-latest
+            python-version: ["3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          tesseract-ocr \
+          tesseract-ocr-eng \
+          poppler-utils \
+          libgl1-mesa-dri \
+          libglib2.0-0
+    
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install tesseract poppler
+    
+    - name: Install system dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        # Create tools directory
+        if (!(Test-Path "C:\tools")) {
+            mkdir C:\tools
+        }
+        
+        # Download and install Tesseract
+        $tesseractUrl = "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
+        $tesseractInstaller = "C:\tools\tesseract-installer.exe"
+        Invoke-WebRequest -Uri $tesseractUrl -OutFile $tesseractInstaller
+        
+        # Install Tesseract silently
+        Start-Process -FilePath $tesseractInstaller -ArgumentList "/S", "/D=C:\tools\tesseract" -Wait
+        
+        # Download and extract Poppler
+        $popplerUrl = "https://github.com/oschwartz10612/poppler-windows/releases/download/v25.07.0-0/Release-25.07.0-0.zip"
+        $popplerZip = "C:\tools\poppler.zip"
+        Invoke-WebRequest -Uri $popplerUrl -OutFile $popplerZip
+        
+        # Extract Poppler
+        Expand-Archive -Path $popplerZip -DestinationPath C:\tools\poppler -Force
+        
+        # Add to PATH
+        echo "C:\tools\tesseract" >> $env:GITHUB_PATH
+        echo "C:\tools\poppler\poppler-25.07.0\Library\bin" >> $env:GITHUB_PATH
+        
+        # Set environment variables for your application
+        echo "TESSERACT_FOLDER=C:\tools\tesseract" >> $env:GITHUB_ENV
+        echo "POPPLER_FOLDER=C:\tools\poppler\poppler-25.07.0\Library\bin" >> $env:GITHUB_ENV
+        echo "TESSERACT_DATA_FOLDER=C:\tools\tesseract\tessdata" >> $env:GITHUB_ENV
+        
+        # Verify installation using full paths (since PATH won't be updated in current session)
+        & "C:\tools\tesseract\tesseract.exe" --version
+        & "C:\tools\poppler\poppler-25.07.0\Library\bin\pdftoppm.exe" -v
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov reportlab pillow
+    
+    - name: Download spaCy model
+      run: |
+        python -m spacy download en_core_web_lg
+    
+    - name: Setup test data
+      run: |
+        python .github/scripts/setup_test_data.py
+    
+    - name: Run CLI tests
+      run: |
+        cd test
+        python test.py
+    
+    - name: Run tests with pytest
+      run: |
+        pytest test/test.py -v --tb=short

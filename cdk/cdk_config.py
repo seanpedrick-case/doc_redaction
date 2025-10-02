@@ -219,6 +219,16 @@ COGNITO_USER_POOL_DOMAIN_PREFIX = get_or_create_env_var(
     "COGNITO_USER_POOL_DOMAIN_PREFIX", "redaction-app-domain"
 )  # Should change this to something unique or you'll probably hit an error
 
+COGNITO_REFRESH_TOKEN_VALIDITY = int(
+    get_or_create_env_var("COGNITO_REFRESH_TOKEN_VALIDITY", "480")
+)  # Minutes
+COGNITO_ID_TOKEN_VALIDITY = int(
+    get_or_create_env_var("COGNITO_ID_TOKEN_VALIDITY", "60")
+)  # Minutes
+COGNITO_ACCESS_TOKEN_VALIDITY = int(
+    get_or_create_env_var("COGNITO_ACCESS_TOKEN_VALIDITY", "60")
+)  # Minutes
+
 # Application load balancer
 ALB_NAME = get_or_create_env_var(
     "ALB_NAME", f"{CDK_PREFIX}Alb"[-32:]

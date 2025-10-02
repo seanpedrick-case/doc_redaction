@@ -38,7 +38,7 @@ from tools.config import (
     OUTPUT_FOLDER,
     PREPROCESS_LOCAL_OCR_IMAGES,
     REMOVE_DUPLICATE_ROWS,
-    RETURN_PDF_END_OF_REDACTION,
+    RETURN_REDACTED_PDF,
     RUN_AWS_FUNCTIONS,
     S3_USAGE_LOGS_FOLDER,
     SAVE_LOGS_TO_CSV,
@@ -123,23 +123,6 @@ def _get_env_list(env_var_name: str) -> list[str]:
     # Split by comma and filter out any empty strings that might result from extra commas
     return [s.strip() for s in value.split(",") if s.strip()]
 
-
-# --- Constants and Configuration ---
-
-if CHOSEN_COMPREHEND_ENTITIES:
-    CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
-if FULL_COMPREHEND_ENTITY_LIST:
-    FULL_COMPREHEND_ENTITY_LIST = _get_env_list(FULL_COMPREHEND_ENTITY_LIST)
-if CHOSEN_REDACT_ENTITIES:
-    CHOSEN_REDACT_ENTITIES = _get_env_list(CHOSEN_REDACT_ENTITIES)
-if FULL_ENTITY_LIST:
-    FULL_ENTITY_LIST = _get_env_list(FULL_ENTITY_LIST)
-if CUSTOM_ENTITIES:
-    CUSTOM_ENTITIES = _get_env_list(CUSTOM_ENTITIES)
-if DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX:
-    DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = _get_env_list(
-        DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX
-    )
 
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
 CHOSEN_COMPREHEND_ENTITIES.extend(CUSTOM_ENTITIES)
@@ -399,7 +382,7 @@ python cli_redact.py --task textract --textract_action list
     )
     pdf_group.add_argument(
         "--return_pdf_end_of_redaction",
-        default=RETURN_PDF_END_OF_REDACTION,
+        default=RETURN_REDACTED_PDF,
         help="Return PDF at end of redaction process.",
     )
     pdf_group.add_argument(
@@ -653,6 +636,21 @@ python cli_redact.py --task textract --textract_action list
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
 
+            # Debug: Print file path information
+            input_file_path = args.input_file[0]
+            print(f"Debug: Input file path: {input_file_path}")
+            print(f"Debug: File exists: {os.path.exists(input_file_path)}")
+            print(f"Debug: Absolute path: {os.path.abspath(input_file_path)}")
+            if os.path.exists(input_file_path):
+                print(f"Debug: File size: {os.path.getsize(input_file_path)} bytes")
+            else:
+                print(
+                    f"Debug: File not found! Current working directory: {os.getcwd()}"
+                )
+                print(
+                    f"Debug: Directory contents: {os.listdir(os.path.dirname(input_file_path) if os.path.dirname(input_file_path) else '.')}"
+                )
+
             _, file_extension = os.path.splitext(args.input_file[0])
             file_extension = file_extension.lower()
         else:
@@ -778,6 +776,7 @@ python cli_redact.py --task textract --textract_action list
                     _,
                     _,
                     total_textract_query_number,
+                    _,
                     _,
                     _,
                     _,

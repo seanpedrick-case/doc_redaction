@@ -26,12 +26,8 @@ import requests
 from spacy.cli.download import download
 
 from tools.config import CUSTOM_ENTITIES, DEFAULT_LANGUAGE, TESSERACT_DATA_FOLDER
-from tools.helper_functions import _get_env_list
 
 score_threshold = 0.001
-
-if CUSTOM_ENTITIES:
-    CUSTOM_ENTITIES = _get_env_list(CUSTOM_ENTITIES)
 custom_entities = CUSTOM_ENTITIES
 
 
@@ -277,7 +273,7 @@ def download_tesseract_lang_pack(
 
     # Download the file
     try:
-        response = requests.get(url, stream=True)
+        response = requests.get(url, stream=True, timeout=60)
         response.raise_for_status()  # Raise an exception for bad status codes
 
         with open(file_path, "wb") as f:
@@ -293,7 +289,7 @@ def download_tesseract_lang_pack(
 
 
 #### Custom recognisers
-def custom_word_list_recogniser(custom_list: List[str] = []):
+def custom_word_list_recogniser(custom_list: List[str] = list()):
     # Create regex pattern, handling quotes carefully
 
     quote_str = '"'
@@ -469,8 +465,8 @@ def extract_street_name(text: str) -> str:
     # Find all matches in text
     matches = re.finditer(pattern, text, re.DOTALL | re.MULTILINE | re.IGNORECASE)
 
-    start_positions = []
-    end_positions = []
+    start_positions = list()
+    end_positions = list()
 
     for match in matches:
         match.group("preceding_word").strip()
@@ -502,7 +498,7 @@ class StreetNameRecognizer(EntityRecognizer):
 
         start_pos, end_pos = extract_street_name(text)
 
-        results = []
+        results = list()
 
         for i in range(0, len(start_pos)):
 
@@ -519,7 +515,7 @@ street_recogniser = StreetNameRecognizer(supported_entities=["STREETNAME"])
 
 
 ## Custom fuzzy match recogniser for list of strings
-def custom_fuzzy_word_list_regex(text: str, custom_list: List[str] = []):
+def custom_fuzzy_word_list_regex(text: str, custom_list: List[str] = list()):
     # Create regex pattern, handling quotes carefully
 
     quote_str = '"'
@@ -535,8 +531,8 @@ def custom_fuzzy_word_list_regex(text: str, custom_list: List[str] = []):
         custom_regex_pattern, text, re.DOTALL | re.MULTILINE | re.IGNORECASE
     )
 
-    start_positions = []
-    end_positions = []
+    start_positions = list()
+    end_positions = list()
 
     for match in matches:
         start_pos = match.start()
@@ -552,7 +548,7 @@ class CustomWordFuzzyRecognizer(EntityRecognizer):
     def __init__(
         self,
         supported_entities: List[str],
-        custom_list: List[str] = [],
+        custom_list: List[str] = list(),
         spelling_mistakes_max: int = 1,
         search_whole_phrase: bool = True,
     ):
@@ -579,7 +575,7 @@ class CustomWordFuzzyRecognizer(EntityRecognizer):
             text, self.custom_list, self.spelling_mistakes_max, self.search_whole_phrase
         )  # Pass new parameters
 
-        results = []
+        results = list()
 
         for i in range(0, len(start_pos)):
             result = RecognizerResult(
@@ -590,7 +586,7 @@ class CustomWordFuzzyRecognizer(EntityRecognizer):
         return results
 
 
-custom_list_default = []
+custom_list_default = list()
 custom_word_fuzzy_recognizer = CustomWordFuzzyRecognizer(
     supported_entities=["CUSTOM_FUZZY"], custom_list=custom_list_default
 )
@@ -640,7 +636,7 @@ def create_nlp_analyser(
 
     # Create custom recognizers
     if custom_list is None:
-        custom_list = []
+        custom_list = list()
 
     custom_recogniser = custom_word_list_recogniser(custom_list)
     custom_word_fuzzy_recognizer = CustomWordFuzzyRecognizer(
@@ -685,7 +681,7 @@ nlp_analyser, nlp = create_nlp_analyser(DEFAULT_LANGUAGE, return_also_model=True
 
 def spacy_fuzzy_search(
     text: str,
-    custom_query_list: List[str] = [],
+    custom_query_list: List[str] = list(),
     spelling_mistakes_max: int = 1,
     search_whole_phrase: bool = True,
     nlp=nlp,
@@ -693,10 +689,10 @@ def spacy_fuzzy_search(
 ):
     """Conduct fuzzy match on a list of text data."""
 
-    all_matches = []
-    all_start_positions = []
-    all_end_positions = []
-    all_ratios = []
+    all_matches = list()
+    all_start_positions = list()
+    all_end_positions = list()
+    all_ratios = list()
 
     # print("custom_query_list:", custom_query_list)
 

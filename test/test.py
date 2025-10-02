@@ -368,8 +368,25 @@ def run_cli_redact(
             print(stderr)
         print("---------------------")
 
-        if result.returncode == 0:
-            print("✅ Script executed successfully.")
+        # Analyze the output for errors and success indicators
+        analysis = analyze_test_output(stdout, stderr)
+
+        if analysis["has_errors"]:
+            print("❌ Errors detected in output:")
+            for i, error_type in enumerate(analysis["error_types"]):
+                print(f"   {i+1}. {error_type}")
+            if analysis["error_messages"]:
+                print("   Error messages:")
+                for msg in analysis["error_messages"][
+                    :3
+                ]:  # Show first 3 error messages
+                    print(f"     - {msg}")
+            return False
+        elif result.returncode == 0:
+            success_msg = "✅ Script executed successfully."
+            if analysis["success_indicators"]:
+                success_msg += f" (Success indicators: {', '.join(analysis['success_indicators'][:3])})"
+            print(success_msg)
             return True
         else:
             print(f"❌ Command failed with return code {result.returncode}")
@@ -382,6 +399,83 @@ def run_cli_redact(
     except Exception as e:
         print(f"❌ An unexpected error occurred: {e}")
         return False
+
+
+def analyze_test_output(stdout: str, stderr: str) -> dict:
+    """
+    Analyze test output to provide detailed error information.
+
+    Args:
+        stdout (str): Standard output from the test
+        stderr (str): Standard error from the test
+
+    Returns:
+        dict: Analysis results with error details
+    """
+    combined_output = (stdout or "") + (stderr or "")
+
+    analysis = {
+        "has_errors": False,
+        "error_types": [],
+        "error_messages": [],
+        "success_indicators": [],
+        "warning_indicators": [],
+    }
+
+    # Error patterns
+    error_patterns = {
+        "An error occurred": "General error message",
+        "Error:": "Error prefix",
+        "Exception:": "Exception occurred",
+        "Traceback": "Python traceback",
+        "Failed to": "Operation failure",
+        "Cannot": "Operation not possible",
+        "Unable to": "Operation not possible",
+        "KeyError:": "Missing key/dictionary error",
+        "AttributeError:": "Missing attribute error",
+        "TypeError:": "Type mismatch error",
+        "ValueError:": "Invalid value error",
+        "FileNotFoundError:": "File not found",
+        "ImportError:": "Import failure",
+        "ModuleNotFoundError:": "Module not found",
+    }
+
+    # Success indicators
+    success_patterns = [
+        "Successfully",
+        "Completed",
+        "Finished",
+        "Processed",
+        "Redacted",
+        "Extracted",
+    ]
+
+    # Warning indicators
+    warning_patterns = ["Warning:", "WARNING:", "Deprecated", "DeprecationWarning"]
+
+    # Check for errors
+    for pattern, description in error_patterns.items():
+        if pattern.lower() in combined_output.lower():
+            analysis["has_errors"] = True
+            analysis["error_types"].append(description)
+
+            # Extract the actual error message
+            lines = combined_output.split("\n")
+            for line in lines:
+                if pattern.lower() in line.lower():
+                    analysis["error_messages"].append(line.strip())
+
+    # Check for success indicators
+    for pattern in success_patterns:
+        if pattern.lower() in combined_output.lower():
+            analysis["success_indicators"].append(pattern)
+
+    # Check for warnings
+    for pattern in warning_patterns:
+        if pattern.lower() in combined_output.lower():
+            analysis["warning_indicators"].append(pattern)
+
+    return analysis
 
 
 class TestCLIRedactExamples(unittest.TestCase):
@@ -405,6 +499,18 @@ class TestCLIRedactExamples(unittest.TestCase):
         print(f"Test setup complete. Script: {cls.script_path}")
         print(f"Example data directory: {cls.example_data_dir}")
         print(f"Temp output directory: {cls.temp_output_dir}")
+
+        # Debug: Check if example data directory exists and list contents
+        if os.path.exists(cls.example_data_dir):
+            print("Example data directory exists. Contents:")
+            for item in os.listdir(cls.example_data_dir):
+                item_path = os.path.join(cls.example_data_dir, item)
+                if os.path.isfile(item_path):
+                    print(f"  File: {item} ({os.path.getsize(item_path)} bytes)")
+                else:
+                    print(f"  Directory: {item}")
+        else:
+            print(f"Example data directory does not exist: {cls.example_data_dir}")
 
     @classmethod
     def tearDownClass(cls):
@@ -914,17 +1020,17 @@ class TestGUIApp(unittest.TestCase):
 
             # Check if the app object exists and is a Gradio Blocks object
             self.assertTrue(
-                hasattr(app, "app"), "App object should exist in the module"
+                hasattr(app, "blocks"), "App object should exist in the module"
             )
 
             # Check if it's a Gradio Blocks instance
             import gradio as gr
 
             self.assertIsInstance(
-                app.app, gr.Blocks, "App should be a Gradio Blocks instance"
+                app.blocks, gr.Blocks, "App should be a Gradio Blocks instance"
             )
 
-            print("✅ GUI app import and initialization passed")
+            print("✅ GUI app import and initialisation passed")
 
         except ImportError as e:
             error_msg = f"Failed to import app module: {e}"
