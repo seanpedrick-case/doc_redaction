@@ -4300,21 +4300,6 @@ def redact_text_pdf(
         )
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
 
-    # Debug: Print file path information before opening
-    print(f"Debug: Attempting to open PDF file: {file_path}")
-    print(f"Debug: File exists: {os.path.exists(file_path)}")
-    print(f"Debug: Absolute path: {os.path.abspath(file_path)}")
-    if os.path.exists(file_path):
-        print(f"Debug: File size: {os.path.getsize(file_path)} bytes")
-    else:
-        print(f"Debug: File not found! Current working directory: {os.getcwd()}")
-        print(
-            f"Debug: Directory contents: {os.listdir(os.path.dirname(file_path) if os.path.dirname(file_path) else '.')}"
-        )
-        raise FileNotFoundError(
-            f"Failed to open file '{file_path}'. File does not exist."
-        )
-
     # Open with Pikepdf to get text lines
     pikepdf_pdf = Pdf.open(file_path)
     number_of_pages = len(pikepdf_pdf.pages)

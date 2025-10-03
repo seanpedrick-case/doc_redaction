@@ -496,6 +496,7 @@ def anonymise_files_with_open_text(
 
     tic = time.perf_counter()
     comprehend_client = ""
+    out_message_out = ""
 
     # If output folder doesn't end with a forward slash, add one
     if not output_folder.endswith("/"):
@@ -682,7 +683,6 @@ def anonymise_files_with_open_text(
 
             elif file_type == "xlsx":
                 print("Running through all xlsx sheets")
-                # anon_xlsx = pd.ExcelFile(anon_file)
                 if not in_excel_sheets:
                     out_message.append(
                         "No Excel sheets selected. Please select at least one to anonymise."
@@ -773,6 +773,8 @@ def anonymise_files_with_open_text(
                     output_folder=output_folder,
                     do_initial_clean=do_initial_clean,
                 )
+
+        out_message_out = ""
 
         # Increase latest file completed count unless we are at the last file
         if latest_file_completed != len(file_paths):

@@ -191,6 +191,9 @@ python cli_redact.py --input_file example_data/combined_case_notes.csv --text_co
 ## Anonymise csv file with a different strategy (remove text completely):
 python cli_redact.py --input_file example_data/combined_case_notes.csv --text_columns "Case Note" "Client" --anon_strategy redact
 
+## Anonymise Excel file, remove text completely:
+python cli_redact.py --input_file example_data/combined_case_notes.xlsx --text_columns "Case Note" "Client" --excel_sheets combined_case_notes --anon_strategy redact
+
 ## Anonymise a word document:
 python cli_redact.py --input_file "example_data/Bold minimalist professional cover letter.docx" --anon_strategy replace_redacted
 
@@ -635,21 +638,6 @@ python cli_redact.py --task textract --textract_action list
         if args.input_file:
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
-
-            # Debug: Print file path information
-            input_file_path = args.input_file[0]
-            print(f"Debug: Input file path: {input_file_path}")
-            print(f"Debug: File exists: {os.path.exists(input_file_path)}")
-            print(f"Debug: Absolute path: {os.path.abspath(input_file_path)}")
-            if os.path.exists(input_file_path):
-                print(f"Debug: File size: {os.path.getsize(input_file_path)} bytes")
-            else:
-                print(
-                    f"Debug: File not found! Current working directory: {os.getcwd()}"
-                )
-                print(
-                    f"Debug: Directory contents: {os.listdir(os.path.dirname(input_file_path) if os.path.dirname(input_file_path) else '.')}"
-                )
 
             _, file_extension = os.path.splitext(args.input_file[0])
             file_extension = file_extension.lower()
