@@ -20,6 +20,14 @@ COPY requirements.txt .
 
 RUN pip install --verbose --no-cache-dir --target=/install -r requirements.txt && rm requirements.txt
 
+# Optionally install PaddleOCR if the INSTALL_PADDLEOCR environment variable is set to True. See requirements.txt for more details, including installing the GPU version of PaddleOCR.
+ARG INSTALL_PADDLEOCR=False
+ENV INSTALL_PADDLEOCR=${INSTALL_PADDLEOCR}
+
+RUN if [ "$INSTALL_PADDLEOCR" = "True" ]; then \
+    pip install --verbose --no-cache-dir --target=/install paddleocr==3.3.0 paddlepaddle==3.2.0; \
+fi
+
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie
 
@@ -114,7 +122,7 @@ COPY --chown=user . $APP_HOME/app
 
 # Copy the entrypoint script to its final destination
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod 755 /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Switch to user
 USER user

@@ -255,7 +255,7 @@ FEEDBACK_LOG_FILE_NAME = get_or_create_env_var("FEEDBACK_LOG_FILE_NAME", LOG_FIL
 # Gradio general app options
 ###
 
-FAVICON_PATH = get_or_create_env_var("FAVICON_PATH", "favicon.ico")
+FAVICON_PATH = get_or_create_env_var("FAVICON_PATH", "favicon.png")
 
 RUN_FASTAPI = get_or_create_env_var("RUN_FASTAPI", "0")
 
@@ -425,6 +425,29 @@ DEFAULT_TABULAR_ANONYMISATION_STRATEGY = get_or_create_env_var(
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
 )  # Choose between "tesseract", "hybrid", and "paddle". "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.
+
+SHOW_LOCAL_OCR_MODEL_OPTIONS = get_or_create_env_var(
+    "SHOW_LOCAL_OCR_MODEL_OPTIONS", "False"
+)
+if SHOW_LOCAL_OCR_MODEL_OPTIONS == "True":
+    LOCAL_OCR_MODEL_OPTIONS = [
+        "tesseract",
+        "hybrid",
+        "paddle",
+    ]
+else:
+    LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
+
+HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "65")
+)  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
+HYBRID_OCR_PADDING = int(
+    get_or_create_env_var("HYBRID_OCR_PADDING", "1")
+)  # The padding to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
+
+SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES = get_or_create_env_var(
+    "SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES", "False"
+)  # Whether to save example images of Tesseract vs PaddleOCR re-extraction in hybrid OCR mode.
 
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
     "PREPROCESS_LOCAL_OCR_IMAGES", "False"
@@ -896,6 +919,21 @@ if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = True
 else:
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = False
+
+if SHOW_LOCAL_OCR_MODEL_OPTIONS == "True":
+    SHOW_LOCAL_OCR_MODEL_OPTIONS = True
+else:
+    SHOW_LOCAL_OCR_MODEL_OPTIONS = False
+
+if SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES == "True":
+    SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES = True
+else:
+    SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES = False
+
+if SHOW_AWS_TEXT_EXTRACTION_OPTIONS == "True":
+    SHOW_AWS_TEXT_EXTRACTION_OPTIONS = True
+else:
+    SHOW_AWS_TEXT_EXTRACTION_OPTIONS = False
 
 if CSV_ACCESS_LOG_HEADERS:
     CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)

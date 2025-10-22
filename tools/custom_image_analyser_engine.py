@@ -1,4 +1,5 @@
 import copy
+import os
 import re
 import time
 from copy import deepcopy
@@ -17,12 +18,18 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from tools.config import (
     AWS_PII_OPTION,
     DEFAULT_LANGUAGE,
+    HYBRID_OCR_CONFIDENCE_THRESHOLD,
+    HYBRID_OCR_PADDING,
+    LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
+    OUTPUT_FOLDER,
     PREPROCESS_LOCAL_OCR_IMAGES,
+    SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES,
 )
 from tools.helper_functions import clean_unicode_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
+from tools.secure_regex_utils import safe_sanitize_text
 
 if PREPROCESS_LOCAL_OCR_IMAGES == "True":
     PREPROCESS_LOCAL_OCR_IMAGES = True
@@ -464,6 +471,7 @@ class CustomImageAnalyzerEngine:
         paddle_kwargs: Optional[Dict[str, Any]] = None,
         image_preprocessor: Optional[ImagePreprocessor] = None,
         language: Optional[str] = DEFAULT_LANGUAGE,
+        output_folder: str = OUTPUT_FOLDER,
     ):
         """
         Initializes the CustomImageAnalyzerEngine.
@@ -474,10 +482,11 @@ class CustomImageAnalyzerEngine:
         :param paddle_kwargs: Dictionary of keyword arguments for PaddleOCR constructor.
         :param image_preprocessor: Optional image preprocessor.
         :param language: Preferred OCR language (e.g., "en", "fr", "de"). Defaults to DEFAULT_LANGUAGE.
+        :param output_folder: The folder to save the output images to.
         """
-        if ocr_engine not in ["tesseract", "paddle", "hybrid"]:
+        if ocr_engine not in LOCAL_OCR_MODEL_OPTIONS:
             raise ValueError(
-                "ocr_engine must be either 'tesseract', 'hybrid', or 'paddle'"
+                f"ocr_engine must be one of the following: {LOCAL_OCR_MODEL_OPTIONS}"
             )
 
         self.ocr_engine = ocr_engine
@@ -486,11 +495,12 @@ class CustomImageAnalyzerEngine:
         self.language = language or DEFAULT_LANGUAGE or "en"
         self.tesseract_lang = _tesseract_lang_code(self.language)
         self.paddle_lang = _paddle_lang_code(self.language)
+        self.output_folder = output_folder
 
         if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid":
             if PaddleOCR is None:
                 raise ImportError(
-                    "paddleocr is not installed. Please run 'pip install paddleocr paddlepaddle'"
+                    "paddleocr is not installed. Please run 'pip install paddleocr paddlepaddle' in your python environment and retry."
                 )
             # Default paddle configuration if none provided
             if paddle_kwargs is None:
@@ -525,7 +535,6 @@ class CustomImageAnalyzerEngine:
         # Remove or replace invalid filename characters
         # Windows: < > : " | ? * \ /
         # Unix: / (forward slash)
-        from tools.secure_regex_utils import safe_sanitize_text
 
         sanitized = safe_sanitize_text(text)
 
@@ -550,12 +559,12 @@ class CustomImageAnalyzerEngine:
         """Converts PaddleOCR result format to Tesseract's dictionary format. NOTE: This attempts to create word-level bounding boxes by estimating the distance between characters in sentence-level text output. This is currently quite inaccurate, and word-level bounding boxes should not be relied upon."""
 
         output = {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
+            "text": list(),
+            "left": list(),
+            "top": list(),
+            "width": list(),
+            "height": list(),
+            "conf": list(),
         }
 
         # paddle_results is now a list of dictionaries with detailed information
@@ -564,9 +573,9 @@ class CustomImageAnalyzerEngine:
 
         for page_result in paddle_results:
             # Extract text recognition results from the new format
-            rec_texts = page_result.get("rec_texts", [])
-            rec_scores = page_result.get("rec_scores", [])
-            rec_polys = page_result.get("rec_polys", [])
+            rec_texts = page_result.get("rec_texts", list())
+            rec_scores = page_result.get("rec_scores", list())
+            rec_polys = page_result.get("rec_polys", list())
 
             for line_text, line_confidence, bounding_box in zip(
                 rec_texts, rec_scores, rec_polys
@@ -620,8 +629,8 @@ class CustomImageAnalyzerEngine:
     def _perform_hybrid_ocr(
         self,
         image: Image.Image,
-        confidence_threshold: int = 65,
-        padding: int = 5,
+        confidence_threshold: int = HYBRID_OCR_CONFIDENCE_THRESHOLD,
+        padding: int = HYBRID_OCR_PADDING,
         ocr: Optional[Any] = None,
     ) -> Dict[str, list]:
         """
@@ -646,15 +655,13 @@ class CustomImageAnalyzerEngine:
             lang=self.tesseract_lang,
         )
 
-        # tesseract_data['abs_line_id'] = tesseract_data.groupby(['block_num', 'par_num', 'line_num']).ngroup()
-
         final_data = {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
+            "text": list(),
+            "left": list(),
+            "top": list(),
+            "width": list(),
+            "height": list(),
+            "conf": list(),
         }
 
         num_words = len(tesseract_data["text"])
@@ -714,8 +721,19 @@ class CustomImageAnalyzerEngine:
                             # For exporting example image comparisons, not used here
                             safe_text = self._sanitize_filename(text, max_length=20)
                             self._sanitize_filename(new_text, max_length=20)
-                            output_image_path = f"examples/tess_vs_paddle_examples/{conf}_conf_{safe_text}_to_{new_text}_{new_conf}.png"
-                            cropped_image.save(output_image_path)
+
+                            if SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES is True:
+                                tess_vs_paddle_examples_folder = (
+                                    self.output_folder + "/tess_vs_paddle_examples/"
+                                )
+                                if not os.path.exists(tess_vs_paddle_examples_folder):
+                                    os.makedirs(tess_vs_paddle_examples_folder)
+                                output_image_path = (
+                                    self.output_folder
+                                    + f"tess_vs_paddle_examples/{conf}_conf_{safe_text}_to_{new_text}_{new_conf}.png"
+                                )
+                                print(f"Saving example image to {output_image_path}")
+                                cropped_image.save(output_image_path)
 
                             text = new_text
                             conf = new_conf

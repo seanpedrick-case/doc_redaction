@@ -79,6 +79,7 @@ from tools.config import (
     IMAGES_DPI,
     INPUT_FOLDER,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
+    LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
     LOG_FILE_NAME,
     MAX_FILE_SIZE,
@@ -105,9 +106,11 @@ from tools.config import (
     SAVE_LOGS_TO_DYNAMODB,
     SESSION_OUTPUT_FOLDER,
     SHOW_AWS_EXAMPLES,
+    SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
     SHOW_COSTS,
     SHOW_EXAMPLES,
     SHOW_LANGUAGE_SELECTION,
+    SHOW_LOCAL_OCR_MODEL_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     TABULAR_PII_DETECTION_MODELS,
     TESSERACT_TEXT_EXTRACT_OPTION,
@@ -249,13 +252,13 @@ in_doc_files = gr.File(
 )
 
 text_extract_method_radio = gr.Radio(
-    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
+    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
     value=DEFAULT_TEXT_EXTRACTION_MODEL,
     choices=TEXT_EXTRACTION_MODELS,
 )
 
 pii_identification_method_drop = gr.Radio(
-    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
     value=DEFAULT_PII_DETECTION_MODEL,
     choices=PII_DETECTION_MODELS,
 )
@@ -264,6 +267,7 @@ handwrite_signature_checkbox = gr.CheckboxGroup(
     label="AWS Textract extraction settings",
     choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
     value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+    visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
 )
 
 in_redact_entities = gr.Dropdown(
@@ -438,9 +442,9 @@ with blocks:
         visible=False,
     )
 
-    chosen_local_model_textbox = gr.Textbox(
-        CHOSEN_LOCAL_OCR_MODEL, label="chosen_local_model_textbox", visible=False
-    )
+    # local_ocr_method_radio = gr.Textbox(
+    #     CHOSEN_LOCAL_OCR_MODEL, label="local_ocr_method_radio", visible=False
+    # )
 
     session_hash_state = gr.Textbox(label="session_hash_state", value="", visible=False)
     host_name_textbox = gr.Textbox(
@@ -1211,11 +1215,36 @@ with blocks:
             ):
                 text_extract_method_radio.render()
 
-                with gr.Accordion(
-                    "Enable AWS Textract signature detection (default is off)",
-                    open=False,
-                ):
+                if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
+                    with gr.Accordion(
+                        "Enable AWS Textract signature detection (default is off)",
+                        open=False,
+                    ):
+                        handwrite_signature_checkbox.render()
+                else:
                     handwrite_signature_checkbox.render()
+
+                print(f"SHOW_LOCAL_OCR_MODEL_OPTIONS : {SHOW_LOCAL_OCR_MODEL_OPTIONS}")
+                if SHOW_LOCAL_OCR_MODEL_OPTIONS:
+                    with gr.Accordion(
+                        label="Change default local OCR model",
+                        open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                    ):
+                        local_ocr_method_radio = gr.Radio(
+                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.""",
+                            value=CHOSEN_LOCAL_OCR_MODEL,
+                            choices=LOCAL_OCR_MODEL_OPTIONS,
+                            interactive=True,
+                            visible=True,
+                        )
+                else:
+                    local_ocr_method_radio = gr.Radio(
+                        label="Choose local OCR model",
+                        value=CHOSEN_LOCAL_OCR_MODEL,
+                        choices=LOCAL_OCR_MODEL_OPTIONS,
+                        interactive=False,
+                        visible=False,
+                    )
 
                 with gr.Row(equal_height=True):
                     pii_identification_method_drop.render()
@@ -2711,7 +2740,7 @@ with blocks:
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
             all_page_line_level_ocr_results_with_words_df_base,
-            chosen_local_model_textbox,
+            local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
         ],
@@ -2835,7 +2864,7 @@ with blocks:
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
             all_page_line_level_ocr_results_with_words_df_base,
-            chosen_local_model_textbox,
+            local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
         ],
@@ -3167,7 +3196,7 @@ with blocks:
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
             all_page_line_level_ocr_results_with_words_df_base,
-            chosen_local_model_textbox,
+            local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
         ],

@@ -40,6 +40,7 @@ from tools.config import (
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
+    CHOSEN_LOCAL_OCR_MODEL,
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
@@ -218,7 +219,7 @@ def choose_and_run_redactor(
     all_page_line_level_ocr_results: list[dict] = list(),
     all_page_line_level_ocr_results_with_words: list[dict] = list(),
     all_page_line_level_ocr_results_with_words_df: pd.DataFrame = None,
-    chosen_local_model: str = "tesseract",
+    chosen_local_model: str = CHOSEN_LOCAL_OCR_MODEL,
     language: str = DEFAULT_LANGUAGE,
     ocr_review_files: list = list(),
     prepare_images: bool = True,
@@ -232,7 +233,6 @@ def choose_and_run_redactor(
     - file_paths (List[str]): A list of paths to the files to be redacted.
     - prepared_pdf_file_paths (List[str]): A list of paths to the PDF files prepared for redaction.
     - pdf_image_file_paths (List[str]): A list of paths to the PDF files converted to images for redaction.
-
     - chosen_redact_entities (List[str]): A list of entity types to redact from the files using the local model (spacy) with Microsoft Presidio.
     - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service.
     - text_extraction_method (str): The method to use to extract text from documents.
@@ -276,7 +276,7 @@ def choose_and_run_redactor(
     - all_page_line_level_ocr_results (list, optional): All line level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words (list, optional): All word level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words_df (pd.Dataframe, optional): All word level text on the page with bounding boxes as a dataframe.
-    - chosen_local_model (str): Which local model is being used for OCR on images - "tesseract", "paddle" for PaddleOCR, or "hybrid" to combine both.
+    - chosen_local_model (str): Which local model is being used for OCR on images - uses the value of CHOSEN_LOCAL_OCR_MODEL by default, choices are "tesseract", "paddle" for PaddleOCR, or "hybrid" to combine both.
     - language (str, optional): The language of the text in the files. Defaults to English.
     - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
     - ocr_review_files (list, optional): A list of OCR review files to be used for the redaction process. Defaults to an empty list.
@@ -312,6 +312,7 @@ def choose_and_run_redactor(
         text_extraction_method = TEXTRACT_TEXT_EXTRACT_OPTION
     if text_extraction_method == "Local OCR":
         text_extraction_method = TESSERACT_TEXT_EXTRACT_OPTION
+        print("Performing local OCR with" + chosen_local_model + " model.")
     if text_extraction_method == "Local text":
         text_extraction_method = SELECTABLE_TEXT_EXTRACT_OPTION
     if pii_identification_method == "None":
@@ -2933,7 +2934,7 @@ def redact_image_pdf(
     text_extraction_only: bool = False,
     all_page_line_level_ocr_results=list(),
     all_page_line_level_ocr_results_with_words=list(),
-    chosen_local_model: str = "tesseract",
+    chosen_local_model: str = CHOSEN_LOCAL_OCR_MODEL,
     page_break_val: int = int(PAGE_BREAK_VALUE),
     log_files_output_paths: List = list(),
     max_time: int = int(MAX_TIME_VALUE),
@@ -2974,7 +2975,7 @@ def redact_image_pdf(
     - text_extraction_only (bool, optional): Should the function only extract text, or also do redaction.
     - all_page_line_level_ocr_results (optional): List of all page line level OCR results.
     - all_page_line_level_ocr_results_with_words (optional): List of all page line level OCR results with words.
-    - chosen_local_model (str, optional): The local model chosen for OCR. Defaults to "tesseract", other choices are "paddle" for PaddleOCR, or "hybrid" for a combination of both.
+    - chosen_local_model (str, optional): The local model chosen for OCR. Defaults to CHOSEN_LOCAL_OCR_MODEL, other choices are "paddle" for PaddleOCR, or "hybrid" for a combination of both.
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to PAGE_BREAK_VALUE.
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
@@ -3023,13 +3024,17 @@ def redact_image_pdf(
     # Only load in PaddleOCR models if not running Textract
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         image_analyser = CustomImageAnalyzerEngine(
-            analyzer_engine=nlp_analyser, ocr_engine="tesseract", language=language
+            analyzer_engine=nlp_analyser,
+            ocr_engine="tesseract",
+            language=language,
+            output_folder=output_folder,
         )
     else:
         image_analyser = CustomImageAnalyzerEngine(
             analyzer_engine=nlp_analyser,
             ocr_engine=chosen_local_model,
             language=language,
+            output_folder=output_folder,
         )
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
