@@ -499,13 +499,15 @@ class CustomImageAnalyzerEngine:
         self.language = language or DEFAULT_LANGUAGE or "en"
         self.tesseract_lang = _tesseract_lang_code(self.language)
         self.paddle_lang = _paddle_lang_code(self.language)
-        
+
         # Security: Validate and normalize output_folder at construction time
         # This ensures the object is always in a secure state and prevents
         # any future code from accidentally using an untrusted directory
         normalized_output_folder = os.path.normpath(os.path.abspath(output_folder))
         if not validate_folder_containment(normalized_output_folder, OUTPUT_FOLDER):
-            raise ValueError(f"Unsafe output folder path: {output_folder}. Must be contained within {OUTPUT_FOLDER}")
+            raise ValueError(
+                f"Unsafe output folder path: {output_folder}. Must be contained within {OUTPUT_FOLDER}"
+            )
         self.output_folder = normalized_output_folder
 
         if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid":

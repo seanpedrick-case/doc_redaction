@@ -474,7 +474,7 @@ def combine_ocr_dataframes(
             raise ValueError(
                 f"Unsafe normalized output folder path: {normalized_output_folder}"
             )
-        
+
         # Assign the validated path back to output_folder to ensure all subsequent
         # operations use the secure, validated value
         output_folder = normalized_output_folder

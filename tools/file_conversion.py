@@ -2813,12 +2813,9 @@ def fill_missing_ids(
         # warnings.warn(f"Column '{column_name}' dtype might change from '{original_dtype}' to 'object' due to string ID assignment.", UserWarning)
 
     df.loc[rows_to_fill_index, column_name] = new_ids_list
-    print(
-        f"Successfully assigned {len(new_ids_list)} new unique IDs to column '{column_name}'."
-    )
-
-    # Optional: Convert the entire column to string type at the end for consistency
-    # df[column_name] = df[column_name].astype(str)
+    # print(
+    #     f"Successfully assigned {len(new_ids_list)} new unique IDs to column '{column_name}'."
+    # )
 
     return df
 
