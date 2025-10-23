@@ -16,6 +16,7 @@ print("S3 client initialised")
 TMP_DIR = "/tmp"
 INPUT_DIR = os.path.join(TMP_DIR, "input")
 OUTPUT_DIR = os.path.join(TMP_DIR, "output")
+os.environ["TESSERACT_DATA_FOLDER"] = "/tmp/share/tessdata"
 
 
 def download_file_from_s3(bucket_name, key, download_path):
@@ -95,7 +96,7 @@ def lambda_handler(event, context):
         "input_file": input_file_path,
         "output_dir": OUTPUT_DIR,
         "input_dir": INPUT_DIR,
-        "language": arguments.get("language", "en_core_web_lg"),
+        "language": arguments.get("default_language", "en"),
         "pii_detector": arguments.get("pii_detector", "Local"),  # Default to local
         "username": arguments.get("username", "lambda_user"),
         "save_to_user_folders": arguments.get("save_to_user_folders", "False"),
