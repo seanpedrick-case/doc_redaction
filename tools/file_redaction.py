@@ -902,6 +902,13 @@ def choose_and_run_redactor(
             file_ending = "local_ocr"
         elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
             file_ending = "textract"
+        else:
+            print(
+                "No valid text extraction method found. Defaulting to local text extraction."
+            )
+            text_extraction_method = SELECTABLE_TEXT_EXTRACT_OPTION
+            file_ending = "local_text"
+
         all_page_line_level_ocr_results_with_words_json_file_path = (
             output_folder
             + pdf_file_name_without_ext

@@ -99,7 +99,7 @@ def lambda_handler(event, context):
         "pii_detector": arguments.get("pii_detector", "Local"),  # Default to local
         "username": arguments.get("username", "lambda_user"),
         "save_to_user_folders": arguments.get("save_to_user_folders", "False"),
-        "ocr_method": arguments.get("ocr_method", "Tesseract OCR - all PDF types"),
+        "ocr_method": arguments.get("ocr_method", "Local OCR"),
         "page_min": int(arguments.get("page_min", 0)),
         "page_max": int(arguments.get("page_max", 0)),
         "handwrite_signature_extraction": arguments.get(
