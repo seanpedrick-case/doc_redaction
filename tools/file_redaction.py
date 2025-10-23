@@ -2472,8 +2472,18 @@ def redact_page_with_pymupdf(
             if hasattr(page.parent, "name") and page.parent.name
             else "document"
         )
-        # pdf_name_without_ext = os.path.splitext(pdf_filename)[0]
-        image_path = os.path.join(input_folder, f"{pdf_filename}_{page.number}.png")
+        # Normalize and validate path safety before using in file path construction
+        normalized_filename = os.path.normpath(pdf_filename)
+        # Ensure the filename doesn't contain path traversal characters
+        if (
+            ".." in normalized_filename
+            or "/" in normalized_filename
+            or "\\" in normalized_filename
+        ):
+            normalized_filename = "document"  # Fallback to safe default
+        image_path = os.path.join(
+            input_folder, f"{normalized_filename}_{page.number}.png"
+        )
         if not os.path.exists(image_path):
             image.save(image_path)
     elif isinstance(image, str):
