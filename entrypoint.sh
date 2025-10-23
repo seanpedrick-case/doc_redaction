@@ -22,12 +22,12 @@ else
 
         # Start uvicorn server.
         echo "Starting with Uvicorn on $GRADIO_SERVER_NAME:$GRADIO_SERVER_PORT"
-        exec uvicorn app:app \
+        exec su -s /bin/sh user -c "uvicorn app:app \
             --host $GRADIO_SERVER_NAME \
             --port $GRADIO_SERVER_PORT \
-            --proxy-headers
+            --proxy-headers"
     else
         echo "Starting in Gradio mode..."
-        exec python app.py
+        exec su -s /bin/sh user -c "python app.py"
     fi    
 fi

@@ -1224,7 +1224,6 @@ with blocks:
                 else:
                     handwrite_signature_checkbox.render()
 
-                print(f"SHOW_LOCAL_OCR_MODEL_OPTIONS : {SHOW_LOCAL_OCR_MODEL_OPTIONS}")
                 if SHOW_LOCAL_OCR_MODEL_OPTIONS:
                     with gr.Accordion(
                         label="Change default local OCR model",

@@ -499,7 +499,14 @@ class CustomImageAnalyzerEngine:
         self.language = language or DEFAULT_LANGUAGE or "en"
         self.tesseract_lang = _tesseract_lang_code(self.language)
         self.paddle_lang = _paddle_lang_code(self.language)
-        self.output_folder = output_folder
+        
+        # Security: Validate and normalize output_folder at construction time
+        # This ensures the object is always in a secure state and prevents
+        # any future code from accidentally using an untrusted directory
+        normalized_output_folder = os.path.normpath(os.path.abspath(output_folder))
+        if not validate_folder_containment(normalized_output_folder, OUTPUT_FOLDER):
+            raise ValueError(f"Unsafe output folder path: {output_folder}. Must be contained within {OUTPUT_FOLDER}")
+        self.output_folder = normalized_output_folder
 
         if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid":
             if PaddleOCR is None:
@@ -868,20 +875,9 @@ class CustomImageAnalyzerEngine:
             if paddle_results and SAVE_PADDLE_VISUALISATIONS is True:
 
                 for res in paddle_results:
-                    # Normalize and validate output folder path before using in path construction
-                    normalized_output_folder = os.path.normpath(
-                        os.path.abspath(self.output_folder)
-                    )
-                    # Validate the output folder is safe
-                    if not validate_folder_containment(
-                        normalized_output_folder, OUTPUT_FOLDER
-                    ):
-                        raise ValueError(
-                            f"Unsafe output folder path: {normalized_output_folder}"
-                        )
-
+                    # self.output_folder is already validated and normalized at construction time
                     paddle_viz_folder = os.path.join(
-                        normalized_output_folder, "paddle_visualisations"
+                        self.output_folder, "paddle_visualisations"
                     )
                     # Double-check the constructed path is safe
                     if not validate_folder_containment(

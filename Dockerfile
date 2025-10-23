@@ -51,8 +51,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN useradd -m -u 1000 user
 ENV APP_HOME=/home/user
+RUN useradd -m -u 1000 user
 
 # Set env variables for Gradio & other apps
 ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
@@ -117,18 +117,21 @@ COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
 # Copy installed CLI binaries (e.g. uvicorn)
 COPY --from=builder /install/bin /usr/local/bin/
 
-# Copy app code and entrypoint with correct ownership
-COPY --chown=user . $APP_HOME/app
+# Copy app code
+COPY . $APP_HOME/app
 
-# Copy the entrypoint script separately, set permissions, set line endings correctly
-COPY --chown=user entrypoint.sh ${APP_HOME}/app/entrypoint.sh
-RUN chmod 755 /home/user/app/entrypoint.sh \
-    && sed -i 's/\r$//' /home/user/app/entrypoint.sh
+# Fix ownership if needed
+RUN if [ "$APP_MODE" = "gradio" ]; then chown -R user:user /home/user/app; fi
 
-# Switch to user
-USER user
+# Copy entrypoint and fix line endings + permissions
+COPY entrypoint.sh ${APP_HOME}/app/entrypoint.sh
+RUN chmod 755 ${APP_HOME}/app/entrypoint.sh \
+    && sed -i 's/\r$//' ${APP_HOME}/app/entrypoint.sh \
+    && if [ "$APP_MODE" = "gradio" ]; then chown user:user ${APP_HOME}/app/entrypoint.sh; fi
 
-# Declare working directory
+# Set permissions for Python executable
+RUN chmod 755 /usr/local/bin/python
+
 WORKDIR $APP_HOME/app
 
 # Declare volumes (NOTE: runtime mounts will override permissions — handle with care)
