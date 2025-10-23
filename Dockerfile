@@ -28,8 +28,10 @@ RUN if [ "$INSTALL_PADDLEOCR" = "True" ]; then \
     pip install --verbose --no-cache-dir --target=/install paddleocr==3.3.0 paddlepaddle==3.2.0; \
 fi
 
-# Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie
+# ===================================================================
+# Stage 2: A common 'base' for both Lambda and Gradio
+# ===================================================================
+FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS base
 
 # Set build-time and runtime environment variable for whether to run in Gradio mode or Lambda mode
 ARG APP_MODE=gradio
@@ -39,20 +41,12 @@ ENV APP_MODE=${APP_MODE}
 ARG RUN_FASTAPI=0
 ENV RUN_FASTAPI=${RUN_FASTAPI}
 
-# Install runtime dependencies
-RUN apt-get update \
-    && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends \
-        tesseract-ocr \
-        poppler-utils \
-        libgl1 \
-        libglib2.0-0 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install runtime system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr poppler-utils libgl1 libglib2.0-0 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
 ENV APP_HOME=/home/user
-RUN useradd -m -u 1000 user
 
 # Set env variables for Gradio & other apps
 ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
@@ -67,7 +61,47 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     XDG_CACHE_HOME=/tmp/xdg_cache/user_1000 \
     TESSERACT_DATA_FOLDER=/usr/share/tessdata \
     GRADIO_SERVER_NAME=0.0.0.0 \
-    GRADIO_SERVER_PORT=7860
+    GRADIO_SERVER_PORT=7860 \
+    PATH=$APP_HOME/.local/bin:$PATH \
+    PYTHONPATH=$APP_HOME/app \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    GRADIO_ALLOW_FLAGGING=never \
+    GRADIO_NUM_PORTS=1 \    
+    GRADIO_ANALYTICS_ENABLED=False \
+    DEFAULT_CONCURRENCY_LIMIT=3
+
+# Copy Python packages from the builder stage
+COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
+COPY --from=builder /install/bin /usr/local/bin/
+
+# Copy your application code and entrypoint
+COPY . ${APP_HOME}/app
+COPY entrypoint.sh ${APP_HOME}/app/entrypoint.sh
+# Fix line endings and set execute permissions
+RUN sed -i 's/\r$//' ${APP_HOME}/app/entrypoint.sh \
+    && chmod +x ${APP_HOME}/app/entrypoint.sh
+
+WORKDIR ${APP_HOME}/app
+
+# ===================================================================
+# FINAL Stage 3: The Lambda Image (runs as root for simplicity)
+# ===================================================================
+FROM base AS lambda
+# Set runtime ENV for Lambda mode
+ENV APP_MODE=lambda
+ENTRYPOINT ["/home/user/app/entrypoint.sh"]
+CMD ["lambda_entrypoint.lambda_handler"]
+
+# ===================================================================
+# FINAL Stage 4: The Gradio Image (runs as a secure, non-root user)
+# ===================================================================
+FROM base AS gradio
+# Set runtime ENV for Gradio mode
+ENV APP_MODE=gradio
+
+# Create non-root user
+RUN useradd -m -u 1000 user
 
 # Create the base application directory and set its ownership
 RUN mkdir -p ${APP_HOME}/app && chown user:user ${APP_HOME}/app
@@ -111,28 +145,11 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
     && chown user:user /usr/share/tessdata \
     && chmod 755 /usr/share/tessdata
 
-# Copy installed packages from builder stage
-COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
-
-# Copy installed CLI binaries (e.g. uvicorn)
-COPY --from=builder /install/bin /usr/local/bin/
-
-# Copy app code
-COPY . $APP_HOME/app
-
 # Fix ownership if needed
-RUN if [ "$APP_MODE" = "gradio" ]; then chown -R user:user /home/user/app; fi
-
-# Copy entrypoint and fix line endings + permissions
-COPY entrypoint.sh ${APP_HOME}/app/entrypoint.sh
-RUN chmod 755 ${APP_HOME}/app/entrypoint.sh \
-    && sed -i 's/\r$//' ${APP_HOME}/app/entrypoint.sh \
-    && if [ "$APP_MODE" = "gradio" ]; then chown user:user ${APP_HOME}/app/entrypoint.sh; fi
+RUN chown -R user:user /home/user/app
 
 # Set permissions for Python executable
 RUN chmod 755 /usr/local/bin/python
-
-WORKDIR $APP_HOME/app
 
 # Declare volumes (NOTE: runtime mounts will override permissions — handle with care)
 VOLUME ["/tmp/matplotlib_cache"]
@@ -150,18 +167,9 @@ VOLUME ["/usr/share/tessdata"]
 VOLUME ["/tmp"]
 VOLUME ["/var/tmp"]
 
+USER user
+
 EXPOSE $GRADIO_SERVER_PORT
 
-# Set runtime environment
-ENV PATH=$APP_HOME/.local/bin:$PATH \
-    PYTHONPATH=$APP_HOME/app \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    GRADIO_ALLOW_FLAGGING=never \
-    GRADIO_NUM_PORTS=1 \    
-    GRADIO_ANALYTICS_ENABLED=False \
-    DEFAULT_CONCURRENCY_LIMIT=3
-
 ENTRYPOINT ["/home/user/app/entrypoint.sh"]
-
-CMD ["lambda_entrypoint.lambda_handler"]
+CMD ["python", "app.py"]
