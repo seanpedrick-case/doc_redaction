@@ -120,9 +120,9 @@ COPY --from=builder /install/bin /usr/local/bin/
 # Copy app code and entrypoint with correct ownership
 COPY --chown=user . $APP_HOME/app
 
-# Copy the entrypoint script to its final destination
-COPY entrypoint.sh /home/user/app/entrypoint.sh
-RUN chmod +x /home/user/app/entrypoint.sh
+# Copy the entrypoint script separately and set permissions
+COPY --chown=user entrypoint.sh ${APP_HOME}/app/entrypoint.sh
+RUN chmod +x ${APP_HOME}/app/entrypoint.sh
 
 # Switch to user
 USER user
