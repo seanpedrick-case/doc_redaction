@@ -120,9 +120,10 @@ COPY --from=builder /install/bin /usr/local/bin/
 # Copy app code and entrypoint with correct ownership
 COPY --chown=user . $APP_HOME/app
 
-# Copy the entrypoint script separately and set permissions
+# Copy the entrypoint script separately, set permissions, set line endings correctly
 COPY --chown=user entrypoint.sh ${APP_HOME}/app/entrypoint.sh
-RUN chmod +x ${APP_HOME}/app/entrypoint.sh
+RUN chmod 755 /home/user/app/entrypoint.sh \
+    && sed -i 's/\r$//' /home/user/app/entrypoint.sh
 
 # Switch to user
 USER user
@@ -158,6 +159,6 @@ ENV PATH=$APP_HOME/.local/bin:$PATH \
     GRADIO_ANALYTICS_ENABLED=False \
     DEFAULT_CONCURRENCY_LIMIT=3
 
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["/home/user/app/entrypoint.sh"]
 
 CMD ["lambda_entrypoint.lambda_handler"]
