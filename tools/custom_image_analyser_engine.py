@@ -33,6 +33,7 @@ from tools.helper_functions import clean_unicode_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.secure_regex_utils import safe_sanitize_text
+from tools.secure_path_utils import validate_folder_containment, secure_path_join
 
 if PREPROCESS_LOCAL_OCR_IMAGES == "True":
     PREPROCESS_LOCAL_OCR_IMAGES = True
@@ -729,10 +730,20 @@ class CustomImageAnalyzerEngine:
                             self._sanitize_filename(new_text, max_length=20)
 
                             if SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES is True:
+                                # Normalize and validate image_name to prevent path traversal attacks
+                                normalized_image_name = os.path.normpath(image_name)
+                                # Ensure the image name doesn't contain path traversal characters
+                                if ".." in normalized_image_name or "/" in normalized_image_name or "\\" in normalized_image_name:
+                                    normalized_image_name = "safe_image"  # Fallback to safe default
+                                
                                 tess_vs_paddle_examples_folder = (
                                     self.output_folder
-                                    + f"/tess_vs_paddle_examples/{image_name}"
+                                    + f"/tess_vs_paddle_examples/{normalized_image_name}"
                                 )
+                                # Validate the constructed path is safe before creating directories
+                                if not validate_folder_containment(tess_vs_paddle_examples_folder, OUTPUT_FOLDER):
+                                    raise ValueError(f"Unsafe tess_vs_paddle_examples folder path: {tess_vs_paddle_examples_folder}")
+                                
                                 if not os.path.exists(tess_vs_paddle_examples_folder):
                                     os.makedirs(tess_vs_paddle_examples_folder)
                                 output_image_path = (
@@ -847,13 +858,20 @@ class CustomImageAnalyzerEngine:
             if paddle_results and SAVE_PADDLE_VISUALISATIONS is True:
 
                 for res in paddle_results:
+                    # Normalize and validate output folder path before using in path construction
+                    normalized_output_folder = os.path.normpath(os.path.abspath(self.output_folder))
+                    # Validate the output folder is safe
+                    if not validate_folder_containment(normalized_output_folder, OUTPUT_FOLDER):
+                        raise ValueError(f"Unsafe output folder path: {normalized_output_folder}")
+                    
                     paddle_viz_folder = os.path.join(
-                        self.output_folder, "paddle_visualisations"
+                        normalized_output_folder, "paddle_visualisations"
                     )
+                    # Double-check the constructed path is safe
+                    if not validate_folder_containment(paddle_viz_folder, OUTPUT_FOLDER):
+                        raise ValueError(f"Unsafe paddle visualisations folder path: {paddle_viz_folder}")
+                    
                     os.makedirs(paddle_viz_folder, exist_ok=True)
-                    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    # viz_filename = f"paddle_ocr_boxes_{timestamp}.jpg"
-                    # viz_path = os.path.join(paddle_viz_folder, viz_filename)
                     res.save_to_img(paddle_viz_folder)
 
             ocr_data = self._convert_paddle_to_tesseract_format(paddle_results)
