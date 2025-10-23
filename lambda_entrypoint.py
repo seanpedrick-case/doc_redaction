@@ -2,6 +2,7 @@ import json
 import os
 
 import boto3
+from dotenv import load_dotenv
 
 # Import the main function from your CLI script
 from cli_redact import main as cli_main
@@ -17,6 +18,19 @@ TMP_DIR = "/tmp"
 INPUT_DIR = os.path.join(TMP_DIR, "input")
 OUTPUT_DIR = os.path.join(TMP_DIR, "output")
 os.environ["TESSERACT_DATA_FOLDER"] = "/tmp/share/tessdata"
+
+# Define compatible file types for processing
+COMPATIBLE_FILE_TYPES = {
+    ".pdf",
+    ".xlsx",
+    ".xls",
+    ".png",
+    ".jpeg",
+    ".csv",
+    ".parquet",
+    ".txt",
+    ".jpg",
+}
 
 
 def download_file_from_s3(bucket_name, key, download_path):
@@ -65,9 +79,9 @@ def lambda_handler(event, context):
         # The user metadata can be used to pass arguments
         # This is more robust than embedding them in the main event body
         response = s3_client.head_object(Bucket=bucket_name, Key=input_key)
-        metadata = response.get("Metadata", {})
+        metadata = response.get("Metadata", dict())
         # Arguments can be passed as a JSON string in metadata
-        arguments = json.loads(metadata.get("arguments", "{}"))
+        arguments = json.loads(metadata.get("arguments", "dict()"))
 
     except (KeyError, IndexError) as e:
         print(
@@ -76,7 +90,7 @@ def lambda_handler(event, context):
         # Fallback for direct invocation (e.g., from Step Functions or manual test)
         bucket_name = event.get("bucket_name")
         input_key = event.get("input_key")
-        arguments = event.get("arguments", {})
+        arguments = event.get("arguments", dict())
         if not all([bucket_name, input_key]):
             raise ValueError(
                 "Missing 'bucket_name' or 'input_key' in direct invocation event."
@@ -85,103 +99,298 @@ def lambda_handler(event, context):
     print(f"Processing s3://{bucket_name}/{input_key}")
     print(f"With arguments: {arguments}")
 
+    # Log file type information
+    file_extension = os.path.splitext(input_key)[1].lower()
+    print(f"Detected file extension: '{file_extension}'")
+
     # 3. Download the main input file
     input_file_path = os.path.join(INPUT_DIR, os.path.basename(input_key))
     download_file_from_s3(bucket_name, input_key, input_file_path)
 
+    # 3.1. Validate file type compatibility
+    is_env_file = input_key.lower().endswith(".env")
+
+    if not is_env_file and file_extension not in COMPATIBLE_FILE_TYPES:
+        error_message = f"File type '{file_extension}' is not supported for processing. Compatible file types are: {', '.join(sorted(COMPATIBLE_FILE_TYPES))}"
+        print(f"ERROR: {error_message}")
+        print(f"File was not processed due to unsupported file type: {file_extension}")
+        return {
+            "statusCode": 400,
+            "body": json.dumps(
+                {
+                    "error": "Unsupported file type",
+                    "message": error_message,
+                    "supported_types": list(COMPATIBLE_FILE_TYPES),
+                    "received_type": file_extension,
+                    "file_processed": False,
+                }
+            ),
+        }
+
+    print(f"File type '{file_extension}' is compatible for processing")
+    if is_env_file:
+        print("Processing .env file for configuration")
+    else:
+        print(f"Processing {file_extension} file for redaction/anonymization")
+
+    # 3.5. Check if the downloaded file is a .env file and handle accordingly
+    actual_input_file_path = input_file_path
+    if input_key.lower().endswith(".env"):
+        print("Detected .env file, loading environment variables...")
+
+        # Load environment variables from the .env file
+        load_dotenv(input_file_path)
+        print("Environment variables loaded from .env file")
+
+        # Log some key environment variables for debugging
+        print(f"DIRECT_MODE_INPUT_FILE: {os.getenv('DIRECT_MODE_INPUT_FILE')}")
+        print(f"INPUT_FILE: {os.getenv('INPUT_FILE')}")
+        print(f"TASK: {os.getenv('DIRECT_MODE_TASK', 'not set')}")
+        print(f"PII_DETECTOR: {os.getenv('LOCAL_PII_OPTION', 'not set')}")
+        print(f"OCR_METHOD: {os.getenv('TESSERACT_TEXT_EXTRACT_OPTION', 'not set')}")
+        print(f"LANGUAGE: {os.getenv('DEFAULT_LANGUAGE', 'not set')}")
+        print(
+            f"ANON_STRATEGY: {os.getenv('DEFAULT_TABULAR_ANONYMISATION_STRATEGY', 'not set')}"
+        )
+
+        # Extract the actual input file path from environment variables
+        # Look for common environment variable names that might contain the input file path
+        env_input_file = (
+            os.getenv("DIRECT_MODE_INPUT_FILE")
+            or os.getenv("INPUT_FILE")
+            or os.getenv("INPUT_FILE_PATH")
+            or os.getenv("FILE_PATH")
+            or os.getenv("DOCUMENT_PATH")
+            or os.getenv("TEXTRACT_INPUT_FILE")
+            or os.getenv("REDACTION_INPUT_FILE")
+            or os.getenv("PROCESSING_INPUT_FILE")
+        )
+
+        if env_input_file:
+            print(f"Found input file path in environment: {env_input_file}")
+
+            # If the path is an S3 path, download it
+            if env_input_file.startswith("s3://"):
+                # Parse S3 path: s3://bucket/key
+                s3_path_parts = env_input_file[5:].split("/", 1)
+                if len(s3_path_parts) == 2:
+                    env_bucket = s3_path_parts[0]
+                    env_key = s3_path_parts[1]
+                    actual_input_file_path = os.path.join(
+                        INPUT_DIR, os.path.basename(env_key)
+                    )
+                    print(
+                        f"Downloading actual input file from s3://{env_bucket}/{env_key}"
+                    )
+                    download_file_from_s3(env_bucket, env_key, actual_input_file_path)
+                else:
+                    print("Warning: Invalid S3 path format in environment variable")
+                    actual_input_file_path = input_file_path
+            else:
+                # Assume it's a local path or relative path
+                actual_input_file_path = env_input_file
+                print(
+                    f"Using input file path from environment: {actual_input_file_path}"
+                )
+        else:
+            print("Warning: No input file path found in environment variables")
+            print(
+                "Available environment variables:",
+                [
+                    k
+                    for k in os.environ.keys()
+                    if k.startswith(("INPUT", "FILE", "DOCUMENT", "DIRECT"))
+                ],
+            )
+            # Fall back to using the .env file itself (though this might not be what we want)
+            actual_input_file_path = input_file_path
+    else:
+        print("File is not a .env file, proceeding with normal processing")
+
     # 4. Prepare arguments for the CLI function
     # This dictionary should mirror the one in your app.py's "direct mode"
+    # If we loaded a .env file, use environment variables as defaults
     cli_args = {
-        "task": arguments.get("task", "redact"),
-        "input_file": input_file_path,
+        # Task Selection
+        "task": arguments.get("task", os.getenv("DIRECT_MODE_TASK", "redact")),
+        # General Arguments (apply to all file types)
+        "input_file": actual_input_file_path,
         "output_dir": OUTPUT_DIR,
         "input_dir": INPUT_DIR,
-        "language": arguments.get("default_language", "en"),
-        "pii_detector": arguments.get("pii_detector", "Local"),  # Default to local
-        "username": arguments.get("username", "lambda_user"),
-        "save_to_user_folders": arguments.get("save_to_user_folders", "False"),
-        "ocr_method": arguments.get("ocr_method", "Local OCR"),
-        "page_min": int(arguments.get("page_min", 0)),
-        "page_max": int(arguments.get("page_max", 0)),
-        "handwrite_signature_extraction": arguments.get(
-            "handwrite_signature_checkbox",
-            ["Extract handwriting", "Extract signatures"],
+        "language": arguments.get("language", os.getenv("DEFAULT_LANGUAGE", "en")),
+        "allow_list": arguments.get("allow_list", os.getenv("ALLOW_LIST_PATH", "")),
+        "pii_detector": arguments.get(
+            "pii_detector", os.getenv("LOCAL_PII_OPTION", "Local")
         ),
-        "extract_forms": arguments.get("extract_forms", False),
-        "extract_tables": arguments.get("extract_tables", False),
-        "extract_layout": arguments.get("extract_layout", False),
-        # General arguments
-        "local_redact_entities": arguments.get("local_redact_entities", []),
-        "aws_redact_entities": arguments.get("aws_redact_entities", []),
-        "cost_code": arguments.get("cost_code", ""),
-        "save_logs_to_csv": arguments.get("save_logs_to_csv", "False"),
-        "save_logs_to_dynamodb": arguments.get("save_logs_to_dynamodb", "False"),
+        "username": arguments.get(
+            "username", os.getenv("DIRECT_MODE_DEFAULT_USER", "lambda_user")
+        ),
+        "save_to_user_folders": arguments.get(
+            "save_to_user_folders", os.getenv("SESSION_OUTPUT_FOLDER", "False")
+        ),
+        "local_redact_entities": arguments.get(
+            "local_redact_entities", os.getenv("CHOSEN_REDACT_ENTITIES", list())
+        ),
+        "aws_redact_entities": arguments.get(
+            "aws_redact_entities", os.getenv("CHOSEN_COMPREHEND_ENTITIES", list())
+        ),
+        "aws_access_key": None,  # Use IAM Role instead of keys
+        "aws_secret_key": None,  # Use IAM Role instead of keys
+        "cost_code": arguments.get("cost_code", os.getenv("DEFAULT_COST_CODE", "")),
+        "aws_region": os.getenv("AWS_REGION", ""),
+        "s3_bucket": bucket_name,
+        "do_initial_clean": arguments.get(
+            "do_initial_clean", os.getenv("DO_INITIAL_TABULAR_DATA_CLEAN", "False")
+        ),
+        "save_logs_to_csv": arguments.get(
+            "save_logs_to_csv", os.getenv("SAVE_LOGS_TO_CSV", "False")
+        ),
+        "save_logs_to_dynamodb": arguments.get(
+            "save_logs_to_dynamodb", os.getenv("SAVE_LOGS_TO_DYNAMODB", "False")
+        ),
         "display_file_names_in_logs": arguments.get(
-            "display_file_names_in_logs", "True"
+            "display_file_names_in_logs",
+            os.getenv("DISPLAY_FILE_NAMES_IN_LOGS", "True"),
         ),
-        "upload_logs_to_s3": arguments.get("upload_logs_to_s3", "False"),
-        "s3_logs_prefix": arguments.get("s3_logs_prefix", ""),
-        "do_initial_clean": arguments.get("do_initial_clean", "False"),
-        # PDF/Image specific arguments
-        "images_dpi": float(arguments.get("images_dpi", 300.0)),
-        "chosen_local_ocr_model": arguments.get("chosen_local_ocr_model", "tesseract"),
+        "upload_logs_to_s3": arguments.get(
+            "upload_logs_to_s3", os.getenv("RUN_AWS_FUNCTIONS", "False")
+        ),
+        "s3_logs_prefix": arguments.get(
+            "s3_logs_prefix", os.getenv("S3_USAGE_LOGS_FOLDER", "")
+        ),
+        # PDF/Image Redaction Arguments
+        "ocr_method": arguments.get(
+            "ocr_method", os.getenv("TESSERACT_TEXT_EXTRACT_OPTION", "Local OCR")
+        ),
+        "page_min": int(arguments.get("page_min", os.getenv("DEFAULT_PAGE_MIN", 0))),
+        "page_max": int(arguments.get("page_max", os.getenv("DEFAULT_PAGE_MAX", 0))),
+        "images_dpi": float(
+            arguments.get("images_dpi", os.getenv("IMAGES_DPI", 300.0))
+        ),
+        "chosen_local_ocr_model": arguments.get(
+            "chosen_local_ocr_model", os.getenv("CHOSEN_LOCAL_OCR_MODEL", "tesseract")
+        ),
         "preprocess_local_ocr_images": arguments.get(
-            "preprocess_local_ocr_images", "False"
+            "preprocess_local_ocr_images",
+            os.getenv("PREPROCESS_LOCAL_OCR_IMAGES", "False"),
         ),
-        # Handle optional files like allow/deny lists
-        "allow_list_file": arguments.get("allow_list_file", ""),
-        "deny_list_file": arguments.get("deny_list_file", ""),
-        "redact_whole_page_file": arguments.get("redact_whole_page_file", ""),
-        # Tabular/Anonymisation arguments
-        "excel_sheets": arguments.get("excel_sheets", []),
-        "fuzzy_mistakes": int(arguments.get("fuzzy_mistakes", 0)),
+        "compress_redacted_pdf": arguments.get(
+            "compress_redacted_pdf", os.getenv("COMPRESS_REDACTED_PDF", "False")
+        ),
+        "return_pdf_end_of_redaction": arguments.get(
+            "return_pdf_end_of_redaction", os.getenv("RETURN_REDACTED_PDF", "True")
+        ),
+        "deny_list_file": arguments.get(
+            "deny_list_file", os.getenv("DENY_LIST_PATH", "")
+        ),
+        "allow_list_file": arguments.get(
+            "allow_list_file", os.getenv("ALLOW_LIST_PATH", "")
+        ),
+        "redact_whole_page_file": arguments.get(
+            "redact_whole_page_file", os.getenv("WHOLE_PAGE_REDACTION_LIST_PATH", "")
+        ),
+        "handwrite_signature_extraction": arguments.get(
+            "handwrite_signature_extraction",
+            os.getenv(
+                "DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX",
+                ["Extract handwriting", "Extract signatures"],
+            ),
+        ),
+        "extract_forms": arguments.get(
+            "extract_forms",
+            os.getenv("INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION", "False") == "True",
+        ),
+        "extract_tables": arguments.get(
+            "extract_tables",
+            os.getenv("INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION", "False") == "True",
+        ),
+        "extract_layout": arguments.get(
+            "extract_layout",
+            os.getenv("INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION", "False") == "True",
+        ),
+        # Word/Tabular Anonymisation Arguments
+        "anon_strategy": arguments.get(
+            "anon_strategy",
+            os.getenv("DEFAULT_TABULAR_ANONYMISATION_STRATEGY", "redact completely"),
+        ),
+        "text_columns": arguments.get(
+            "text_columns", os.getenv("DEFAULT_TEXT_COLUMNS", list())
+        ),
+        "excel_sheets": arguments.get(
+            "excel_sheets", os.getenv("DEFAULT_EXCEL_SHEETS", list())
+        ),
+        "fuzzy_mistakes": int(
+            arguments.get(
+                "fuzzy_mistakes", os.getenv("DEFAULT_FUZZY_SPELLING_MISTAKES_NUM", 1)
+            )
+        ),
         "match_fuzzy_whole_phrase_bool": arguments.get(
-            "match_fuzzy_whole_phrase_bool", "True"
+            "match_fuzzy_whole_phrase_bool",
+            os.getenv("MATCH_FUZZY_WHOLE_PHRASE_BOOL", "True"),
         ),
-        # Deduplication specific arguments
-        "duplicate_type": arguments.get("duplicate_type", "pages"),
-        "similarity_threshold": float(arguments.get("similarity_threshold", 0.95)),
-        "min_word_count": int(arguments.get("min_word_count", 3)),
-        "min_consecutive_pages": int(arguments.get("min_consecutive_pages", 1)),
-        "greedy_match": arguments.get("greedy_match", "False"),
-        "combine_pages": arguments.get("combine_pages", "True"),
-        "search_query": arguments.get("search_query", ""),
-        "text_columns": arguments.get("text_columns", []),
-        "remove_duplicate_rows": arguments.get("remove_duplicate_rows", "True"),
-        "anon_strategy": arguments.get("anon_strategy", "redact"),
-        # Textract specific arguments
+        # Duplicate Detection Arguments
+        "duplicate_type": arguments.get(
+            "duplicate_type", os.getenv("DIRECT_MODE_DUPLICATE_TYPE", "pages")
+        ),
+        "similarity_threshold": float(
+            arguments.get(
+                "similarity_threshold",
+                os.getenv("DEFAULT_DUPLICATE_DETECTION_THRESHOLD", 0.95),
+            )
+        ),
+        "min_word_count": int(
+            arguments.get("min_word_count", os.getenv("DEFAULT_MIN_WORD_COUNT", 10))
+        ),
+        "min_consecutive_pages": int(
+            arguments.get(
+                "min_consecutive_pages", os.getenv("DEFAULT_MIN_CONSECUTIVE_PAGES", 1)
+            )
+        ),
+        "greedy_match": arguments.get(
+            "greedy_match", os.getenv("USE_GREEDY_DUPLICATE_DETECTION", "False")
+        ),
+        "combine_pages": arguments.get(
+            "combine_pages", os.getenv("DEFAULT_COMBINE_PAGES", "True")
+        ),
+        "remove_duplicate_rows": arguments.get(
+            "remove_duplicate_rows", os.getenv("REMOVE_DUPLICATE_ROWS", "False")
+        ),
+        # Textract Batch Operations Arguments
         "textract_action": arguments.get("textract_action", ""),
         "job_id": arguments.get("job_id", ""),
         "extract_signatures": arguments.get("extract_signatures", False),
-        "textract_bucket": arguments.get("textract_bucket", ""),
-        "textract_input_prefix": arguments.get("textract_input_prefix", ""),
-        "textract_output_prefix": arguments.get("textract_output_prefix", ""),
+        "textract_bucket": arguments.get(
+            "textract_bucket", os.getenv("TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET", "")
+        ),
+        "textract_input_prefix": arguments.get(
+            "textract_input_prefix",
+            os.getenv("TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER", ""),
+        ),
+        "textract_output_prefix": arguments.get(
+            "textract_output_prefix",
+            os.getenv("TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER", ""),
+        ),
         "s3_textract_document_logs_subfolder": arguments.get(
-            "s3_textract_document_logs_subfolder", ""
+            "s3_textract_document_logs_subfolder", os.getenv("TEXTRACT_JOBS_S3_LOC", "")
         ),
         "local_textract_document_logs_subfolder": arguments.get(
-            "local_textract_document_logs_subfolder", ""
+            "local_textract_document_logs_subfolder",
+            os.getenv("TEXTRACT_JOBS_LOCAL_LOC", ""),
         ),
         "poll_interval": int(arguments.get("poll_interval", 30)),
         "max_poll_attempts": int(arguments.get("max_poll_attempts", 120)),
-        # AWS credentials (use IAM Role instead of keys)
-        "aws_access_key": None,
-        "aws_secret_key": None,
-        "aws_region": os.getenv("AWS_REGION", ""),
-        "s3_bucket": bucket_name,
-        # Set defaults for boolean flags
-        "prepare_images": arguments.get("prepare_images", True),
-        "compress_redacted_pdf": arguments.get("compress_redacted_pdf", False),
-        "return_pdf_end_of_redaction": arguments.get(
-            "return_pdf_end_of_redaction", True
+        # Additional arguments that were missing
+        "search_query": arguments.get(
+            "search_query", os.getenv("DEFAULT_SEARCH_QUERY", "")
         ),
+        "prepare_images": arguments.get("prepare_images", True),
     }
 
     # Combine extraction options
     extraction_options = (
         list(cli_args["handwrite_signature_extraction"])
         if cli_args["handwrite_signature_extraction"]
-        else []
+        else list()
     )
     if cli_args["extract_forms"]:
         extraction_options.append("Extract forms")

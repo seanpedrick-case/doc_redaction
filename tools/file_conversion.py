@@ -36,8 +36,7 @@ from tools.config import (
 )
 from tools.helper_functions import get_file_name_without_type, read_file
 from tools.secure_path_utils import secure_file_read, secure_join
-
-# from tools.aws_textract import load_and_convert_textract_json
+from tools.secure_regex_utils import safe_extract_page_number_from_path
 
 IMAGE_NUM_REGEX = re.compile(r"_(\d+)\.png$")
 
@@ -233,8 +232,8 @@ def convert_pdf_to_images(
     Args:
         pdf_path (str): The path to the PDF file to convert.
         prepare_for_review (bool, optional): If True, only the first page is processed (feature not currently used). Defaults to False.
-        page_min (int, optional): The starting page number (0-indexed) for conversion. Defaults to 0.
-        page_max (int, optional): The ending page number (exclusive, 0-indexed) for conversion. If 0, all pages up to `page_count` are processed. Defaults to 0.
+        page_min (int, optional): The starting page number (0-indexed) for conversion. If 0, uses the first page. Defaults to 0.
+        page_max (int, optional): The ending page number (exclusive, 0-indexed) for conversion. If 0, uses the last page of the document. Defaults to 0.
         create_images (bool, optional): If True, images are created and saved to disk. Defaults to True.
         image_dpi (float, optional): The DPI (dots per inch) to use for converting PDF pages to images. Defaults to the global `image_dpi`.
         num_threads (int, optional): The number of threads to use for concurrent page processing. Defaults to 8.
@@ -255,7 +254,14 @@ def convert_pdf_to_images(
 
     print(f"Creating images. Number of pages in PDF: {page_count}")
 
-    # Set page max to length of pdf if not specified
+    # Handle special cases for page range
+    # If page_min is 0, use the first page (0-indexed)
+    if page_min == 0:
+        page_min = 0  # First page is 0-indexed
+    else:
+        page_min = page_min - 1
+
+    # If page_max is 0, use the last page of the document
     if page_max == 0:
         page_max = page_count
 
@@ -310,6 +316,8 @@ def process_file_for_image_creation(
     prepare_for_review: bool = False,
     input_folder: str = INPUT_FOLDER,
     create_images: bool = True,
+    page_min: int = 0,
+    page_max: int = 0,
 ):
     """
     Processes a given file path, determining if it's an image or a PDF,
@@ -322,6 +330,8 @@ def process_file_for_image_creation(
         input_folder (str, optional): The folder where input files are located. Defaults to INPUT_FOLDER.
         create_images (bool, optional): If True, images will be created from PDF pages.
                                         If False, only metadata will be extracted. Defaults to True.
+        page_min (int, optional): The minimum page number to process (0-indexed). If 0, uses the first page. Defaults to 0.
+        page_max (int, optional): The maximum page number to process (0-indexed). If 0, uses the last page of the document. Defaults to 0.
     """
     # Get the file extension
     file_extension = os.path.splitext(file_path)[1].lower()
@@ -352,6 +362,8 @@ def process_file_for_image_creation(
             convert_pdf_to_images(
                 file_path,
                 prepare_for_review,
+                page_min=page_min,
+                page_max=page_max,
                 input_folder=input_folder,
                 create_images=create_images,
             )
@@ -540,26 +552,49 @@ def create_page_size_objects(
     image_sizes_width: List[float],
     image_sizes_height: List[float],
     image_file_paths: List[str],
+    page_min: int = 0,
+    page_max: int = 0,
 ):
     """
     Creates page size objects for a PyMuPDF document.
 
+    Creates entries for ALL pages in the document. Pages that were processed for image creation
+    will have actual image paths and dimensions. Pages that were not processed will have
+    placeholder image paths and no image dimensions.
+
     Args:
         pymupdf_doc (Document): The PyMuPDF document object.
-        image_sizes_width (List[float]): List of image widths.
-        image_sizes_height (List[float]): List of image heights.
-        image_file_paths (List[str]): List of image file paths.
+        image_sizes_width (List[float]): List of image widths for processed pages.
+        image_sizes_height (List[float]): List of image heights for processed pages.
+        image_file_paths (List[str]): List of image file paths for processed pages.
+        page_min (int, optional): The minimum page number that was processed (0-indexed). If 0, uses the first page. Defaults to 0.
+        page_max (int, optional): The maximum page number that was processed (0-indexed). If 0, uses the last page of the document. Defaults to 0.
     """
     page_sizes = list()
     original_cropboxes = list()
 
-    for page_no, page in enumerate(pymupdf_doc):
-        reported_page_no = page_no + 1
+    # Handle special cases for page range
+    # If page_min is 0, use the first page (0-indexed)
+    if page_min == 0:
+        page_min = 0  # First page is 0-indexed
+    else:
+        page_min = page_min - 1
 
+    # If page_max is 0, use the last page of the document
+    if page_max == 0:
+        page_max = len(pymupdf_doc)
+
+    # Process ALL pages in the document, not just the ones with images
+    for page_no in range(len(pymupdf_doc)):
+        reported_page_no = page_no + 1
         pymupdf_page = pymupdf_doc.load_page(page_no)
         original_cropboxes.append(pymupdf_page.cropbox)  # Save original CropBox
 
-        # Create a page_sizes_object. If images have been created, then image width an height come from this value. Otherwise, they are set to the cropbox size
+        # Check if this page was processed for image creation
+        is_page_in_range = page_min <= page_no < page_max
+        image_index = page_no - page_min if is_page_in_range else None
+
+        # Create a page_sizes_object for every page
         out_page_image_sizes = {
             "page": reported_page_no,
             "mediabox_width": pymupdf_page.mediabox.width,
@@ -567,7 +602,6 @@ def create_page_size_objects(
             "cropbox_width": pymupdf_page.cropbox.width,
             "cropbox_height": pymupdf_page.cropbox.height,
             "original_cropbox": original_cropboxes[-1],
-            "image_path": image_file_paths[page_no],
         }
 
         # cropbox_x_offset: Distance from MediaBox left edge to CropBox left edge
@@ -581,9 +615,28 @@ def create_page_size_objects(
             pymupdf_page.mediabox.y1 - pymupdf_page.cropbox.y1
         )
 
-        if image_sizes_width and image_sizes_height:
-            out_page_image_sizes["image_width"] = image_sizes_width[page_no]
-            out_page_image_sizes["image_height"] = image_sizes_height[page_no]
+        # Set image path and dimensions based on whether this page was processed
+        if (
+            is_page_in_range
+            and image_index is not None
+            and image_index < len(image_file_paths)
+        ):
+            # This page was processed for image creation
+            out_page_image_sizes["image_path"] = image_file_paths[image_index]
+
+            # Add image dimensions if available
+            if (
+                image_sizes_width
+                and image_sizes_height
+                and image_index < len(image_sizes_width)
+                and image_index < len(image_sizes_height)
+            ):
+                out_page_image_sizes["image_width"] = image_sizes_width[image_index]
+                out_page_image_sizes["image_height"] = image_sizes_height[image_index]
+        else:
+            # This page was not processed for image creation - use placeholder
+            out_page_image_sizes["image_path"] = f"image_placeholder_{page_no}.png"
+            # No image dimensions for placeholder pages
 
         page_sizes.append(out_page_image_sizes)
 
@@ -818,6 +871,8 @@ def prepare_image_or_pdf(
     pymupdf_doc: Document = list(),
     textract_output_found: bool = False,
     relevant_ocr_output_with_words_found: bool = False,
+    page_min: int = 0,
+    page_max: int = 0,
     progress: Progress = Progress(track_tqdm=True),
 ) -> tuple[List[str], List[str]]:
     """
@@ -842,6 +897,8 @@ def prepare_image_or_pdf(
         pymupdf_doc(optional, Document): A pymupdf document object that indicates the existing PDF document object.
         textract_output_found (optional, bool): A boolean indicating whether Textract analysis output has already been found. Defaults to False.
         relevant_ocr_output_with_words_found (optional, bool): A boolean indicating whether local OCR analysis output has already been found. Defaults to False.
+        page_min (optional, int): The minimum page number to process (0-indexed). If 0, uses the first page. Defaults to 0.
+        page_max (optional, int): The maximum page number to process (0-indexed). If 0, uses the last page of the document. Defaults to 0.
         progress (optional, Progress): Progress tracker for the operation
 
 
@@ -971,7 +1028,12 @@ def prepare_image_or_pdf(
                     image_sizes_height,
                     all_img_details,
                 ) = process_file_for_image_creation(
-                    file_path, prepare_for_review, input_folder, create_images=True
+                    file_path,
+                    prepare_for_review,
+                    input_folder,
+                    create_images=True,
+                    page_min=page_min,
+                    page_max=page_max,
                 )
             else:
                 (
@@ -980,11 +1042,21 @@ def prepare_image_or_pdf(
                     image_sizes_height,
                     all_img_details,
                 ) = process_file_for_image_creation(
-                    file_path, prepare_for_review, input_folder, create_images=False
+                    file_path,
+                    prepare_for_review,
+                    input_folder,
+                    create_images=False,
+                    page_min=page_min,
+                    page_max=page_max,
                 )
 
             page_sizes, original_cropboxes = create_page_size_objects(
-                pymupdf_doc, image_sizes_width, image_sizes_height, image_file_paths
+                pymupdf_doc,
+                image_sizes_width,
+                image_sizes_height,
+                image_file_paths,
+                page_min,
+                page_max,
             )
 
             # Create base version of the annotation object that doesn't have any annotations in it
@@ -1185,9 +1257,6 @@ def prepare_image_or_pdf(
 
             # If you have an annotations object from the above code
             if all_annotations_object:
-
-                # Get list of page numbers
-                from tools.secure_regex_utils import safe_extract_page_number_from_path
 
                 image_file_paths_pages = [
                     safe_extract_page_number_from_path(s)

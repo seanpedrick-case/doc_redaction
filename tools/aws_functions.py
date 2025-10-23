@@ -227,7 +227,7 @@ def upload_file_to_s3(
             final_out_message_str = "Could not upload files to S3 due to: " + str(e)
             print(final_out_message_str)
     else:
-        final_out_message_str = "App config will not run AWS functions"
+        final_out_message_str = "App not set to run AWS functions"
 
     return final_out_message_str
 
@@ -295,7 +295,6 @@ def upload_log_file_to_s3(
             final_out_message_str = "Could not upload files to S3 due to: " + str(e)
             print(final_out_message_str)
     else:
-        final_out_message_str = "App config will not run AWS functions"
-        print(final_out_message_str)
+        final_out_message_str = "App not set to run AWS functions"
 
     return final_out_message_str

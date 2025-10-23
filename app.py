@@ -2291,14 +2291,14 @@ with blocks:
                     precision=0,
                     minimum=0,
                     maximum=9999,
-                    label="Lowest page to redact",
+                    label="Lowest page to redact (set to 0 to redact from the first page)",
                 )
                 page_max = gr.Number(
                     value=DEFAULT_PAGE_MAX,
                     precision=0,
                     minimum=0,
                     maximum=9999,
-                    label="Highest page to redact",
+                    label="Highest page to redact (set to 0 to redact to the last page)",
                 )
 
         if SHOW_LANGUAGE_SELECTION:
@@ -2628,6 +2628,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3094,6 +3096,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3306,6 +3310,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3379,6 +3385,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -5217,6 +5225,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -5279,6 +5289,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -6483,7 +6495,9 @@ with blocks:
 
             # Prepare direct mode arguments based on environment variables
             direct_mode_args = {
+                # Task Selection
                 "task": DIRECT_MODE_TASK,
+                # General Arguments (apply to all file types)
                 "input_file": DIRECT_MODE_INPUT_FILE,
                 "output_dir": DIRECT_MODE_OUTPUT_DIR,
                 "input_dir": INPUT_FOLDER,
@@ -6492,8 +6506,11 @@ with blocks:
                 "pii_detector": LOCAL_PII_OPTION,
                 "username": DIRECT_MODE_DEFAULT_USER,
                 "save_to_user_folders": SESSION_OUTPUT_FOLDER,
+                "local_redact_entities": CHOSEN_REDACT_ENTITIES,
+                "aws_redact_entities": CHOSEN_COMPREHEND_ENTITIES,
                 "aws_access_key": AWS_ACCESS_KEY,
                 "aws_secret_key": AWS_SECRET_KEY,
+                "cost_code": DEFAULT_COST_CODE,
                 "aws_region": AWS_REGION,
                 "s3_bucket": DOCUMENT_REDACTION_BUCKET,
                 "do_initial_clean": DO_INITIAL_TABULAR_DATA_CLEAN,
@@ -6502,6 +6519,7 @@ with blocks:
                 "display_file_names_in_logs": DISPLAY_FILE_NAMES_IN_LOGS,
                 "upload_logs_to_s3": RUN_AWS_FUNCTIONS == "1",
                 "s3_logs_prefix": S3_USAGE_LOGS_FOLDER,
+                # PDF/Image Redaction Arguments
                 "ocr_method": TESSERACT_TEXT_EXTRACT_OPTION,
                 "page_min": DEFAULT_PAGE_MIN,
                 "page_max": DEFAULT_PAGE_MAX,
@@ -6510,27 +6528,28 @@ with blocks:
                 "preprocess_local_ocr_images": PREPROCESS_LOCAL_OCR_IMAGES,
                 "compress_redacted_pdf": COMPRESS_REDACTED_PDF,
                 "return_pdf_end_of_redaction": RETURN_REDACTED_PDF,
-                "allow_list_file": ALLOW_LIST_PATH,
                 "deny_list_file": DENY_LIST_PATH,
+                "allow_list_file": ALLOW_LIST_PATH,
                 "redact_whole_page_file": WHOLE_PAGE_REDACTION_LIST_PATH,
                 "handwrite_signature_extraction": DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
                 "extract_forms": False,
                 "extract_tables": False,
                 "extract_layout": False,
+                # Word/Tabular Anonymisation Arguments
                 "anon_strategy": DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
+                "text_columns": DEFAULT_TEXT_COLUMNS,
                 "excel_sheets": DEFAULT_EXCEL_SHEETS,
                 "fuzzy_mistakes": DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
-                "match_fuzzy_whole_phrase_bool": "True",  # Default value
+                "match_fuzzy_whole_phrase_bool": True,  # Fixed: was "True" (string)
+                # Duplicate Detection Arguments
                 "duplicate_type": DIRECT_MODE_DUPLICATE_TYPE,
                 "similarity_threshold": DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
                 "min_word_count": DEFAULT_MIN_WORD_COUNT,
                 "min_consecutive_pages": DEFAULT_MIN_CONSECUTIVE_PAGES,
                 "greedy_match": USE_GREEDY_DUPLICATE_DETECTION,
                 "combine_pages": DEFAULT_COMBINE_PAGES,
-                "search_query": DEFAULT_SEARCH_QUERY,
-                "text_columns": DEFAULT_TEXT_COLUMNS,
                 "remove_duplicate_rows": REMOVE_DUPLICATE_ROWS,
-                # Textract specific arguments (with defaults)
+                # Textract Batch Operations Arguments
                 "textract_action": "",
                 "job_id": "",
                 "extract_signatures": False,
@@ -6541,10 +6560,8 @@ with blocks:
                 "local_textract_document_logs_subfolder": TEXTRACT_JOBS_LOCAL_LOC,
                 "poll_interval": 30,
                 "max_poll_attempts": 120,
-                # General arguments that might be missing
-                "local_redact_entities": CHOSEN_REDACT_ENTITIES,
-                "aws_redact_entities": CHOSEN_COMPREHEND_ENTITIES,
-                "cost_code": DEFAULT_COST_CODE,
+                # Additional arguments
+                "search_query": DEFAULT_SEARCH_QUERY,
             }
 
             print(f"Running in direct mode with task: {DIRECT_MODE_TASK}")
@@ -6565,7 +6582,7 @@ with blocks:
             extraction_options = (
                 list(direct_mode_args["handwrite_signature_extraction"])
                 if direct_mode_args["handwrite_signature_extraction"]
-                else []
+                else list()
             )
             if direct_mode_args["extract_forms"]:
                 extraction_options.append("Extract forms")

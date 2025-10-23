@@ -172,6 +172,51 @@ def merge_page_results(data: list):
     return list(merged.values())
 
 
+def add_page_range_suffix_to_file_path(
+    file_path: str,
+    page_min: int,
+    current_loop_page: int,
+    number_of_pages: int,
+    page_max: int = None,
+) -> str:
+    """
+    Add page range suffix to file path if redaction didn't complete all pages.
+
+    Args:
+        file_path: The original file path
+        page_min: The minimum page number to start redaction from
+        current_loop_page: The current page being processed
+        number_of_pages: Total number of pages in the document
+
+    Returns:
+        File path with page range suffix if partial processing, otherwise original path
+    """
+
+    # if page_min == 0 and page_max == 0:
+    #     return file_path
+
+    # If we processed all pages, don't add suffix
+    if current_loop_page >= number_of_pages:
+        return file_path
+
+    # Calculate the page range that was actually processed
+    start_page = page_min + 1 if page_min == 0 else page_min
+    if page_max is None:
+        end_page = (start_page + current_loop_page) - 1
+    else:
+        end_page = page_max
+
+    if end_page < start_page:
+        end_page = start_page
+
+    # Add suffix before file extension
+    if "." in file_path:
+        name, ext = file_path.rsplit(".", 1)
+        return f"{name}_{start_page}_{end_page}.{ext}"
+    else:
+        return f"{file_path}_{start_page}_{end_page}"
+
+
 def choose_and_run_redactor(
     file_paths: List[str],
     prepared_pdf_file_paths: List[str],
@@ -188,7 +233,7 @@ def choose_and_run_redactor(
     log_files_output_paths: List = list(),
     first_loop_state: bool = False,
     page_min: int = 0,
-    page_max: int = 999,
+    page_max: int = 0,
     estimated_time_taken_state: float = 0.0,
     handwrite_signature_checkbox: List[str] = list(["Extract handwriting"]),
     all_request_metadata_str: str = "",
@@ -244,8 +289,8 @@ def choose_and_run_redactor(
     - out_file_paths (list, optional): A list to store paths to the output files. Defaults to an empty list.
     - log_files_output_paths (list, optional): A list to store paths to the log files. Defaults to an empty list.
     - first_loop_state (bool, optional): A flag indicating if this is the first iteration. Defaults to False.
-    - page_min (int, optional): The minimum page number to start redaction from. Defaults to 0.
-    - page_max (int, optional): The maximum page number to end redaction at. Defaults to 999.
+    - page_min (int, optional): The minimum page number to start redaction from. Defaults to 0 (first page).
+    - page_max (int, optional): The maximum page number to end redaction at. Defaults to 0 (last page).
     - estimated_time_taken_state (float, optional): The estimated time taken for the redaction process. Defaults to 0.0.
     - handwrite_signature_checkbox (List[str], optional): A list of options for redacting handwriting and signatures. Defaults to ["Extract handwriting", "Extract signatures"].
     - all_request_metadata_str (str, optional): A string containing all request metadata. Defaults to an empty string.
@@ -306,6 +351,7 @@ def choose_and_run_redactor(
     out_redacted_pdf_file_path = ""
     if not ocr_review_files:
         ocr_review_files = list()
+    current_loop_page = 0
 
     # CLI mode may provide options to enter method names in a different format
     if text_extraction_method == "AWS Textract":
@@ -396,10 +442,10 @@ def choose_and_run_redactor(
         comprehend_query_number = 0
         total_textract_query_number = 0
     # If not the first time around, and the current page loop has been set to a huge number (been through all pages), reset current page to 0
-    elif (first_loop_state is False) & (current_loop_page == 999):
-        current_loop_page = 0
-        total_textract_query_number = 0
-        comprehend_query_number = 0
+    # elif (first_loop_state is False) & (current_loop_page == 999):
+    #     current_loop_page = 0
+    #     total_textract_query_number = 0
+    #     comprehend_query_number = 0
 
     if not file_paths:
         raise Exception("No files to redact")
@@ -493,7 +539,11 @@ def choose_and_run_redactor(
         estimate_total_processing_time = sum_numbers_before_seconds(
             combined_out_message
         )
-        print("Estimated total processing time:", str(estimate_total_processing_time))
+        print(
+            "Estimated total processing time:",
+            str(estimate_total_processing_time),
+            "seconds",
+        )
 
         gr.Info(combined_out_message)
 
@@ -534,6 +584,9 @@ def choose_and_run_redactor(
             task_textbox,
             ocr_review_files,
         )
+    else:
+        # ocr_review_files will be replaced by latest file output
+        ocr_review_files = list()
 
     # if first_loop_state == False:
     # Prepare documents and images as required if they don't already exist
@@ -595,6 +648,8 @@ def choose_and_run_redactor(
             page_sizes=page_sizes,
             pymupdf_doc=pymupdf_doc,
             input_folder=input_folder,
+            page_min=page_min,
+            page_max=page_max,
         )
 
     page_sizes_df = pd.DataFrame(page_sizes)
@@ -621,20 +676,26 @@ def choose_and_run_redactor(
 
     number_of_pages = pymupdf_doc.page_count
 
-    if number_of_pages > MAX_DOC_PAGES:
-        out_message = f"Number of pages in document is greater than {MAX_DOC_PAGES}. Please submit a smaller document."
+    if page_min == 0 and page_max == 0:
+        number_of_pages_to_process = number_of_pages
+    else:
+        number_of_pages_to_process = (page_max - page_min) + 1
+
+    if number_of_pages_to_process > MAX_DOC_PAGES:
+        out_message = f"Number of pages to process is greater than {MAX_DOC_PAGES}. Please submit a smaller document."
         print(out_message)
         raise Exception(out_message)
 
     # If we have reached the last page, return message and outputs
-    if current_loop_page >= number_of_pages:
+    if current_loop_page >= number_of_pages_to_process:
         print("Reached last page of document:", current_loop_page)
 
         if total_textract_query_number > number_of_pages:
             total_textract_query_number = number_of_pages
 
-        # Set to a very high number so as not to mix up with subsequent file processing by the user
-        current_loop_page = 999
+        # Reset current loop page to 0
+        current_loop_page = 0
+
         if out_message:
             combined_out_message = combined_out_message + "\n" + out_message
 
@@ -891,10 +952,8 @@ def choose_and_run_redactor(
 
         # Output file paths names
         orig_pdf_file_path = output_folder + pdf_file_name_without_ext
-        review_file_path = orig_pdf_file_path + "_review_file.csv"
 
         # Load in all_ocr_results_with_words if it exists as a file path and doesn't exist already
-        # file_name = get_file_name_without_type(file_path)
 
         if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
             file_ending = "local_text"
@@ -1059,11 +1118,15 @@ def choose_and_run_redactor(
             raise Exception(out_message)
 
         # If at last page, save to file
-        if current_loop_page >= number_of_pages:
+        if current_loop_page >= number_of_pages_to_process:
 
-            print("Current page loop:", current_loop_page, "is the last page.")
+            print(
+                "Current page number",
+                (page_min + current_loop_page) - 1,
+                "is the last page to process.",
+            )
             latest_file_completed += 1
-            current_loop_page = 999
+            # current_loop_page = 999
 
             if latest_file_completed != len(file_paths_list):
                 print(
@@ -1080,6 +1143,14 @@ def choose_and_run_redactor(
                     if is_pdf(file_path) is False:
                         out_redacted_pdf_file_path = (
                             output_folder + pdf_file_name_without_ext + "_redacted.png"
+                        )
+                        # Add page range suffix if partial processing
+                        out_redacted_pdf_file_path = add_page_range_suffix_to_file_path(
+                            out_redacted_pdf_file_path,
+                            page_min,
+                            current_loop_page,
+                            number_of_pages,
+                            page_max,
                         )
                         # pymupdf_doc is an image list in this case
                         if isinstance(pymupdf_doc[-1], str):
@@ -1236,6 +1307,19 @@ def choose_and_run_redactor(
                                 + pdf_file_name_without_ext
                                 + "_redacted.pdf"
                             )
+                            # Add page range suffix if partial processing
+                            print(
+                                f"page_min: {page_min}, current_loop_page: {current_loop_page}, number_of_pages: {number_of_pages}"
+                            )
+                            out_redacted_pdf_file_path = (
+                                add_page_range_suffix_to_file_path(
+                                    out_redacted_pdf_file_path,
+                                    page_min,
+                                    current_loop_page,
+                                    number_of_pages,
+                                    page_max,
+                                )
+                            )
                             print(
                                 "Saving redacted PDF file:", out_redacted_pdf_file_path
                             )
@@ -1264,6 +1348,14 @@ def choose_and_run_redactor(
                         output_folder
                         + pdf_file_name_without_ext
                         + "_redactions_for_review.pdf"
+                    )
+                    # Add page range suffix if partial processing
+                    out_review_pdf_file_path = add_page_range_suffix_to_file_path(
+                        out_review_pdf_file_path,
+                        page_min,
+                        current_loop_page,
+                        number_of_pages,
+                        page_max,
                     )
                     print("Saving PDF file for review:", out_review_pdf_file_path)
 
@@ -1300,6 +1392,10 @@ def choose_and_run_redactor(
                 + "_ocr_output_"
                 + file_ending
                 + ".csv"
+            )
+            # Add page range suffix if partial processing
+            ocr_file_path = add_page_range_suffix_to_file_path(
+                ocr_file_path, page_min, current_loop_page, number_of_pages, page_max
             )
             all_page_line_level_ocr_results_df.sort_values(
                 ["page", "line"], inplace=True
@@ -1372,6 +1468,16 @@ def choose_and_run_redactor(
                         ".json", ".csv"
                     )
                 )
+                # Add page range suffix if partial processing
+                all_page_line_level_ocr_results_with_words_df_file_path = (
+                    add_page_range_suffix_to_file_path(
+                        all_page_line_level_ocr_results_with_words_df_file_path,
+                        page_min,
+                        current_loop_page,
+                        number_of_pages,
+                        page_max,
+                    )
+                )
                 all_page_line_level_ocr_results_with_words_df.to_csv(
                     all_page_line_level_ocr_results_with_words_df_file_path,
                     index=None,
@@ -1432,6 +1538,16 @@ def choose_and_run_redactor(
                     + file_ending
                     + ".csv"
                 )
+                # Add page range suffix if partial processing
+                all_pages_decision_process_table_file_path = (
+                    add_page_range_suffix_to_file_path(
+                        all_pages_decision_process_table_file_path,
+                        page_min,
+                        current_loop_page,
+                        number_of_pages,
+                        page_max,
+                    )
+                )
                 all_pages_decision_process_table.to_csv(
                     all_pages_decision_process_table_file_path,
                     index=None,
@@ -1450,6 +1566,16 @@ def choose_and_run_redactor(
                     + file_ending
                     + ".csv"
                 )
+                # Add page range suffix if partial processing
+                selection_element_results_list_df_file_path = (
+                    add_page_range_suffix_to_file_path(
+                        selection_element_results_list_df_file_path,
+                        page_min,
+                        current_loop_page,
+                        number_of_pages,
+                        page_max,
+                    )
+                )
                 selection_element_results_list_df.to_csv(
                     selection_element_results_list_df_file_path,
                     index=None,
@@ -1464,6 +1590,16 @@ def choose_and_run_redactor(
                     + "_form_key_value_results_output_"
                     + file_ending
                     + ".csv"
+                )
+                # Add page range suffix if partial processing
+                form_key_value_results_list_df_file_path = (
+                    add_page_range_suffix_to_file_path(
+                        form_key_value_results_list_df_file_path,
+                        page_min,
+                        current_loop_page,
+                        number_of_pages,
+                        page_max,
+                    )
                 )
                 form_key_value_results_list_df.to_csv(
                     form_key_value_results_list_df_file_path,
@@ -1529,6 +1665,11 @@ def choose_and_run_redactor(
                     )
                 )
 
+            review_file_path = orig_pdf_file_path + "_review_file.csv"
+            # Add page range suffix if partial processing
+            review_file_path = add_page_range_suffix_to_file_path(
+                review_file_path, page_min, current_loop_page, number_of_pages, page_max
+            )
             if isinstance(review_file_path, str):
                 review_file_state.to_csv(
                     review_file_path, index=None, encoding="utf-8-sig"
@@ -1583,15 +1724,26 @@ def choose_and_run_redactor(
 
         # all_textract_request_metadata_file_path is constructed by output_folder + filename
         # Split output_folder (trusted base) from pdf_file_name_without_ext + "_textract_metadata.txt" (untrusted)
+        textract_metadata_filename = (
+            pdf_file_name_without_ext + "_textract_metadata.txt"
+        )
         secure_file_write(
             output_folder,
-            pdf_file_name_without_ext + "_textract_metadata.txt",
+            textract_metadata_filename,
             all_request_metadata_str,
         )
 
         # Reconstruct the full path for logging purposes
         all_textract_request_metadata_file_path = (
-            output_folder + pdf_file_name_without_ext + "_textract_metadata.txt"
+            output_folder + textract_metadata_filename
+        )
+        # Add page range suffix if partial processing
+        all_textract_request_metadata_file_path = add_page_range_suffix_to_file_path(
+            all_textract_request_metadata_file_path,
+            page_min,
+            current_loop_page,
+            number_of_pages,
+            page_max,
         )
 
         # Add the request metadata to the log outputs if not there already
@@ -2908,7 +3060,7 @@ def redact_image_pdf(
     chosen_redact_comprehend_entities: List[str],
     allow_list: List[str] = None,
     page_min: int = 0,
-    page_max: int = 999,
+    page_max: int = 0,
     text_extraction_method: str = TESSERACT_TEXT_EXTRACT_OPTION,
     handwrite_signature_checkbox: List[str] = [
         "Extract handwriting",
@@ -2970,7 +3122,7 @@ def redact_image_pdf(
     - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from the list allowed by the AWS Comprehend service.
     - allow_list (List[str], optional): A list of entity types to allow in the PDF. Defaults to None.
     - page_min (int, optional): The minimum page number to start redaction from. Defaults to 0.
-    - page_max (int, optional): The maximum page number to end redaction at. Defaults to 999.
+    - page_max (int, optional): The maximum page number to end redaction at. Defaults to 0.
     - text_extraction_method (str, optional): The type of analysis to perform on the PDF. Defaults to TESSERACT_TEXT_EXTRACT_OPTION.
     - handwrite_signature_checkbox (List[str], optional): A list of options for redacting handwriting and signatures. Defaults to ["Extract handwriting", "Extract signatures"].
     - textract_request_metadata (list, optional): Metadata related to the redaction request. Defaults to an empty string.
@@ -3110,12 +3262,14 @@ def redact_image_pdf(
 
     ###
     if current_loop_page == 0:
-        page_loop_start = 0
+        page_loop_start = page_min
     else:
         page_loop_start = current_loop_page
 
+    page_loop_end = page_max
+
     progress_bar = tqdm(
-        range(page_loop_start, number_of_pages),
+        range(page_loop_start, page_loop_end),
         unit="pages remaining",
         desc="Redacting pages",
     )
@@ -3137,6 +3291,8 @@ def redact_image_pdf(
 
     # Go through each page
     for page_no in progress_bar:
+
+        print(f"page_no: {page_no}")
 
         handwriting_or_signature_boxes = list()
         page_signature_recogniser_results = list()
@@ -3710,6 +3866,9 @@ def redact_image_pdf(
 
         # Break if new page is a multiple of chosen page_break_val
         if current_loop_page % page_break_val == 0:
+            print(
+                f"current_loop_page: {current_loop_page} is a multiple of page_break_val: {page_break_val}, breaking loop"
+            )
             page_break_return = True
             progress.close(_tqdm=progress_bar)
             tqdm._instances.clear()
@@ -3731,7 +3890,7 @@ def redact_image_pdf(
                     original_all_page_line_level_ocr_results_with_words
                     != all_page_line_level_ocr_results_with_words
                 ):
-                    # Write the updated existing textract data back to the JSON file
+                    # Write the updated existing local OCR data back to the JSON file
                     with open(
                         all_page_line_level_ocr_results_with_words_json_file_path, "w"
                     ) as json_file:
@@ -3783,6 +3942,10 @@ def redact_image_pdf(
                 form_key_value_results_list_df,
             )
 
+    print(
+        f"current_loop_page: {current_loop_page} is not a multiple of page_break_val: {page_break_val}, continuing loop"
+    )
+
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Write the updated existing textract data back to the JSON file
 
@@ -3797,6 +3960,9 @@ def redact_image_pdf(
             log_files_output_paths.append(textract_json_file_path)
 
     if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+        print(
+            f"Writing updated existing local OCR data back to the JSON file: {all_page_line_level_ocr_results_with_words_json_file_path}"
+        )
         if (
             original_all_page_line_level_ocr_results_with_words
             != all_page_line_level_ocr_results_with_words
@@ -3849,6 +4015,8 @@ def redact_image_pdf(
         form_key_value_results_list_df = convert_question_answer_to_dataframe(
             form_key_value_results_list, page_sizes_df
         )
+
+    print("Returning from redact_image_pdf function")
 
     return (
         pymupdf_doc,
@@ -4205,7 +4373,7 @@ def redact_text_pdf(
     chosen_redact_comprehend_entities: List[str],
     allow_list: List[str] = None,  # Optional list of allowed entities
     page_min: int = 0,  # Minimum page number to start redaction
-    page_max: int = 999,  # Maximum page number to end redaction
+    page_max: int = 0,  # Maximum page number to end redaction
     current_loop_page: int = 0,  # Current page being processed in the loop
     page_break_return: bool = False,  # Flag to indicate if a page break should be returned
     annotations_all_pages: List[dict] = list(),  # List of annotations across all pages
@@ -4340,11 +4508,19 @@ def redact_text_pdf(
     else:
         page_min = page_min - 1
 
-    print("Page range is", str(page_min + 1), "to", str(page_max))
+    ###
+    if current_loop_page == 0:
+        page_loop_start = page_min
+    else:
+        page_loop_start = current_loop_page
+
+    page_loop_end = page_max
+
+    print("Page range is", str(page_loop_start + 1), "to", str(page_loop_end))
 
     # Run through each page in document to 1. Extract text and then 2. Create redaction boxes
     progress_bar = tqdm(
-        range(current_loop_page, number_of_pages),
+        range(page_loop_start, page_loop_end),
         unit="pages remaining",
         desc="Redacting pages",
     )
@@ -4699,8 +4875,6 @@ def redact_text_pdf(
         ymin="top",
         ymax="height",
     )
-
-    # print("all_line_level_ocr_results_df:", all_line_level_ocr_results_df)
 
     # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
     if not all_line_level_ocr_results_df.empty:
