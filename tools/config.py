@@ -424,7 +424,7 @@ DEFAULT_TABULAR_ANONYMISATION_STRATEGY = get_or_create_env_var(
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-)  # Choose between "tesseract", "hybrid", and "paddle". "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.
+)  # Choose between "tesseract", "hybrid", and "paddle". "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence.
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = get_or_create_env_var(
     "SHOW_LOCAL_OCR_MODEL_OPTIONS", "False"
@@ -445,9 +445,21 @@ HYBRID_OCR_PADDING = int(
     get_or_create_env_var("HYBRID_OCR_PADDING", "1")
 )  # The padding to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
 
+PADDLE_USE_TEXTLINE_ORIENTATION = get_or_create_env_var(
+    "PADDLE_USE_TEXTLINE_ORIENTATION", "False"
+)
+
+PADDLE_DET_DB_UNCLIP_RATIO = get_or_create_env_var(
+    "PADDLE_DET_DB_UNCLIP_RATIO", "1.2"
+)
+
 SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES = get_or_create_env_var(
     "SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES", "False"
 )  # Whether to save example images of Tesseract vs PaddleOCR re-extraction in hybrid OCR mode.
+
+SAVE_PADDLE_VISUALISATIONS = get_or_create_env_var(
+    "SAVE_PADDLE_VISUALISATIONS", "False"
+)  # Whether to save visualisations of PaddleOCR bounding boxes.
 
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
     "PREPROCESS_LOCAL_OCR_IMAGES", "False"
@@ -930,6 +942,11 @@ if SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES == "True":
 else:
     SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES = False
 
+if SAVE_PADDLE_VISUALISATIONS == "True":
+    SAVE_PADDLE_VISUALISATIONS = True
+else:
+    SAVE_PADDLE_VISUALISATIONS = False
+
 if SHOW_AWS_TEXT_EXTRACTION_OPTIONS == "True":
     SHOW_AWS_TEXT_EXTRACTION_OPTIONS = True
 else:
@@ -994,3 +1011,13 @@ if EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT == "True":
     EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = True
 else:
     EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = False
+
+if PADDLE_USE_TEXTLINE_ORIENTATION == "True":
+    PADDLE_USE_TEXTLINE_ORIENTATION = True
+else:
+    PADDLE_USE_TEXTLINE_ORIENTATION = False
+
+if PADDLE_DET_DB_UNCLIP_RATIO == "True":
+    PADDLE_DET_DB_UNCLIP_RATIO = True
+else:
+    PADDLE_DET_DB_UNCLIP_RATIO = False

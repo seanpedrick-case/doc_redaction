@@ -121,8 +121,8 @@ COPY --from=builder /install/bin /usr/local/bin/
 COPY --chown=user . $APP_HOME/app
 
 # Copy the entrypoint script to its final destination
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY entrypoint.sh /home/user/app/entrypoint.sh
+RUN chmod +x /home/user/app/entrypoint.sh
 
 # Switch to user
 USER user
@@ -158,6 +158,6 @@ ENV PATH=$APP_HOME/.local/bin:$PATH \
     GRADIO_ANALYTICS_ENABLED=False \
     DEFAULT_CONCURRENCY_LIMIT=3
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["./entrypoint.sh"]
 
 CMD ["lambda_entrypoint.lambda_handler"]

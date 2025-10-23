@@ -417,7 +417,7 @@ def reveal_feedback_buttons():
     return (
         gr.Radio(
             visible=True,
-            label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 60% of personally identifiable information in a given (typed) document.",
+            label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 80% of personally identifiable information in a given (typed) document.",
         ),
         gr.Textbox(visible=True),
         gr.Button(visible=True),

@@ -1,6 +1,7 @@
 import copy
 import os
 import re
+from datetime import datetime
 import time
 from copy import deepcopy
 from dataclasses import dataclass
@@ -23,8 +24,11 @@ from tools.config import (
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
     OUTPUT_FOLDER,
+    PADDLE_DET_DB_UNCLIP_RATIO,
+    PADDLE_USE_TEXTLINE_ORIENTATION,
     PREPROCESS_LOCAL_OCR_IMAGES,
     SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES,
+    SAVE_PADDLE_VISUALISATIONS,
 )
 from tools.helper_functions import clean_unicode_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
@@ -505,7 +509,10 @@ class CustomImageAnalyzerEngine:
             # Default paddle configuration if none provided
             if paddle_kwargs is None:
                 paddle_kwargs = {
-                    "use_textline_orientation": True,
+                    "det_db_unclip_ratio":PADDLE_DET_DB_UNCLIP_RATIO,
+                    "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
+                    "use_doc_orientation_classify": False, 
+                    "use_doc_unwarping": False,
                     "lang": self.paddle_lang,
                 }
             else:
@@ -591,11 +598,10 @@ class CustomImageAnalyzerEngine:
                 x_coords = [p[0] for p in box]
                 y_coords = [p[1] for p in box]
 
-                line_left = int(min(x_coords))
-                line_top = int(min(y_coords))
-                line_width = int(max(x_coords) - line_left)
-                line_height = int(max(y_coords) - line_top)
-                # line_y_center = (max(y_coords) + min(y_coords)) / 2
+                line_left = float(min(x_coords))
+                line_top = float(min(y_coords))
+                line_width = float(max(x_coords) - line_left)
+                line_height = float(max(y_coords) - line_top)
 
                 # 2. Split the line into words
                 words = line_text.split()
@@ -610,8 +616,8 @@ class CustomImageAnalyzerEngine:
                 current_char_offset = 0
 
                 for word in words:
-                    word_width = int(len(word) * avg_char_width)
-                    word_left = line_left + int(current_char_offset * avg_char_width)
+                    word_width = float(len(word) * avg_char_width)
+                    word_left = line_left + float(current_char_offset * avg_char_width)
 
                     output["text"].append(word)
                     output["left"].append(word_left)
@@ -632,6 +638,7 @@ class CustomImageAnalyzerEngine:
         confidence_threshold: int = HYBRID_OCR_CONFIDENCE_THRESHOLD,
         padding: int = HYBRID_OCR_PADDING,
         ocr: Optional[Any] = None,
+        image_name: str = "unknown_image_name"
     ) -> Dict[str, list]:
         """
         Performs OCR using Tesseract for bounding boxes and PaddleOCR for low-confidence text.
@@ -724,13 +731,12 @@ class CustomImageAnalyzerEngine:
 
                             if SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES is True:
                                 tess_vs_paddle_examples_folder = (
-                                    self.output_folder + "/tess_vs_paddle_examples/"
+                                    self.output_folder + f"/tess_vs_paddle_examples/{image_name}"
                                 )
                                 if not os.path.exists(tess_vs_paddle_examples_folder):
                                     os.makedirs(tess_vs_paddle_examples_folder)
                                 output_image_path = (
-                                    self.output_folder
-                                    + f"tess_vs_paddle_examples/{conf}_conf_{safe_text}_to_{new_text}_{new_conf}.png"
+                                    tess_vs_paddle_examples_folder + f"/{safe_text}_conf_{conf}_to_{new_text}_conf_{new_conf}.png"
                                 )
                                 print(f"Saving example image to {output_image_path}")
                                 cropped_image.save(output_image_path)
@@ -774,9 +780,13 @@ class CustomImageAnalyzerEngine:
         Performs OCR on the given image using the configured engine.
         """
         if isinstance(image, str):
+            image_path = image
+            image_name = os.path.basename(image)
             image = Image.open(image)
-        elif isinstance(image, np.ndarray):
+        elif isinstance(image, np.ndarray):            
             image = Image.fromarray(image)
+            image_path = ""
+            image_name = "unknown_image_name"
 
         # Pre-process image - currently seems to give worse results!
         if str(PREPROCESS_LOCAL_OCR_IMAGES).lower() == "true":
@@ -784,12 +794,14 @@ class CustomImageAnalyzerEngine:
                 image
             )
         else:
-            preprocessing_metadata = {}
+            preprocessing_metadata = dict()
+
+        image_width, image_height = image.size
 
         # Note: In testing I haven't seen that this necessarily improves results
         if self.ocr_engine == "hybrid":
             # Try hybrid with original image for cropping:
-            ocr_data = self._perform_hybrid_ocr(image)
+            ocr_data = self._perform_hybrid_ocr(image, image_name=image_name)
 
         elif self.ocr_engine == "tesseract":
 
@@ -800,15 +812,7 @@ class CustomImageAnalyzerEngine:
                 lang=self.tesseract_lang,  # Ensure the Tesseract language data (e.g., fra.traineddata) is installed on your system.
             )
 
-            # ocr_data['abs_line_id'] = ocr_data.groupby(['block_num', 'par_num', 'line_num']).ngroup()
-
         elif self.ocr_engine == "paddle":
-
-            image_np = np.array(image)  # image_processed
-
-            # PaddleOCR may need an RGB image. Ensure it has 3 channels.
-            if len(image_np.shape) == 2:
-                image_np = np.stack([image_np] * 3, axis=-1)
 
             if ocr is None:
                 if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
@@ -818,8 +822,36 @@ class CustomImageAnalyzerEngine:
                         "No OCR object provided and 'paddle_ocr' is not initialised."
                     )
 
-            # ocr = PaddleOCR(use_textline_orientation=True, lang='en')
-            paddle_results = ocr.predict(image_np)
+            if not image_path:
+                image_np = np.array(image)  # image_processed
+
+                # Check that sizes are the same
+                image_np_height, image_np_width = image_np.shape[:2]
+                if image_np_width != image_width or image_np_height != image_height:
+                    raise ValueError(f"Image size mismatch: {image_np_width}x{image_np_height} != {image_width}x{image_height}")
+
+                # PaddleOCR may need an RGB image. Ensure it has 3 channels.
+                if len(image_np.shape) == 2:
+                    image_np = np.stack([image_np] * 3, axis=-1)            
+                else:
+                    image_np = np.array(image)
+
+                paddle_results = ocr.predict(image_np)
+            else:
+                paddle_results = ocr.predict(image_path)
+            
+            # Save PaddleOCR visualization with bounding boxes
+            if paddle_results and SAVE_PADDLE_VISUALISATIONS is True:
+                
+                for res in paddle_results:
+                    #print(res)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    paddle_viz_folder = os.path.join(self.output_folder, "paddle_visualisations")
+                    os.makedirs(paddle_viz_folder, exist_ok=True)
+                    viz_filename = f"paddle_ocr_boxes_{timestamp}.jpg"
+                    viz_path = os.path.join(paddle_viz_folder, viz_filename)
+                    res.save_to_img(paddle_viz_folder)
+            
             ocr_data = self._convert_paddle_to_tesseract_format(paddle_results)
 
         else:
@@ -827,6 +859,9 @@ class CustomImageAnalyzerEngine:
 
         if preprocessing_metadata:
             scale_factor = preprocessing_metadata.get("scale_factor", 1.0)
+            if scale_factor != 1.0:
+                print(f"Rescaling OCR data by scale factor: {scale_factor}")
+                print(f"OCR data before rescaling: {ocr_data}")
             ocr_data = rescale_ocr_data(ocr_data, scale_factor)
 
         # The rest of your processing pipeline now works for both engines

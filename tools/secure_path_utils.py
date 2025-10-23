@@ -339,18 +339,12 @@ def validate_folder_containment(
             ]
         )
 
-        print(f"DEBUG: is_test_path={is_test_path} is_test_base={is_test_base}")
-
         # For test scenarios, be more permissive
         if is_test_path or is_test_base:
-            print(f"DEBUG: Allowing test path: {path_str} (base: {base_str})")
             return True
 
         # Ensure the base path exists and is a directory
         if not os.path.exists(normalized_base) or not os.path.isdir(normalized_base):
-            print(
-                f"DEBUG: Base path does not exist or is not a directory: {normalized_base}"
-            )
             return False
 
         # Use commonpath to check containment
@@ -358,15 +352,12 @@ def validate_folder_containment(
             common_path = os.path.commonpath([normalized_path, normalized_base])
             # The common path must be exactly the base path for strict containment
             result = common_path == normalized_base
-            print(f"DEBUG: common_path='{common_path}' result={result}")
             return result
         except ValueError:
             # commonpath raises ValueError if paths are on different drives (Windows)
-            print("DEBUG: ValueError in commonpath check")
             return False
 
     except Exception as e:
-        print(f"DEBUG: Exception in validate_folder_containment: {e}")
         return False
 
 

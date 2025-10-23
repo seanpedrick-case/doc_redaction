@@ -1231,7 +1231,7 @@ with blocks:
                         open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                     ):
                         local_ocr_method_radio = gr.Radio(
-                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.""",
+                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence.""",
                             value=CHOSEN_LOCAL_OCR_MODEL,
                             choices=LOCAL_OCR_MODEL_OPTIONS,
                             interactive=True,
