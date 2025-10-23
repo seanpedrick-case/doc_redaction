@@ -358,6 +358,7 @@ def validate_folder_containment(
             return False
 
     except Exception as e:
+        print(f"Error validating folder containment: {e}")
         return False
 
 

@@ -1,7 +1,6 @@
 import copy
 import os
 import re
-from datetime import datetime
 import time
 from copy import deepcopy
 from dataclasses import dataclass
@@ -509,9 +508,9 @@ class CustomImageAnalyzerEngine:
             # Default paddle configuration if none provided
             if paddle_kwargs is None:
                 paddle_kwargs = {
-                    "det_db_unclip_ratio":PADDLE_DET_DB_UNCLIP_RATIO,
+                    "det_db_unclip_ratio": PADDLE_DET_DB_UNCLIP_RATIO,
                     "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
-                    "use_doc_orientation_classify": False, 
+                    "use_doc_orientation_classify": False,
                     "use_doc_unwarping": False,
                     "lang": self.paddle_lang,
                 }
@@ -638,7 +637,7 @@ class CustomImageAnalyzerEngine:
         confidence_threshold: int = HYBRID_OCR_CONFIDENCE_THRESHOLD,
         padding: int = HYBRID_OCR_PADDING,
         ocr: Optional[Any] = None,
-        image_name: str = "unknown_image_name"
+        image_name: str = "unknown_image_name",
     ) -> Dict[str, list]:
         """
         Performs OCR using Tesseract for bounding boxes and PaddleOCR for low-confidence text.
@@ -731,12 +730,14 @@ class CustomImageAnalyzerEngine:
 
                             if SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES is True:
                                 tess_vs_paddle_examples_folder = (
-                                    self.output_folder + f"/tess_vs_paddle_examples/{image_name}"
+                                    self.output_folder
+                                    + f"/tess_vs_paddle_examples/{image_name}"
                                 )
                                 if not os.path.exists(tess_vs_paddle_examples_folder):
                                     os.makedirs(tess_vs_paddle_examples_folder)
                                 output_image_path = (
-                                    tess_vs_paddle_examples_folder + f"/{safe_text}_conf_{conf}_to_{new_text}_conf_{new_conf}.png"
+                                    tess_vs_paddle_examples_folder
+                                    + f"/{safe_text}_conf_{conf}_to_{new_text}_conf_{new_conf}.png"
                                 )
                                 print(f"Saving example image to {output_image_path}")
                                 cropped_image.save(output_image_path)
@@ -783,7 +784,7 @@ class CustomImageAnalyzerEngine:
             image_path = image
             image_name = os.path.basename(image)
             image = Image.open(image)
-        elif isinstance(image, np.ndarray):            
+        elif isinstance(image, np.ndarray):
             image = Image.fromarray(image)
             image_path = ""
             image_name = "unknown_image_name"
@@ -828,30 +829,33 @@ class CustomImageAnalyzerEngine:
                 # Check that sizes are the same
                 image_np_height, image_np_width = image_np.shape[:2]
                 if image_np_width != image_width or image_np_height != image_height:
-                    raise ValueError(f"Image size mismatch: {image_np_width}x{image_np_height} != {image_width}x{image_height}")
+                    raise ValueError(
+                        f"Image size mismatch: {image_np_width}x{image_np_height} != {image_width}x{image_height}"
+                    )
 
                 # PaddleOCR may need an RGB image. Ensure it has 3 channels.
                 if len(image_np.shape) == 2:
-                    image_np = np.stack([image_np] * 3, axis=-1)            
+                    image_np = np.stack([image_np] * 3, axis=-1)
                 else:
                     image_np = np.array(image)
 
                 paddle_results = ocr.predict(image_np)
             else:
                 paddle_results = ocr.predict(image_path)
-            
+
             # Save PaddleOCR visualization with bounding boxes
             if paddle_results and SAVE_PADDLE_VISUALISATIONS is True:
-                
+
                 for res in paddle_results:
-                    #print(res)
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    paddle_viz_folder = os.path.join(self.output_folder, "paddle_visualisations")
+                    paddle_viz_folder = os.path.join(
+                        self.output_folder, "paddle_visualisations"
+                    )
                     os.makedirs(paddle_viz_folder, exist_ok=True)
-                    viz_filename = f"paddle_ocr_boxes_{timestamp}.jpg"
-                    viz_path = os.path.join(paddle_viz_folder, viz_filename)
+                    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    # viz_filename = f"paddle_ocr_boxes_{timestamp}.jpg"
+                    # viz_path = os.path.join(paddle_viz_folder, viz_filename)
                     res.save_to_img(paddle_viz_folder)
-            
+
             ocr_data = self._convert_paddle_to_tesseract_format(paddle_results)
 
         else:
