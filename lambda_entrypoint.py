@@ -537,12 +537,6 @@ def lambda_handler(event, context):
         ),
     }
 
-    # Debug: Print the final page_min and page_max values
-    print(f"Final cli_args page_min: {cli_args['page_min']}")
-    print(f"Final cli_args page_max: {cli_args['page_max']}")
-    print(f"Final cli_args save_logs_to_csv: {cli_args['save_logs_to_csv']}")
-    print(f"Final cli_args usage_logs_folder: {cli_args['usage_logs_folder']}")
-
     # Combine extraction options
     extraction_options = (
         _get_env_list(cli_args["handwrite_signature_extraction"])

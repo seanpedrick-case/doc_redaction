@@ -3266,7 +3266,7 @@ def redact_image_pdf(
     # Go through each page
     for page_no in progress_bar:
 
-        print(f"page_no: {page_no}")
+        print(f"Current page: {page_no}")
 
         handwriting_or_signature_boxes = list()
         page_signature_recogniser_results = list()
