@@ -6,6 +6,7 @@ import uuid
 import pandas as pd
 
 from tools.config import (
+    ACCESS_LOGS_FOLDER,
     ALLOW_LIST_PATH,
     AWS_ACCESS_KEY,
     AWS_PII_OPTION,
@@ -30,6 +31,7 @@ from tools.config import (
     DISPLAY_FILE_NAMES_IN_LOGS,
     DO_INITIAL_TABULAR_DATA_CLEAN,
     DOCUMENT_REDACTION_BUCKET,
+    FEEDBACK_LOGS_FOLDER,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
     IMAGES_DPI,
@@ -49,6 +51,7 @@ from tools.config import (
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
+    USAGE_LOGS_FOLDER,
     USE_GREEDY_DUPLICATE_DETECTION,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
@@ -343,6 +346,21 @@ python cli_redact.py --task textract --textract_action list
         "--s3_logs_prefix",
         default=S3_USAGE_LOGS_FOLDER,
         help="S3 prefix for usage log files.",
+    )
+    general_group.add_argument(
+        "--feedback_logs_folder",
+        default=FEEDBACK_LOGS_FOLDER,
+        help="Directory for feedback log files.",
+    )
+    general_group.add_argument(
+        "--access_logs_folder",
+        default=ACCESS_LOGS_FOLDER,
+        help="Directory for access log files.",
+    )
+    general_group.add_argument(
+        "--usage_logs_folder",
+        default=USAGE_LOGS_FOLDER,
+        help="Directory for usage log files.",
     )
 
     # --- PDF/Image Redaction Arguments ---

@@ -6519,6 +6519,9 @@ with blocks:
                 "display_file_names_in_logs": DISPLAY_FILE_NAMES_IN_LOGS,
                 "upload_logs_to_s3": RUN_AWS_FUNCTIONS == "1",
                 "s3_logs_prefix": S3_USAGE_LOGS_FOLDER,
+                "feedback_logs_folder": FEEDBACK_LOGS_FOLDER,
+                "access_logs_folder": ACCESS_LOGS_FOLDER,
+                "usage_logs_folder": USAGE_LOGS_FOLDER,
                 # PDF/Image Redaction Arguments
                 "ocr_method": TESSERACT_TEXT_EXTRACT_OPTION,
                 "page_min": DEFAULT_PAGE_MIN,

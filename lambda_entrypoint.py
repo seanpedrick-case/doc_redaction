@@ -8,6 +8,32 @@ from dotenv import load_dotenv
 from cli_redact import main as cli_main
 from tools.config import AWS_REGION
 
+
+def _get_env_list(env_var_name: str | list[str] | None) -> list[str]:
+    """Parses a comma-separated environment variable into a list of strings."""
+    if isinstance(env_var_name, list):
+        return env_var_name
+    if env_var_name is None:
+        return []
+
+    # Handle string input
+    value = str(env_var_name).strip()
+    if not value or value == "[]":
+        return []
+
+    # Remove brackets if present (e.g., "[item1, item2]" -> "item1, item2")
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+
+    # Remove quotes and split by comma
+    value = value.replace('"', "").replace("'", "")
+    if not value:
+        return []
+
+    # Split by comma and filter out any empty strings
+    return [s.strip() for s in value.split(",") if s.strip()]
+
+
 print("Lambda entrypoint loading...")
 
 # Initialize S3 client outside the handler for connection reuse
@@ -165,19 +191,11 @@ def lambda_handler(event, context):
         load_dotenv(input_file_path)
         print("Environment variables loaded from .env file")
 
-        # Log some key environment variables for debugging
-        # print(f"INPUT_FILE: {os.getenv('INPUT_FILE', 'not set')}")
-        # print(f"TASK: {os.getenv('DIRECT_MODE_TASK', 'not set')}")
-        # print(f"PII_DETECTOR: {os.getenv('LOCAL_PII_OPTION', 'not set')}")
-        # print(f"OCR_METHOD: {os.getenv('TESSERACT_TEXT_EXTRACT_OPTION', 'not set')}")
-        # print(f"LANGUAGE: {os.getenv('DEFAULT_LANGUAGE', 'not set')}")
-        # print(
-        #     f"ANON_STRATEGY: {os.getenv('DEFAULT_TABULAR_ANONYMISATION_STRATEGY', 'not set')}"
-        # )
-
         # Extract the actual input file path from environment variables
         # Look for common environment variable names that might contain the input file path
-        env_input_file = os.getenv("INPUT_FILE")
+        env_input_file = os.getenv(
+            "INPUT_FILE"
+        )  # This needs to be the full S3 path to the input file, e.g.INPUT_FILE=s3://my-processing-bucket/documents/sensitive-data.pdf
 
         if env_input_file:
             print(f"Found input file path in environment: {env_input_file}")
@@ -241,11 +259,15 @@ def lambda_handler(event, context):
         "save_to_user_folders": arguments.get(
             "save_to_user_folders", os.getenv("SESSION_OUTPUT_FOLDER", "False")
         ),
-        "local_redact_entities": arguments.get(
-            "local_redact_entities", os.getenv("CHOSEN_REDACT_ENTITIES", list())
+        "local_redact_entities": _get_env_list(
+            arguments.get(
+                "local_redact_entities", os.getenv("CHOSEN_REDACT_ENTITIES", list())
+            )
         ),
-        "aws_redact_entities": arguments.get(
-            "aws_redact_entities", os.getenv("CHOSEN_COMPREHEND_ENTITIES", list())
+        "aws_redact_entities": _get_env_list(
+            arguments.get(
+                "aws_redact_entities", os.getenv("CHOSEN_COMPREHEND_ENTITIES", list())
+            )
         ),
         "aws_access_key": None,  # Use IAM Role instead of keys
         "aws_secret_key": None,  # Use IAM Role instead of keys
@@ -270,6 +292,15 @@ def lambda_handler(event, context):
         ),
         "s3_logs_prefix": arguments.get(
             "s3_logs_prefix", os.getenv("S3_USAGE_LOGS_FOLDER", "")
+        ),
+        "feedback_logs_folder": arguments.get(
+            "feedback_logs_folder", os.getenv("FEEDBACK_LOGS_FOLDER", "")
+        ),
+        "access_logs_folder": arguments.get(
+            "access_logs_folder", os.getenv("ACCESS_LOGS_FOLDER", "")
+        ),
+        "usage_logs_folder": arguments.get(
+            "usage_logs_folder", os.getenv("USAGE_LOGS_FOLDER", "")
         ),
         # PDF/Image Redaction Arguments
         "ocr_method": arguments.get(
@@ -302,12 +333,14 @@ def lambda_handler(event, context):
         "redact_whole_page_file": arguments.get(
             "redact_whole_page_file", os.getenv("WHOLE_PAGE_REDACTION_LIST_PATH", "")
         ),
-        "handwrite_signature_extraction": arguments.get(
-            "handwrite_signature_extraction",
-            os.getenv(
-                "DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX",
-                ["Extract handwriting", "Extract signatures"],
-            ),
+        "handwrite_signature_extraction": _get_env_list(
+            arguments.get(
+                "handwrite_signature_extraction",
+                os.getenv(
+                    "DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX",
+                    ["Extract handwriting", "Extract signatures"],
+                ),
+            )
         ),
         "extract_forms": arguments.get(
             "extract_forms",
@@ -401,7 +434,7 @@ def lambda_handler(event, context):
 
     # Combine extraction options
     extraction_options = (
-        list(cli_args["handwrite_signature_extraction"])
+        _get_env_list(cli_args["handwrite_signature_extraction"])
         if cli_args["handwrite_signature_extraction"]
         else list()
     )
