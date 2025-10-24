@@ -24,6 +24,7 @@ from tools.config import (
     LOCAL_PII_OPTION,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
+    PADDLE_MODEL_PATH,
     PADDLE_USE_TEXTLINE_ORIENTATION,
     PREPROCESS_LOCAL_OCR_IMAGES,
     SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES,
@@ -515,6 +516,14 @@ class CustomImageAnalyzerEngine:
                 raise ImportError(
                     "paddleocr is not installed. Please run 'pip install paddleocr paddlepaddle' in your python environment and retry."
                 )
+
+            # Set PaddleOCR model directory environment variable (only if specified).
+            if PADDLE_MODEL_PATH and PADDLE_MODEL_PATH.strip():
+                os.environ["PADDLEOCR_MODEL_DIR"] = PADDLE_MODEL_PATH
+                print(f"Setting PaddleOCR model path to: {PADDLE_MODEL_PATH}")
+            else:
+                print("Using default PaddleOCR model storage location")
+
             # Default paddle configuration if none provided
             if paddle_kwargs is None:
                 paddle_kwargs = {

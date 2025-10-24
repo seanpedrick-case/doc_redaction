@@ -459,6 +459,15 @@ SAVE_PADDLE_VISUALISATIONS = get_or_create_env_var(
     "SAVE_PADDLE_VISUALISATIONS", "False"
 )  # Whether to save visualisations of PaddleOCR bounding boxes.
 
+# Model storage paths for Lambda compatibility
+PADDLE_MODEL_PATH = get_or_create_env_var(
+    "PADDLE_MODEL_PATH", ""
+)  # Directory for PaddleOCR model storage. Uses default location if not set.
+
+SPACY_MODEL_PATH = get_or_create_env_var(
+    "SPACY_MODEL_PATH", ""
+)  # Directory for spaCy model storage. Uses default location if not set.
+
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
     "PREPROCESS_LOCAL_OCR_IMAGES", "False"
 )  # Whether to try and preprocess images before extracting text. NOTE: I have found in testing that this doesn't necessarily imporove results, and greatly slows down extraction.

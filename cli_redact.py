@@ -38,6 +38,7 @@ from tools.config import (
     INPUT_FOLDER,
     LOCAL_PII_OPTION,
     OUTPUT_FOLDER,
+    PADDLE_MODEL_PATH,
     PREPROCESS_LOCAL_OCR_IMAGES,
     REMOVE_DUPLICATE_ROWS,
     RETURN_REDACTED_PDF,
@@ -46,6 +47,7 @@ from tools.config import (
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SESSION_OUTPUT_FOLDER,
+    SPACY_MODEL_PATH,
     TEXTRACT_JOBS_LOCAL_LOC,
     TEXTRACT_JOBS_S3_LOC,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
@@ -361,6 +363,16 @@ python cli_redact.py --task textract --textract_action list
         "--usage_logs_folder",
         default=USAGE_LOGS_FOLDER,
         help="Directory for usage log files.",
+    )
+    general_group.add_argument(
+        "--paddle_model_path",
+        default=PADDLE_MODEL_PATH,
+        help="Directory for PaddleOCR model storage.",
+    )
+    general_group.add_argument(
+        "--spacy_model_path",
+        default=SPACY_MODEL_PATH,
+        help="Directory for spaCy model storage.",
     )
 
     # --- PDF/Image Redaction Arguments ---

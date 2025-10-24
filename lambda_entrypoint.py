@@ -51,6 +51,8 @@ os.environ["GRADIO_TEMP_DIR"] = os.path.join(TMP_DIR, "gradio_tmp")
 os.environ["FEEDBACK_LOGS_FOLDER"] = os.path.join(TMP_DIR, "feedback")
 os.environ["ACCESS_LOGS_FOLDER"] = os.path.join(TMP_DIR, "logs")
 os.environ["USAGE_LOGS_FOLDER"] = os.path.join(TMP_DIR, "usage")
+os.environ["PADDLE_MODEL_PATH"] = os.path.join(TMP_DIR, "paddle_models")
+os.environ["SPACY_MODEL_PATH"] = os.path.join(TMP_DIR, "spacy_models")
 
 # Define compatible file types for processing
 COMPATIBLE_FILE_TYPES = {
@@ -294,13 +296,24 @@ def lambda_handler(event, context):
             "s3_logs_prefix", os.getenv("S3_USAGE_LOGS_FOLDER", "")
         ),
         "feedback_logs_folder": arguments.get(
-            "feedback_logs_folder", os.getenv("FEEDBACK_LOGS_FOLDER", "")
+            "feedback_logs_folder",
+            os.getenv("FEEDBACK_LOGS_FOLDER", os.environ["FEEDBACK_LOGS_FOLDER"]),
         ),
         "access_logs_folder": arguments.get(
-            "access_logs_folder", os.getenv("ACCESS_LOGS_FOLDER", "")
+            "access_logs_folder",
+            os.getenv("ACCESS_LOGS_FOLDER", os.environ["ACCESS_LOGS_FOLDER"]),
         ),
         "usage_logs_folder": arguments.get(
-            "usage_logs_folder", os.getenv("USAGE_LOGS_FOLDER", "")
+            "usage_logs_folder",
+            os.getenv("USAGE_LOGS_FOLDER", os.environ["USAGE_LOGS_FOLDER"]),
+        ),
+        "paddle_model_path": arguments.get(
+            "paddle_model_path",
+            os.getenv("PADDLE_MODEL_PATH", os.environ["PADDLE_MODEL_PATH"]),
+        ),
+        "spacy_model_path": arguments.get(
+            "spacy_model_path",
+            os.getenv("SPACY_MODEL_PATH", os.environ["SPACY_MODEL_PATH"]),
         ),
         # PDF/Image Redaction Arguments
         "ocr_method": arguments.get(
@@ -360,10 +373,10 @@ def lambda_handler(event, context):
             os.getenv("DEFAULT_TABULAR_ANONYMISATION_STRATEGY", "redact completely"),
         ),
         "text_columns": arguments.get(
-            "text_columns", os.getenv("DEFAULT_TEXT_COLUMNS", list())
+            "text_columns", _get_env_list(os.getenv("DEFAULT_TEXT_COLUMNS", list()))
         ),
         "excel_sheets": arguments.get(
-            "excel_sheets", os.getenv("DEFAULT_EXCEL_SHEETS", list())
+            "excel_sheets", _get_env_list(os.getenv("DEFAULT_EXCEL_SHEETS", list()))
         ),
         "fuzzy_mistakes": int(
             arguments.get(

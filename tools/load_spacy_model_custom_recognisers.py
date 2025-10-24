@@ -25,7 +25,12 @@ import Levenshtein
 import requests
 from spacy.cli.download import download
 
-from tools.config import CUSTOM_ENTITIES, DEFAULT_LANGUAGE, TESSERACT_DATA_FOLDER
+from tools.config import (
+    CUSTOM_ENTITIES,
+    DEFAULT_LANGUAGE,
+    SPACY_MODEL_PATH,
+    TESSERACT_DATA_FOLDER,
+)
 
 score_threshold = 0.001
 custom_entities = CUSTOM_ENTITIES
@@ -56,6 +61,15 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
     Accepts common inputs like: "en", "en_lg", "en_sm", "de", "fr", "es", "it", "nl", "pt", "zh", "ja", "xx".
     Falls back through sensible candidates and will download if missing.
     """
+
+    # Set spaCy data path for custom model storage (only if specified)
+    import os
+
+    if SPACY_MODEL_PATH and SPACY_MODEL_PATH.strip():
+        os.environ["SPACY_DATA"] = SPACY_MODEL_PATH
+        print(f"Setting spaCy model path to: {SPACY_MODEL_PATH}")
+    else:
+        print("Using default spaCy model storage location")
 
     synonyms = {
         "english": "en",
