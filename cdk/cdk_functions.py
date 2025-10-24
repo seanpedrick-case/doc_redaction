@@ -1335,8 +1335,8 @@ def create_basic_config_env(
     Create a basic config.env file for the user to use with their newly deployed redaction app.
     """
     variables = {
-        "COGNITO_AUTH": "1",
-        "RUN_AWS_FUNCTIONS": "1",
+        "COGNITO_AUTH": "True",
+        "RUN_AWS_FUNCTIONS": "True",
         "DISPLAY_FILE_NAMES_IN_LOGS": "False",
         "SESSION_OUTPUT_FOLDER": "True",
         "SAVE_LOGS_TO_DYNAMODB": "True",

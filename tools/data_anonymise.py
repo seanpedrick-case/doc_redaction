@@ -545,7 +545,7 @@ def anonymise_files_with_open_text(
     # Try to connect to AWS services directly only if RUN_AWS_FUNCTIONS environmental variable is 1, otherwise an environment variable or direct textbox input is needed.
     if pii_identification_method == "AWS Comprehend":
         print("Trying to connect to AWS Comprehend service")
-        if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+        if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Comprehend via existing SSO connection")
             comprehend_client = boto3.client("comprehend", region_name=AWS_REGION)
         elif aws_access_key_textbox and aws_secret_key_textbox:
@@ -557,7 +557,7 @@ def anonymise_files_with_open_text(
                 aws_access_key_id=aws_access_key_textbox,
                 aws_secret_access_key=aws_secret_key_textbox,
             )
-        elif RUN_AWS_FUNCTIONS == "1":
+        elif RUN_AWS_FUNCTIONS:
             print("Connecting to Comprehend via existing SSO connection")
             comprehend_client = boto3.client("comprehend")
         elif AWS_ACCESS_KEY and AWS_SECRET_KEY:

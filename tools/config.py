@@ -25,6 +25,18 @@ def _get_env_list(env_var_name: str) -> List[str]:
 # Set or retrieve configuration variables for the redaction app
 
 
+def convert_string_to_boolean(value: str) -> bool:
+    """Convert string to boolean, handling various formats."""
+    if isinstance(value, bool):
+        return value
+    elif value in ["True", "1", "true", "TRUE"]:
+        return True
+    elif value in ["False", "0", "false", "FALSE"]:
+        return False
+    else:
+        raise ValueError(f"Invalid boolean value: {value}")
+
+
 def get_or_create_env_var(var_name: str, default_value: str, print_val: bool = False):
     """
     Get an environmental variable, and set it to a default value if it doesn't exist
@@ -100,7 +112,9 @@ if AWS_CONFIG_PATH:
     else:
         print("AWS config file not found at location:", AWS_CONFIG_PATH)
 
-RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
+RUN_AWS_FUNCTIONS = convert_string_to_boolean(
+    get_or_create_env_var("RUN_AWS_FUNCTIONS", "False")
+)
 
 AWS_REGION = get_or_create_env_var("AWS_REGION", "")
 
@@ -119,8 +133,8 @@ AWS_SECRET_KEY = get_or_create_env_var("AWS_SECRET_KEY", "")
 DOCUMENT_REDACTION_BUCKET = get_or_create_env_var("DOCUMENT_REDACTION_BUCKET", "")
 
 # Should the app prioritise using AWS SSO over using API keys stored in environment variables/secrets (defaults to yes)
-PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS = get_or_create_env_var(
-    "PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS", "1"
+PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS = convert_string_to_boolean(
+    get_or_create_env_var("PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS", "True")
 )
 
 # Custom headers e.g. if routing traffic through Cloudfront
@@ -134,7 +148,9 @@ CUSTOM_HEADER_VALUE = get_or_create_env_var("CUSTOM_HEADER_VALUE", "")
 # Image options
 ###
 IMAGES_DPI = float(get_or_create_env_var("IMAGES_DPI", "300.0"))
-LOAD_TRUNCATED_IMAGES = get_or_create_env_var("LOAD_TRUNCATED_IMAGES", "True")
+LOAD_TRUNCATED_IMAGES = convert_string_to_boolean(
+    get_or_create_env_var("LOAD_TRUNCATED_IMAGES", "True")
+)
 MAX_IMAGE_PIXELS = get_or_create_env_var(
     "MAX_IMAGE_PIXELS", ""
 )  # Changed to None if blank in file_conversion.py
@@ -173,15 +189,19 @@ MPLCONFIGDIR = get_or_create_env_var("MPLCONFIGDIR", "")  # Matplotlib cache fol
 # By default, logs are put into a subfolder of today's date and the host name of the instance running the app. This is to avoid at all possible the possibility of log files from one instance overwriting the logs of another instance on S3. If running the app on one system always, or just locally, it is not necessary to make the log folders so specific.
 # Another way to address this issue would be to write logs to another type of storage, e.g. database such as dynamodb. I may look into this in future.
 
-SAVE_LOGS_TO_CSV = get_or_create_env_var("SAVE_LOGS_TO_CSV", "True")
+SAVE_LOGS_TO_CSV = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_LOGS_TO_CSV", "True")
+)
 
-USE_LOG_SUBFOLDERS = get_or_create_env_var("USE_LOG_SUBFOLDERS", "True")
+USE_LOG_SUBFOLDERS = convert_string_to_boolean(
+    get_or_create_env_var("USE_LOG_SUBFOLDERS", "True")
+)
 
 FEEDBACK_LOGS_FOLDER = get_or_create_env_var("FEEDBACK_LOGS_FOLDER", "feedback/")
 ACCESS_LOGS_FOLDER = get_or_create_env_var("ACCESS_LOGS_FOLDER", "logs/")
 USAGE_LOGS_FOLDER = get_or_create_env_var("USAGE_LOGS_FOLDER", "usage/")
 
-if USE_LOG_SUBFOLDERS == "True":
+if USE_LOG_SUBFOLDERS:
     day_log_subfolder = today_rev + "/"
     host_name_subfolder = HOST_NAME + "/"
     full_log_subfolder = day_log_subfolder + host_name_subfolder
@@ -201,8 +221,8 @@ S3_USAGE_LOGS_FOLDER = get_or_create_env_var(
 )
 
 # Should the redacted file name be included in the logs? In some instances, the names of the files themselves could be sensitive, and should not be disclosed beyond the app. So, by default this is false.
-DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var(
-    "DISPLAY_FILE_NAMES_IN_LOGS", "False"
+DISPLAY_FILE_NAMES_IN_LOGS = convert_string_to_boolean(
+    get_or_create_env_var("DISPLAY_FILE_NAMES_IN_LOGS", "False")
 )
 
 # Further customisation options for CSV logs
@@ -218,7 +238,9 @@ CSV_USAGE_LOG_HEADERS = get_or_create_env_var(
 )  # If blank, uses component labels
 
 ### DYNAMODB logs. Whether to save to DynamoDB, and the headers of the table
-SAVE_LOGS_TO_DYNAMODB = get_or_create_env_var("SAVE_LOGS_TO_DYNAMODB", "False")
+SAVE_LOGS_TO_DYNAMODB = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_LOGS_TO_DYNAMODB", "False")
+)
 
 ACCESS_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
     "ACCESS_LOG_DYNAMODB_TABLE_NAME", "redaction_access_log"
@@ -238,9 +260,9 @@ USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
 DYNAMODB_USAGE_LOG_HEADERS = get_or_create_env_var("DYNAMODB_USAGE_LOG_HEADERS", "")
 
 # Report logging to console?
-LOGGING = get_or_create_env_var("LOGGING", "False")
+LOGGING = convert_string_to_boolean(get_or_create_env_var("LOGGING", "False"))
 
-if LOGGING == "True":
+if LOGGING:
     # Configure logging
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -255,9 +277,9 @@ FEEDBACK_LOG_FILE_NAME = get_or_create_env_var("FEEDBACK_LOG_FILE_NAME", LOG_FIL
 # Gradio general app options
 ###
 
-FAVICON_PATH = get_or_create_env_var("FAVICON_PATH", "favicon.ico")
+FAVICON_PATH = get_or_create_env_var("FAVICON_PATH", "favicon.png")
 
-RUN_FASTAPI = get_or_create_env_var("RUN_FASTAPI", "0")
+RUN_FASTAPI = convert_string_to_boolean(get_or_create_env_var("RUN_FASTAPI", "False"))
 
 MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
 
@@ -291,8 +313,8 @@ MAX_OPEN_TEXT_CHARACTERS = int(
 )
 
 # When loading for review, should PDFs have existing redaction annotations loaded in?
-LOAD_REDACTION_ANNOTATIONS_FROM_PDF = get_or_create_env_var(
-    "LOAD_REDACTION_ANNOTATIONS_FROM_PDF", "True"
+LOAD_REDACTION_ANNOTATIONS_FROM_PDF = convert_string_to_boolean(
+    get_or_create_env_var("LOAD_REDACTION_ANNOTATIONS_FROM_PDF", "True")
 )
 
 
@@ -313,8 +335,8 @@ if POPPLER_FOLDER:
     add_folder_to_path(POPPLER_FOLDER)
 
 # Extraction and PII options open by default:
-EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = get_or_create_env_var(
-    "EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT", "True"
+EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = convert_string_to_boolean(
+    get_or_create_env_var("EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT", "True")
 )
 
 # List of models to use for text extraction and PII detection
@@ -336,62 +358,56 @@ NO_REDACTION_PII_OPTION = get_or_create_env_var(
 LOCAL_PII_OPTION = get_or_create_env_var("LOCAL_PII_OPTION", "Local")
 AWS_PII_OPTION = get_or_create_env_var("AWS_PII_OPTION", "AWS Comprehend")
 
-SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = get_or_create_env_var(
-    "SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS", "True"
+SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS", "True")
 )
-SHOW_AWS_TEXT_EXTRACTION_OPTIONS = get_or_create_env_var(
-    "SHOW_AWS_TEXT_EXTRACTION_OPTIONS", "True"
+SHOW_AWS_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AWS_TEXT_EXTRACTION_OPTIONS", "True")
 )
 
 # Show at least local options if everything mistakenly removed
-if (
-    SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS != "True"
-    and SHOW_AWS_TEXT_EXTRACTION_OPTIONS != "True"
-):
-    SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = "True"
+if not SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS and not SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
+    SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = True
 
 local_model_options = list()
 aws_model_options = list()
 text_extraction_models = list()
 
-if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS == "True":
+if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS:
     local_model_options.append(SELECTABLE_TEXT_EXTRACT_OPTION)
     local_model_options.append(TESSERACT_TEXT_EXTRACT_OPTION)
 
-if SHOW_AWS_TEXT_EXTRACTION_OPTIONS == "True":
+if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
     aws_model_options.append(TEXTRACT_TEXT_EXTRACT_OPTION)
 
 TEXT_EXTRACTION_MODELS = local_model_options + aws_model_options
-DO_INITIAL_TABULAR_DATA_CLEAN = get_or_create_env_var(
-    "DO_INITIAL_TABULAR_DATA_CLEAN", "True"
+DO_INITIAL_TABULAR_DATA_CLEAN = convert_string_to_boolean(
+    get_or_create_env_var("DO_INITIAL_TABULAR_DATA_CLEAN", "True")
 )
 
-SHOW_LOCAL_PII_DETECTION_OPTIONS = get_or_create_env_var(
-    "SHOW_LOCAL_PII_DETECTION_OPTIONS", "True"
+SHOW_LOCAL_PII_DETECTION_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOCAL_PII_DETECTION_OPTIONS", "True")
 )
-SHOW_AWS_PII_DETECTION_OPTIONS = get_or_create_env_var(
-    "SHOW_AWS_PII_DETECTION_OPTIONS", "True"
+SHOW_AWS_PII_DETECTION_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AWS_PII_DETECTION_OPTIONS", "True")
 )
 
-if (
-    SHOW_LOCAL_PII_DETECTION_OPTIONS != "True"
-    and SHOW_AWS_PII_DETECTION_OPTIONS != "True"
-):
-    SHOW_LOCAL_PII_DETECTION_OPTIONS = "True"
+if not SHOW_LOCAL_PII_DETECTION_OPTIONS and not SHOW_AWS_PII_DETECTION_OPTIONS:
+    SHOW_LOCAL_PII_DETECTION_OPTIONS = True
 
 local_model_options = [NO_REDACTION_PII_OPTION]
 aws_model_options = list()
 pii_detection_models = list()
 
-if SHOW_LOCAL_PII_DETECTION_OPTIONS == "True":
+if SHOW_LOCAL_PII_DETECTION_OPTIONS:
     local_model_options.append(LOCAL_PII_OPTION)
 
-if SHOW_AWS_PII_DETECTION_OPTIONS == "True":
+if SHOW_AWS_PII_DETECTION_OPTIONS:
     aws_model_options.append(AWS_PII_OPTION)
 
 PII_DETECTION_MODELS = local_model_options + aws_model_options
 
-if SHOW_AWS_TEXT_EXTRACTION_OPTIONS == "True":
+if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
     DEFAULT_TEXT_EXTRACTION_MODEL = get_or_create_env_var(
         "DEFAULT_TEXT_EXTRACTION_MODEL", TEXTRACT_TEXT_EXTRACT_OPTION
     )
@@ -400,7 +416,7 @@ else:
         "DEFAULT_TEXT_EXTRACTION_MODEL", SELECTABLE_TEXT_EXTRACT_OPTION
     )
 
-if SHOW_AWS_PII_DETECTION_OPTIONS == "True":
+if SHOW_AWS_PII_DETECTION_OPTIONS:
     DEFAULT_PII_DETECTION_MODEL = get_or_create_env_var(
         "DEFAULT_PII_DETECTION_MODEL", AWS_PII_OPTION
     )
@@ -424,7 +440,51 @@ DEFAULT_TABULAR_ANONYMISATION_STRATEGY = get_or_create_env_var(
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-)  # Choose between "tesseract", "hybrid", and "paddle". "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence.
+)  # Choose between "tesseract", "hybrid", and "paddle". "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence.
+
+SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "False")
+)
+if SHOW_LOCAL_OCR_MODEL_OPTIONS:
+    LOCAL_OCR_MODEL_OPTIONS = [
+        "tesseract",
+        "hybrid",
+        "paddle",
+    ]
+else:
+    LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
+
+HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "65")
+)  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
+HYBRID_OCR_PADDING = int(
+    get_or_create_env_var("HYBRID_OCR_PADDING", "1")
+)  # The padding to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
+
+PADDLE_USE_TEXTLINE_ORIENTATION = convert_string_to_boolean(
+    get_or_create_env_var("PADDLE_USE_TEXTLINE_ORIENTATION", "False")
+)
+
+PADDLE_DET_DB_UNCLIP_RATIO = float(
+    get_or_create_env_var("PADDLE_DET_DB_UNCLIP_RATIO", "1.2")
+)
+
+SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES", "False")
+)  # Whether to save example images of Tesseract vs PaddleOCR re-extraction in hybrid OCR mode.
+
+SAVE_PADDLE_VISUALISATIONS = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_PADDLE_VISUALISATIONS", "False")
+)  # Whether to save visualisations of PaddleOCR bounding boxes.
+
+# Model storage paths for Lambda compatibility
+PADDLE_MODEL_PATH = get_or_create_env_var(
+    "PADDLE_MODEL_PATH", ""
+)  # Directory for PaddleOCR model storage. Uses default location if not set.
+
+SPACY_MODEL_PATH = get_or_create_env_var(
+    "SPACY_MODEL_PATH", ""
+)  # Directory for spaCy model storage. Uses default location if not set.
 
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
     "PREPROCESS_LOCAL_OCR_IMAGES", "False"
@@ -501,7 +561,9 @@ DEFAULT_PAGE_MAX = int(get_or_create_env_var("DEFAULT_PAGE_MAX", "0"))
 
 ### Language selection options
 
-SHOW_LANGUAGE_SELECTION = get_or_create_env_var("SHOW_LANGUAGE_SELECTION", "False")
+SHOW_LANGUAGE_SELECTION = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LANGUAGE_SELECTION", "False")
+)
 
 DEFAULT_LANGUAGE_FULL_NAME = get_or_create_env_var(
     "DEFAULT_LANGUAGE_FULL_NAME", "english"
@@ -539,22 +601,24 @@ DEFAULT_DUPLICATE_DETECTION_THRESHOLD = float(
 DEFAULT_MIN_CONSECUTIVE_PAGES = int(
     get_or_create_env_var("DEFAULT_MIN_CONSECUTIVE_PAGES", "1")
 )
-USE_GREEDY_DUPLICATE_DETECTION = get_or_create_env_var(
-    "USE_GREEDY_DUPLICATE_DETECTION", "True"
+USE_GREEDY_DUPLICATE_DETECTION = convert_string_to_boolean(
+    get_or_create_env_var("USE_GREEDY_DUPLICATE_DETECTION", "True")
 )
-DEFAULT_COMBINE_PAGES = get_or_create_env_var(
-    "DEFAULT_COMBINE_PAGES", "True"
+DEFAULT_COMBINE_PAGES = convert_string_to_boolean(
+    get_or_create_env_var("DEFAULT_COMBINE_PAGES", "True")
 )  # Combine text from the same page number within a file. Alternative will enable line-level duplicate detection.
 DEFAULT_MIN_WORD_COUNT = int(get_or_create_env_var("DEFAULT_MIN_WORD_COUNT", "10"))
-REMOVE_DUPLICATE_ROWS = get_or_create_env_var("REMOVE_DUPLICATE_ROWS", "False")
+REMOVE_DUPLICATE_ROWS = convert_string_to_boolean(
+    get_or_create_env_var("REMOVE_DUPLICATE_ROWS", "False")
+)
 
 
 ###
 # File output options
 ###
 # Should the output pdf redaction boxes be drawn using the custom box colour?
-USE_GUI_BOX_COLOURS_FOR_OUTPUTS = get_or_create_env_var(
-    "USE_GUI_BOX_COLOURS_FOR_OUTPUTS", "False"
+USE_GUI_BOX_COLOURS_FOR_OUTPUTS = convert_string_to_boolean(
+    get_or_create_env_var("USE_GUI_BOX_COLOURS_FOR_OUTPUTS", "False")
 )
 
 # This is the colour of the output pdf redaction boxes. Should be a tuple of three integers between 0 and 255
@@ -590,14 +654,16 @@ APPLY_REDACTIONS_TEXT = int(
 )  # The default PDF_REDACT_TEXT_REMOVE | 0 removes all characters whose boundary box overlaps any redaction rectangle. This complies with the original legal / data protection intentions of redaction annotations. Other use cases however may require to keep text while redacting vector graphics or images. This can be achieved by setting text=True|PDF_REDACT_TEXT_NONE | 1. This does not comply with the data protection intentions of redaction annotations. Do so at your own risk.
 
 # If you don't want to redact the text, but instead just draw a box over it, set this to True
-RETURN_PDF_FOR_REVIEW = get_or_create_env_var("RETURN_PDF_FOR_REVIEW", "True")
+RETURN_PDF_FOR_REVIEW = convert_string_to_boolean(
+    get_or_create_env_var("RETURN_PDF_FOR_REVIEW", "True")
+)
 
-RETURN_REDACTED_PDF = get_or_create_env_var(
-    "RETURN_REDACTED_PDF", "True"
+RETURN_REDACTED_PDF = convert_string_to_boolean(
+    get_or_create_env_var("RETURN_REDACTED_PDF", "True")
 )  # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
 
-COMPRESS_REDACTED_PDF = get_or_create_env_var(
-    "COMPRESS_REDACTED_PDF", "False"
+COMPRESS_REDACTED_PDF = convert_string_to_boolean(
+    get_or_create_env_var("COMPRESS_REDACTED_PDF", "False")
 )  # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
 
 ###
@@ -612,7 +678,7 @@ except Exception as e:
     extract = TLDExtract(cache_dir=None)
 
 # Get some environment variables and Launch the Gradio app
-COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "0")
+COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "False"))
 
 
 # Link to user guide - ensure it is a valid URL
@@ -667,12 +733,18 @@ USER_GUIDE_URL = validate_safe_url(
     )
 )
 
-SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "True")
-SHOW_AWS_EXAMPLES = get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
+SHOW_EXAMPLES = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_EXAMPLES", "True")
+)
+SHOW_AWS_EXAMPLES = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
+)
 
 FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))
 
-RUN_DIRECT_MODE = get_or_create_env_var("RUN_DIRECT_MODE", "0")
+RUN_DIRECT_MODE = convert_string_to_boolean(
+    get_or_create_env_var("RUN_DIRECT_MODE", "False")
+)
 
 # Direct mode configuration options
 DIRECT_MODE_DEFAULT_USER = get_or_create_env_var(
@@ -694,7 +766,9 @@ DIRECT_MODE_DUPLICATE_TYPE = get_or_create_env_var(
 
 ### ALLOW LIST
 
-GET_DEFAULT_ALLOW_LIST = get_or_create_env_var("GET_DEFAULT_ALLOW_LIST", "False")
+GET_DEFAULT_ALLOW_LIST = convert_string_to_boolean(
+    get_or_create_env_var("GET_DEFAULT_ALLOW_LIST", "False")
+)
 
 ALLOW_LIST_PATH = get_or_create_env_var(
     "ALLOW_LIST_PATH", ""
@@ -711,7 +785,9 @@ else:
 
 ### DENY LIST
 
-GET_DEFAULT_DENY_LIST = get_or_create_env_var("GET_DEFAULT_DENY_LIST", "False")
+GET_DEFAULT_DENY_LIST = convert_string_to_boolean(
+    get_or_create_env_var("GET_DEFAULT_DENY_LIST", "False")
+)
 
 S3_DENY_LIST_PATH = get_or_create_env_var(
     "S3_DENY_LIST_PATH", ""
@@ -751,9 +827,11 @@ else:
 # COST CODE OPTIONS
 ###
 
-SHOW_COSTS = get_or_create_env_var("SHOW_COSTS", "False")
+SHOW_COSTS = convert_string_to_boolean(get_or_create_env_var("SHOW_COSTS", "False"))
 
-GET_COST_CODES = get_or_create_env_var("GET_COST_CODES", "False")
+GET_COST_CODES = convert_string_to_boolean(
+    get_or_create_env_var("GET_COST_CODES", "False")
+)
 
 DEFAULT_COST_CODE = get_or_create_env_var("DEFAULT_COST_CODE", "")
 
@@ -771,20 +849,21 @@ if COST_CODES_PATH:
 else:
     OUTPUT_COST_CODES_PATH = "config/cost_codes.csv"
 
-ENFORCE_COST_CODES = get_or_create_env_var(
-    "ENFORCE_COST_CODES", "False"
-)  # If you have cost codes listed, is it compulsory to choose one before redacting?
+ENFORCE_COST_CODES = convert_string_to_boolean(
+    get_or_create_env_var("ENFORCE_COST_CODES", "False")
+)
+# If you have cost codes listed, is it compulsory to choose one before redacting?
 
-if ENFORCE_COST_CODES == "True":
-    GET_COST_CODES = "True"
+if ENFORCE_COST_CODES:
+    GET_COST_CODES = True
 
 
 ###
 # WHOLE DOCUMENT API OPTIONS
 ###
 
-SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = get_or_create_env_var(
-    "SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS", "False"
+SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS", "False")
 )  # This feature not currently implemented
 
 TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET = get_or_create_env_var(
@@ -799,9 +878,10 @@ TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER = get_or_create_env_var(
     "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER", "output"
 )
 
-LOAD_PREVIOUS_TEXTRACT_JOBS_S3 = get_or_create_env_var(
-    "LOAD_PREVIOUS_TEXTRACT_JOBS_S3", "False"
-)  # Whether or not to load previous Textract jobs from S3
+LOAD_PREVIOUS_TEXTRACT_JOBS_S3 = convert_string_to_boolean(
+    get_or_create_env_var("LOAD_PREVIOUS_TEXTRACT_JOBS_S3", "False")
+)
+# Whether or not to load previous Textract jobs from S3
 
 TEXTRACT_JOBS_S3_LOC = get_or_create_env_var(
     "TEXTRACT_JOBS_S3_LOC", "output"
@@ -823,94 +903,15 @@ DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(
 ###
 # Config vars output format
 ###
-# Ensure that config variables are in the correct format for subsequent use elsewhere
-
-if LOAD_REDACTION_ANNOTATIONS_FROM_PDF == "True":
-    LOAD_REDACTION_ANNOTATIONS_FROM_PDF = True
-else:
-    LOAD_REDACTION_ANNOTATIONS_FROM_PDF = False
 
 # Convert string environment variables to string or list
-if SAVE_LOGS_TO_CSV == "True":
-    SAVE_LOGS_TO_CSV = True
-else:
-    SAVE_LOGS_TO_CSV = False
-if SAVE_LOGS_TO_DYNAMODB == "True":
-    SAVE_LOGS_TO_DYNAMODB = True
-else:
-    SAVE_LOGS_TO_DYNAMODB = False
-if SHOW_LANGUAGE_SELECTION == "True":
-    SHOW_LANGUAGE_SELECTION = True
-else:
-    SHOW_LANGUAGE_SELECTION = False
-if DISPLAY_FILE_NAMES_IN_LOGS == "True":
-    DISPLAY_FILE_NAMES_IN_LOGS = True
-else:
-    DISPLAY_FILE_NAMES_IN_LOGS = False
-if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
-    DO_INITIAL_TABULAR_DATA_CLEAN = True
-else:
-    DO_INITIAL_TABULAR_DATA_CLEAN = False
-if COMPRESS_REDACTED_PDF == "True":
-    COMPRESS_REDACTED_PDF = True
-else:
-    COMPRESS_REDACTED_PDF = False
-if RETURN_REDACTED_PDF == "True":
-    RETURN_REDACTED_PDF = True
-else:
-    RETURN_REDACTED_PDF = False
-if USE_GREEDY_DUPLICATE_DETECTION == "True":
-    USE_GREEDY_DUPLICATE_DETECTION = True
-else:
-    USE_GREEDY_DUPLICATE_DETECTION = False
-if DEFAULT_COMBINE_PAGES == "True":
-    DEFAULT_COMBINE_PAGES = True
-else:
-    DEFAULT_COMBINE_PAGES = False
-if REMOVE_DUPLICATE_ROWS == "True":
-    REMOVE_DUPLICATE_ROWS = True
-else:
-    REMOVE_DUPLICATE_ROWS = False
+CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
+CSV_FEEDBACK_LOG_HEADERS = _get_env_list(CSV_FEEDBACK_LOG_HEADERS)
+CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
 
-if GET_COST_CODES == "True":
-    GET_COST_CODES = True
-else:
-    GET_COST_CODES = False
-
-if ENFORCE_COST_CODES == "True":
-    ENFORCE_COST_CODES = True
-else:
-    ENFORCE_COST_CODES = False
-
-if SHOW_COSTS == "True":
-    SHOW_COSTS = True
-else:
-    SHOW_COSTS = False
-
-if GET_DEFAULT_ALLOW_LIST == "True":
-    GET_DEFAULT_ALLOW_LIST = True
-else:
-    GET_DEFAULT_ALLOW_LIST = False
-
-if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
-    SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = True
-else:
-    SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS = False
-
-if CSV_ACCESS_LOG_HEADERS:
-    CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
-if CSV_FEEDBACK_LOG_HEADERS:
-    CSV_FEEDBACK_LOG_HEADERS = _get_env_list(CSV_FEEDBACK_LOG_HEADERS)
-if CSV_USAGE_LOG_HEADERS:
-    CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
-
-if DYNAMODB_ACCESS_LOG_HEADERS:
-    DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
-if DYNAMODB_FEEDBACK_LOG_HEADERS:
-    DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
-if DYNAMODB_USAGE_LOG_HEADERS:
-    DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
-
+DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
+DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
+DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
 if CHOSEN_COMPREHEND_ENTITIES:
     CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
 if FULL_COMPREHEND_ENTITY_LIST:
@@ -938,21 +939,3 @@ if ALLOWED_ORIGINS:
 
 if ALLOWED_HOSTS:
     ALLOWED_HOSTS = _get_env_list(ALLOWED_HOSTS)
-
-USE_GUI_BOX_COLOURS_FOR_OUTPUTS = USE_GUI_BOX_COLOURS_FOR_OUTPUTS.lower() == "true"
-RETURN_PDF_FOR_REVIEW = RETURN_PDF_FOR_REVIEW.lower() == "true"
-
-if DO_INITIAL_TABULAR_DATA_CLEAN == "True":
-    DO_INITIAL_TABULAR_DATA_CLEAN = True
-else:
-    DO_INITIAL_TABULAR_DATA_CLEAN = False
-
-if REMOVE_DUPLICATE_ROWS == "True":
-    REMOVE_DUPLICATE_ROWS = True
-else:
-    REMOVE_DUPLICATE_ROWS = False
-
-if EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT == "True":
-    EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = True
-else:
-    EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = False

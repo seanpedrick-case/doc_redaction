@@ -83,7 +83,7 @@ AWS_ACCOUNT_ID=1234567890 # AWS account ID that has administrator access that yo
 CDK_FOLDER=C:/path_to_cdk_folder/ # The place where the cdk folder code is located
 CONTEXT_FILE=C:/path_to_cdk_folder/cdk.context.json
 COGNITO_USER_POOL_DOMAIN_PREFIX=redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.
-COGNITO_AUTH=1 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  
+COGNITO_AUTH=0 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  
 USE_CLOUDFRONT=True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.
 RUN_USEAST_STACK=False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).
 CLOUDFRONT_DOMAIN=<example>.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.
@@ -155,7 +155,7 @@ if you want to do this manually:
 Create a `config.env` file to upload to the S3 bucket that has at least the following variables:
 
 ```ini
-COGNITO_AUTH=1 # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.
+COGNITO_AUTH=0 # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.
 RUN_AWS_FUNCTIONS=1 # This will enable the app to communicate with AWS services.
 SESSION_OUTPUT_FOLDER=True # This will put outputs for each user in separate output folders.
 ```

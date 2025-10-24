@@ -10,7 +10,7 @@ license: agpl-3.0
 ---
 # Document redaction
 
-version: 1.3.0
+version: 1.4.0
 
 Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
@@ -176,8 +176,8 @@ These settings are useful for all users, regardless of whether you are using AWS
 
 These settings are only relevant if you intend to use AWS services like Textract for OCR and Comprehend for PII detection.
 
-*   `RUN_AWS_FUNCTIONS=1`
-    *   **This is the master switch.** You must set this to `1` to enable any AWS functionality. If it is `0`, all other AWS settings will be ignored.
+*   `RUN_AWS_FUNCTIONS=True`
+    *   **This is the master switch.** You must set this to `True` to enable any AWS functionality. If it is `False`, all other AWS settings will be ignored.
 
 *   **UI Options:**
     *   `SHOW_AWS_TEXT_EXTRACTION_OPTIONS=True`: Adds "AWS Textract" as an option in the text extraction dropdown.

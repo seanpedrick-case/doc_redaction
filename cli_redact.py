@@ -6,6 +6,7 @@ import uuid
 import pandas as pd
 
 from tools.config import (
+    ACCESS_LOGS_FOLDER,
     ALLOW_LIST_PATH,
     AWS_ACCESS_KEY,
     AWS_PII_OPTION,
@@ -30,12 +31,14 @@ from tools.config import (
     DISPLAY_FILE_NAMES_IN_LOGS,
     DO_INITIAL_TABULAR_DATA_CLEAN,
     DOCUMENT_REDACTION_BUCKET,
+    FEEDBACK_LOGS_FOLDER,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
     IMAGES_DPI,
     INPUT_FOLDER,
     LOCAL_PII_OPTION,
     OUTPUT_FOLDER,
+    PADDLE_MODEL_PATH,
     PREPROCESS_LOCAL_OCR_IMAGES,
     REMOVE_DUPLICATE_ROWS,
     RETURN_REDACTED_PDF,
@@ -44,11 +47,13 @@ from tools.config import (
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SESSION_OUTPUT_FOLDER,
+    SPACY_MODEL_PATH,
     TEXTRACT_JOBS_LOCAL_LOC,
     TEXTRACT_JOBS_S3_LOC,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
+    USAGE_LOGS_FOLDER,
     USE_GREEDY_DUPLICATE_DETECTION,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
@@ -336,13 +341,38 @@ python cli_redact.py --task textract --textract_action list
     )
     general_group.add_argument(
         "--upload_logs_to_s3",
-        default=RUN_AWS_FUNCTIONS == "1",
+        default=RUN_AWS_FUNCTIONS,
         help="Upload log files to S3 after processing.",
     )
     general_group.add_argument(
         "--s3_logs_prefix",
         default=S3_USAGE_LOGS_FOLDER,
         help="S3 prefix for usage log files.",
+    )
+    general_group.add_argument(
+        "--feedback_logs_folder",
+        default=FEEDBACK_LOGS_FOLDER,
+        help="Directory for feedback log files.",
+    )
+    general_group.add_argument(
+        "--access_logs_folder",
+        default=ACCESS_LOGS_FOLDER,
+        help="Directory for access log files.",
+    )
+    general_group.add_argument(
+        "--usage_logs_folder",
+        default=USAGE_LOGS_FOLDER,
+        help="Directory for usage log files.",
+    )
+    general_group.add_argument(
+        "--paddle_model_path",
+        default=PADDLE_MODEL_PATH,
+        help="Directory for PaddleOCR model storage.",
+    )
+    general_group.add_argument(
+        "--spacy_model_path",
+        default=SPACY_MODEL_PATH,
+        help="Directory for spaCy model storage.",
     )
 
     # --- PDF/Image Redaction Arguments ---
@@ -650,7 +680,7 @@ python cli_redact.py --task textract --textract_action list
         from tools.cli_usage_logger import create_cli_usage_logger
 
         try:
-            usage_logger = create_cli_usage_logger()
+            usage_logger = create_cli_usage_logger(logs_folder=args.usage_logs_folder)
         except Exception as e:
             print(f"Warning: Could not initialise usage logger: {e}")
 
@@ -732,6 +762,8 @@ python cli_redact.py --task textract --textract_action list
                     output_folder=args.output_dir,
                     input_folder=args.input_dir,
                     prepare_images=args.prepare_images,
+                    page_min=args.page_min,
+                    page_max=args.page_max,
                 )
                 print(f"Preparation complete. {prep_summary}")
 

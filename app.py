@@ -79,6 +79,7 @@ from tools.config import (
     IMAGES_DPI,
     INPUT_FOLDER,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
+    LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
     LOG_FILE_NAME,
     MAX_FILE_SIZE,
@@ -88,6 +89,7 @@ from tools.config import (
     NO_REDACTION_PII_OPTION,
     OUTPUT_COST_CODES_PATH,
     OUTPUT_FOLDER,
+    PADDLE_MODEL_PATH,
     PII_DETECTION_MODELS,
     PREPROCESS_LOCAL_OCR_IMAGES,
     REMOVE_DUPLICATE_ROWS,
@@ -105,10 +107,13 @@ from tools.config import (
     SAVE_LOGS_TO_DYNAMODB,
     SESSION_OUTPUT_FOLDER,
     SHOW_AWS_EXAMPLES,
+    SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
     SHOW_COSTS,
     SHOW_EXAMPLES,
     SHOW_LANGUAGE_SELECTION,
+    SHOW_LOCAL_OCR_MODEL_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
+    SPACY_MODEL_PATH,
     TABULAR_PII_DETECTION_MODELS,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXT_EXTRACTION_MODELS,
@@ -249,13 +254,13 @@ in_doc_files = gr.File(
 )
 
 text_extract_method_radio = gr.Radio(
-    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
+    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
     value=DEFAULT_TEXT_EXTRACTION_MODEL,
     choices=TEXT_EXTRACTION_MODELS,
 )
 
 pii_identification_method_drop = gr.Radio(
-    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
     value=DEFAULT_PII_DETECTION_MODEL,
     choices=PII_DETECTION_MODELS,
 )
@@ -264,6 +269,7 @@ handwrite_signature_checkbox = gr.CheckboxGroup(
     label="AWS Textract extraction settings",
     choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
     value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+    visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
 )
 
 in_redact_entities = gr.Dropdown(
@@ -438,9 +444,9 @@ with blocks:
         visible=False,
     )
 
-    chosen_local_model_textbox = gr.Textbox(
-        CHOSEN_LOCAL_OCR_MODEL, label="chosen_local_model_textbox", visible=False
-    )
+    # local_ocr_method_radio = gr.Textbox(
+    #     CHOSEN_LOCAL_OCR_MODEL, label="local_ocr_method_radio", visible=False
+    # )
 
     session_hash_state = gr.Textbox(label="session_hash_state", value="", visible=False)
     host_name_textbox = gr.Textbox(
@@ -1211,11 +1217,35 @@ with blocks:
             ):
                 text_extract_method_radio.render()
 
-                with gr.Accordion(
-                    "Enable AWS Textract signature detection (default is off)",
-                    open=False,
-                ):
+                if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
+                    with gr.Accordion(
+                        "Enable AWS Textract signature detection (default is off)",
+                        open=False,
+                    ):
+                        handwrite_signature_checkbox.render()
+                else:
                     handwrite_signature_checkbox.render()
+
+                if SHOW_LOCAL_OCR_MODEL_OPTIONS:
+                    with gr.Accordion(
+                        label="Change default local OCR model",
+                        open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                    ):
+                        local_ocr_method_radio = gr.Radio(
+                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence.""",
+                            value=CHOSEN_LOCAL_OCR_MODEL,
+                            choices=LOCAL_OCR_MODEL_OPTIONS,
+                            interactive=True,
+                            visible=True,
+                        )
+                else:
+                    local_ocr_method_radio = gr.Radio(
+                        label="Choose local OCR model",
+                        value=CHOSEN_LOCAL_OCR_MODEL,
+                        choices=LOCAL_OCR_MODEL_OPTIONS,
+                        interactive=False,
+                        visible=False,
+                    )
 
                 with gr.Row(equal_height=True):
                     pii_identification_method_drop.render()
@@ -2263,14 +2293,14 @@ with blocks:
                     precision=0,
                     minimum=0,
                     maximum=9999,
-                    label="Lowest page to redact",
+                    label="Lowest page to redact (set to 0 to redact from the first page)",
                 )
                 page_max = gr.Number(
                     value=DEFAULT_PAGE_MAX,
                     precision=0,
                     minimum=0,
                     maximum=9999,
-                    label="Highest page to redact",
+                    label="Highest page to redact (set to 0 to redact to the last page)",
                 )
 
         if SHOW_LANGUAGE_SELECTION:
@@ -2600,6 +2630,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -2711,7 +2743,7 @@ with blocks:
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
             all_page_line_level_ocr_results_with_words_df_base,
-            chosen_local_model_textbox,
+            local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
         ],
@@ -2835,7 +2867,7 @@ with blocks:
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
             all_page_line_level_ocr_results_with_words_df_base,
-            chosen_local_model_textbox,
+            local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
         ],
@@ -3066,6 +3098,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3167,7 +3201,7 @@ with blocks:
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
             all_page_line_level_ocr_results_with_words_df_base,
-            chosen_local_model_textbox,
+            local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
         ],
@@ -3278,6 +3312,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3351,6 +3387,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -5189,6 +5227,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -5251,6 +5291,8 @@ with blocks:
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
+            page_min,
+            page_max,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -5764,7 +5806,7 @@ with blocks:
         if (
             not os.path.exists(ALLOW_LIST_PATH)
             and S3_ALLOW_LIST_PATH
-            and RUN_AWS_FUNCTIONS == "1"
+            and RUN_AWS_FUNCTIONS
         ):
             print("Downloading allow list from S3")
             blocks.load(
@@ -5798,7 +5840,7 @@ with blocks:
         if (
             not os.path.exists(COST_CODES_PATH)
             and S3_COST_CODES_PATH
-            and RUN_AWS_FUNCTIONS == "1"
+            and RUN_AWS_FUNCTIONS
         ):
             print("Downloading cost codes from S3")
             blocks.load(
@@ -6381,9 +6423,9 @@ with blocks:
         default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT),
     )
 
-    if RUN_DIRECT_MODE == "0":
+    if not RUN_DIRECT_MODE:
         # If running through command line with uvicorn
-        if RUN_FASTAPI == "1":
+        if RUN_FASTAPI:
             if ALLOWED_ORIGINS:
                 print(f"CORS enabled. Allowing origins: {ALLOWED_ORIGINS}")
                 app.add_middleware(
@@ -6406,7 +6448,7 @@ with blocks:
                 app,
                 blocks,
                 show_error=True,
-                auth=authenticate_user if COGNITO_AUTH == "1" else None,
+                auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
                 path=FASTAPI_ROOT_PATH,
                 favicon_path=Path(FAVICON_PATH),
@@ -6417,7 +6459,7 @@ with blocks:
 
         else:
             if __name__ == "__main__":
-                if COGNITO_AUTH == "1":
+                if COGNITO_AUTH:
                     blocks.launch(
                         show_error=True,
                         inbrowser=True,
@@ -6455,7 +6497,9 @@ with blocks:
 
             # Prepare direct mode arguments based on environment variables
             direct_mode_args = {
+                # Task Selection
                 "task": DIRECT_MODE_TASK,
+                # General Arguments (apply to all file types)
                 "input_file": DIRECT_MODE_INPUT_FILE,
                 "output_dir": DIRECT_MODE_OUTPUT_DIR,
                 "input_dir": INPUT_FOLDER,
@@ -6464,16 +6508,25 @@ with blocks:
                 "pii_detector": LOCAL_PII_OPTION,
                 "username": DIRECT_MODE_DEFAULT_USER,
                 "save_to_user_folders": SESSION_OUTPUT_FOLDER,
+                "local_redact_entities": CHOSEN_REDACT_ENTITIES,
+                "aws_redact_entities": CHOSEN_COMPREHEND_ENTITIES,
                 "aws_access_key": AWS_ACCESS_KEY,
                 "aws_secret_key": AWS_SECRET_KEY,
+                "cost_code": DEFAULT_COST_CODE,
                 "aws_region": AWS_REGION,
                 "s3_bucket": DOCUMENT_REDACTION_BUCKET,
                 "do_initial_clean": DO_INITIAL_TABULAR_DATA_CLEAN,
                 "save_logs_to_csv": SAVE_LOGS_TO_CSV,
                 "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,
                 "display_file_names_in_logs": DISPLAY_FILE_NAMES_IN_LOGS,
-                "upload_logs_to_s3": RUN_AWS_FUNCTIONS == "1",
+                "upload_logs_to_s3": RUN_AWS_FUNCTIONS,
                 "s3_logs_prefix": S3_USAGE_LOGS_FOLDER,
+                "feedback_logs_folder": FEEDBACK_LOGS_FOLDER,
+                "access_logs_folder": ACCESS_LOGS_FOLDER,
+                "usage_logs_folder": USAGE_LOGS_FOLDER,
+                "paddle_model_path": PADDLE_MODEL_PATH,
+                "spacy_model_path": SPACY_MODEL_PATH,
+                # PDF/Image Redaction Arguments
                 "ocr_method": TESSERACT_TEXT_EXTRACT_OPTION,
                 "page_min": DEFAULT_PAGE_MIN,
                 "page_max": DEFAULT_PAGE_MAX,
@@ -6482,27 +6535,28 @@ with blocks:
                 "preprocess_local_ocr_images": PREPROCESS_LOCAL_OCR_IMAGES,
                 "compress_redacted_pdf": COMPRESS_REDACTED_PDF,
                 "return_pdf_end_of_redaction": RETURN_REDACTED_PDF,
-                "allow_list_file": ALLOW_LIST_PATH,
                 "deny_list_file": DENY_LIST_PATH,
+                "allow_list_file": ALLOW_LIST_PATH,
                 "redact_whole_page_file": WHOLE_PAGE_REDACTION_LIST_PATH,
                 "handwrite_signature_extraction": DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
                 "extract_forms": False,
                 "extract_tables": False,
                 "extract_layout": False,
+                # Word/Tabular Anonymisation Arguments
                 "anon_strategy": DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
+                "text_columns": DEFAULT_TEXT_COLUMNS,
                 "excel_sheets": DEFAULT_EXCEL_SHEETS,
                 "fuzzy_mistakes": DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
-                "match_fuzzy_whole_phrase_bool": "True",  # Default value
+                "match_fuzzy_whole_phrase_bool": True,  # Fixed: was "True" (string)
+                # Duplicate Detection Arguments
                 "duplicate_type": DIRECT_MODE_DUPLICATE_TYPE,
                 "similarity_threshold": DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
                 "min_word_count": DEFAULT_MIN_WORD_COUNT,
                 "min_consecutive_pages": DEFAULT_MIN_CONSECUTIVE_PAGES,
                 "greedy_match": USE_GREEDY_DUPLICATE_DETECTION,
                 "combine_pages": DEFAULT_COMBINE_PAGES,
-                "search_query": DEFAULT_SEARCH_QUERY,
-                "text_columns": DEFAULT_TEXT_COLUMNS,
                 "remove_duplicate_rows": REMOVE_DUPLICATE_ROWS,
-                # Textract specific arguments (with defaults)
+                # Textract Batch Operations Arguments
                 "textract_action": "",
                 "job_id": "",
                 "extract_signatures": False,
@@ -6513,10 +6567,8 @@ with blocks:
                 "local_textract_document_logs_subfolder": TEXTRACT_JOBS_LOCAL_LOC,
                 "poll_interval": 30,
                 "max_poll_attempts": 120,
-                # General arguments that might be missing
-                "local_redact_entities": CHOSEN_REDACT_ENTITIES,
-                "aws_redact_entities": CHOSEN_COMPREHEND_ENTITIES,
-                "cost_code": DEFAULT_COST_CODE,
+                # Additional arguments
+                "search_query": DEFAULT_SEARCH_QUERY,
             }
 
             print(f"Running in direct mode with task: {DIRECT_MODE_TASK}")
@@ -6537,24 +6589,7 @@ with blocks:
             extraction_options = (
                 list(direct_mode_args["handwrite_signature_extraction"])
                 if direct_mode_args["handwrite_signature_extraction"]
-                else []
-            )
-            if direct_mode_args["extract_forms"]:
-                extraction_options.append("Extract forms")
-            if direct_mode_args["extract_tables"]:
-                extraction_options.append("Extract tables")
-            if direct_mode_args["extract_layout"]:
-                extraction_options.append("Extract layout")
-            direct_mode_args["handwrite_signature_extraction"] = extraction_options
-
-            # Run the CLI main function with direct mode arguments
-            main(direct_mode_args=direct_mode_args)
-
-            # Combine extraction options
-            extraction_options = (
-                list(direct_mode_args["handwrite_signature_extraction"])
-                if direct_mode_args["handwrite_signature_extraction"]
-                else []
+                else list()
             )
             if direct_mode_args["extract_forms"]:
                 extraction_options.append("Extract forms")
