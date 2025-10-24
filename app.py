@@ -1011,7 +1011,7 @@ with blocks:
     with gr.Tab("Redact PDFs/images"):
 
         # Examples for PDF/image redaction
-        if SHOW_EXAMPLES == "True":
+        if SHOW_EXAMPLES is True:
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Extract text and redact document' button:"
             )
