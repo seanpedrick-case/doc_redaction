@@ -201,10 +201,11 @@ def add_page_range_suffix_to_file_path(
 
     # Calculate the page range that was actually processed
     start_page = page_min + 1 if page_min == 0 else page_min
-    if page_max is None:
-        end_page = (start_page + current_loop_page) - 1
-    else:
+
+    if current_loop_page > page_max:
         end_page = page_max
+    else:
+        end_page = (start_page + current_loop_page) - 1
 
     if end_page < start_page:
         end_page = start_page
@@ -1117,34 +1118,189 @@ def choose_and_run_redactor(
             print(out_message)
             raise Exception(out_message)
 
-        # If at last page, save to file
-        if current_loop_page >= number_of_pages_to_process:
+        # If at last page, save to file - CHANGED - now will return outputs regardless of page progress.
+        # if current_loop_page >= number_of_pages_to_process:
 
+        print(
+            "Current page number",
+            (page_min + current_loop_page) - 1,
+            "is the last page processed.",
+        )
+        latest_file_completed += 1
+        # current_loop_page = 999
+
+        if latest_file_completed != len(file_paths_list):
             print(
-                "Current page number",
-                (page_min + current_loop_page) - 1,
-                "is the last page to process.",
+                "Completed file number:",
+                str(latest_file_completed),
+                "there are more files to do",
             )
-            latest_file_completed += 1
-            # current_loop_page = 999
 
-            if latest_file_completed != len(file_paths_list):
-                print(
-                    "Completed file number:",
-                    str(latest_file_completed),
-                    "there are more files to do",
-                )
+        # Save redacted file
+        if pii_identification_method != NO_REDACTION_PII_OPTION:
+            if RETURN_REDACTED_PDF is True:
+                progress(0.9, "Saving redacted file")
 
-            # Save redacted file
-            if pii_identification_method != NO_REDACTION_PII_OPTION:
-                if RETURN_REDACTED_PDF is True:
-                    progress(0.9, "Saving redacted file")
+                if is_pdf(file_path) is False:
+                    out_redacted_pdf_file_path = (
+                        output_folder + pdf_file_name_without_ext + "_redacted.png"
+                    )
+                    # Add page range suffix if partial processing
+                    out_redacted_pdf_file_path = add_page_range_suffix_to_file_path(
+                        out_redacted_pdf_file_path,
+                        page_min,
+                        current_loop_page,
+                        number_of_pages,
+                        page_max,
+                    )
+                    # pymupdf_doc is an image list in this case
+                    if isinstance(pymupdf_doc[-1], str):
+                        # Normalize and validate path safety before opening image
+                        normalized_path = os.path.normpath(
+                            os.path.abspath(pymupdf_doc[-1])
+                        )
+                        if validate_path_containment(normalized_path, INPUT_FOLDER):
+                            img = Image.open(normalized_path)
+                        else:
+                            raise ValueError(
+                                f"Unsafe image path detected: {pymupdf_doc[-1]}"
+                            )
+                    # Otherwise could be an image object
+                    else:
+                        img = pymupdf_doc[-1]
+                    img.save(out_redacted_pdf_file_path, "PNG", resolution=image_dpi)
 
-                    if is_pdf(file_path) is False:
+                    if isinstance(out_redacted_pdf_file_path, str):
+                        out_file_paths.append(out_redacted_pdf_file_path)
+                    else:
+                        out_file_paths.append(out_redacted_pdf_file_path[0])
+
+                else:
+                    # Check if we have dual PDF documents to save
+                    applied_redaction_pymupdf_doc = None
+
+                    if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
+                        if (
+                            hasattr(redact_image_pdf, "_applied_redaction_pages")
+                            and redact_image_pdf._applied_redaction_pages
+                        ):
+
+                            # Create final document by copying the original document and replacing specific pages
+                            applied_redaction_pymupdf_doc = pymupdf.open()
+                            applied_redaction_pymupdf_doc.insert_pdf(pymupdf_doc)
+
+                            # Create a mapping of original page numbers to final pages
+                            applied_redaction_pages_map = {}
+                            for (
+                                applied_redaction_page_data
+                            ) in redact_image_pdf._applied_redaction_pages:
+                                if isinstance(applied_redaction_page_data, tuple):
+                                    applied_redaction_page, original_page_number = (
+                                        applied_redaction_page_data
+                                    )
+                                    applied_redaction_pages_map[
+                                        original_page_number
+                                    ] = applied_redaction_page
+                                else:
+                                    applied_redaction_page = applied_redaction_page_data
+                                    applied_redaction_pages_map[0] = (
+                                        applied_redaction_page  # Default to page 0 if no original number
+                                    )
+
+                            # Replace pages in the final document with their final versions
+                            for (
+                                original_page_number,
+                                applied_redaction_page,
+                            ) in applied_redaction_pages_map.items():
+                                if (
+                                    original_page_number
+                                    < applied_redaction_pymupdf_doc.page_count
+                                ):
+                                    # Remove the original page and insert the final page
+                                    applied_redaction_pymupdf_doc.delete_page(
+                                        original_page_number
+                                    )
+                                    applied_redaction_pymupdf_doc.insert_pdf(
+                                        applied_redaction_page.parent,
+                                        from_page=applied_redaction_page.number,
+                                        to_page=applied_redaction_page.number,
+                                        start_at=original_page_number,
+                                    )
+
+                                    applied_redaction_pymupdf_doc[
+                                        original_page_number
+                                    ].apply_redactions(
+                                        images=APPLY_REDACTIONS_IMAGES,
+                                        graphics=APPLY_REDACTIONS_GRAPHICS,
+                                        text=APPLY_REDACTIONS_TEXT,
+                                    )
+                            # Clear the stored final pages
+                            delattr(redact_image_pdf, "_applied_redaction_pages")
+                        elif (
+                            hasattr(redact_text_pdf, "_applied_redaction_pages")
+                            and redact_text_pdf._applied_redaction_pages
+                        ):
+                            # Create final document by copying the original document and replacing specific pages
+                            applied_redaction_pymupdf_doc = pymupdf.open()
+                            applied_redaction_pymupdf_doc.insert_pdf(pymupdf_doc)
+
+                            # Create a mapping of original page numbers to final pages
+                            applied_redaction_pages_map = {}
+                            for (
+                                applied_redaction_page_data
+                            ) in redact_text_pdf._applied_redaction_pages:
+                                if isinstance(applied_redaction_page_data, tuple):
+                                    applied_redaction_page, original_page_number = (
+                                        applied_redaction_page_data
+                                    )
+                                    applied_redaction_pages_map[
+                                        original_page_number
+                                    ] = applied_redaction_page
+                                else:
+                                    applied_redaction_page = applied_redaction_page_data
+                                    applied_redaction_pages_map[0] = (
+                                        applied_redaction_page  # Default to page 0 if no original number
+                                    )
+
+                            # Replace pages in the final document with their final versions
+                            for (
+                                original_page_number,
+                                applied_redaction_page,
+                            ) in applied_redaction_pages_map.items():
+                                if (
+                                    original_page_number
+                                    < applied_redaction_pymupdf_doc.page_count
+                                ):
+                                    # Remove the original page and insert the final page
+                                    applied_redaction_pymupdf_doc.delete_page(
+                                        original_page_number
+                                    )
+                                    applied_redaction_pymupdf_doc.insert_pdf(
+                                        applied_redaction_page.parent,
+                                        from_page=applied_redaction_page.number,
+                                        to_page=applied_redaction_page.number,
+                                        start_at=original_page_number,
+                                    )
+
+                                    applied_redaction_pymupdf_doc[
+                                        original_page_number
+                                    ].apply_redactions(
+                                        images=APPLY_REDACTIONS_IMAGES,
+                                        graphics=APPLY_REDACTIONS_GRAPHICS,
+                                        text=APPLY_REDACTIONS_TEXT,
+                                    )
+                            # Clear the stored final pages
+                            delattr(redact_text_pdf, "_applied_redaction_pages")
+
+                    # Save final redacted PDF if we have dual outputs or if RETURN_PDF_FOR_REVIEW is False
+                    if RETURN_PDF_FOR_REVIEW is False or applied_redaction_pymupdf_doc:
                         out_redacted_pdf_file_path = (
-                            output_folder + pdf_file_name_without_ext + "_redacted.png"
+                            output_folder + pdf_file_name_without_ext + "_redacted.pdf"
                         )
                         # Add page range suffix if partial processing
+                        print(
+                            f"page_min: {page_min}, current_loop_page: {current_loop_page}, number_of_pages: {number_of_pages}"
+                        )
                         out_redacted_pdf_file_path = add_page_range_suffix_to_file_path(
                             out_redacted_pdf_file_path,
                             page_min,
@@ -1152,569 +1308,389 @@ def choose_and_run_redactor(
                             number_of_pages,
                             page_max,
                         )
-                        # pymupdf_doc is an image list in this case
-                        if isinstance(pymupdf_doc[-1], str):
-                            # Normalize and validate path safety before opening image
-                            normalized_path = os.path.normpath(
-                                os.path.abspath(pymupdf_doc[-1])
+                        print("Saving redacted PDF file:", out_redacted_pdf_file_path)
+
+                        # Use final document if available, otherwise use main document
+                        doc_to_save = (
+                            applied_redaction_pymupdf_doc
+                            if applied_redaction_pymupdf_doc
+                            else pymupdf_doc
+                        )
+
+                        if out_redacted_pdf_file_path:
+                            save_pdf_with_or_without_compression(
+                                doc_to_save, out_redacted_pdf_file_path
                             )
-                            if validate_path_containment(normalized_path, INPUT_FOLDER):
-                                img = Image.open(normalized_path)
+
+                            if isinstance(out_redacted_pdf_file_path, str):
+                                out_file_paths.append(out_redacted_pdf_file_path)
                             else:
-                                raise ValueError(
-                                    f"Unsafe image path detected: {pymupdf_doc[-1]}"
-                                )
-                        # Otherwise could be an image object
-                        else:
-                            img = pymupdf_doc[-1]
-                        img.save(
-                            out_redacted_pdf_file_path, "PNG", resolution=image_dpi
-                        )
+                                out_file_paths.append(out_redacted_pdf_file_path[0])
 
-                        if isinstance(out_redacted_pdf_file_path, str):
-                            out_file_paths.append(out_redacted_pdf_file_path)
-                        else:
-                            out_file_paths.append(out_redacted_pdf_file_path[0])
+        # Always return a file for review if a pdf is given and RETURN_PDF_FOR_REVIEW is True
+        if is_pdf(file_path) is True:
+            if RETURN_PDF_FOR_REVIEW is True:
+                out_review_pdf_file_path = (
+                    output_folder
+                    + pdf_file_name_without_ext
+                    + "_redactions_for_review.pdf"
+                )
+                # Add page range suffix if partial processing
+                out_review_pdf_file_path = add_page_range_suffix_to_file_path(
+                    out_review_pdf_file_path,
+                    page_min,
+                    current_loop_page,
+                    number_of_pages,
+                    page_max,
+                )
+                print("Saving PDF file for review:", out_review_pdf_file_path)
 
+                if out_review_pdf_file_path:
+                    save_pdf_with_or_without_compression(
+                        pymupdf_doc, out_review_pdf_file_path
+                    )
+                    if isinstance(out_review_pdf_file_path, str):
+                        out_file_paths.append(out_review_pdf_file_path)
                     else:
-                        # Check if we have dual PDF documents to save
-                        applied_redaction_pymupdf_doc = None
+                        out_file_paths.append(out_review_pdf_file_path[0])
 
-                        if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
-                            if (
-                                hasattr(redact_image_pdf, "_applied_redaction_pages")
-                                and redact_image_pdf._applied_redaction_pages
-                            ):
-
-                                # Create final document by copying the original document and replacing specific pages
-                                applied_redaction_pymupdf_doc = pymupdf.open()
-                                applied_redaction_pymupdf_doc.insert_pdf(pymupdf_doc)
-
-                                # Create a mapping of original page numbers to final pages
-                                applied_redaction_pages_map = {}
-                                for (
-                                    applied_redaction_page_data
-                                ) in redact_image_pdf._applied_redaction_pages:
-                                    if isinstance(applied_redaction_page_data, tuple):
-                                        applied_redaction_page, original_page_number = (
-                                            applied_redaction_page_data
-                                        )
-                                        applied_redaction_pages_map[
-                                            original_page_number
-                                        ] = applied_redaction_page
-                                    else:
-                                        applied_redaction_page = (
-                                            applied_redaction_page_data
-                                        )
-                                        applied_redaction_pages_map[0] = (
-                                            applied_redaction_page  # Default to page 0 if no original number
-                                        )
-
-                                # Replace pages in the final document with their final versions
-                                for (
-                                    original_page_number,
-                                    applied_redaction_page,
-                                ) in applied_redaction_pages_map.items():
-                                    if (
-                                        original_page_number
-                                        < applied_redaction_pymupdf_doc.page_count
-                                    ):
-                                        # Remove the original page and insert the final page
-                                        applied_redaction_pymupdf_doc.delete_page(
-                                            original_page_number
-                                        )
-                                        applied_redaction_pymupdf_doc.insert_pdf(
-                                            applied_redaction_page.parent,
-                                            from_page=applied_redaction_page.number,
-                                            to_page=applied_redaction_page.number,
-                                            start_at=original_page_number,
-                                        )
-
-                                        applied_redaction_pymupdf_doc[
-                                            original_page_number
-                                        ].apply_redactions(
-                                            images=APPLY_REDACTIONS_IMAGES,
-                                            graphics=APPLY_REDACTIONS_GRAPHICS,
-                                            text=APPLY_REDACTIONS_TEXT,
-                                        )
-                                # Clear the stored final pages
-                                delattr(redact_image_pdf, "_applied_redaction_pages")
-                            elif (
-                                hasattr(redact_text_pdf, "_applied_redaction_pages")
-                                and redact_text_pdf._applied_redaction_pages
-                            ):
-                                # Create final document by copying the original document and replacing specific pages
-                                applied_redaction_pymupdf_doc = pymupdf.open()
-                                applied_redaction_pymupdf_doc.insert_pdf(pymupdf_doc)
-
-                                # Create a mapping of original page numbers to final pages
-                                applied_redaction_pages_map = {}
-                                for (
-                                    applied_redaction_page_data
-                                ) in redact_text_pdf._applied_redaction_pages:
-                                    if isinstance(applied_redaction_page_data, tuple):
-                                        applied_redaction_page, original_page_number = (
-                                            applied_redaction_page_data
-                                        )
-                                        applied_redaction_pages_map[
-                                            original_page_number
-                                        ] = applied_redaction_page
-                                    else:
-                                        applied_redaction_page = (
-                                            applied_redaction_page_data
-                                        )
-                                        applied_redaction_pages_map[0] = (
-                                            applied_redaction_page  # Default to page 0 if no original number
-                                        )
-
-                                # Replace pages in the final document with their final versions
-                                for (
-                                    original_page_number,
-                                    applied_redaction_page,
-                                ) in applied_redaction_pages_map.items():
-                                    if (
-                                        original_page_number
-                                        < applied_redaction_pymupdf_doc.page_count
-                                    ):
-                                        # Remove the original page and insert the final page
-                                        applied_redaction_pymupdf_doc.delete_page(
-                                            original_page_number
-                                        )
-                                        applied_redaction_pymupdf_doc.insert_pdf(
-                                            applied_redaction_page.parent,
-                                            from_page=applied_redaction_page.number,
-                                            to_page=applied_redaction_page.number,
-                                            start_at=original_page_number,
-                                        )
-
-                                        applied_redaction_pymupdf_doc[
-                                            original_page_number
-                                        ].apply_redactions(
-                                            images=APPLY_REDACTIONS_IMAGES,
-                                            graphics=APPLY_REDACTIONS_GRAPHICS,
-                                            text=APPLY_REDACTIONS_TEXT,
-                                        )
-                                # Clear the stored final pages
-                                delattr(redact_text_pdf, "_applied_redaction_pages")
-
-                        # Save final redacted PDF if we have dual outputs or if RETURN_PDF_FOR_REVIEW is False
-                        if (
-                            RETURN_PDF_FOR_REVIEW is False
-                            or applied_redaction_pymupdf_doc
-                        ):
-                            out_redacted_pdf_file_path = (
-                                output_folder
-                                + pdf_file_name_without_ext
-                                + "_redacted.pdf"
-                            )
-                            # Add page range suffix if partial processing
-                            print(
-                                f"page_min: {page_min}, current_loop_page: {current_loop_page}, number_of_pages: {number_of_pages}"
-                            )
-                            out_redacted_pdf_file_path = (
-                                add_page_range_suffix_to_file_path(
-                                    out_redacted_pdf_file_path,
-                                    page_min,
-                                    current_loop_page,
-                                    number_of_pages,
-                                    page_max,
-                                )
-                            )
-                            print(
-                                "Saving redacted PDF file:", out_redacted_pdf_file_path
-                            )
-
-                            # Use final document if available, otherwise use main document
-                            doc_to_save = (
-                                applied_redaction_pymupdf_doc
-                                if applied_redaction_pymupdf_doc
-                                else pymupdf_doc
-                            )
-
-                            if out_redacted_pdf_file_path:
-                                save_pdf_with_or_without_compression(
-                                    doc_to_save, out_redacted_pdf_file_path
-                                )
-
-                                if isinstance(out_redacted_pdf_file_path, str):
-                                    out_file_paths.append(out_redacted_pdf_file_path)
-                                else:
-                                    out_file_paths.append(out_redacted_pdf_file_path[0])
-
-            # Always return a file for review if a pdf is given and RETURN_PDF_FOR_REVIEW is True
-            if is_pdf(file_path) is True:
-                if RETURN_PDF_FOR_REVIEW is True:
-                    out_review_pdf_file_path = (
-                        output_folder
-                        + pdf_file_name_without_ext
-                        + "_redactions_for_review.pdf"
-                    )
-                    # Add page range suffix if partial processing
-                    out_review_pdf_file_path = add_page_range_suffix_to_file_path(
-                        out_review_pdf_file_path,
-                        page_min,
-                        current_loop_page,
-                        number_of_pages,
-                        page_max,
-                    )
-                    print("Saving PDF file for review:", out_review_pdf_file_path)
-
-                    if out_review_pdf_file_path:
-                        save_pdf_with_or_without_compression(
-                            pymupdf_doc, out_review_pdf_file_path
-                        )
-                        if isinstance(out_review_pdf_file_path, str):
-                            out_file_paths.append(out_review_pdf_file_path)
-                        else:
-                            out_file_paths.append(out_review_pdf_file_path[0])
-
-            if not all_page_line_level_ocr_results_df.empty:
-                all_page_line_level_ocr_results_df = all_page_line_level_ocr_results_df[
-                    ["page", "text", "left", "top", "width", "height", "line", "conf"]
+        if not all_page_line_level_ocr_results_df.empty:
+            all_page_line_level_ocr_results_df = all_page_line_level_ocr_results_df[
+                ["page", "text", "left", "top", "width", "height", "line", "conf"]
+            ]
+        else:
+            all_page_line_level_ocr_results_df = pd.DataFrame(
+                columns=[
+                    "page",
+                    "text",
+                    "left",
+                    "top",
+                    "width",
+                    "height",
+                    "line",
+                    "conf",
                 ]
-            else:
-                all_page_line_level_ocr_results_df = pd.DataFrame(
-                    columns=[
-                        "page",
-                        "text",
-                        "left",
-                        "top",
-                        "width",
-                        "height",
-                        "line",
-                        "conf",
-                    ]
+            )
+
+        ocr_file_path = (
+            output_folder
+            + pdf_file_name_without_ext
+            + "_ocr_output_"
+            + file_ending
+            + ".csv"
+        )
+        # Add page range suffix if partial processing
+        ocr_file_path = add_page_range_suffix_to_file_path(
+            ocr_file_path, page_min, current_loop_page, number_of_pages, page_max
+        )
+        all_page_line_level_ocr_results_df.sort_values(["page", "line"], inplace=True)
+        all_page_line_level_ocr_results_df.to_csv(
+            ocr_file_path, index=None, encoding="utf-8-sig"
+        )
+
+        if isinstance(ocr_file_path, str):
+            out_file_paths.append(ocr_file_path)
+        else:
+            duplication_file_path_outputs.append(ocr_file_path[0])
+
+        if all_page_line_level_ocr_results_with_words:
+            all_page_line_level_ocr_results_with_words = merge_page_results(
+                all_page_line_level_ocr_results_with_words
+            )
+
+            with open(
+                all_page_line_level_ocr_results_with_words_json_file_path, "w"
+            ) as json_file:
+                json.dump(
+                    all_page_line_level_ocr_results_with_words,
+                    json_file,
+                    separators=(",", ":"),
                 )
 
-            ocr_file_path = (
+            all_page_line_level_ocr_results_with_words_df = (
+                word_level_ocr_output_to_dataframe(
+                    all_page_line_level_ocr_results_with_words
+                )
+            )
+
+            all_page_line_level_ocr_results_with_words_df = (
+                divide_coordinates_by_page_sizes(
+                    all_page_line_level_ocr_results_with_words_df,
+                    page_sizes_df,
+                    xmin="word_x0",
+                    xmax="word_x1",
+                    ymin="word_y0",
+                    ymax="word_y1",
+                )
+            )
+
+            if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
+                # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
+                if not all_page_line_level_ocr_results_with_words_df.empty:
+                    all_page_line_level_ocr_results_with_words_df["word_y0"] = (
+                        reverse_y_coords(
+                            all_page_line_level_ocr_results_with_words_df, "word_y0"
+                        )
+                    )
+                    all_page_line_level_ocr_results_with_words_df["word_y1"] = (
+                        reverse_y_coords(
+                            all_page_line_level_ocr_results_with_words_df, "word_y1"
+                        )
+                    )
+
+            all_page_line_level_ocr_results_with_words_df["line_text"] = ""
+            all_page_line_level_ocr_results_with_words_df["line_x0"] = ""
+            all_page_line_level_ocr_results_with_words_df["line_x1"] = ""
+            all_page_line_level_ocr_results_with_words_df["line_y0"] = ""
+            all_page_line_level_ocr_results_with_words_df["line_y1"] = ""
+
+            all_page_line_level_ocr_results_with_words_df.sort_values(
+                ["page", "line", "word_x0"], inplace=True
+            )
+            all_page_line_level_ocr_results_with_words_df_file_path = (
+                all_page_line_level_ocr_results_with_words_json_file_path.replace(
+                    ".json", ".csv"
+                )
+            )
+            # Add page range suffix if partial processing
+            all_page_line_level_ocr_results_with_words_df_file_path = (
+                add_page_range_suffix_to_file_path(
+                    all_page_line_level_ocr_results_with_words_df_file_path,
+                    page_min,
+                    current_loop_page,
+                    number_of_pages,
+                    page_max,
+                )
+            )
+            all_page_line_level_ocr_results_with_words_df.to_csv(
+                all_page_line_level_ocr_results_with_words_df_file_path,
+                index=None,
+                encoding="utf-8-sig",
+            )
+
+            if (
+                all_page_line_level_ocr_results_with_words_json_file_path
+                not in log_files_output_paths
+            ):
+                if isinstance(
+                    all_page_line_level_ocr_results_with_words_json_file_path, str
+                ):
+                    log_files_output_paths.append(
+                        all_page_line_level_ocr_results_with_words_json_file_path
+                    )
+                else:
+                    log_files_output_paths.append(
+                        all_page_line_level_ocr_results_with_words_json_file_path[0]
+                    )
+
+            if (
+                all_page_line_level_ocr_results_with_words_df_file_path
+                not in log_files_output_paths
+            ):
+                if isinstance(
+                    all_page_line_level_ocr_results_with_words_df_file_path, str
+                ):
+                    log_files_output_paths.append(
+                        all_page_line_level_ocr_results_with_words_df_file_path
+                    )
+                else:
+                    log_files_output_paths.append(
+                        all_page_line_level_ocr_results_with_words_df_file_path[0]
+                    )
+
+            if (
+                all_page_line_level_ocr_results_with_words_df_file_path
+                not in out_file_paths
+            ):
+                if isinstance(
+                    all_page_line_level_ocr_results_with_words_df_file_path, str
+                ):
+                    out_file_paths.append(
+                        all_page_line_level_ocr_results_with_words_df_file_path
+                    )
+                else:
+                    out_file_paths.append(
+                        all_page_line_level_ocr_results_with_words_df_file_path[0]
+                    )
+
+        # Save decision process outputs
+        if not all_pages_decision_process_table.empty:
+            all_pages_decision_process_table_file_path = (
                 output_folder
                 + pdf_file_name_without_ext
-                + "_ocr_output_"
+                + "_all_pages_decision_process_table_output_"
                 + file_ending
                 + ".csv"
             )
             # Add page range suffix if partial processing
-            ocr_file_path = add_page_range_suffix_to_file_path(
-                ocr_file_path, page_min, current_loop_page, number_of_pages, page_max
-            )
-            all_page_line_level_ocr_results_df.sort_values(
-                ["page", "line"], inplace=True
-            )
-            all_page_line_level_ocr_results_df.to_csv(
-                ocr_file_path, index=None, encoding="utf-8-sig"
-            )
-
-            if isinstance(ocr_file_path, str):
-                out_file_paths.append(ocr_file_path)
-            else:
-                duplication_file_path_outputs.append(ocr_file_path[0])
-
-            if all_page_line_level_ocr_results_with_words:
-                all_page_line_level_ocr_results_with_words = merge_page_results(
-                    all_page_line_level_ocr_results_with_words
-                )
-
-                with open(
-                    all_page_line_level_ocr_results_with_words_json_file_path, "w"
-                ) as json_file:
-                    json.dump(
-                        all_page_line_level_ocr_results_with_words,
-                        json_file,
-                        separators=(",", ":"),
-                    )
-
-                all_page_line_level_ocr_results_with_words_df = (
-                    word_level_ocr_output_to_dataframe(
-                        all_page_line_level_ocr_results_with_words
-                    )
-                )
-
-                all_page_line_level_ocr_results_with_words_df = (
-                    divide_coordinates_by_page_sizes(
-                        all_page_line_level_ocr_results_with_words_df,
-                        page_sizes_df,
-                        xmin="word_x0",
-                        xmax="word_x1",
-                        ymin="word_y0",
-                        ymax="word_y1",
-                    )
-                )
-
-                if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
-                    # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
-                    if not all_page_line_level_ocr_results_with_words_df.empty:
-                        all_page_line_level_ocr_results_with_words_df["word_y0"] = (
-                            reverse_y_coords(
-                                all_page_line_level_ocr_results_with_words_df, "word_y0"
-                            )
-                        )
-                        all_page_line_level_ocr_results_with_words_df["word_y1"] = (
-                            reverse_y_coords(
-                                all_page_line_level_ocr_results_with_words_df, "word_y1"
-                            )
-                        )
-
-                all_page_line_level_ocr_results_with_words_df["line_text"] = ""
-                all_page_line_level_ocr_results_with_words_df["line_x0"] = ""
-                all_page_line_level_ocr_results_with_words_df["line_x1"] = ""
-                all_page_line_level_ocr_results_with_words_df["line_y0"] = ""
-                all_page_line_level_ocr_results_with_words_df["line_y1"] = ""
-
-                all_page_line_level_ocr_results_with_words_df.sort_values(
-                    ["page", "line", "word_x0"], inplace=True
-                )
-                all_page_line_level_ocr_results_with_words_df_file_path = (
-                    all_page_line_level_ocr_results_with_words_json_file_path.replace(
-                        ".json", ".csv"
-                    )
-                )
-                # Add page range suffix if partial processing
-                all_page_line_level_ocr_results_with_words_df_file_path = (
-                    add_page_range_suffix_to_file_path(
-                        all_page_line_level_ocr_results_with_words_df_file_path,
-                        page_min,
-                        current_loop_page,
-                        number_of_pages,
-                        page_max,
-                    )
-                )
-                all_page_line_level_ocr_results_with_words_df.to_csv(
-                    all_page_line_level_ocr_results_with_words_df_file_path,
-                    index=None,
-                    encoding="utf-8-sig",
-                )
-
-                if (
-                    all_page_line_level_ocr_results_with_words_json_file_path
-                    not in log_files_output_paths
-                ):
-                    if isinstance(
-                        all_page_line_level_ocr_results_with_words_json_file_path, str
-                    ):
-                        log_files_output_paths.append(
-                            all_page_line_level_ocr_results_with_words_json_file_path
-                        )
-                    else:
-                        log_files_output_paths.append(
-                            all_page_line_level_ocr_results_with_words_json_file_path[0]
-                        )
-
-                if (
-                    all_page_line_level_ocr_results_with_words_df_file_path
-                    not in log_files_output_paths
-                ):
-                    if isinstance(
-                        all_page_line_level_ocr_results_with_words_df_file_path, str
-                    ):
-                        log_files_output_paths.append(
-                            all_page_line_level_ocr_results_with_words_df_file_path
-                        )
-                    else:
-                        log_files_output_paths.append(
-                            all_page_line_level_ocr_results_with_words_df_file_path[0]
-                        )
-
-                if (
-                    all_page_line_level_ocr_results_with_words_df_file_path
-                    not in out_file_paths
-                ):
-                    if isinstance(
-                        all_page_line_level_ocr_results_with_words_df_file_path, str
-                    ):
-                        out_file_paths.append(
-                            all_page_line_level_ocr_results_with_words_df_file_path
-                        )
-                    else:
-                        out_file_paths.append(
-                            all_page_line_level_ocr_results_with_words_df_file_path[0]
-                        )
-
-            # Save decision process outputs
-            if not all_pages_decision_process_table.empty:
-                all_pages_decision_process_table_file_path = (
-                    output_folder
-                    + pdf_file_name_without_ext
-                    + "_all_pages_decision_process_table_output_"
-                    + file_ending
-                    + ".csv"
-                )
-                # Add page range suffix if partial processing
-                all_pages_decision_process_table_file_path = (
-                    add_page_range_suffix_to_file_path(
-                        all_pages_decision_process_table_file_path,
-                        page_min,
-                        current_loop_page,
-                        number_of_pages,
-                        page_max,
-                    )
-                )
-                all_pages_decision_process_table.to_csv(
+            all_pages_decision_process_table_file_path = (
+                add_page_range_suffix_to_file_path(
                     all_pages_decision_process_table_file_path,
-                    index=None,
-                    encoding="utf-8-sig",
+                    page_min,
+                    current_loop_page,
+                    number_of_pages,
+                    page_max,
                 )
-                log_files_output_paths.append(
-                    all_pages_decision_process_table_file_path
-                )
-
-            # Save outputs from form analysis if they exist
-            if not selection_element_results_list_df.empty:
-                selection_element_results_list_df_file_path = (
-                    output_folder
-                    + pdf_file_name_without_ext
-                    + "_selection_element_results_output_"
-                    + file_ending
-                    + ".csv"
-                )
-                # Add page range suffix if partial processing
-                selection_element_results_list_df_file_path = (
-                    add_page_range_suffix_to_file_path(
-                        selection_element_results_list_df_file_path,
-                        page_min,
-                        current_loop_page,
-                        number_of_pages,
-                        page_max,
-                    )
-                )
-                selection_element_results_list_df.to_csv(
-                    selection_element_results_list_df_file_path,
-                    index=None,
-                    encoding="utf-8-sig",
-                )
-                out_file_paths.append(selection_element_results_list_df_file_path)
-
-            if not form_key_value_results_list_df.empty:
-                form_key_value_results_list_df_file_path = (
-                    output_folder
-                    + pdf_file_name_without_ext
-                    + "_form_key_value_results_output_"
-                    + file_ending
-                    + ".csv"
-                )
-                # Add page range suffix if partial processing
-                form_key_value_results_list_df_file_path = (
-                    add_page_range_suffix_to_file_path(
-                        form_key_value_results_list_df_file_path,
-                        page_min,
-                        current_loop_page,
-                        number_of_pages,
-                        page_max,
-                    )
-                )
-                form_key_value_results_list_df.to_csv(
-                    form_key_value_results_list_df_file_path,
-                    index=None,
-                    encoding="utf-8-sig",
-                )
-                out_file_paths.append(form_key_value_results_list_df_file_path)
-
-            # Convert the gradio annotation boxes to relative coordinates
-            progress(0.93, "Creating review file output")
-            page_sizes = page_sizes_df.to_dict(orient="records")
-            all_image_annotations_df = convert_annotation_data_to_dataframe(
-                annotations_all_pages
             )
-            all_image_annotations_df = divide_coordinates_by_page_sizes(
-                all_image_annotations_df,
-                page_sizes_df,
-                xmin="xmin",
-                xmax="xmax",
-                ymin="ymin",
-                ymax="ymax",
+            all_pages_decision_process_table.to_csv(
+                all_pages_decision_process_table_file_path,
+                index=None,
+                encoding="utf-8-sig",
             )
-            annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(
-                all_image_annotations_df, page_sizes
-            )
-            annotations_all_pages_divide = remove_duplicate_images_with_blank_boxes(
-                annotations_all_pages_divide
-            )
+            log_files_output_paths.append(all_pages_decision_process_table_file_path)
 
-            # Save the gradio_annotation_boxes to a review csv file
-            review_file_state = convert_annotation_json_to_review_df(
-                annotations_all_pages_divide,
-                all_pages_decision_process_table,
-                page_sizes=page_sizes,
+        # Save outputs from form analysis if they exist
+        if not selection_element_results_list_df.empty:
+            selection_element_results_list_df_file_path = (
+                output_folder
+                + pdf_file_name_without_ext
+                + "_selection_element_results_output_"
+                + file_ending
+                + ".csv"
             )
-
-            # Don't need page sizes in outputs
-            review_file_state.drop(
-                [
-                    "image_width",
-                    "image_height",
-                    "mediabox_width",
-                    "mediabox_height",
-                    "cropbox_width",
-                    "cropbox_height",
-                ],
-                axis=1,
-                inplace=True,
-                errors="ignore",
-            )
-
-            if (
-                pii_identification_method == NO_REDACTION_PII_OPTION
-                and not form_key_value_results_list_df.empty
-            ):
-                print(
-                    "Form outputs found with no redaction method selected. Creating review file from form outputs."
-                )
-                review_file_state = form_key_value_results_list_df
-                annotations_all_pages_divide = (
-                    create_annotation_dicts_from_annotation_df(
-                        review_file_state, page_sizes
-                    )
-                )
-
-            review_file_path = orig_pdf_file_path + "_review_file.csv"
             # Add page range suffix if partial processing
-            review_file_path = add_page_range_suffix_to_file_path(
-                review_file_path, page_min, current_loop_page, number_of_pages, page_max
-            )
-            if isinstance(review_file_path, str):
-                review_file_state.to_csv(
-                    review_file_path, index=None, encoding="utf-8-sig"
+            selection_element_results_list_df_file_path = (
+                add_page_range_suffix_to_file_path(
+                    selection_element_results_list_df_file_path,
+                    page_min,
+                    current_loop_page,
+                    number_of_pages,
+                    page_max,
                 )
-            else:
-                review_file_state.to_csv(
-                    review_file_path[0], index=None, encoding="utf-8-sig"
+            )
+            selection_element_results_list_df.to_csv(
+                selection_element_results_list_df_file_path,
+                index=None,
+                encoding="utf-8-sig",
+            )
+            out_file_paths.append(selection_element_results_list_df_file_path)
+
+        if not form_key_value_results_list_df.empty:
+            form_key_value_results_list_df_file_path = (
+                output_folder
+                + pdf_file_name_without_ext
+                + "_form_key_value_results_output_"
+                + file_ending
+                + ".csv"
+            )
+            # Add page range suffix if partial processing
+            form_key_value_results_list_df_file_path = (
+                add_page_range_suffix_to_file_path(
+                    form_key_value_results_list_df_file_path,
+                    page_min,
+                    current_loop_page,
+                    number_of_pages,
+                    page_max,
                 )
-
-            if pii_identification_method != NO_REDACTION_PII_OPTION:
-                if isinstance(review_file_path, str):
-                    out_file_paths.append(review_file_path)
-                else:
-                    out_file_paths.append(review_file_path[0])
-
-            # Make a combined message for the file
-            if isinstance(combined_out_message, list):
-                combined_out_message = "\n".join(combined_out_message)
-            elif combined_out_message is None:
-                combined_out_message = ""
-
-            if isinstance(out_message, list) and out_message:
-                combined_out_message = combined_out_message + "\n".join(out_message)
-            elif isinstance(out_message, str) and out_message:
-                combined_out_message = combined_out_message + "\n" + out_message
-
-            toc = time.perf_counter()
-            time_taken = toc - tic
-            estimated_time_taken_state += time_taken
-
-            out_time_message = (
-                f" Redacted in {estimated_time_taken_state:0.1f} seconds."
             )
-            combined_out_message = (
-                combined_out_message + " " + out_time_message
-            )  # Ensure this is a single string
+            form_key_value_results_list_df.to_csv(
+                form_key_value_results_list_df_file_path,
+                index=None,
+                encoding="utf-8-sig",
+            )
+            out_file_paths.append(form_key_value_results_list_df_file_path)
 
-            estimate_total_processing_time = sum_numbers_before_seconds(
-                combined_out_message
+        # Convert the gradio annotation boxes to relative coordinates
+        progress(0.93, "Creating review file output")
+        page_sizes = page_sizes_df.to_dict(orient="records")
+        all_image_annotations_df = convert_annotation_data_to_dataframe(
+            annotations_all_pages
+        )
+        all_image_annotations_df = divide_coordinates_by_page_sizes(
+            all_image_annotations_df,
+            page_sizes_df,
+            xmin="xmin",
+            xmax="xmax",
+            ymin="ymin",
+            ymax="ymax",
+        )
+        annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(
+            all_image_annotations_df, page_sizes
+        )
+        annotations_all_pages_divide = remove_duplicate_images_with_blank_boxes(
+            annotations_all_pages_divide
+        )
+
+        # Save the gradio_annotation_boxes to a review csv file
+        review_file_state = convert_annotation_json_to_review_df(
+            annotations_all_pages_divide,
+            all_pages_decision_process_table,
+            page_sizes=page_sizes,
+        )
+
+        # Don't need page sizes in outputs
+        review_file_state.drop(
+            [
+                "image_width",
+                "image_height",
+                "mediabox_width",
+                "mediabox_height",
+                "cropbox_width",
+                "cropbox_height",
+            ],
+            axis=1,
+            inplace=True,
+            errors="ignore",
+        )
+
+        if (
+            pii_identification_method == NO_REDACTION_PII_OPTION
+            and not form_key_value_results_list_df.empty
+        ):
+            print(
+                "Form outputs found with no redaction method selected. Creating review file from form outputs."
+            )
+            review_file_state = form_key_value_results_list_df
+            annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(
+                review_file_state, page_sizes
             )
 
+        review_file_path = orig_pdf_file_path + "_review_file.csv"
+        # Add page range suffix if partial processing
+        review_file_path = add_page_range_suffix_to_file_path(
+            review_file_path, page_min, current_loop_page, number_of_pages, page_max
+        )
+        if isinstance(review_file_path, str):
+            review_file_state.to_csv(review_file_path, index=None, encoding="utf-8-sig")
         else:
-            toc = time.perf_counter()
-            time_taken = toc - tic
-            estimated_time_taken_state += time_taken
+            review_file_state.to_csv(
+                review_file_path[0], index=None, encoding="utf-8-sig"
+            )
+
+        if pii_identification_method != NO_REDACTION_PII_OPTION:
+            if isinstance(review_file_path, str):
+                out_file_paths.append(review_file_path)
+            else:
+                out_file_paths.append(review_file_path[0])
+
+        # Make a combined message for the file
+        if isinstance(combined_out_message, list):
+            combined_out_message = "\n".join(combined_out_message)
+        elif combined_out_message is None:
+            combined_out_message = ""
+
+        if isinstance(out_message, list) and out_message:
+            combined_out_message = combined_out_message + "\n".join(out_message)
+        elif isinstance(out_message, str) and out_message:
+            combined_out_message = combined_out_message + "\n" + out_message
+
+        toc = time.perf_counter()
+        time_taken = toc - tic
+        estimated_time_taken_state += time_taken
+
+        out_time_message = f" Redacted in {estimated_time_taken_state:0.1f} seconds."
+        combined_out_message = (
+            combined_out_message + " " + out_time_message
+        )  # Ensure this is a single string
+
+        estimate_total_processing_time = sum_numbers_before_seconds(
+            combined_out_message
+        )
+
+        # else:
+        #     toc = time.perf_counter()
+        #     time_taken = toc - tic
+        #     estimated_time_taken_state += time_taken
 
     # If textract requests made, write to logging file. Also record number of Textract requests
     if all_textract_request_metadata and isinstance(

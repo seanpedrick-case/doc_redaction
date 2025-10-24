@@ -6,18 +6,25 @@ from dotenv import load_dotenv
 
 # Import the main function from your CLI script
 from cli_redact import main as cli_main
+from tools.config import AWS_REGION
 
 print("Lambda entrypoint loading...")
 
 # Initialize S3 client outside the handler for connection reuse
-s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "eu-west-2"))
+s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", AWS_REGION))
 print("S3 client initialised")
 
-# Lambda's only writable directory
+# Lambda's only writable directory is /tmp. Ensure that all temporary files are stored in this directory.
 TMP_DIR = "/tmp"
 INPUT_DIR = os.path.join(TMP_DIR, "input")
 OUTPUT_DIR = os.path.join(TMP_DIR, "output")
-os.environ["TESSERACT_DATA_FOLDER"] = "/tmp/share/tessdata"
+os.environ["TESSERACT_DATA_FOLDER"] = os.path.join(TMP_DIR, "share/tessdata")
+os.environ["TLDEXTRACT_CACHE"] = os.path.join(TMP_DIR, "tld")
+os.environ["MPLCONFIGDIR"] = os.path.join(TMP_DIR, "matplotlib_cache")
+os.environ["GRADIO_TEMP_DIR"] = os.path.join(TMP_DIR, "gradio_tmp")
+os.environ["FEEDBACK_LOGS_FOLDER"] = os.path.join(TMP_DIR, "feedback")
+os.environ["ACCESS_LOGS_FOLDER"] = os.path.join(TMP_DIR, "logs")
+os.environ["USAGE_LOGS_FOLDER"] = os.path.join(TMP_DIR, "usage")
 
 # Define compatible file types for processing
 COMPATIBLE_FILE_TYPES = {
@@ -78,10 +85,25 @@ def lambda_handler(event, context):
 
         # The user metadata can be used to pass arguments
         # This is more robust than embedding them in the main event body
-        response = s3_client.head_object(Bucket=bucket_name, Key=input_key)
-        metadata = response.get("Metadata", dict())
-        # Arguments can be passed as a JSON string in metadata
-        arguments = json.loads(metadata.get("arguments", "dict()"))
+        try:
+            response = s3_client.head_object(Bucket=bucket_name, Key=input_key)
+            metadata = response.get("Metadata", dict())
+            print(f"S3 object metadata: {metadata}")
+
+            # Arguments can be passed as a JSON string in metadata
+            arguments_str = metadata.get("arguments", "{}")
+            print(f"Arguments string from metadata: '{arguments_str}'")
+
+            if arguments_str and arguments_str != "{}":
+                arguments = json.loads(arguments_str)
+                print(f"Successfully parsed arguments from metadata: {arguments}")
+            else:
+                arguments = dict()
+                print("No arguments found in metadata, using empty dictionary")
+        except Exception as e:
+            print(f"Warning: Could not parse metadata arguments: {e}")
+            print("Using empty arguments dictionary")
+            arguments = dict()
 
     except (KeyError, IndexError) as e:
         print(
@@ -96,8 +118,9 @@ def lambda_handler(event, context):
                 "Missing 'bucket_name' or 'input_key' in direct invocation event."
             )
 
-    print(f"Processing s3://{bucket_name}/{input_key}")
-    print(f"With arguments: {arguments}")
+    # print(f"Processing s3://{bucket_name}/{input_key}")
+    # print(f"With arguments: {arguments}")
+    # print(f"Arguments type: {type(arguments)}")
 
     # Log file type information
     file_extension = os.path.splitext(input_key)[1].lower()
@@ -143,28 +166,18 @@ def lambda_handler(event, context):
         print("Environment variables loaded from .env file")
 
         # Log some key environment variables for debugging
-        print(f"DIRECT_MODE_INPUT_FILE: {os.getenv('DIRECT_MODE_INPUT_FILE')}")
-        print(f"INPUT_FILE: {os.getenv('INPUT_FILE')}")
-        print(f"TASK: {os.getenv('DIRECT_MODE_TASK', 'not set')}")
-        print(f"PII_DETECTOR: {os.getenv('LOCAL_PII_OPTION', 'not set')}")
-        print(f"OCR_METHOD: {os.getenv('TESSERACT_TEXT_EXTRACT_OPTION', 'not set')}")
-        print(f"LANGUAGE: {os.getenv('DEFAULT_LANGUAGE', 'not set')}")
-        print(
-            f"ANON_STRATEGY: {os.getenv('DEFAULT_TABULAR_ANONYMISATION_STRATEGY', 'not set')}"
-        )
+        # print(f"INPUT_FILE: {os.getenv('INPUT_FILE', 'not set')}")
+        # print(f"TASK: {os.getenv('DIRECT_MODE_TASK', 'not set')}")
+        # print(f"PII_DETECTOR: {os.getenv('LOCAL_PII_OPTION', 'not set')}")
+        # print(f"OCR_METHOD: {os.getenv('TESSERACT_TEXT_EXTRACT_OPTION', 'not set')}")
+        # print(f"LANGUAGE: {os.getenv('DEFAULT_LANGUAGE', 'not set')}")
+        # print(
+        #     f"ANON_STRATEGY: {os.getenv('DEFAULT_TABULAR_ANONYMISATION_STRATEGY', 'not set')}"
+        # )
 
         # Extract the actual input file path from environment variables
         # Look for common environment variable names that might contain the input file path
-        env_input_file = (
-            os.getenv("DIRECT_MODE_INPUT_FILE")
-            or os.getenv("INPUT_FILE")
-            or os.getenv("INPUT_FILE_PATH")
-            or os.getenv("FILE_PATH")
-            or os.getenv("DOCUMENT_PATH")
-            or os.getenv("TEXTRACT_INPUT_FILE")
-            or os.getenv("REDACTION_INPUT_FILE")
-            or os.getenv("PROCESSING_INPUT_FILE")
-        )
+        env_input_file = os.getenv("INPUT_FILE")
 
         if env_input_file:
             print(f"Found input file path in environment: {env_input_file}")

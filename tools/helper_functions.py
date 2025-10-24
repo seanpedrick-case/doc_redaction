@@ -643,18 +643,17 @@ def _generate_unique_ids(
 
 
 def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:
-    """Get the file paths of all files in the given folder."""
-    file_paths = []
+    """Get the file paths of all files in the given folder and its subfolders."""
+    file_paths = list()
 
     # Ensure folder_path is a safe, absolute path
     safe_folder_path = Path(folder_path).resolve()
 
-    # List all files in the specified folder
-    for filename in os.listdir(safe_folder_path):
-        # Construct full file path using secure_join to prevent path traversal
-        full_path = secure_join(safe_folder_path, filename)
-        # Check if it's a file (not a directory)
-        if os.path.isfile(full_path):
+    # Walk through all files in the directory tree
+    for root, dirs, files in os.walk(safe_folder_path):
+        for filename in files:
+            # Construct full file path using secure_join to prevent path traversal
+            full_path = secure_join(Path(root), filename)
             file_paths.append(full_path)
 
     return file_paths
