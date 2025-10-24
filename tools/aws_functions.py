@@ -29,7 +29,7 @@ def get_assumed_role_info():
     return assumed_role_arn, assumed_role_name
 
 
-if RUN_AWS_FUNCTIONS == "1":
+if RUN_AWS_FUNCTIONS:
     try:
         session = boto3.Session(region_name=AWS_REGION)
 
@@ -52,10 +52,10 @@ def download_file_from_s3(
     bucket_name: str,
     key: str,
     local_file_path_and_name: str,
-    RUN_AWS_FUNCTIONS: str = RUN_AWS_FUNCTIONS,
+    RUN_AWS_FUNCTIONS: bool = RUN_AWS_FUNCTIONS,
 ):
 
-    if RUN_AWS_FUNCTIONS == "1":
+    if RUN_AWS_FUNCTIONS:
 
         try:
             # Ensure the local directory exists
@@ -74,12 +74,12 @@ def download_folder_from_s3(
     bucket_name: str,
     s3_folder: str,
     local_folder: str,
-    RUN_AWS_FUNCTIONS: str = RUN_AWS_FUNCTIONS,
+    RUN_AWS_FUNCTIONS: bool = RUN_AWS_FUNCTIONS,
 ):
     """
     Download all files from an S3 folder to a local folder.
     """
-    if RUN_AWS_FUNCTIONS == "1":
+    if RUN_AWS_FUNCTIONS:
         if bucket_name and s3_folder and local_folder:
 
             s3 = boto3.client("s3", region_name=AWS_REGION)
@@ -117,13 +117,13 @@ def download_files_from_s3(
     s3_folder: str,
     local_folder: str,
     filenames: List[str],
-    RUN_AWS_FUNCTIONS: str = RUN_AWS_FUNCTIONS,
+    RUN_AWS_FUNCTIONS: bool = RUN_AWS_FUNCTIONS,
 ):
     """
     Download specific files from an S3 folder to a local folder.
     """
 
-    if RUN_AWS_FUNCTIONS == "1":
+    if RUN_AWS_FUNCTIONS:
         if bucket_name and s3_folder and local_folder and filenames:
 
             s3 = boto3.client("s3", region_name=AWS_REGION)
@@ -169,7 +169,7 @@ def upload_file_to_s3(
     local_file_paths: List[str],
     s3_key: str,
     s3_bucket: str = DOCUMENT_REDACTION_BUCKET,
-    RUN_AWS_FUNCTIONS: str = RUN_AWS_FUNCTIONS,
+    RUN_AWS_FUNCTIONS: bool = RUN_AWS_FUNCTIONS,
 ):
     """
     Uploads a file from local machine to Amazon S3.
@@ -182,10 +182,10 @@ def upload_file_to_s3(
     Returns:
     - Message as variable/printed to console
     """
-    final_out_message = []
+    final_out_message = list()
     final_out_message_str = ""
 
-    if RUN_AWS_FUNCTIONS == "1":
+    if RUN_AWS_FUNCTIONS:
         try:
             if s3_bucket and s3_key and local_file_paths:
 
@@ -236,8 +236,8 @@ def upload_log_file_to_s3(
     local_file_paths: List[str],
     s3_key: str,
     s3_bucket: str = DOCUMENT_REDACTION_BUCKET,
-    RUN_AWS_FUNCTIONS: str = RUN_AWS_FUNCTIONS,
-    SAVE_LOGS_TO_CSV: str = SAVE_LOGS_TO_CSV,
+    RUN_AWS_FUNCTIONS: bool = RUN_AWS_FUNCTIONS,
+    SAVE_LOGS_TO_CSV: bool = SAVE_LOGS_TO_CSV,
 ):
     """
     Uploads a log file from local machine to Amazon S3.
@@ -250,10 +250,10 @@ def upload_log_file_to_s3(
     Returns:
     - Message as variable/printed to console
     """
-    final_out_message = []
+    final_out_message = list()
     final_out_message_str = ""
 
-    if RUN_AWS_FUNCTIONS == "1" and SAVE_LOGS_TO_CSV is True:
+    if RUN_AWS_FUNCTIONS and SAVE_LOGS_TO_CSV:
         try:
             if s3_bucket and s3_key and local_file_paths:
 

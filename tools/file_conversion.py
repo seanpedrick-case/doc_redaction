@@ -48,7 +48,7 @@ if not MAX_IMAGE_PIXELS:
 else:
     Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
-ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
+ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES
 
 
 def is_pdf_or_image(filename):

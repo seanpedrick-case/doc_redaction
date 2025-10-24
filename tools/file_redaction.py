@@ -107,7 +107,7 @@ from tools.secure_path_utils import (
     validate_path_containment,
 )
 
-ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES.lower() == "true"
+ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES
 if not MAX_IMAGE_PIXELS:
     Image.MAX_IMAGE_PIXELS = None
 else:
@@ -803,9 +803,9 @@ def choose_and_run_redactor(
 
     ### Load/create PII identification method
 
-    # Try to connect to AWS services directly only if RUN_AWS_FUNCTIONS environmental variable is 1, otherwise an environment variable or direct textbox input is needed.
+    # Try to connect to AWS services directly only if RUN_AWS_FUNCTIONS environmental variable is True, otherwise an environment variable or direct textbox input is needed.
     if pii_identification_method == AWS_PII_OPTION:
-        if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+        if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Comprehend via existing SSO connection")
             comprehend_client = boto3.client("comprehend", region_name=AWS_REGION)
         elif aws_access_key_textbox and aws_secret_key_textbox:
@@ -818,7 +818,7 @@ def choose_and_run_redactor(
                 aws_secret_access_key=aws_secret_key_textbox,
                 region_name=AWS_REGION,
             )
-        elif RUN_AWS_FUNCTIONS == "1":
+        elif RUN_AWS_FUNCTIONS:
             print("Connecting to Comprehend via existing SSO connection")
             comprehend_client = boto3.client("comprehend", region_name=AWS_REGION)
         elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
@@ -839,7 +839,7 @@ def choose_and_run_redactor(
 
     # Try to connect to AWS Textract Client if using that text extraction method
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
-        if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+        if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Textract via existing SSO connection")
             textract_client = boto3.client("textract", region_name=AWS_REGION)
         elif aws_access_key_textbox and aws_secret_key_textbox:
@@ -852,7 +852,7 @@ def choose_and_run_redactor(
                 aws_secret_access_key=aws_secret_key_textbox,
                 region_name=AWS_REGION,
             )
-        elif RUN_AWS_FUNCTIONS == "1":
+        elif RUN_AWS_FUNCTIONS:
             print("Connecting to Textract via existing SSO connection")
             textract_client = boto3.client("textract", region_name=AWS_REGION)
         elif AWS_ACCESS_KEY and AWS_SECRET_KEY:

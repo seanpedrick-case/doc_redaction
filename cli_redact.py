@@ -341,7 +341,7 @@ python cli_redact.py --task textract --textract_action list
     )
     general_group.add_argument(
         "--upload_logs_to_s3",
-        default=RUN_AWS_FUNCTIONS == "1",
+        default=RUN_AWS_FUNCTIONS,
         help="Upload log files to S3 after processing.",
     )
     general_group.add_argument(
@@ -762,6 +762,8 @@ python cli_redact.py --task textract --textract_action list
                     output_folder=args.output_dir,
                     input_folder=args.input_dir,
                     prepare_images=args.prepare_images,
+                    page_min=args.page_min,
+                    page_max=args.page_max,
                 )
                 print(f"Preparation complete. {prep_summary}")
 

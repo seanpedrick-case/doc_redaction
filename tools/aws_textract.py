@@ -38,8 +38,8 @@ def analyse_page_with_textract(
     textract_output_found: bool = False,
     aws_access_question_textbox: str = AWS_ACCESS_KEY,
     aws_secret_question_textbox: str = AWS_SECRET_KEY,
-    RUN_AWS_FUNCTIONS: str = RUN_AWS_FUNCTIONS,
-    PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS: str = PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
+    RUN_AWS_FUNCTIONS: bool = RUN_AWS_FUNCTIONS,
+    PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS: bool = PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
 ):
     """
     Analyzes a single page of a document using AWS Textract to extract text and other features.
@@ -62,12 +62,12 @@ def analyse_page_with_textract(
                                                 SSO or environment variables. Defaults to AWS_ACCESS_KEY.
         aws_secret_question_textbox (str, optional): AWS secret question provided by the user, if not using
                                                 SSO or environment variables. Defaults to AWS_SECRET_KEY.
-        RUN_AWS_FUNCTIONS (str, optional): Configuration flag (e.g., "1" or "0") to enable or
+        RUN_AWS_FUNCTIONS (bool, optional): Configuration flag to enable or
                                            disable AWS functions. Defaults to RUN_AWS_FUNCTIONS.
-        PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS (str, optional): Configuration flag (e.g., "1" or "0")
+        PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS (bool, optional): Configuration flag (e.g., True or False)
                                                                  to prioritize AWS SSO credentials
                                                                  over environment variables.
-                                                                 Defaults to PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS.
+                                                                 Defaults to True.
 
     Returns:
         Tuple[List[Dict], str]: A tuple containing:
@@ -79,10 +79,7 @@ def analyse_page_with_textract(
     if client == "":
         try:
             # Try to connect to AWS Textract Client if using that text extraction method
-            if (
-                RUN_AWS_FUNCTIONS == "1"
-                and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1"
-            ):
+            if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
                 print("Connecting to Textract via existing SSO connection")
                 client = boto3.client("textract", region_name=AWS_REGION)
             elif aws_access_question_textbox and aws_secret_question_textbox:
@@ -95,7 +92,7 @@ def analyse_page_with_textract(
                     aws_secret_access_question=aws_secret_question_textbox,
                     region_name=AWS_REGION,
                 )
-            elif RUN_AWS_FUNCTIONS == "1":
+            elif RUN_AWS_FUNCTIONS is True:
                 print("Connecting to Textract via existing SSO connection")
                 client = boto3.client("textract", region_name=AWS_REGION)
             elif AWS_ACCESS_KEY and AWS_SECRET_KEY:

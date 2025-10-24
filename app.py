@@ -5806,7 +5806,7 @@ with blocks:
         if (
             not os.path.exists(ALLOW_LIST_PATH)
             and S3_ALLOW_LIST_PATH
-            and RUN_AWS_FUNCTIONS == "1"
+            and RUN_AWS_FUNCTIONS
         ):
             print("Downloading allow list from S3")
             blocks.load(
@@ -5840,7 +5840,7 @@ with blocks:
         if (
             not os.path.exists(COST_CODES_PATH)
             and S3_COST_CODES_PATH
-            and RUN_AWS_FUNCTIONS == "1"
+            and RUN_AWS_FUNCTIONS
         ):
             print("Downloading cost codes from S3")
             blocks.load(
@@ -6423,9 +6423,9 @@ with blocks:
         default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT),
     )
 
-    if RUN_DIRECT_MODE == "0":
+    if not RUN_DIRECT_MODE:
         # If running through command line with uvicorn
-        if RUN_FASTAPI == "1":
+        if RUN_FASTAPI:
             if ALLOWED_ORIGINS:
                 print(f"CORS enabled. Allowing origins: {ALLOWED_ORIGINS}")
                 app.add_middleware(
@@ -6448,7 +6448,7 @@ with blocks:
                 app,
                 blocks,
                 show_error=True,
-                auth=authenticate_user if COGNITO_AUTH == "1" else None,
+                auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
                 path=FASTAPI_ROOT_PATH,
                 favicon_path=Path(FAVICON_PATH),
@@ -6459,7 +6459,7 @@ with blocks:
 
         else:
             if __name__ == "__main__":
-                if COGNITO_AUTH == "1":
+                if COGNITO_AUTH:
                     blocks.launch(
                         show_error=True,
                         inbrowser=True,
@@ -6519,7 +6519,7 @@ with blocks:
                 "save_logs_to_csv": SAVE_LOGS_TO_CSV,
                 "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,
                 "display_file_names_in_logs": DISPLAY_FILE_NAMES_IN_LOGS,
-                "upload_logs_to_s3": RUN_AWS_FUNCTIONS == "1",
+                "upload_logs_to_s3": RUN_AWS_FUNCTIONS,
                 "s3_logs_prefix": S3_USAGE_LOGS_FOLDER,
                 "feedback_logs_folder": FEEDBACK_LOGS_FOLDER,
                 "access_logs_folder": ACCESS_LOGS_FOLDER,
@@ -6590,23 +6590,6 @@ with blocks:
                 list(direct_mode_args["handwrite_signature_extraction"])
                 if direct_mode_args["handwrite_signature_extraction"]
                 else list()
-            )
-            if direct_mode_args["extract_forms"]:
-                extraction_options.append("Extract forms")
-            if direct_mode_args["extract_tables"]:
-                extraction_options.append("Extract tables")
-            if direct_mode_args["extract_layout"]:
-                extraction_options.append("Extract layout")
-            direct_mode_args["handwrite_signature_extraction"] = extraction_options
-
-            # Run the CLI main function with direct mode arguments
-            main(direct_mode_args=direct_mode_args)
-
-            # Combine extraction options
-            extraction_options = (
-                list(direct_mode_args["handwrite_signature_extraction"])
-                if direct_mode_args["handwrite_signature_extraction"]
-                else []
             )
             if direct_mode_args["extract_forms"]:
                 extraction_options.append("Extract forms")

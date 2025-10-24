@@ -28,8 +28,8 @@ This section covers configurations related to AWS services used by the applicati
     *   **Configuration:** Set as an environment variable directly. This variable defines an additional source for AWS-specific configurations.
 
 *   **`RUN_AWS_FUNCTIONS`**
-    *   **Description:** Enables or disables AWS-specific functionalities within the application. Set to `"1"` to enable and `"0"` to disable.
-    *   **Default Value:** `"0"`
+    *   **Description:** Enables or disables AWS-specific functionalities within the application. Set to `"True"` to enable and `"False"` to disable.
+    *   **Default Value:** `"False"`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
 
 *   **`AWS_REGION`**
@@ -392,13 +392,13 @@ General runtime configurations for the application.
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
 *   **`COGNITO_AUTH`**
-    *   **Description:** Enables or disables AWS Cognito authentication for the application. Set to `'1'` to enable.
-    *   **Default Value:** `'0'`
+    *   **Description:** Enables or disables AWS Cognito authentication for the application. Set to `'True'` to enable.
+    *   **Default Value:** `'False'`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
 
 *   **`RUN_DIRECT_MODE`**
-    *   **Description:** If set to `'1'`, runs the application in a "direct mode", which might alter certain behaviors (e.g., UI elements, processing flow).
-    *   **Default Value:** `'0'`
+    *   **Description:** If set to `'True'`, runs the application in a "direct mode", which might alter certain behaviors (e.g., UI elements, processing flow).
+    *   **Default Value:** `'False'`
     *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
 
 *   **`MAX_QUEUE_SIZE`**

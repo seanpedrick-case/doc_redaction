@@ -112,11 +112,11 @@ class CLIUsageLogger:
         """
         # Use config defaults if not specified
         if save_to_csv is None:
-            save_to_csv = SAVE_LOGS_TO_CSV == "True"
+            save_to_csv = SAVE_LOGS_TO_CSV
         if save_to_dynamodb is None:
-            save_to_dynamodb = SAVE_LOGS_TO_DYNAMODB == "True"
+            save_to_dynamodb = SAVE_LOGS_TO_DYNAMODB
         if save_to_s3 is None:
-            save_to_s3 = RUN_AWS_FUNCTIONS == "1" and SAVE_LOGS_TO_CSV == "True"
+            save_to_s3 = RUN_AWS_FUNCTIONS and SAVE_LOGS_TO_CSV
         if s3_bucket is None:
             s3_bucket = DOCUMENT_REDACTION_BUCKET
         if s3_key_prefix is None:

@@ -43,6 +43,18 @@ def _get_env_list(env_var_name: str | list[str] | None) -> list[str]:
     return [s.strip() for s in value.split(",") if s.strip()]
 
 
+def convert_string_to_boolean(value: str) -> bool:
+    """Convert string to boolean, handling various formats."""
+    if isinstance(value, bool):
+        return value
+    elif value in ["True", "1", "true", "TRUE"]:
+        return True
+    elif value in ["False", "0", "false", "FALSE"]:
+        return False
+    else:
+        raise ValueError(f"Invalid boolean value: {value}")
+
+
 print("Lambda entrypoint loading...")
 
 # Initialize S3 client outside the handler for connection reuse
@@ -293,8 +305,10 @@ def lambda_handler(event, context):
         "username": arguments.get(
             "username", os.getenv("DIRECT_MODE_DEFAULT_USER", "lambda_user")
         ),
-        "save_to_user_folders": arguments.get(
-            "save_to_user_folders", os.getenv("SESSION_OUTPUT_FOLDER", "False")
+        "save_to_user_folders": convert_string_to_boolean(
+            arguments.get(
+                "save_to_user_folders", os.getenv("SESSION_OUTPUT_FOLDER", "False")
+            )
         ),
         "local_redact_entities": _get_env_list(
             arguments.get(
@@ -312,20 +326,26 @@ def lambda_handler(event, context):
         "aws_region": os.getenv("AWS_REGION", ""),
         "s3_bucket": bucket_name,
         "do_initial_clean": arguments.get(
-            "do_initial_clean", os.getenv("DO_INITIAL_TABULAR_DATA_CLEAN", "False")
+            "do_initial_clean",
+            convert_string_to_boolean(
+                os.getenv("DO_INITIAL_TABULAR_DATA_CLEAN", "False")
+            ),
         ),
-        "save_logs_to_csv": arguments.get(
-            "save_logs_to_csv", os.getenv("SAVE_LOGS_TO_CSV", "True")
+        "save_logs_to_csv": convert_string_to_boolean(
+            arguments.get("save_logs_to_csv", os.getenv("SAVE_LOGS_TO_CSV", "True"))
         ),
         "save_logs_to_dynamodb": arguments.get(
-            "save_logs_to_dynamodb", os.getenv("SAVE_LOGS_TO_DYNAMODB", "False")
+            "save_logs_to_dynamodb",
+            convert_string_to_boolean(os.getenv("SAVE_LOGS_TO_DYNAMODB", "False")),
         ),
-        "display_file_names_in_logs": arguments.get(
-            "display_file_names_in_logs",
-            os.getenv("DISPLAY_FILE_NAMES_IN_LOGS", "True"),
+        "display_file_names_in_logs": convert_string_to_boolean(
+            arguments.get(
+                "display_file_names_in_logs",
+                os.getenv("DISPLAY_FILE_NAMES_IN_LOGS", "True"),
+            )
         ),
-        "upload_logs_to_s3": arguments.get(
-            "upload_logs_to_s3", os.getenv("RUN_AWS_FUNCTIONS", "False")
+        "upload_logs_to_s3": convert_string_to_boolean(
+            arguments.get("upload_logs_to_s3", os.getenv("RUN_AWS_FUNCTIONS", "False"))
         ),
         "s3_logs_prefix": arguments.get(
             "s3_logs_prefix", os.getenv("S3_USAGE_LOGS_FOLDER", "")
@@ -364,15 +384,21 @@ def lambda_handler(event, context):
         "chosen_local_ocr_model": arguments.get(
             "chosen_local_ocr_model", os.getenv("CHOSEN_LOCAL_OCR_MODEL", "tesseract")
         ),
-        "preprocess_local_ocr_images": arguments.get(
-            "preprocess_local_ocr_images",
-            os.getenv("PREPROCESS_LOCAL_OCR_IMAGES", "False"),
+        "preprocess_local_ocr_images": convert_string_to_boolean(
+            arguments.get(
+                "preprocess_local_ocr_images",
+                os.getenv("PREPROCESS_LOCAL_OCR_IMAGES", "True"),
+            )
         ),
-        "compress_redacted_pdf": arguments.get(
-            "compress_redacted_pdf", os.getenv("COMPRESS_REDACTED_PDF", "False")
+        "compress_redacted_pdf": convert_string_to_boolean(
+            arguments.get(
+                "compress_redacted_pdf", os.getenv("COMPRESS_REDACTED_PDF", "True")
+            )
         ),
-        "return_pdf_end_of_redaction": arguments.get(
-            "return_pdf_end_of_redaction", os.getenv("RETURN_REDACTED_PDF", "True")
+        "return_pdf_end_of_redaction": convert_string_to_boolean(
+            arguments.get(
+                "return_pdf_end_of_redaction", os.getenv("RETURN_REDACTED_PDF", "True")
+            )
         ),
         "deny_list_file": arguments.get(
             "deny_list_file", os.getenv("DENY_LIST_PATH", "")
@@ -392,17 +418,23 @@ def lambda_handler(event, context):
                 ),
             )
         ),
-        "extract_forms": arguments.get(
-            "extract_forms",
-            os.getenv("INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION", "False") == "True",
+        "extract_forms": convert_string_to_boolean(
+            arguments.get(
+                "extract_forms",
+                os.getenv("INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION", "False"),
+            )
         ),
-        "extract_tables": arguments.get(
-            "extract_tables",
-            os.getenv("INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION", "False") == "True",
+        "extract_tables": convert_string_to_boolean(
+            arguments.get(
+                "extract_tables",
+                os.getenv("INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION", "False"),
+            )
         ),
-        "extract_layout": arguments.get(
-            "extract_layout",
-            os.getenv("INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION", "False") == "True",
+        "extract_layout": convert_string_to_boolean(
+            arguments.get(
+                "extract_layout",
+                os.getenv("INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION", "False"),
+            )
         ),
         # Word/Tabular Anonymisation Arguments
         "anon_strategy": arguments.get(
@@ -424,9 +456,11 @@ def lambda_handler(event, context):
                 ),
             )
         ),
-        "match_fuzzy_whole_phrase_bool": arguments.get(
-            "match_fuzzy_whole_phrase_bool",
-            os.getenv("MATCH_FUZZY_WHOLE_PHRASE_BOOL", "True"),
+        "match_fuzzy_whole_phrase_bool": convert_string_to_boolean(
+            arguments.get(
+                "match_fuzzy_whole_phrase_bool",
+                os.getenv("MATCH_FUZZY_WHOLE_PHRASE_BOOL", "True"),
+            )
         ),
         # Duplicate Detection Arguments
         "duplicate_type": arguments.get(
@@ -455,19 +489,25 @@ def lambda_handler(event, context):
                 ),
             )
         ),
-        "greedy_match": arguments.get(
-            "greedy_match", os.getenv("USE_GREEDY_DUPLICATE_DETECTION", "False")
+        "greedy_match": convert_string_to_boolean(
+            arguments.get(
+                "greedy_match", os.getenv("USE_GREEDY_DUPLICATE_DETECTION", "False")
+            )
         ),
-        "combine_pages": arguments.get(
-            "combine_pages", os.getenv("DEFAULT_COMBINE_PAGES", "True")
+        "combine_pages": convert_string_to_boolean(
+            arguments.get("combine_pages", os.getenv("DEFAULT_COMBINE_PAGES", "True"))
         ),
-        "remove_duplicate_rows": arguments.get(
-            "remove_duplicate_rows", os.getenv("REMOVE_DUPLICATE_ROWS", "False")
+        "remove_duplicate_rows": convert_string_to_boolean(
+            arguments.get(
+                "remove_duplicate_rows", os.getenv("REMOVE_DUPLICATE_ROWS", "False")
+            )
         ),
         # Textract Batch Operations Arguments
         "textract_action": arguments.get("textract_action", ""),
         "job_id": arguments.get("job_id", ""),
-        "extract_signatures": arguments.get("extract_signatures", False),
+        "extract_signatures": convert_string_to_boolean(
+            arguments.get("extract_signatures", "False")
+        ),
         "textract_bucket": arguments.get(
             "textract_bucket", os.getenv("TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET", "")
         ),
@@ -492,7 +532,9 @@ def lambda_handler(event, context):
         "search_query": arguments.get(
             "search_query", os.getenv("DEFAULT_SEARCH_QUERY", "")
         ),
-        "prepare_images": arguments.get("prepare_images", True),
+        "prepare_images": convert_string_to_boolean(
+            arguments.get("prepare_images", "True")
+        ),
     }
 
     # Debug: Print the final page_min and page_max values
