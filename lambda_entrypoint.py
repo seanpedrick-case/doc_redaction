@@ -199,8 +199,26 @@ def lambda_handler(event, context):
         print("Detected .env file, loading environment variables...")
 
         # Load environment variables from the .env file
-        load_dotenv(input_file_path)
-        print("Environment variables loaded from .env file")
+        print(f"Loading .env file from: {input_file_path}")
+
+        # Check if file exists and is readable
+        if os.path.exists(input_file_path):
+            print(".env file exists and is readable")
+            with open(input_file_path, "r") as f:
+                content = f.read()
+                print(f".env file content preview: {content[:200]}...")
+        else:
+            print(f"ERROR: .env file does not exist at {input_file_path}")
+
+        load_dotenv(input_file_path, override=True)
+        print("Environment variables loaded from .env file (with override=True)")
+
+        # Debug: Print the loaded environment variables
+        print(f"DEFAULT_PAGE_MIN from env: {os.getenv('DEFAULT_PAGE_MIN')}")
+        print(f"DEFAULT_PAGE_MAX from env: {os.getenv('DEFAULT_PAGE_MAX')}")
+        print(
+            f"All DEFAULT_PAGE_* env vars: {[k for k in os.environ.keys() if 'DEFAULT_PAGE' in k]}"
+        )
 
         # Extract the actual input file path from environment variables
         # Look for common environment variable names that might contain the input file path
@@ -252,6 +270,14 @@ def lambda_handler(event, context):
     # 4. Prepare arguments for the CLI function
     # This dictionary should mirror the one in your app.py's "direct mode"
     # If we loaded a .env file, use environment variables as defaults
+
+    # Debug: Print environment variables before constructing cli_args
+    print("Before cli_args construction:")
+    print(f"  DEFAULT_PAGE_MIN from env: {os.getenv('DEFAULT_PAGE_MIN')}")
+    print(f"  DEFAULT_PAGE_MAX from env: {os.getenv('DEFAULT_PAGE_MAX')}")
+    print(f"  DEFAULT_PAGE_MIN from config: {DEFAULT_PAGE_MIN}")
+    print(f"  DEFAULT_PAGE_MAX from config: {DEFAULT_PAGE_MAX}")
+
     cli_args = {
         # Task Selection
         "task": arguments.get("task", os.getenv("DIRECT_MODE_TASK", "redact")),
@@ -289,7 +315,7 @@ def lambda_handler(event, context):
             "do_initial_clean", os.getenv("DO_INITIAL_TABULAR_DATA_CLEAN", "False")
         ),
         "save_logs_to_csv": arguments.get(
-            "save_logs_to_csv", os.getenv("SAVE_LOGS_TO_CSV", "False")
+            "save_logs_to_csv", os.getenv("SAVE_LOGS_TO_CSV", "True")
         ),
         "save_logs_to_dynamodb": arguments.get(
             "save_logs_to_dynamodb", os.getenv("SAVE_LOGS_TO_DYNAMODB", "False")
@@ -325,9 +351,7 @@ def lambda_handler(event, context):
             os.getenv("SPACY_MODEL_PATH", os.environ["SPACY_MODEL_PATH"]),
         ),
         # PDF/Image Redaction Arguments
-        "ocr_method": arguments.get(
-            "ocr_method", os.getenv("TESSERACT_TEXT_EXTRACT_OPTION", "Local OCR")
-        ),
+        "ocr_method": arguments.get("ocr_method", os.getenv("OCR_METHOD", "Local OCR")),
         "page_min": int(
             arguments.get("page_min", os.getenv("DEFAULT_PAGE_MIN", DEFAULT_PAGE_MIN))
         ),
@@ -470,6 +494,12 @@ def lambda_handler(event, context):
         ),
         "prepare_images": arguments.get("prepare_images", True),
     }
+
+    # Debug: Print the final page_min and page_max values
+    print(f"Final cli_args page_min: {cli_args['page_min']}")
+    print(f"Final cli_args page_max: {cli_args['page_max']}")
+    print(f"Final cli_args save_logs_to_csv: {cli_args['save_logs_to_csv']}")
+    print(f"Final cli_args usage_logs_folder: {cli_args['usage_logs_folder']}")
 
     # Combine extraction options
     extraction_options = (

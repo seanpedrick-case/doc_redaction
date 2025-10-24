@@ -1298,9 +1298,7 @@ def choose_and_run_redactor(
                             output_folder + pdf_file_name_without_ext + "_redacted.pdf"
                         )
                         # Add page range suffix if partial processing
-                        print(
-                            f"page_min: {page_min}, current_loop_page: {current_loop_page}, number_of_pages: {number_of_pages}"
-                        )
+
                         out_redacted_pdf_file_path = add_page_range_suffix_to_file_path(
                             out_redacted_pdf_file_path,
                             page_min,

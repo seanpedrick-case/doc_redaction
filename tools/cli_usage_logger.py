@@ -217,13 +217,13 @@ def create_cli_usage_logger(logs_folder: str = None) -> CLIUsageLogger:
     Returns:
         Configured CLIUsageLogger instance
     """
-    # Parse CSV headers from config
-    import json
-
+    # Use CSV headers from config (already parsed as list)
     try:
-        headers = json.loads(CSV_USAGE_LOG_HEADERS)
+        headers = CSV_USAGE_LOG_HEADERS
+        if not headers or len(headers) == 0:
+            raise ValueError("Empty headers list")
     except Exception as e:
-        print(f"Error parsing CSV usage log headers: {e}")
+        print(f"Error using CSV usage log headers: {e}")
         # Fallback headers if parsing fails
         headers = [
             "session_hash_textbox",
