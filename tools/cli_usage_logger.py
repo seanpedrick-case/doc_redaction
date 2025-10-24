@@ -37,15 +37,18 @@ class CLIUsageLogger:
     of the Gradio CSVLogger_custom class.
     """
 
-    def __init__(self, dataset_file_name: str = "usage_log.csv"):
+    def __init__(
+        self, dataset_file_name: str = "usage_log.csv", logs_folder: str = None
+    ):
         """
         Initialize the CLI usage logger.
 
         Args:
             dataset_file_name: Name of the CSV file to store logs
+            logs_folder: Custom folder for logs (uses USAGE_LOGS_FOLDER if None)
         """
         self.dataset_file_name = dataset_file_name
-        self.flagging_dir = Path(USAGE_LOGS_FOLDER)
+        self.flagging_dir = Path(logs_folder if logs_folder else USAGE_LOGS_FOLDER)
         self.dataset_filepath = None
         self.headers = None
 
@@ -204,9 +207,12 @@ class CLIUsageLogger:
         return line_count
 
 
-def create_cli_usage_logger() -> CLIUsageLogger:
+def create_cli_usage_logger(logs_folder: str = None) -> CLIUsageLogger:
     """
     Create and setup a CLI usage logger with the standard headers.
+
+    Args:
+        logs_folder: Custom folder for logs (uses USAGE_LOGS_FOLDER if None)
 
     Returns:
         Configured CLIUsageLogger instance
@@ -236,7 +242,7 @@ def create_cli_usage_logger() -> CLIUsageLogger:
             "task",
         ]
 
-    logger = CLIUsageLogger()
+    logger = CLIUsageLogger(logs_folder=logs_folder)
     logger.setup(headers)
     return logger
 

@@ -680,7 +680,7 @@ python cli_redact.py --task textract --textract_action list
         from tools.cli_usage_logger import create_cli_usage_logger
 
         try:
-            usage_logger = create_cli_usage_logger()
+            usage_logger = create_cli_usage_logger(logs_folder=args.usage_logs_folder)
         except Exception as e:
             print(f"Warning: Could not initialise usage logger: {e}")
 
