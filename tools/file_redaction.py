@@ -3918,10 +3918,6 @@ def redact_image_pdf(
                 form_key_value_results_list_df,
             )
 
-    print(
-        f"current_loop_page: {current_loop_page} is not a multiple of page_break_val: {page_break_val}, continuing loop"
-    )
-
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Write the updated existing textract data back to the JSON file
 

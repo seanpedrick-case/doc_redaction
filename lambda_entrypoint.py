@@ -6,7 +6,16 @@ from dotenv import load_dotenv
 
 # Import the main function from your CLI script
 from cli_redact import main as cli_main
-from tools.config import AWS_REGION
+from tools.config import (
+    AWS_REGION,
+    DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
+    DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+    DEFAULT_MIN_CONSECUTIVE_PAGES,
+    DEFAULT_MIN_WORD_COUNT,
+    DEFAULT_PAGE_MAX,
+    DEFAULT_PAGE_MIN,
+    IMAGES_DPI,
+)
 
 
 def _get_env_list(env_var_name: str | list[str] | None) -> list[str]:
@@ -319,10 +328,14 @@ def lambda_handler(event, context):
         "ocr_method": arguments.get(
             "ocr_method", os.getenv("TESSERACT_TEXT_EXTRACT_OPTION", "Local OCR")
         ),
-        "page_min": int(arguments.get("page_min", os.getenv("DEFAULT_PAGE_MIN", 0))),
-        "page_max": int(arguments.get("page_max", os.getenv("DEFAULT_PAGE_MAX", 0))),
+        "page_min": int(
+            arguments.get("page_min", os.getenv("DEFAULT_PAGE_MIN", DEFAULT_PAGE_MIN))
+        ),
+        "page_max": int(
+            arguments.get("page_max", os.getenv("DEFAULT_PAGE_MAX", DEFAULT_PAGE_MAX))
+        ),
         "images_dpi": float(
-            arguments.get("images_dpi", os.getenv("IMAGES_DPI", 300.0))
+            arguments.get("images_dpi", os.getenv("IMAGES_DPI", IMAGES_DPI))
         ),
         "chosen_local_ocr_model": arguments.get(
             "chosen_local_ocr_model", os.getenv("CHOSEN_LOCAL_OCR_MODEL", "tesseract")
@@ -380,7 +393,11 @@ def lambda_handler(event, context):
         ),
         "fuzzy_mistakes": int(
             arguments.get(
-                "fuzzy_mistakes", os.getenv("DEFAULT_FUZZY_SPELLING_MISTAKES_NUM", 1)
+                "fuzzy_mistakes",
+                os.getenv(
+                    "DEFAULT_FUZZY_SPELLING_MISTAKES_NUM",
+                    DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+                ),
             )
         ),
         "match_fuzzy_whole_phrase_bool": arguments.get(
@@ -394,15 +411,24 @@ def lambda_handler(event, context):
         "similarity_threshold": float(
             arguments.get(
                 "similarity_threshold",
-                os.getenv("DEFAULT_DUPLICATE_DETECTION_THRESHOLD", 0.95),
+                os.getenv(
+                    "DEFAULT_DUPLICATE_DETECTION_THRESHOLD",
+                    DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
+                ),
             )
         ),
         "min_word_count": int(
-            arguments.get("min_word_count", os.getenv("DEFAULT_MIN_WORD_COUNT", 10))
+            arguments.get(
+                "min_word_count",
+                os.getenv("DEFAULT_MIN_WORD_COUNT", DEFAULT_MIN_WORD_COUNT),
+            )
         ),
         "min_consecutive_pages": int(
             arguments.get(
-                "min_consecutive_pages", os.getenv("DEFAULT_MIN_CONSECUTIVE_PAGES", 1)
+                "min_consecutive_pages",
+                os.getenv(
+                    "DEFAULT_MIN_CONSECUTIVE_PAGES", DEFAULT_MIN_CONSECUTIVE_PAGES
+                ),
             )
         ),
         "greedy_match": arguments.get(
