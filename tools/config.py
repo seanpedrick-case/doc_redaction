@@ -465,7 +465,9 @@ PADDLE_USE_TEXTLINE_ORIENTATION = convert_string_to_boolean(
     get_or_create_env_var("PADDLE_USE_TEXTLINE_ORIENTATION", "False")
 )
 
-PADDLE_DET_DB_UNCLIP_RATIO = float(get_or_create_env_var("PADDLE_DET_DB_UNCLIP_RATIO", "1.2"))
+PADDLE_DET_DB_UNCLIP_RATIO = float(
+    get_or_create_env_var("PADDLE_DET_DB_UNCLIP_RATIO", "1.2")
+)
 
 SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES = convert_string_to_boolean(
     get_or_create_env_var("SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES", "False")
