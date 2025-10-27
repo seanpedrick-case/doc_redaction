@@ -15,6 +15,11 @@ from tools.config import (
     DEFAULT_PAGE_MAX,
     DEFAULT_PAGE_MIN,
     IMAGES_DPI,
+    LAMBDA_POLL_INTERVAL,
+    LAMBDA_MAX_POLL_ATTEMPTS,
+    LAMBDA_PREPARE_IMAGES,
+    LAMBDA_EXTRACT_SIGNATURES,
+    LAMBDA_DEFAULT_USERNAME,
 )
 
 
@@ -303,7 +308,7 @@ def lambda_handler(event, context):
             "pii_detector", os.getenv("LOCAL_PII_OPTION", "Local")
         ),
         "username": arguments.get(
-            "username", os.getenv("DIRECT_MODE_DEFAULT_USER", "lambda_user")
+            "username", os.getenv("DIRECT_MODE_DEFAULT_USER", LAMBDA_DEFAULT_USERNAME)
         ),
         "save_to_user_folders": convert_string_to_boolean(
             arguments.get(
@@ -506,7 +511,7 @@ def lambda_handler(event, context):
         "textract_action": arguments.get("textract_action", ""),
         "job_id": arguments.get("job_id", ""),
         "extract_signatures": convert_string_to_boolean(
-            arguments.get("extract_signatures", "False")
+            arguments.get("extract_signatures", str(LAMBDA_EXTRACT_SIGNATURES))
         ),
         "textract_bucket": arguments.get(
             "textract_bucket", os.getenv("TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET", "")
@@ -526,14 +531,14 @@ def lambda_handler(event, context):
             "local_textract_document_logs_subfolder",
             os.getenv("TEXTRACT_JOBS_LOCAL_LOC", ""),
         ),
-        "poll_interval": int(arguments.get("poll_interval", 30)),
-        "max_poll_attempts": int(arguments.get("max_poll_attempts", 120)),
+        "poll_interval": int(arguments.get("poll_interval", LAMBDA_POLL_INTERVAL)),
+        "max_poll_attempts": int(arguments.get("max_poll_attempts", LAMBDA_MAX_POLL_ATTEMPTS)),
         # Additional arguments that were missing
         "search_query": arguments.get(
             "search_query", os.getenv("DEFAULT_SEARCH_QUERY", "")
         ),
         "prepare_images": convert_string_to_boolean(
-            arguments.get("prepare_images", "True")
+            arguments.get("prepare_images", str(LAMBDA_PREPARE_IMAGES))
         ),
     }
 

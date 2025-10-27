@@ -97,6 +97,32 @@ from tools.config import (
     ROOT_PATH,
     RUN_AWS_FUNCTIONS,
     RUN_DIRECT_MODE,
+    # Additional direct mode configuration options
+    DIRECT_MODE_LANGUAGE,
+    DIRECT_MODE_PII_DETECTOR,
+    DIRECT_MODE_OCR_METHOD,
+    DIRECT_MODE_PAGE_MIN,
+    DIRECT_MODE_PAGE_MAX,
+    DIRECT_MODE_IMAGES_DPI,
+    DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL,
+    DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES,
+    DIRECT_MODE_COMPRESS_REDACTED_PDF,
+    DIRECT_MODE_RETURN_PDF_END_OF_REDACTION,
+    DIRECT_MODE_EXTRACT_FORMS,
+    DIRECT_MODE_EXTRACT_TABLES,
+    DIRECT_MODE_EXTRACT_LAYOUT,
+    DIRECT_MODE_EXTRACT_SIGNATURES,
+    DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
+    DIRECT_MODE_ANON_STRATEGY,
+    DIRECT_MODE_FUZZY_MISTAKES,
+    DIRECT_MODE_SIMILARITY_THRESHOLD,
+    DIRECT_MODE_MIN_WORD_COUNT,
+    DIRECT_MODE_MIN_CONSECUTIVE_PAGES,
+    DIRECT_MODE_GREEDY_MATCH,
+    DIRECT_MODE_COMBINE_PAGES,
+    DIRECT_MODE_REMOVE_DUPLICATE_ROWS,
+    DIRECT_MODE_TEXTRACT_ACTION,
+    DIRECT_MODE_JOB_ID,
     RUN_FASTAPI,
     S3_ACCESS_LOGS_FOLDER,
     S3_ALLOW_LIST_PATH,
@@ -403,10 +429,18 @@ tabular_min_word_count = gr.Number(
     info="Cells with fewer words than this are ignored.",
 )
 
+clean_path = f"/{ROOT_PATH.strip('/')}"
+base_href = f"{clean_path}/" if clean_path != "/" else "/"
+
+if ROOT_PATH:
+    print(f"✅ Setting HTML base href for Gradio to: '{base_href}'")
+
+head_html = f"<base href='{base_href}'>"
+
 # Create the gradio interface
 blocks = gr.Blocks(
-    theme=gr.themes.Default(primary_hue="blue"), fill_width=True
-)  # gr.themes.Base()
+    theme=gr.themes.Default(primary_hue="blue"), fill_width=True, head=head_html
+)
 
 with blocks:
 
@@ -6503,9 +6537,9 @@ with blocks:
                 "input_file": DIRECT_MODE_INPUT_FILE,
                 "output_dir": DIRECT_MODE_OUTPUT_DIR,
                 "input_dir": INPUT_FOLDER,
-                "language": DEFAULT_LANGUAGE,
+                "language": DIRECT_MODE_LANGUAGE,
                 "allow_list": ALLOW_LIST_PATH,
-                "pii_detector": LOCAL_PII_OPTION,
+                "pii_detector": DIRECT_MODE_PII_DETECTOR,
                 "username": DIRECT_MODE_DEFAULT_USER,
                 "save_to_user_folders": SESSION_OUTPUT_FOLDER,
                 "local_redact_entities": CHOSEN_REDACT_ENTITIES,
@@ -6527,39 +6561,43 @@ with blocks:
                 "paddle_model_path": PADDLE_MODEL_PATH,
                 "spacy_model_path": SPACY_MODEL_PATH,
                 # PDF/Image Redaction Arguments
-                "ocr_method": TESSERACT_TEXT_EXTRACT_OPTION,
-                "page_min": DEFAULT_PAGE_MIN,
-                "page_max": DEFAULT_PAGE_MAX,
-                "images_dpi": IMAGES_DPI,
-                "chosen_local_ocr_model": CHOSEN_LOCAL_OCR_MODEL,
-                "preprocess_local_ocr_images": PREPROCESS_LOCAL_OCR_IMAGES,
-                "compress_redacted_pdf": COMPRESS_REDACTED_PDF,
-                "return_pdf_end_of_redaction": RETURN_REDACTED_PDF,
+                "ocr_method": DIRECT_MODE_OCR_METHOD,
+                "page_min": DIRECT_MODE_PAGE_MIN,
+                "page_max": DIRECT_MODE_PAGE_MAX,
+                "images_dpi": DIRECT_MODE_IMAGES_DPI,
+                "chosen_local_ocr_model": DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL,
+                "preprocess_local_ocr_images": DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES,
+                "compress_redacted_pdf": DIRECT_MODE_COMPRESS_REDACTED_PDF,
+                "return_pdf_end_of_redaction": DIRECT_MODE_RETURN_PDF_END_OF_REDACTION,
                 "deny_list_file": DENY_LIST_PATH,
                 "allow_list_file": ALLOW_LIST_PATH,
                 "redact_whole_page_file": WHOLE_PAGE_REDACTION_LIST_PATH,
                 "handwrite_signature_extraction": DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
-                "extract_forms": False,
-                "extract_tables": False,
-                "extract_layout": False,
+                "extract_forms": DIRECT_MODE_EXTRACT_FORMS,
+                "extract_tables": DIRECT_MODE_EXTRACT_TABLES,
+                "extract_layout": DIRECT_MODE_EXTRACT_LAYOUT,
+                "extract_signatures": DIRECT_MODE_EXTRACT_SIGNATURES,
+                "match_fuzzy_whole_phrase_bool": DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
+                
                 # Word/Tabular Anonymisation Arguments
-                "anon_strategy": DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
+                
+                "anon_strategy": DIRECT_MODE_ANON_STRATEGY,
                 "text_columns": DEFAULT_TEXT_COLUMNS,
                 "excel_sheets": DEFAULT_EXCEL_SHEETS,
-                "fuzzy_mistakes": DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
-                "match_fuzzy_whole_phrase_bool": True,  # Fixed: was "True" (string)
+                "fuzzy_mistakes": DIRECT_MODE_FUZZY_MISTAKES,
+                
                 # Duplicate Detection Arguments
                 "duplicate_type": DIRECT_MODE_DUPLICATE_TYPE,
-                "similarity_threshold": DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
-                "min_word_count": DEFAULT_MIN_WORD_COUNT,
-                "min_consecutive_pages": DEFAULT_MIN_CONSECUTIVE_PAGES,
-                "greedy_match": USE_GREEDY_DUPLICATE_DETECTION,
-                "combine_pages": DEFAULT_COMBINE_PAGES,
-                "remove_duplicate_rows": REMOVE_DUPLICATE_ROWS,
+                "similarity_threshold": DIRECT_MODE_SIMILARITY_THRESHOLD,
+                "min_word_count": DIRECT_MODE_MIN_WORD_COUNT,
+                "min_consecutive_pages": DIRECT_MODE_MIN_CONSECUTIVE_PAGES,
+                "greedy_match": DIRECT_MODE_GREEDY_MATCH,
+                "combine_pages": DIRECT_MODE_COMBINE_PAGES,
+                "remove_duplicate_rows": DIRECT_MODE_REMOVE_DUPLICATE_ROWS,
+                
                 # Textract Batch Operations Arguments
-                "textract_action": "",
-                "job_id": "",
-                "extract_signatures": False,
+                "textract_action": DIRECT_MODE_TEXTRACT_ACTION,
+                "job_id": DIRECT_MODE_JOB_ID,      
                 "textract_bucket": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
                 "textract_input_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
                 "textract_output_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
