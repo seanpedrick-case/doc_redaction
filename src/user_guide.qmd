@@ -25,7 +25,6 @@ format:
 - [Identifying and redacting duplicate pages](#identifying-and-redacting-duplicate-pages)
 
 ### Advanced user guide
-- [Advanced user guide](#advanced-user-guide)
 - [Fuzzy search and redaction](#fuzzy-search-and-redaction)
 - [Export redactions to and import from Adobe Acrobat](#export-to-and-import-from-adobe)
     - [Using _for_review.pdf files with Adobe Acrobat](#using-_for_reviewpdf-files-with-adobe-acrobat)
@@ -37,7 +36,6 @@ format:
 - [Merging redaction review files](#merging-redaction-review-files)
 
 ### Features for expert users/system administrators
-- [Features for expert users/system administrators](#features-for-expert-userssystem-administrators)
 - [Advanced OCR options (Hybrid OCR)](#advanced-ocr-options-hybrid-ocr)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
 
