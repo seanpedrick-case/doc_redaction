@@ -22,14 +22,12 @@ from tools.config import (
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
     COGNITO_AUTH,
-    COMPRESS_REDACTED_PDF,
     CONFIG_FOLDER,
     COST_CODES_PATH,
     CSV_ACCESS_LOG_HEADERS,
     CSV_FEEDBACK_LOG_HEADERS,
     CSV_USAGE_LOG_HEADERS,
     CUSTOM_BOX_COLOUR,
-    DEFAULT_COMBINE_PAGES,
     DEFAULT_CONCURRENCY_LIMIT,
     DEFAULT_COST_CODE,
     DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
@@ -48,11 +46,37 @@ from tools.config import (
     DEFAULT_TEXT_COLUMNS,
     DEFAULT_TEXT_EXTRACTION_MODEL,
     DENY_LIST_PATH,
+    DIRECT_MODE_ANON_STRATEGY,
+    DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL,
+    DIRECT_MODE_COMBINE_PAGES,
+    DIRECT_MODE_COMPRESS_REDACTED_PDF,
     DIRECT_MODE_DEFAULT_USER,
     DIRECT_MODE_DUPLICATE_TYPE,
+    DIRECT_MODE_EXTRACT_FORMS,
+    DIRECT_MODE_EXTRACT_LAYOUT,
+    DIRECT_MODE_EXTRACT_SIGNATURES,
+    DIRECT_MODE_EXTRACT_TABLES,
+    DIRECT_MODE_FUZZY_MISTAKES,
+    DIRECT_MODE_GREEDY_MATCH,
+    DIRECT_MODE_IMAGES_DPI,
     DIRECT_MODE_INPUT_FILE,
+    DIRECT_MODE_JOB_ID,
+    # Additional direct mode configuration options
+    DIRECT_MODE_LANGUAGE,
+    DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
+    DIRECT_MODE_MIN_CONSECUTIVE_PAGES,
+    DIRECT_MODE_MIN_WORD_COUNT,
+    DIRECT_MODE_OCR_METHOD,
     DIRECT_MODE_OUTPUT_DIR,
+    DIRECT_MODE_PAGE_MAX,
+    DIRECT_MODE_PAGE_MIN,
+    DIRECT_MODE_PII_DETECTOR,
+    DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES,
+    DIRECT_MODE_REMOVE_DUPLICATE_ROWS,
+    DIRECT_MODE_RETURN_PDF_END_OF_REDACTION,
+    DIRECT_MODE_SIMILARITY_THRESHOLD,
     DIRECT_MODE_TASK,
+    DIRECT_MODE_TEXTRACT_ACTION,
     DISPLAY_FILE_NAMES_IN_LOGS,
     DO_INITIAL_TABULAR_DATA_CLEAN,
     DOCUMENT_REDACTION_BUCKET,
@@ -76,11 +100,9 @@ from tools.config import (
     GRADIO_TEMP_DIR,
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
     HOST_NAME,
-    IMAGES_DPI,
     INPUT_FOLDER,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     LOCAL_OCR_MODEL_OPTIONS,
-    LOCAL_PII_OPTION,
     LOG_FILE_NAME,
     MAX_FILE_SIZE,
     MAX_OPEN_TEXT_CHARACTERS,
@@ -91,38 +113,10 @@ from tools.config import (
     OUTPUT_FOLDER,
     PADDLE_MODEL_PATH,
     PII_DETECTION_MODELS,
-    PREPROCESS_LOCAL_OCR_IMAGES,
     REMOVE_DUPLICATE_ROWS,
-    RETURN_REDACTED_PDF,
     ROOT_PATH,
     RUN_AWS_FUNCTIONS,
     RUN_DIRECT_MODE,
-    # Additional direct mode configuration options
-    DIRECT_MODE_LANGUAGE,
-    DIRECT_MODE_PII_DETECTOR,
-    DIRECT_MODE_OCR_METHOD,
-    DIRECT_MODE_PAGE_MIN,
-    DIRECT_MODE_PAGE_MAX,
-    DIRECT_MODE_IMAGES_DPI,
-    DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL,
-    DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES,
-    DIRECT_MODE_COMPRESS_REDACTED_PDF,
-    DIRECT_MODE_RETURN_PDF_END_OF_REDACTION,
-    DIRECT_MODE_EXTRACT_FORMS,
-    DIRECT_MODE_EXTRACT_TABLES,
-    DIRECT_MODE_EXTRACT_LAYOUT,
-    DIRECT_MODE_EXTRACT_SIGNATURES,
-    DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
-    DIRECT_MODE_ANON_STRATEGY,
-    DIRECT_MODE_FUZZY_MISTAKES,
-    DIRECT_MODE_SIMILARITY_THRESHOLD,
-    DIRECT_MODE_MIN_WORD_COUNT,
-    DIRECT_MODE_MIN_CONSECUTIVE_PAGES,
-    DIRECT_MODE_GREEDY_MATCH,
-    DIRECT_MODE_COMBINE_PAGES,
-    DIRECT_MODE_REMOVE_DUPLICATE_ROWS,
-    DIRECT_MODE_TEXTRACT_ACTION,
-    DIRECT_MODE_JOB_ID,
     RUN_FASTAPI,
     S3_ACCESS_LOGS_FOLDER,
     S3_ALLOW_LIST_PATH,
@@ -141,7 +135,6 @@ from tools.config import (
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     SPACY_MODEL_PATH,
     TABULAR_PII_DETECTION_MODELS,
-    TESSERACT_TEXT_EXTRACT_OPTION,
     TEXT_EXTRACTION_MODELS,
     TEXTRACT_JOBS_LOCAL_LOC,
     TEXTRACT_JOBS_S3_INPUT_LOC,
@@ -1045,7 +1038,7 @@ with blocks:
     with gr.Tab("Redact PDFs/images"):
 
         # Examples for PDF/image redaction
-        if SHOW_EXAMPLES is True:
+        if SHOW_EXAMPLES:
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Extract text and redact document' button:"
             )
@@ -1834,7 +1827,7 @@ with blocks:
         )
 
         # Examples for duplicate page detection
-        if SHOW_EXAMPLES == "True":
+        if SHOW_EXAMPLES:
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Identify duplicate pages/subdocuments' button:"
             )
@@ -1989,7 +1982,7 @@ with blocks:
         )
 
         # Examples for Word/Excel/csv redaction and tabular duplicate detection
-        if SHOW_EXAMPLES == "True":
+        if SHOW_EXAMPLES:
             gr.Markdown(
                 "### Try an example - Click on an example below and then the 'Redact text/data files' button for redaction, or the 'Find duplicate cells/rows' button for duplicate detection:"
             )
@@ -6578,14 +6571,11 @@ with blocks:
                 "extract_layout": DIRECT_MODE_EXTRACT_LAYOUT,
                 "extract_signatures": DIRECT_MODE_EXTRACT_SIGNATURES,
                 "match_fuzzy_whole_phrase_bool": DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
-                
                 # Word/Tabular Anonymisation Arguments
-                
                 "anon_strategy": DIRECT_MODE_ANON_STRATEGY,
                 "text_columns": DEFAULT_TEXT_COLUMNS,
                 "excel_sheets": DEFAULT_EXCEL_SHEETS,
                 "fuzzy_mistakes": DIRECT_MODE_FUZZY_MISTAKES,
-                
                 # Duplicate Detection Arguments
                 "duplicate_type": DIRECT_MODE_DUPLICATE_TYPE,
                 "similarity_threshold": DIRECT_MODE_SIMILARITY_THRESHOLD,
@@ -6594,10 +6584,9 @@ with blocks:
                 "greedy_match": DIRECT_MODE_GREEDY_MATCH,
                 "combine_pages": DIRECT_MODE_COMBINE_PAGES,
                 "remove_duplicate_rows": DIRECT_MODE_REMOVE_DUPLICATE_ROWS,
-                
                 # Textract Batch Operations Arguments
                 "textract_action": DIRECT_MODE_TEXTRACT_ACTION,
-                "job_id": DIRECT_MODE_JOB_ID,      
+                "job_id": DIRECT_MODE_JOB_ID,
                 "textract_bucket": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
                 "textract_input_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
                 "textract_output_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,

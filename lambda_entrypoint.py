@@ -15,11 +15,11 @@ from tools.config import (
     DEFAULT_PAGE_MAX,
     DEFAULT_PAGE_MIN,
     IMAGES_DPI,
-    LAMBDA_POLL_INTERVAL,
-    LAMBDA_MAX_POLL_ATTEMPTS,
-    LAMBDA_PREPARE_IMAGES,
-    LAMBDA_EXTRACT_SIGNATURES,
     LAMBDA_DEFAULT_USERNAME,
+    LAMBDA_EXTRACT_SIGNATURES,
+    LAMBDA_MAX_POLL_ATTEMPTS,
+    LAMBDA_POLL_INTERVAL,
+    LAMBDA_PREPARE_IMAGES,
 )
 
 
@@ -532,7 +532,9 @@ def lambda_handler(event, context):
             os.getenv("TEXTRACT_JOBS_LOCAL_LOC", ""),
         ),
         "poll_interval": int(arguments.get("poll_interval", LAMBDA_POLL_INTERVAL)),
-        "max_poll_attempts": int(arguments.get("max_poll_attempts", LAMBDA_MAX_POLL_ATTEMPTS)),
+        "max_poll_attempts": int(
+            arguments.get("max_poll_attempts", LAMBDA_MAX_POLL_ATTEMPTS)
+        ),
         # Additional arguments that were missing
         "search_query": arguments.get(
             "search_query", os.getenv("DEFAULT_SEARCH_QUERY", "")
