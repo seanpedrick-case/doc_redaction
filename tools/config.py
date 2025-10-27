@@ -763,6 +763,118 @@ DIRECT_MODE_DUPLICATE_TYPE = get_or_create_env_var(
     "DIRECT_MODE_DUPLICATE_TYPE", "pages"
 )  # 'pages' or 'tabular'
 
+# Additional direct mode configuration options for user customization
+DIRECT_MODE_LANGUAGE = get_or_create_env_var(
+    "DIRECT_MODE_LANGUAGE", DEFAULT_LANGUAGE
+)  # Language for document processing
+DIRECT_MODE_PII_DETECTOR = get_or_create_env_var(
+    "DIRECT_MODE_PII_DETECTOR", LOCAL_PII_OPTION
+)  # PII detection method
+DIRECT_MODE_OCR_METHOD = get_or_create_env_var(
+    "DIRECT_MODE_OCR_METHOD", "Local OCR"
+)  # OCR method for PDF/image processing
+DIRECT_MODE_PAGE_MIN = int(
+    get_or_create_env_var("DIRECT_MODE_PAGE_MIN", str(DEFAULT_PAGE_MIN))
+)  # First page to process
+DIRECT_MODE_PAGE_MAX = int(
+    get_or_create_env_var("DIRECT_MODE_PAGE_MAX", str(DEFAULT_PAGE_MAX))
+)  # Last page to process
+DIRECT_MODE_IMAGES_DPI = float(
+    get_or_create_env_var("DIRECT_MODE_IMAGES_DPI", str(IMAGES_DPI))
+)  # DPI for image processing
+DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
+    "DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL", CHOSEN_LOCAL_OCR_MODEL
+)  # Local OCR model choice
+DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES = convert_string_to_boolean(
+    get_or_create_env_var(
+        "DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES", str(PREPROCESS_LOCAL_OCR_IMAGES)
+    )
+)  # Preprocess images before OCR
+DIRECT_MODE_COMPRESS_REDACTED_PDF = convert_string_to_boolean(
+    get_or_create_env_var(
+        "DIRECT_MODE_COMPRESS_REDACTED_PDF", str(COMPRESS_REDACTED_PDF)
+    )
+)  # Compress redacted PDF
+DIRECT_MODE_RETURN_PDF_END_OF_REDACTION = convert_string_to_boolean(
+    get_or_create_env_var(
+        "DIRECT_MODE_RETURN_PDF_END_OF_REDACTION", str(RETURN_REDACTED_PDF)
+    )
+)  # Return PDF at end of redaction
+DIRECT_MODE_EXTRACT_FORMS = convert_string_to_boolean(
+    get_or_create_env_var("DIRECT_MODE_EXTRACT_FORMS", "False")
+)  # Extract forms during Textract analysis
+DIRECT_MODE_EXTRACT_TABLES = convert_string_to_boolean(
+    get_or_create_env_var("DIRECT_MODE_EXTRACT_TABLES", "False")
+)  # Extract tables during Textract analysis
+DIRECT_MODE_EXTRACT_LAYOUT = convert_string_to_boolean(
+    get_or_create_env_var("DIRECT_MODE_EXTRACT_LAYOUT", "False")
+)  # Extract layout during Textract analysis
+DIRECT_MODE_EXTRACT_SIGNATURES = convert_string_to_boolean(
+    get_or_create_env_var("DIRECT_MODE_EXTRACT_SIGNATURES", "False")
+)  # Extract signatures during Textract analysis
+DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL = convert_string_to_boolean(
+    get_or_create_env_var("DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL", "True")
+)  # Match fuzzy whole phrase boolean
+DIRECT_MODE_ANON_STRATEGY = get_or_create_env_var(
+    "DIRECT_MODE_ANON_STRATEGY", DEFAULT_TABULAR_ANONYMISATION_STRATEGY
+)  # Anonymisation strategy for tabular data
+DIRECT_MODE_FUZZY_MISTAKES = int(
+    get_or_create_env_var(
+        "DIRECT_MODE_FUZZY_MISTAKES", str(DEFAULT_FUZZY_SPELLING_MISTAKES_NUM)
+    )
+)  # Number of fuzzy spelling mistakes allowed
+DIRECT_MODE_SIMILARITY_THRESHOLD = float(
+    get_or_create_env_var(
+        "DIRECT_MODE_SIMILARITY_THRESHOLD", str(DEFAULT_DUPLICATE_DETECTION_THRESHOLD)
+    )
+)  # Similarity threshold for duplicate detection
+DIRECT_MODE_MIN_WORD_COUNT = int(
+    get_or_create_env_var("DIRECT_MODE_MIN_WORD_COUNT", str(DEFAULT_MIN_WORD_COUNT))
+)  # Minimum word count for duplicate detection
+DIRECT_MODE_MIN_CONSECUTIVE_PAGES = int(
+    get_or_create_env_var(
+        "DIRECT_MODE_MIN_CONSECUTIVE_PAGES", str(DEFAULT_MIN_CONSECUTIVE_PAGES)
+    )
+)  # Minimum consecutive pages for duplicate detection
+DIRECT_MODE_GREEDY_MATCH = convert_string_to_boolean(
+    get_or_create_env_var(
+        "DIRECT_MODE_GREEDY_MATCH", str(USE_GREEDY_DUPLICATE_DETECTION)
+    )
+)  # Use greedy matching for duplicate detection
+DIRECT_MODE_COMBINE_PAGES = convert_string_to_boolean(
+    get_or_create_env_var("DIRECT_MODE_COMBINE_PAGES", str(DEFAULT_COMBINE_PAGES))
+)  # Combine pages for duplicate detection
+DIRECT_MODE_REMOVE_DUPLICATE_ROWS = convert_string_to_boolean(
+    get_or_create_env_var(
+        "DIRECT_MODE_REMOVE_DUPLICATE_ROWS", str(REMOVE_DUPLICATE_ROWS)
+    )
+)  # Remove duplicate rows in tabular data
+
+# Textract Batch Operations Options
+DIRECT_MODE_TEXTRACT_ACTION = get_or_create_env_var(
+    "DIRECT_MODE_TEXTRACT_ACTION", ""
+)  # Textract action for batch operations
+DIRECT_MODE_JOB_ID = get_or_create_env_var(
+    "DIRECT_MODE_JOB_ID", ""
+)  # Job ID for Textract operations
+
+# Lambda-specific configuration options
+LAMBDA_POLL_INTERVAL = int(
+    get_or_create_env_var("LAMBDA_POLL_INTERVAL", "30")
+)  # Polling interval in seconds for Textract job status
+LAMBDA_MAX_POLL_ATTEMPTS = int(
+    get_or_create_env_var("LAMBDA_MAX_POLL_ATTEMPTS", "120")
+)  # Maximum number of polling attempts for Textract job completion
+LAMBDA_PREPARE_IMAGES = convert_string_to_boolean(
+    get_or_create_env_var("LAMBDA_PREPARE_IMAGES", "True")
+)  # Prepare images for OCR processing
+LAMBDA_EXTRACT_SIGNATURES = convert_string_to_boolean(
+    get_or_create_env_var("LAMBDA_EXTRACT_SIGNATURES", "False")
+)  # Extract signatures during Textract analysis
+LAMBDA_DEFAULT_USERNAME = get_or_create_env_var(
+    "LAMBDA_DEFAULT_USERNAME", "lambda_user"
+)  # Default username for Lambda operations
+
 
 ### ALLOW LIST
 
