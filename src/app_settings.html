@@ -125,16 +125,32 @@ ul.task-list li input[type="checkbox"] {
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#app-configuration-file-config.env" id="toc-app-configuration-file-config.env" class="nav-link active" data-scroll-target="#app-configuration-file-config.env">App Configuration File (config.env)</a></li>
+  <li><a href="#app-configuration-file-config.env" id="toc-app-configuration-file-config.env" class="nav-link active" data-scroll-target="#app-configuration-file-config.env">App Configuration File (<code>config.env</code>)</a></li>
   <li><a href="#aws-options" id="toc-aws-options" class="nav-link" data-scroll-target="#aws-options">AWS Options</a></li>
   <li><a href="#image-options" id="toc-image-options" class="nav-link" data-scroll-target="#image-options">Image Options</a></li>
   <li><a href="#file-io-options" id="toc-file-io-options" class="nav-link" data-scroll-target="#file-io-options">File I/O Options</a></li>
   <li><a href="#logging-options" id="toc-logging-options" class="nav-link" data-scroll-target="#logging-options">Logging Options</a></li>
-  <li><a href="#redaction-options" id="toc-redaction-options" class="nav-link" data-scroll-target="#redaction-options">Redaction Options</a></li>
+  <li><a href="#gradio-general-app-options" id="toc-gradio-general-app-options" class="nav-link" data-scroll-target="#gradio-general-app-options">Gradio &amp; General App Options</a></li>
+  <li><a href="#redaction-pii-options" id="toc-redaction-pii-options" class="nav-link" data-scroll-target="#redaction-pii-options">Redaction &amp; PII Options</a>
+  <ul class="collapse">
+  <li><a href="#ui-and-model-selection" id="toc-ui-and-model-selection" class="nav-link" data-scroll-target="#ui-and-model-selection">UI and Model Selection</a></li>
+  <li><a href="#external-tool-paths" id="toc-external-tool-paths" class="nav-link" data-scroll-target="#external-tool-paths">External Tool Paths</a></li>
+  <li><a href="#local-ocr-tesseract-paddleocr" id="toc-local-ocr-tesseract-paddleocr" class="nav-link" data-scroll-target="#local-ocr-tesseract-paddleocr">Local OCR (Tesseract &amp; PaddleOCR)</a></li>
+  <li><a href="#entity-and-search-options" id="toc-entity-and-search-options" class="nav-link" data-scroll-target="#entity-and-search-options">Entity and Search Options</a></li>
+  <li><a href="#textract-feature-selection" id="toc-textract-feature-selection" class="nav-link" data-scroll-target="#textract-feature-selection">Textract Feature Selection</a></li>
+  <li><a href="#tabular-data-options" id="toc-tabular-data-options" class="nav-link" data-scroll-target="#tabular-data-options">Tabular Data Options</a></li>
+  </ul></li>
   <li><a href="#language-options" id="toc-language-options" class="nav-link" data-scroll-target="#language-options">Language Options</a></li>
-  <li><a href="#app-run-options" id="toc-app-run-options" class="nav-link" data-scroll-target="#app-run-options">App Run Options</a></li>
+  <li><a href="#duplicate-detection-settings" id="toc-duplicate-detection-settings" class="nav-link" data-scroll-target="#duplicate-detection-settings">Duplicate Detection Settings</a></li>
+  <li><a href="#file-output-options" id="toc-file-output-options" class="nav-link" data-scroll-target="#file-output-options">File Output Options</a></li>
+  <li><a href="#direct-mode-lambda-configuration" id="toc-direct-mode-lambda-configuration" class="nav-link" data-scroll-target="#direct-mode-lambda-configuration">Direct Mode &amp; Lambda Configuration</a>
+  <ul class="collapse">
+  <li><a href="#direct-mode" id="toc-direct-mode" class="nav-link" data-scroll-target="#direct-mode">Direct Mode</a></li>
+  <li><a href="#lambda-configuration" id="toc-lambda-configuration" class="nav-link" data-scroll-target="#lambda-configuration">Lambda Configuration</a></li>
+  </ul></li>
+  <li><a href="#allow-deny-whole-page-redaction-lists" id="toc-allow-deny-whole-page-redaction-lists" class="nav-link" data-scroll-target="#allow-deny-whole-page-redaction-lists">Allow, Deny, &amp; Whole Page Redaction Lists</a></li>
   <li><a href="#cost-code-options" id="toc-cost-code-options" class="nav-link" data-scroll-target="#cost-code-options">Cost Code Options</a></li>
-  <li><a href="#whole-document-api-options" id="toc-whole-document-api-options" class="nav-link" data-scroll-target="#whole-document-api-options">Whole Document API Options</a></li>
+  <li><a href="#whole-document-api-options-textract-async" id="toc-whole-document-api-options-textract-async" class="nav-link" data-scroll-target="#whole-document-api-options-textract-async">Whole Document API Options (Textract Async)</a></li>
   </ul>
 </nav>
     </div>
@@ -160,16 +176,20 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<p>Settings for the redaction app can be set from outside by changing values in the <code>config.env</code> file stored in your local config folder, or in S3 if running on AWS. This guide provides an overview of how to configure the application using environment variables. The application loads configurations using <code>os.environ.get()</code>. It first attempts to load variables from the file specified by <code>APP_CONFIG_PATH</code> (which defaults to <code>config/app_config.env</code>). If <code>AWS_CONFIG_PATH</code> is also set (e.g., to <code>config/aws_config.env</code>), variables are loaded from that file as well. Environment variables set directly in the system will always take precedence over those defined in these <code>.env</code> files.</p>
+<p>Settings for the redaction app can be set from outside by changing values in the <code>.env</code> file stored in your local config folder, or in S3 if running on AWS. This guide provides an overview of how to configure the application using environment variables. The application loads configurations using <code>os.environ.get()</code>. It first attempts to load variables from the file specified by <code>APP_CONFIG_PATH</code> (which defaults to <code>config/app_config.env</code>). If <code>AWS_CONFIG_PATH</code> is also set (e.g., to <code>config/aws_config.env</code>), variables are loaded from that file as well. Environment variables set directly in the system will always take precedence over those defined in these <code>.env</code> files.</p>
 <section id="app-configuration-file-config.env" class="level2">
-<h2 class="anchored" data-anchor-id="app-configuration-file-config.env">App Configuration File (config.env)</h2>
+<h2 class="anchored" data-anchor-id="app-configuration-file-config.env">App Configuration File (<code>config.env</code>)</h2>
 <p>This section details variables related to the main application configuration file.</p>
 <ul>
+<li><strong><code>CONFIG_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> The folder where configuration files are stored.</li>
+<li><strong>Default Value:</strong> <code>config/</code></li>
+</ul></li>
 <li><strong><code>APP_CONFIG_PATH</code></strong>
 <ul>
 <li><strong>Description:</strong> Specifies the path to the application configuration <code>.env</code> file. This file contains various settings that control the application’s behavior.</li>
 <li><strong>Default Value:</strong> <code>config/app_config.env</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly. This variable defines where to load other application configurations, so it cannot be set within <code>config/app_config.env</code> itself.</li>
 </ul></li>
 </ul>
 </section>
@@ -181,67 +201,61 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Specifies the path to the AWS configuration <code>.env</code> file. This file is intended to store AWS credentials and specific settings.</li>
 <li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly. This variable defines an additional source for AWS-specific configurations.</li>
 </ul></li>
 <li><strong><code>RUN_AWS_FUNCTIONS</code></strong>
 <ul>
-<li><strong>Description:</strong> Enables or disables AWS-specific functionalities within the application. Set to <code>"1"</code> to enable and <code>"0"</code> to disable.</li>
-<li><strong>Default Value:</strong> <code>"0"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
+<li><strong>Description:</strong> Enables or disables AWS-specific functionalities within the application. Set to <code>"True"</code> to enable.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>AWS_REGION</code></strong>
 <ul>
 <li><strong>Description:</strong> Defines the AWS region where services like S3, Cognito, and Textract are located.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/aws_config.env</code> (if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
 <li><strong><code>AWS_CLIENT_ID</code></strong>
 <ul>
 <li><strong>Description:</strong> The client ID for AWS Cognito, used for user authentication.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/aws_config.env</code> (if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
 <li><strong><code>AWS_CLIENT_SECRET</code></strong>
 <ul>
 <li><strong>Description:</strong> The client secret for AWS Cognito, used in conjunction with the client ID for authentication.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/aws_config.env</code> (if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
 <li><strong><code>AWS_USER_POOL_ID</code></strong>
 <ul>
 <li><strong>Description:</strong> The user pool ID for AWS Cognito, identifying the user directory.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/aws_config.env</code> (if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
 <li><strong><code>AWS_ACCESS_KEY</code></strong>
 <ul>
 <li><strong>Description:</strong> The AWS access key ID for programmatic access to AWS services.</li>
-<li><strong>Default Value:</strong> <code>''</code> (Note: Often found in the environment or AWS credentials file.)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/aws_config.env</code> (if <code>AWS_CONFIG_PATH</code> is configured). It’s also commonly configured via shared AWS credentials files or IAM roles.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>AWS_SECRET_KEY</code></strong>
 <ul>
 <li><strong>Description:</strong> The AWS secret access key corresponding to the AWS access key ID.</li>
-<li><strong>Default Value:</strong> <code>''</code> (Note: Often found in the environment or AWS credentials file.)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/aws_config.env</code> (if <code>AWS_CONFIG_PATH</code> is configured). It’s also commonly configured via shared AWS credentials files or IAM roles.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>DOCUMENT_REDACTION_BUCKET</code></strong>
 <ul>
 <li><strong>Description:</strong> The name of the S3 bucket used for storing documents related to the redaction process.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/aws_config.env</code> (if <code>AWS_CONFIG_PATH</code> is configured).</li>
+</ul></li>
+<li><strong><code>PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the app will prioritize using AWS SSO credentials over access keys stored in environment variables.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
 </ul></li>
 <li><strong><code>CUSTOM_HEADER</code></strong>
 <ul>
 <li><strong>Description:</strong> Specifies a custom header name to be included in requests, often used for services like AWS CloudFront.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
 <li><strong><code>CUSTOM_HEADER_VALUE</code></strong>
 <ul>
 <li><strong>Description:</strong> The value for the custom header specified by <code>CUSTOM_HEADER</code>.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
 </ul>
 </section>
@@ -253,19 +267,16 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Dots Per Inch (DPI) setting for image processing, affecting the resolution and quality of processed images.</li>
 <li><strong>Default Value:</strong> <code>'300.0'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>LOAD_TRUNCATED_IMAGES</code></strong>
 <ul>
 <li><strong>Description:</strong> Controls whether the application attempts to load truncated images. Set to <code>'True'</code> to enable.</li>
 <li><strong>Default Value:</strong> <code>'True'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>MAX_IMAGE_PIXELS</code></strong>
 <ul>
 <li><strong>Description:</strong> Sets the maximum number of pixels for an image that the application will process. Leave blank for no limit. This can help prevent issues with very large images.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 </ul>
 </section>
@@ -275,525 +286,636 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong><code>SESSION_OUTPUT_FOLDER</code></strong>
 <ul>
-<li><strong>Description:</strong> If set to <code>'True'</code>, the application will save output and input files into session-specific subfolders, helping to organise files from different user sessions.</li>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the application will save output and input files into session-specific subfolders.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
-<li><strong><code>GRADIO_OUTPUT_FOLDER</code></strong> (aliased as <code>OUTPUT_FOLDER</code>)
+<li><strong><code>OUTPUT_FOLDER</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the default output folder for files generated by Gradio components. Can be set to “TEMP” to use a temporary directory.</li>
+<li><strong>Description:</strong> Specifies the default output folder for generated files. Can be set to <code>"TEMP"</code> to use a temporary directory.</li>
 <li><strong>Default Value:</strong> <code>'output/'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
-<li><strong><code>GRADIO_INPUT_FOLDER</code></strong> (aliased as <code>INPUT_FOLDER</code>)
+<li><strong><code>INPUT_FOLDER</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the default input folder for files used by Gradio components. Can be set to “TEMP” to use a temporary directory.</li>
+<li><strong>Description:</strong> Specifies the default input folder for files. Can be set to <code>"TEMP"</code> to use a temporary directory.</li>
 <li><strong>Default Value:</strong> <code>'input/'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>GRADIO_TEMP_DIR</code></strong>
 <ul>
 <li><strong>Description:</strong> Defines the path for Gradio’s temporary file storage.</li>
-<li><strong>Default Value:</strong> <code>'tmp/gradio_tmp/'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>MPLCONFIGDIR</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the cache directory for the Matplotlib library, which is used for plotting and image handling.</li>
-<li><strong>Default Value:</strong> <code>'tmp/matplotlib_cache/'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> Specifies the cache directory for the Matplotlib library.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 </ul>
 </section>
 <section id="logging-options" class="level2">
 <h2 class="anchored" data-anchor-id="logging-options">Logging Options</h2>
-<p>Settings for configuring application logging, including log formats and storage locations.</p>
+<p>Settings for configuring application logging.</p>
 <ul>
 <li><strong><code>SAVE_LOGS_TO_CSV</code></strong>
 <ul>
 <li><strong>Description:</strong> Enables or disables saving logs to CSV files. Set to <code>'True'</code> to enable.</li>
 <li><strong>Default Value:</strong> <code>'True'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>USE_LOG_SUBFOLDERS</code></strong>
 <ul>
-<li><strong>Description:</strong> If enabled (<code>'True'</code>), logs will be stored in subfolders based on date and hostname, aiding in log organisation.</li>
+<li><strong>Description:</strong> If enabled (<code>'True'</code>), logs will be stored in subfolders based on date and hostname.</li>
 <li><strong>Default Value:</strong> <code>'True'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
-<li><strong><code>FEEDBACK_LOGS_FOLDER</code></strong>
+<li><strong><code>FEEDBACK_LOGS_FOLDER</code></strong>, <strong><code>ACCESS_LOGS_FOLDER</code></strong>, <strong><code>USAGE_LOGS_FOLDER</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the base folder for storing feedback logs. If <code>USE_LOG_SUBFOLDERS</code> is true, date/hostname subfolders will be created within this folder.</li>
-<li><strong>Default Value:</strong> <code>'feedback/'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> Base folders for feedback, access, and usage logs respectively.</li>
+<li><strong>Default Values:</strong> <code>'feedback/'</code>, <code>'logs/'</code>, <code>'usage/'</code></li>
 </ul></li>
-<li><strong><code>ACCESS_LOGS_FOLDER</code></strong>
+<li><strong><code>S3_FEEDBACK_LOGS_FOLDER</code></strong>, <strong><code>S3_ACCESS_LOGS_FOLDER</code></strong>, <strong><code>S3_USAGE_LOGS_FOLDER</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the base folder for storing access logs. If <code>USE_LOG_SUBFOLDERS</code> is true, date/hostname subfolders will be created within this folder.</li>
-<li><strong>Default Value:</strong> <code>'logs/'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> S3 paths where feedback, access, and usage logs will be stored if <code>RUN_AWS_FUNCTIONS</code> is enabled.</li>
+<li><strong>Default Values:</strong> Dynamically generated based on date and hostname, e.g., <code>'feedback/YYYYMMDD/hostname/'</code>.</li>
 </ul></li>
-<li><strong><code>USAGE_LOGS_FOLDER</code></strong>
+<li><strong><code>LOG_FILE_NAME</code></strong>, <strong><code>USAGE_LOG_FILE_NAME</code></strong>, <strong><code>FEEDBACK_LOG_FILE_NAME</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the base folder for storing usage logs. If <code>USE_LOG_SUBFOLDERS</code> is true, date/hostname subfolders will be created within this folder.</li>
-<li><strong>Default Value:</strong> <code>'usage/'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> Specifies the name for log files. <code>USAGE_LOG_FILE_NAME</code> and <code>FEEDBACK_LOG_FILE_NAME</code> default to the value of <code>LOG_FILE_NAME</code>.</li>
+<li><strong>Default Value:</strong> <code>'log.csv'</code></li>
 </ul></li>
 <li><strong><code>DISPLAY_FILE_NAMES_IN_LOGS</code></strong>
 <ul>
-<li><strong>Description:</strong> If set to <code>'True'</code>, file names will be included in the log entries.</li>
+<li><strong>Description:</strong> If set to <code>'True'</code>, file names will be included in log entries.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
-<li><strong><code>CSV_ACCESS_LOG_HEADERS</code></strong>
+<li><strong><code>CSV_ACCESS_LOG_HEADERS</code></strong>, <strong><code>CSV_FEEDBACK_LOG_HEADERS</code></strong>, <strong><code>CSV_USAGE_LOG_HEADERS</code></strong>
 <ul>
-<li><strong>Description:</strong> Defines custom headers for CSV access logs. If left blank, component labels will be used as headers.</li>
-<li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>CSV_FEEDBACK_LOG_HEADERS</code></strong>
-<ul>
-<li><strong>Description:</strong> Defines custom headers for CSV feedback logs. If left blank, component labels will be used as headers.</li>
-<li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>CSV_USAGE_LOG_HEADERS</code></strong>
-<ul>
-<li><strong>Description:</strong> Defines custom headers for CSV usage logs.</li>
-<li><strong>Default Value:</strong> A predefined list of header names. Refer to <code>config.py</code> for the complete list.</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> Defines custom headers for the respective CSV logs as a string representation of a list. If blank, component labels are used.</li>
+<li><strong>Default Value:</strong> Varies; see script for <code>CSV_USAGE_LOG_HEADERS</code> default.</li>
 </ul></li>
 <li><strong><code>SAVE_LOGS_TO_DYNAMODB</code></strong>
 <ul>
-<li><strong>Description:</strong> Enables or disables saving logs to AWS DynamoDB. Set to <code>'True'</code> to enable. Requires appropriate AWS setup.</li>
+<li><strong>Description:</strong> Enables or disables saving logs to AWS DynamoDB. Set to <code>'True'</code> to enable.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
-<li><strong><code>ACCESS_LOG_DYNAMODB_TABLE_NAME</code></strong>
+<li><strong><code>ACCESS_LOG_DYNAMODB_TABLE_NAME</code></strong>, <strong><code>FEEDBACK_LOG_DYNAMODB_TABLE_NAME</code></strong>, <strong><code>USAGE_LOG_DYNAMODB_TABLE_NAME</code></strong>
 <ul>
-<li><strong>Description:</strong> The name of the DynamoDB table used for storing access logs.</li>
-<li><strong>Default Value:</strong> <code>'redaction_access_log'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
+<li><strong>Description:</strong> Names of the DynamoDB tables for storing access, feedback, and usage logs.</li>
+<li><strong>Default Values:</strong> <code>'redaction_access_log'</code>, <code>'redaction_feedback'</code>, <code>'redaction_usage'</code></li>
 </ul></li>
-<li><strong><code>DYNAMODB_ACCESS_LOG_HEADERS</code></strong>
+<li><strong><code>DYNAMODB_ACCESS_LOG_HEADERS</code></strong>, <strong><code>DYNAMODB_FEEDBACK_LOG_HEADERS</code></strong>, <strong><code>DYNAMODB_USAGE_LOG_HEADERS</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the headers (attributes) for the DynamoDB access log table.</li>
+<li><strong>Description:</strong> Specifies the headers (attributes) for the respective DynamoDB log tables.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
-</ul></li>
-<li><strong><code>FEEDBACK_LOG_DYNAMODB_TABLE_NAME</code></strong>
-<ul>
-<li><strong>Description:</strong> The name of the DynamoDB table used for storing feedback logs.</li>
-<li><strong>Default Value:</strong> <code>'redaction_feedback'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
-</ul></li>
-<li><strong><code>DYNAMODB_FEEDBACK_LOG_HEADERS</code></strong>
-<ul>
-<li><strong>Description:</strong> Specifies the headers (attributes) for the DynamoDB feedback log table.</li>
-<li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
-</ul></li>
-<li><strong><code>USAGE_LOG_DYNAMODB_TABLE_NAME</code></strong>
-<ul>
-<li><strong>Description:</strong> The name of the DynamoDB table used for storing usage logs.</li>
-<li><strong>Default Value:</strong> <code>'redaction_usage'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
-</ul></li>
-<li><strong><code>DYNAMODB_USAGE_LOG_HEADERS</code></strong>
-<ul>
-<li><strong>Description:</strong> Specifies the headers (attributes) for the DynamoDB usage log table.</li>
-<li><strong>Default Value:</strong> <code>''</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
 <li><strong><code>LOGGING</code></strong>
 <ul>
 <li><strong>Description:</strong> Enables or disables general console logging. Set to <code>'True'</code> to enable.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>LOG_FILE_NAME</code></strong>
-<ul>
-<li><strong>Description:</strong> Specifies the name for the CSV log file if <code>SAVE_LOGS_TO_CSV</code> is enabled.</li>
-<li><strong>Default Value:</strong> <code>'log.csv'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 </ul>
 </section>
-<section id="redaction-options" class="level2">
-<h2 class="anchored" data-anchor-id="redaction-options">Redaction Options</h2>
-<p>Configurations related to the text redaction process, including PII detection models and external tool paths.</p>
+<section id="gradio-general-app-options" class="level2">
+<h2 class="anchored" data-anchor-id="gradio-general-app-options">Gradio &amp; General App Options</h2>
+<p>Configurations for the Gradio UI, server behavior, and application limits.</p>
 <ul>
-<li><strong><code>TESSERACT_FOLDER</code></strong>
+<li><strong><code>FAVICON_PATH</code></strong>
 <ul>
-<li><strong>Description:</strong> Path to the local Tesseract OCR installation folder. Only required if Tesseract is not in the system’s PATH, or when running a packaged executable (e.g., via PyInstaller).</li>
-<li><strong>Default Value:</strong> <code>""</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> Path to the favicon icon file for the web interface.</li>
+<li><strong>Default Value:</strong> <code>"favicon.png"</code></li>
 </ul></li>
-<li><strong><code>TESSERACT_DATA_FOLDER</code></strong>
+<li><strong><code>RUN_FASTAPI</code></strong>
 <ul>
-<li><strong>Description:</strong> Path to the Tesseract trained data files (e.g., <code>tessdata</code>).</li>
-<li><strong>Default Value:</strong> <code>"/usr/share/tessdata"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>POPPLER_FOLDER</code></strong>
-<ul>
-<li><strong>Description:</strong> Path to the local Poppler installation’s <code>bin</code> folder. Poppler is used for PDF processing. Only required if Poppler is not in the system’s PATH.</li>
-<li><strong>Default Value:</strong> <code>""</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>SELECTABLE_TEXT_EXTRACT_OPTION</code></strong>
-<ul>
-<li><strong>Description:</strong> Display name in the UI for the text extraction method that processes selectable text directly from PDFs.</li>
-<li><strong>Default Value:</strong> <code>"Local model - selectable text"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>TESSERACT_TEXT_EXTRACT_OPTION</code></strong>
-<ul>
-<li><strong>Description:</strong> Display name in the UI for the text extraction method using local Tesseract OCR (for PDFs without selectable text).</li>
-<li><strong>Default Value:</strong> <code>"Local OCR model - PDFs without selectable text"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>TEXTRACT_TEXT_EXTRACT_OPTION</code></strong>
-<ul>
-<li><strong>Description:</strong> Display name in the UI for the text extraction method using AWS Textract service.</li>
-<li><strong>Default Value:</strong> <code>"AWS Textract service - all PDF types"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>NO_REDACTION_PII_OPTION</code></strong>
-<ul>
-<li><strong>Description:</strong> Display name in the UI for the option to only extract text without performing any PII detection or redaction.</li>
-<li><strong>Default Value:</strong> <code>"Only extract text (no redaction)"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>LOCAL_PII_OPTION</code></strong>
-<ul>
-<li><strong>Description:</strong> Display name in the UI for the PII detection method using a local model.</li>
-<li><strong>Default Value:</strong> <code>"Local"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>AWS_PII_OPTION</code></strong>
-<ul>
-<li><strong>Description:</strong> Display name in the UI for the PII detection method using AWS Comprehend.</li>
-<li><strong>Default Value:</strong> <code>"AWS Comprehend"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS</code></strong>
-<ul>
-<li><strong>Description:</strong> Controls whether local text extraction options (selectable text, Tesseract) are shown in the UI. Set to <code>'True'</code> to show.</li>
-<li><strong>Default Value:</strong> <code>'True'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>SHOW_AWS_TEXT_EXTRACTION_OPTIONS</code></strong>
-<ul>
-<li><strong>Description:</strong> Controls whether AWS Textract text extraction option is shown in the UI. Set to <code>'True'</code> to show.</li>
-<li><strong>Default Value:</strong> <code>'True'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>DEFAULT_TEXT_EXTRACTION_MODEL</code></strong>
-<ul>
-<li><strong>Description:</strong> Sets the default text extraction model selected in the UI. Defaults to <code>TEXTRACT_TEXT_EXTRACT_OPTION</code> if AWS options are shown; otherwise, defaults to <code>SELECTABLE_TEXT_EXTRACT_OPTION</code>.</li>
-<li><strong>Default Value:</strong> Value of <code>TEXTRACT_TEXT_EXTRACT_OPTION</code> if <code>SHOW_AWS_TEXT_EXTRACTION_OPTIONS</code> is True, else value of <code>SELECTABLE_TEXT_EXTRACT_OPTION</code>.</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>. Provide one of the text extraction option display names.</li>
-</ul></li>
-<li><strong><code>SHOW_LOCAL_PII_DETECTION_OPTIONS</code></strong>
-<ul>
-<li><strong>Description:</strong> Controls whether the local PII detection option is shown in the UI. Set to <code>'True'</code> to show.</li>
-<li><strong>Default Value:</strong> <code>'True'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>SHOW_AWS_PII_DETECTION_OPTIONS</code></strong>
-<ul>
-<li><strong>Description:</strong> Controls whether the AWS Comprehend PII detection option is shown in the UI. Set to <code>'True'</code> to show.</li>
-<li><strong>Default Value:</strong> <code>'True'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>DEFAULT_PII_DETECTION_MODEL</code></strong>
-<ul>
-<li><strong>Description:</strong> Sets the default PII detection model selected in the UI. Defaults to <code>AWS_PII_OPTION</code> if AWS options are shown; otherwise, defaults to <code>LOCAL_PII_OPTION</code>.</li>
-<li><strong>Default Value:</strong> Value of <code>AWS_PII_OPTION</code> if <code>SHOW_AWS_PII_DETECTION_OPTIONS</code> is True, else value of <code>LOCAL_PII_OPTION</code>.</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>. Provide one of the PII detection option display names.</li>
-</ul></li>
-<li><strong><code>CHOSEN_LOCAL_OCR_MODEL</code></strong>
-<ul>
-<li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, or <code>"hybrid"</code>. “paddle” is effective for line extraction but not word-level redaction. “hybrid” uses Tesseract first, then PaddleOCR for low-confidence words.</li>
-<li><strong>Default Value:</strong> <code>"tesseract"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>PREPROCESS_LOCAL_OCR_IMAGES</code></strong>
-<ul>
-<li><strong>Description:</strong> If set to <code>"True"</code>, images will be preprocessed (e.g., deskewed, contrast adjusted) before being sent to the local OCR engine. This can sometimes yield worse results on clean scans.</li>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the application will be served via FastAPI, allowing for API endpoint integration.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
-<li><strong><code>CHOSEN_COMPREHEND_ENTITIES</code></strong>
+<li><strong><code>GRADIO_SERVER_NAME</code></strong>
 <ul>
-<li><strong>Description:</strong> A list of AWS Comprehend PII entity types to be redacted when using AWS Comprehend.</li>
-<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>config.py</code> for the complete list.</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>. This should be a string representation of a Python list.</li>
+<li><strong>Description:</strong> The IP address the Gradio server will bind to. Use <code>"0.0.0.0"</code> to allow external access.</li>
+<li><strong>Default Value:</strong> <code>"0.0.0.0"</code></li>
 </ul></li>
-<li><strong><code>FULL_COMPREHEND_ENTITY_LIST</code></strong>
+<li><strong><code>GRADIO_SERVER_PORT</code></strong>
 <ul>
-<li><strong>Description:</strong> The complete list of PII entity types supported by AWS Comprehend that can be selected for redaction.</li>
-<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>config.py</code> for the complete list.</li>
-<li><strong>Configuration:</strong> This is typically an informational variable reflecting the capabilities of AWS Comprehend and is not meant to be changed by users directly affecting redaction behavior (use <code>CHOSEN_COMPREHEND_ENTITIES</code> for that). Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> The network port on which the Gradio server will listen.</li>
+<li><strong>Default Value:</strong> <code>7860</code></li>
 </ul></li>
-<li><strong><code>CHOSEN_REDACT_ENTITIES</code></strong>
+<li><strong><code>ALLOWED_ORIGINS</code></strong>
 <ul>
-<li><strong>Description:</strong> A list of local PII entity types to be redacted when using the local PII detection model.</li>
-<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>config.py</code> for the complete list.</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>. This should be a string representation of a Python list.</li>
+<li><strong>Description:</strong> A comma-separated list of allowed origins for Cross-Origin Resource Sharing (CORS).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
-<li><strong><code>FULL_ENTITY_LIST</code></strong>
+<li><strong><code>ALLOWED_HOSTS</code></strong>
 <ul>
-<li><strong>Description:</strong> The complete list of PII entity types supported by the local PII detection model that can be selected for redaction.</li>
-<li><strong>Default Value:</strong> A predefined list of entity types. Refer to <code>config.py</code> for the complete list.</li>
-<li><strong>Configuration:</strong> This is typically an informational variable reflecting the capabilities of the local model and is not meant to be changed by users directly affecting redaction behavior (use <code>CHOSEN_REDACT_ENTITIES</code> for that). Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> A comma-separated list of allowed hostnames.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
-<li><strong><code>PAGE_BREAK_VALUE</code></strong>
+<li><strong><code>ROOT_PATH</code></strong>
 <ul>
-<li><strong>Description:</strong> Defines a page count after which a function might restart. (Note: Currently not activated).</li>
-<li><strong>Default Value:</strong> <code>'99999'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> The root path for the application, useful if running behind a reverse proxy (e.g., <code>/app</code>).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
-<li><strong><code>MAX_TIME_VALUE</code></strong>
+<li><strong><code>FASTAPI_ROOT_PATH</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies a maximum time value for long-running processes.</li>
-<li><strong>Default Value:</strong> <code>'999999'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>CUSTOM_BOX_COLOUR</code></strong>
-<ul>
-<li><strong>Description:</strong> Allows specifying a custom color for the redaction boxes drawn on documents. Only <code>"grey"</code> is currently supported as a custom value. If empty, a default color is used.</li>
-<li><strong>Default Value:</strong> <code>""</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>RETURN_PDF_END_OF_REDACTION</code></strong>
-<ul>
-<li><strong>Description:</strong> If set to <code>'True'</code>, the application will return a PDF document at the end of the redaction task.</li>
-<li><strong>Default Value:</strong> <code>"True"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>COMPRESS_REDACTED_PDF</code></strong>
-<ul>
-<li><strong>Description:</strong> If set to <code>'True'</code>, the redacted PDF output will be compressed. This can reduce file size but may cause issues on systems with low memory.</li>
-<li><strong>Default Value:</strong> <code>"False"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-</ul>
-</section>
-<section id="language-options" class="level2">
-<h2 class="anchored" data-anchor-id="language-options">Language Options</h2>
-<p>Settings for multi-language support in OCR and PII detection.</p>
-<ul>
-<li><strong><code>SHOW_LANGUAGE_SELECTION</code></strong>
-<ul>
-<li><strong>Description:</strong> If set to <code>"True"</code>, a dropdown menu for language selection will be visible in the user interface.</li>
-<li><strong>Default Value:</strong> <code>"False"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>DEFAULT_LANGUAGE_FULL_NAME</code></strong>
-<ul>
-<li><strong>Description:</strong> The default language’s full name (e.g., “english”) to be displayed in the UI.</li>
-<li><strong>Default Value:</strong> <code>"english"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>DEFAULT_LANGUAGE</code></strong>
-<ul>
-<li><strong>Description:</strong> The default language’s short code (e.g., “en”) used by the backend engines. Ensure the corresponding Tesseract/PaddleOCR language packs are installed.</li>
-<li><strong>Default Value:</strong> <code>"en"</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>MAPPED_LANGUAGE_CHOICES</code></strong>
-<ul>
-<li><strong>Description:</strong> A string list of full language names (e.g., ‘english’, ‘french’) presented to the user in the language dropdown.</li>
-<li><strong>Default Value:</strong> A predefined list. See <code>config.py</code>.</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>LANGUAGE_CHOICES</code></strong>
-<ul>
-<li><strong>Description:</strong> A string list of short language codes (e.g., ‘en’, ‘fr’) that correspond to <code>MAPPED_LANGUAGE_CHOICES</code>. This is what the backend uses.</li>
-<li><strong>Default Value:</strong> A predefined list. See <code>config.py</code>.</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-</ul>
-</section>
-<section id="app-run-options" class="level2">
-<h2 class="anchored" data-anchor-id="app-run-options">App Run Options</h2>
-<p>General runtime configurations for the application.</p>
-<ul>
-<li><strong><code>TLDEXTRACT_CACHE</code></strong>
-<ul>
-<li><strong>Description:</strong> Path to the cache directory used by the <code>tldextract</code> library, which helps in accurately extracting top-level domains (TLDs) from URLs.</li>
-<li><strong>Default Value:</strong> <code>'tmp/tld/'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>COGNITO_AUTH</code></strong>
-<ul>
-<li><strong>Description:</strong> Enables or disables AWS Cognito authentication for the application. Set to <code>'1'</code> to enable.</li>
-<li><strong>Default Value:</strong> <code>'0'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
-</ul></li>
-<li><strong><code>RUN_DIRECT_MODE</code></strong>
-<ul>
-<li><strong>Description:</strong> If set to <code>'1'</code>, runs the application in a “direct mode”, which might alter certain behaviors (e.g., UI elements, processing flow).</li>
-<li><strong>Default Value:</strong> <code>'0'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> The root path for the FastAPI application, used when <code>RUN_FASTAPI</code> is true.</li>
+<li><strong>Default Value:</strong> <code>"/"</code></li>
 </ul></li>
 <li><strong><code>MAX_QUEUE_SIZE</code></strong>
 <ul>
 <li><strong>Description:</strong> The maximum number of requests that can be queued in the Gradio interface.</li>
-<li><strong>Default Value:</strong> <code>'5'</code> (integer)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Default Value:</strong> <code>5</code></li>
 </ul></li>
 <li><strong><code>MAX_FILE_SIZE</code></strong>
 <ul>
 <li><strong>Description:</strong> Maximum file size allowed for uploads (e.g., “250mb”, “1gb”).</li>
 <li><strong>Default Value:</strong> <code>'250mb'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>GRADIO_SERVER_PORT</code></strong>
-<ul>
-<li><strong>Description:</strong> The network port on which the Gradio server will listen.</li>
-<li><strong>Default Value:</strong> <code>'7860'</code> (integer)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>ROOT_PATH</code></strong>
-<ul>
-<li><strong>Description:</strong> The root path for the application, useful if running behind a reverse proxy (e.g., <code>/app</code>).</li>
-<li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>DEFAULT_CONCURRENCY_LIMIT</code></strong>
 <ul>
 <li><strong>Description:</strong> The default concurrency limit for Gradio event handlers, controlling how many requests can be processed simultaneously.</li>
-<li><strong>Default Value:</strong> <code>'3'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Default Value:</strong> <code>3</code></li>
 </ul></li>
-<li><strong><code>GET_DEFAULT_ALLOW_LIST</code></strong>
+<li><strong><code>MAX_SIMULTANEOUS_FILES</code></strong>
 <ul>
-<li><strong>Description:</strong> If set, enables the use of a default allow list for user access or specific functionalities. The exact behavior depends on application logic.</li>
-<li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> The maximum number of files that can be processed at once.</li>
+<li><strong>Default Value:</strong> <code>10</code></li>
 </ul></li>
-<li><strong><code>ALLOW_LIST_PATH</code></strong>
+<li><strong><code>MAX_DOC_PAGES</code></strong>
 <ul>
-<li><strong>Description:</strong> Path to a local CSV file containing an allow list (e.g., <code>config/default_allow_list.csv</code>).</li>
-<li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> The maximum number of pages a document can have.</li>
+<li><strong>Default Value:</strong> <code>3000</code></li>
 </ul></li>
-<li><strong><code>S3_ALLOW_LIST_PATH</code></strong>
+<li><strong><code>MAX_TABLE_ROWS</code></strong> / <strong><code>MAX_TABLE_COLUMNS</code></strong>
 <ul>
-<li><strong>Description:</strong> Path to an allow list CSV file stored in an S3 bucket (e.g., <code>default_allow_list.csv</code>). Requires <code>DOCUMENT_REDACTION_BUCKET</code> to be set.</li>
-<li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
+<li><strong>Description:</strong> Maximum number of rows and columns for tabular data processing.</li>
+<li><strong>Default Values:</strong> <code>250000</code> / <code>100</code></li>
+</ul></li>
+<li><strong><code>MAX_OPEN_TEXT_CHARACTERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of characters for open text input.</li>
+<li><strong>Default Value:</strong> <code>50000</code></li>
+</ul></li>
+<li><strong><code>TLDEXTRACT_CACHE</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the cache directory used by the <code>tldextract</code> library.</li>
+<li><strong>Default Value:</strong> <code>'tmp/tld/'</code></li>
+</ul></li>
+<li><strong><code>COGNITO_AUTH</code></strong>
+<ul>
+<li><strong>Description:</strong> Enables or disables AWS Cognito authentication. Set to <code>'True'</code> to enable.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>USER_GUIDE_URL</code></strong>
+<ul>
+<li><strong>Description:</strong> A safe URL pointing to the user guide. The URL is validated against a list of allowed domains.</li>
+<li><strong>Default Value:</strong> <code>"https://seanpedrick-case.github.io/doc_redaction"</code></li>
+</ul></li>
+<li><strong><code>SHOW_EXAMPLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, displays example files in the Gradio interface.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>SHOW_AWS_EXAMPLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, includes AWS-specific examples.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>FILE_INPUT_HEIGHT</code></strong>
 <ul>
-<li><strong>Description:</strong> Sets the height (in pixels or other CSS unit) of the file input component in the Gradio UI.</li>
-<li><strong>Default Value:</strong> <code>'200'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> Sets the height (in pixels) of the file input component in the Gradio UI.</li>
+<li><strong>Default Value:</strong> <code>200</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="redaction-pii-options" class="level2">
+<h2 class="anchored" data-anchor-id="redaction-pii-options">Redaction &amp; PII Options</h2>
+<p>Configurations related to text extraction, PII detection, and the redaction process.</p>
+<section id="ui-and-model-selection" class="level3">
+<h3 class="anchored" data-anchor-id="ui-and-model-selection">UI and Model Selection</h3>
+<ul>
+<li><strong><code>EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the “Extraction and PII Options” accordion in the UI will be open by default.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS</code></strong> / <strong><code>SHOW_AWS_TEXT_EXTRACTION_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether local (Tesseract) or AWS (Textract) text extraction options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"True"</code> for both.</li>
+</ul></li>
+<li><strong><code>SHOW_LOCAL_PII_DETECTION_OPTIONS</code></strong> / <strong><code>SHOW_AWS_PII_DETECTION_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether local or AWS (Comprehend) PII detection options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"True"</code> for both.</li>
+</ul></li>
+<li><strong><code>DEFAULT_TEXT_EXTRACTION_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Sets the default text extraction model selected in the UI.</li>
+<li><strong>Default Value:</strong> Defaults to AWS Textract if available, otherwise local selectable text.</li>
+</ul></li>
+<li><strong><code>DEFAULT_PII_DETECTION_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Sets the default PII detection model selected in the UI.</li>
+<li><strong>Default Value:</strong> Defaults to AWS Comprehend if available, otherwise the local model.</li>
+</ul></li>
+<li><strong><code>LOAD_REDACTION_ANNOTATIONS_FROM_PDF</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the application will load existing redaction annotations from PDFs during the review step.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="external-tool-paths" class="level3">
+<h3 class="anchored" data-anchor-id="external-tool-paths">External Tool Paths</h3>
+<ul>
+<li><strong><code>TESSERACT_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the local Tesseract OCR installation folder.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>TESSERACT_DATA_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the Tesseract trained data files (<code>tessdata</code>).</li>
+<li><strong>Default Value:</strong> <code>"/usr/share/tessdata"</code></li>
+</ul></li>
+<li><strong><code>POPPLER_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the local Poppler installation’s <code>bin</code> folder.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>PADDLE_MODEL_PATH</code></strong> / <strong><code>SPACY_MODEL_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Custom directory for PaddleOCR and spaCy model storage, useful for environments like AWS Lambda.</li>
+<li><strong>Default Value:</strong> <code>''</code> (uses default location).</li>
+</ul></li>
+</ul>
+</section>
+<section id="local-ocr-tesseract-paddleocr" class="level3">
+<h3 class="anchored" data-anchor-id="local-ocr-tesseract-paddleocr">Local OCR (Tesseract &amp; PaddleOCR)</h3>
+<ul>
+<li><strong><code>CHOSEN_LOCAL_OCR_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, or <code>"hybrid"</code>.</li>
+<li><strong>Default Value:</strong> <code>"tesseract"</code></li>
+</ul></li>
+<li><strong><code>SHOW_LOCAL_OCR_MODEL_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select the local OCR model from the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>HYBRID_OCR_CONFIDENCE_THRESHOLD</code></strong>
+<ul>
+<li><strong>Description:</strong> In “hybrid” mode, this is the Tesseract confidence score below which PaddleOCR will be used for re-extraction.</li>
+<li><strong>Default Value:</strong> <code>65</code></li>
+</ul></li>
+<li><strong><code>HYBRID_OCR_PADDING</code></strong>
+<ul>
+<li><strong>Description:</strong> In “hybrid” mode, padding added to the word’s bounding box before re-extraction.</li>
+<li><strong>Default Value:</strong> <code>1</code></li>
+</ul></li>
+<li><strong><code>PADDLE_USE_TEXTLINE_ORIENTATION</code></strong>
+<ul>
+<li><strong>Description:</strong> Toggles textline orientation detection for PaddleOCR.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>PADDLE_DET_DB_UNCLIP_RATIO</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls the expansion ratio of the detected text region in PaddleOCR.</li>
+<li><strong>Default Value:</strong> <code>1.2</code></li>
+</ul></li>
+<li><strong><code>SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> Saves comparison images when using “hybrid” OCR mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SAVE_PADDLE_VISUALISATIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Saves images with PaddleOCR’s detected bounding boxes overlaid.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>PREPROCESS_LOCAL_OCR_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, images will be preprocessed before local OCR. Can slow down processing.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="entity-and-search-options" class="level3">
+<h3 class="anchored" data-anchor-id="entity-and-search-options">Entity and Search Options</h3>
+<ul>
+<li><strong><code>CHOSEN_COMPREHEND_ENTITIES</code></strong> / <strong><code>FULL_COMPREHEND_ENTITY_LIST</code></strong>
+<ul>
+<li><strong>Description:</strong> The selected and available PII entity types for AWS Comprehend.</li>
+<li><strong>Default Value:</strong> Predefined lists of entities (see script).</li>
+</ul></li>
+<li><strong><code>CHOSEN_REDACT_ENTITIES</code></strong> / <strong><code>FULL_ENTITY_LIST</code></strong>
+<ul>
+<li><strong>Description:</strong> The selected and available PII entity types for the local model.</li>
+<li><strong>Default Value:</strong> Predefined lists of entities (see script).</li>
+</ul></li>
+<li><strong><code>CUSTOM_ENTITIES</code></strong>
+<ul>
+<li><strong>Description:</strong> A list of entities that are considered “custom” and may have special handling.</li>
+<li><strong>Default Value:</strong> <code>['TITLES', 'UKPOSTCODE', 'STREETNAME', 'CUSTOM']</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_SEARCH_QUERY</code></strong>
+<ul>
+<li><strong>Description:</strong> The default text for the custom search/redact input box.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_FUZZY_SPELLING_MISTAKES_NUM</code></strong>
+<ul>
+<li><strong>Description:</strong> Default number of allowed spelling mistakes for fuzzy searches.</li>
+<li><strong>Default Value:</strong> <code>1</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_PAGE_MIN</code></strong> / <strong><code>DEFAULT_PAGE_MAX</code></strong>
+<ul>
+<li><strong>Description:</strong> Default start and end pages for processing. <code>0</code> for max means process all pages.</li>
+<li><strong>Default Value:</strong> <code>0</code> for both.</li>
+</ul></li>
+</ul>
+</section>
+<section id="textract-feature-selection" class="level3">
+<h3 class="anchored" data-anchor-id="textract-feature-selection">Textract Feature Selection</h3>
+<ul>
+<li><strong><code>DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX</code></strong>
+<ul>
+<li><strong>Description:</strong> The default options selected for Textract’s handwriting and signature detection.</li>
+<li><strong>Default Value:</strong> <code>['Extract handwriting']</code></li>
+</ul></li>
+<li><strong><code>INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION</code></strong></li>
+<li><strong><code>INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION</code></strong></li>
+<li><strong><code>INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Booleans (<code>"True"</code>/<code>"False"</code>) to include Forms, Layout, and Tables as selectable options for Textract analysis.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for all.</li>
+</ul></li>
+</ul>
+</section>
+<section id="tabular-data-options" class="level3">
+<h3 class="anchored" data-anchor-id="tabular-data-options">Tabular Data Options</h3>
+<ul>
+<li><strong><code>DO_INITIAL_TABULAR_DATA_CLEAN</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, performs an initial cleaning step on tabular data.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_TEXT_COLUMNS</code></strong> / <strong><code>DEFAULT_EXCEL_SHEETS</code></strong>
+<ul>
+<li><strong>Description:</strong> Default values for specifying which columns or sheets to process in tabular files.</li>
+<li><strong>Default Value:</strong> <code>[]</code> (empty list)</li>
+</ul></li>
+<li><strong><code>DEFAULT_TABULAR_ANONYMISATION_STRATEGY</code></strong>
+<ul>
+<li><strong>Description:</strong> The default method for anonymizing tabular data (e.g., “redact completely”).</li>
+<li><strong>Default Value:</strong> <code>"redact completely"</code></li>
+</ul></li>
+</ul>
+</section>
+</section>
+<section id="language-options" class="level2">
+<h2 class="anchored" data-anchor-id="language-options">Language Options</h2>
+<p>Settings for multi-language support.</p>
+<ul>
+<li><strong><code>SHOW_LANGUAGE_SELECTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, a language selection dropdown will be visible in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_LANGUAGE_FULL_NAME</code></strong> / <strong><code>DEFAULT_LANGUAGE</code></strong>
+<ul>
+<li><strong>Description:</strong> The default language’s full name (e.g., “english”) and its short code (e.g., “en”).</li>
+<li><strong>Default Values:</strong> <code>"english"</code>, <code>"en"</code></li>
+</ul></li>
+<li><strong><code>textract_language_choices</code></strong> / <strong><code>aws_comprehend_language_choices</code></strong>
+<ul>
+<li><strong>Description:</strong> Lists of supported language codes for Textract and Comprehend.</li>
+<li><strong>Default Value:</strong> <code>['en', 'es', 'fr', 'de', 'it', 'pt']</code> and <code>['en', 'es']</code></li>
+</ul></li>
+<li><strong><code>MAPPED_LANGUAGE_CHOICES</code></strong> / <strong><code>LANGUAGE_CHOICES</code></strong>
+<ul>
+<li><strong>Description:</strong> Paired lists of full language names and their corresponding short codes for the UI dropdown.</li>
+<li><strong>Default Value:</strong> Predefined lists (see script).</li>
+</ul></li>
+</ul>
+</section>
+<section id="duplicate-detection-settings" class="level2">
+<h2 class="anchored" data-anchor-id="duplicate-detection-settings">Duplicate Detection Settings</h2>
+<ul>
+<li><strong><code>DEFAULT_DUPLICATE_DETECTION_THRESHOLD</code></strong>
+<ul>
+<li><strong>Description:</strong> The similarity score (0.0 to 1.0) above which documents/pages are considered duplicates.</li>
+<li><strong>Default Value:</strong> <code>0.95</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_MIN_CONSECUTIVE_PAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum number of consecutive pages that must be duplicates to be flagged.</li>
+<li><strong>Default Value:</strong> <code>1</code></li>
+</ul></li>
+<li><strong><code>USE_GREEDY_DUPLICATE_DETECTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, uses a greedy algorithm that may find more duplicates but can be less precise.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_COMBINE_PAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, text from the same page number across different files is combined before checking for duplicates.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_MIN_WORD_COUNT</code></strong>
+<ul>
+<li><strong>Description:</strong> Pages with fewer words than this value will be ignored by the duplicate detector.</li>
+<li><strong>Default Value:</strong> <code>10</code></li>
+</ul></li>
+<li><strong><code>REMOVE_DUPLICATE_ROWS</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, enables duplicate row detection in tabular data.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="file-output-options" class="level2">
+<h2 class="anchored" data-anchor-id="file-output-options">File Output Options</h2>
+<ul>
+<li><strong><code>USE_GUI_BOX_COLOURS_FOR_OUTPUTS</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, the final redacted PDF will use the same redaction box colors as shown in the review UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>CUSTOM_BOX_COLOUR</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies the color for redaction boxes as an RGB tuple string, e.g., <code>"(0, 0, 0)"</code> for black.</li>
+<li><strong>Default Value:</strong> <code>"(0, 0, 0)"</code></li>
+</ul></li>
+<li><strong><code>APPLY_REDACTIONS_IMAGES</code></strong>, <strong><code>APPLY_REDACTIONS_GRAPHICS</code></strong>, <strong><code>APPLY_REDACTIONS_TEXT</code></strong>
+<ul>
+<li><strong>Description:</strong> Advanced control over how redactions are applied to underlying images, vector graphics, and text in the PDF, based on PyMuPDF options. <code>0</code> is the default for a standard redaction workflow.</li>
+<li><strong>Default Value:</strong> <code>0</code> for all.</li>
+</ul></li>
+<li><strong><code>RETURN_PDF_FOR_REVIEW</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, a PDF with redaction boxes drawn on it (but text not removed) is generated for the “Review” tab.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>RETURN_REDACTED_PDF</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the application will return a fully redacted PDF at the end of the main task.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>COMPRESS_REDACTED_PDF</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the redacted PDF output will be compressed.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="direct-mode-lambda-configuration" class="level2">
+<h2 class="anchored" data-anchor-id="direct-mode-lambda-configuration">Direct Mode &amp; Lambda Configuration</h2>
+<p>Settings for running the application from the command line (Direct Mode) or as an AWS Lambda function.</p>
+<section id="direct-mode" class="level3">
+<h3 class="anchored" data-anchor-id="direct-mode">Direct Mode</h3>
+<ul>
+<li><strong><code>RUN_DIRECT_MODE</code></strong>
+<ul>
+<li><strong>Description:</strong> Set to <code>'True'</code> to enable direct command-line mode.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_DEFAULT_USER</code></strong>
+<ul>
+<li><strong>Description:</strong> Default username for CLI requests.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_TASK</code></strong>
+<ul>
+<li><strong>Description:</strong> The task to perform: <code>'redact'</code> or <code>'deduplicate'</code>.</li>
+<li><strong>Default Value:</strong> <code>'redact'</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_INPUT_FILE</code></strong> / <strong><code>DIRECT_MODE_OUTPUT_DIR</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the input file and output directory for the task.</li>
+<li><strong>Default Values:</strong> <code>''</code>, <code>output/</code></li>
+</ul></li>
+<li><strong>Other <code>DIRECT_MODE_*</code> variables:</strong>
+<ul>
+<li><strong>Description:</strong> These variables allow for setting nearly all application options (e.g., <code>DIRECT_MODE_PII_DETECTOR</code>, <code>DIRECT_MODE_SIMILARITY_THRESHOLD</code>) directly for a single CLI run, overriding other configurations.</li>
+<li><strong>Default Value:</strong> Defaults are inherited from the main application settings (e.g., <code>LOCAL_PII_OPTION</code>, <code>DEFAULT_DUPLICATE_DETECTION_THRESHOLD</code>).</li>
+</ul></li>
+</ul>
+</section>
+<section id="lambda-configuration" class="level3">
+<h3 class="anchored" data-anchor-id="lambda-configuration">Lambda Configuration</h3>
+<ul>
+<li><strong><code>LAMBDA_POLL_INTERVAL</code></strong>
+<ul>
+<li><strong>Description:</strong> Polling interval in seconds for checking Textract job status.</li>
+<li><strong>Default Value:</strong> <code>30</code></li>
+</ul></li>
+<li><strong><code>LAMBDA_MAX_POLL_ATTEMPTS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of polling attempts before timeout.</li>
+<li><strong>Default Value:</strong> <code>120</code></li>
+</ul></li>
+<li><strong><code>LAMBDA_PREPARE_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, prepares images for OCR processing within the Lambda environment.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>LAMBDA_EXTRACT_SIGNATURES</code></strong>
+<ul>
+<li><strong>Description:</strong> Enables signature extraction during Textract analysis in Lambda.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>LAMBDA_DEFAULT_USERNAME</code></strong>
+<ul>
+<li><strong>Description:</strong> Default username for operations initiated by Lambda.</li>
+<li><strong>Default Value:</strong> <code>"lambda_user"</code></li>
+</ul></li>
+</ul>
+</section>
+</section>
+<section id="allow-deny-whole-page-redaction-lists" class="level2">
+<h2 class="anchored" data-anchor-id="allow-deny-whole-page-redaction-lists">Allow, Deny, &amp; Whole Page Redaction Lists</h2>
+<ul>
+<li><strong><code>GET_DEFAULT_ALLOW_LIST</code></strong>, <strong><code>GET_DEFAULT_DENY_LIST</code></strong>, <strong><code>GET_DEFAULT_WHOLE_PAGE_REDACTION_LIST</code></strong>
+<ul>
+<li><strong>Description:</strong> Booleans (<code>"True"</code>/<code>"False"</code>) to enable the use of allow, deny, or whole-page redaction lists.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>ALLOW_LIST_PATH</code></strong>, <strong><code>DENY_LIST_PATH</code></strong>, <strong><code>WHOLE_PAGE_REDACTION_LIST_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Local paths to the respective CSV list files.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>S3_ALLOW_LIST_PATH</code></strong>, <strong><code>S3_DENY_LIST_PATH</code></strong>, <strong><code>S3_WHOLE_PAGE_REDACTION_LIST_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Paths to the respective list files within the <code>DOCUMENT_REDACTION_BUCKET</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 </ul>
 </section>
 <section id="cost-code-options" class="level2">
 <h2 class="anchored" data-anchor-id="cost-code-options">Cost Code Options</h2>
-<p>Settings related to tracking and applying cost codes for application usage.</p>
 <ul>
 <li><strong><code>SHOW_COSTS</code></strong>
 <ul>
 <li><strong>Description:</strong> If set to <code>'True'</code>, cost-related information will be displayed in the UI.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>GET_COST_CODES</code></strong>
 <ul>
-<li><strong>Description:</strong> Enables fetching and using cost codes within the application. Set to <code>'True'</code> to enable.</li>
+<li><strong>Description:</strong> Enables fetching and using cost codes. Set to <code>'True'</code> to enable.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>DEFAULT_COST_CODE</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies a default cost code to be used if cost codes are enabled but none is selected by the user.</li>
-<li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> Specifies a default cost code.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
-<li><strong><code>COST_CODES_PATH</code></strong>
+<li><strong><code>COST_CODES_PATH</code></strong> / <strong><code>S3_COST_CODES_PATH</code></strong>
 <ul>
-<li><strong>Description:</strong> Path to a local CSV file containing available cost codes (e.g., <code>config/COST_CENTRES.csv</code>).</li>
-<li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
-</ul></li>
-<li><strong><code>S3_COST_CODES_PATH</code></strong>
-<ul>
-<li><strong>Description:</strong> Path to a cost codes CSV file stored in an S3 bucket (e.g., <code>COST_CENTRES.csv</code>). Requires <code>DOCUMENT_REDACTION_BUCKET</code> to be set.</li>
-<li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
+<li><strong>Description:</strong> Local or S3 path to a CSV file containing available cost codes.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>ENFORCE_COST_CODES</code></strong>
 <ul>
-<li><strong>Description:</strong> If set to <code>'True'</code> and <code>GET_COST_CODES</code> is also enabled, makes the selection of a cost code mandatory for users.</li>
+<li><strong>Description:</strong> If set to <code>'True'</code>, makes the selection of a cost code mandatory.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 </ul>
 </section>
-<section id="whole-document-api-options" class="level2">
-<h2 class="anchored" data-anchor-id="whole-document-api-options">Whole Document API Options</h2>
-<p>Configurations for features related to processing whole documents via APIs, particularly AWS Textract for large documents.</p>
+<section id="whole-document-api-options-textract-async" class="level2">
+<h2 class="anchored" data-anchor-id="whole-document-api-options-textract-async">Whole Document API Options (Textract Async)</h2>
 <ul>
 <li><strong><code>SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS</code></strong>
 <ul>
-<li><strong>Description:</strong> Controls whether UI options for whole document Textract calls are displayed.</li>
+<li><strong>Description:</strong> Controls whether UI options for asynchronous whole document Textract calls are displayed.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET</code></strong>
 <ul>
-<li><strong>Description:</strong> The S3 bucket used for input and output of whole document analysis with AWS Textract.</li>
-<li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
+<li><strong>Description:</strong> The S3 bucket used for asynchronous Textract analysis.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
-<li><strong><code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER</code></strong>
+<li><strong><code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER</code></strong> / <strong><code>..._OUTPUT_SUBFOLDER</code></strong>
 <ul>
-<li><strong>Description:</strong> The subfolder within <code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET</code> where input documents for Textract analysis are placed.</li>
-<li><strong>Default Value:</strong> <code>'input'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
-</ul></li>
-<li><strong><code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER</code></strong>
-<ul>
-<li><strong>Description:</strong> The subfolder within <code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET</code> where output results from Textract analysis are stored.</li>
-<li><strong>Default Value:</strong> <code>'output'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
+<li><strong>Description:</strong> Input and output subfolders within the analysis bucket.</li>
+<li><strong>Default Values:</strong> <code>'input'</code>, <code>'output'</code></li>
 </ul></li>
 <li><strong><code>LOAD_PREVIOUS_TEXTRACT_JOBS_S3</code></strong>
 <ul>
-<li><strong>Description:</strong> If set to <code>'True'</code>, the application will attempt to load data from previous Textract jobs stored in S3.</li>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the application will load data from previous Textract jobs stored in S3.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
 </ul></li>
-<li><strong><code>TEXTRACT_JOBS_S3_LOC</code></strong>
+<li><strong><code>TEXTRACT_JOBS_S3_LOC</code></strong> / <strong><code>TEXTRACT_JOBS_S3_INPUT_LOC</code></strong>
 <ul>
-<li><strong>Description:</strong> The S3 subfolder (within the main redaction bucket) where Textract job data (output) is stored.</li>
-<li><strong>Default Value:</strong> <code>'output'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
-</ul></li>
-<li><strong><code>TEXTRACT_JOBS_S3_INPUT_LOC</code></strong>
-<ul>
-<li><strong>Description:</strong> The S3 subfolder (within the main redaction bucket) where Textract job input is stored.</li>
-<li><strong>Default Value:</strong> <code>'input'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code> (or <code>config/aws_config.env</code> if <code>AWS_CONFIG_PATH</code> is configured).</li>
+<li><strong>Description:</strong> S3 subfolders where Textract job output and input are stored.</li>
+<li><strong>Default Value:</strong> <code>'output'</code>, <code>'input'</code></li>
 </ul></li>
 <li><strong><code>TEXTRACT_JOBS_LOCAL_LOC</code></strong>
 <ul>
-<li><strong>Description:</strong> The local subfolder where Textract job data is stored if not using S3 or as a cache.</li>
+<li><strong>Description:</strong> The local subfolder for storing Textract job data.</li>
 <li><strong>Default Value:</strong> <code>'output'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
 </ul></li>
 <li><strong><code>DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the number of past days for which to display whole document Textract jobs in the UI.</li>
-<li><strong>Default Value:</strong> <code>'7'</code></li>
-<li><strong>Configuration:</strong> Set as an environment variable directly, or include in <code>config/app_config.env</code>.</li>
+<li><strong>Description:</strong> Specifies the number of past days for which to display whole document Textract jobs.</li>
+<li><strong>Default Value:</strong> <code>7</code></li>
 </ul></li>
 </ul>
 

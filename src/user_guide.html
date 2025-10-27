@@ -20,6 +20,41 @@ ul.task-list li input[type="checkbox"] {
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
 }
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
 </style>
 
 
@@ -125,13 +160,22 @@ ul.task-list li input[type="checkbox"] {
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#table-of-contents" id="toc-table-of-contents" class="nav-link active" data-scroll-target="#table-of-contents">Table of contents</a></li>
-  <li><a href="#example-data-files" id="toc-example-data-files" class="nav-link" data-scroll-target="#example-data-files">Example data files</a></li>
+  <li><a href="#table-of-contents" id="toc-table-of-contents" class="nav-link active" data-scroll-target="#table-of-contents">Table of contents</a>
+  <ul class="collapse">
+  <li><a href="#getting-started" id="toc-getting-started" class="nav-link" data-scroll-target="#getting-started">Getting Started</a></li>
+  <li><a href="#advanced-user-guide" id="toc-advanced-user-guide" class="nav-link" data-scroll-target="#advanced-user-guide">Advanced user guide</a></li>
+  <li><a href="#features-for-expert-userssystem-administrators" id="toc-features-for-expert-userssystem-administrators" class="nav-link" data-scroll-target="#features-for-expert-userssystem-administrators">Features for expert users/system administrators</a></li>
+  </ul></li>
+  <li><a href="#built-in-example-data" id="toc-built-in-example-data" class="nav-link" data-scroll-target="#built-in-example-data">Built-in example data</a>
+  <ul class="collapse">
+  <li><a href="#using-built-in-examples" id="toc-using-built-in-examples" class="nav-link" data-scroll-target="#using-built-in-examples">Using built-in examples</a></li>
+  <li><a href="#external-example-files-optional" id="toc-external-example-files-optional" class="nav-link" data-scroll-target="#external-example-files-optional">External example files (optional)</a></li>
+  </ul></li>
   <li><a href="#basic-redaction" id="toc-basic-redaction" class="nav-link" data-scroll-target="#basic-redaction">Basic redaction</a>
   <ul class="collapse">
   <li><a href="#upload-files-to-the-app" id="toc-upload-files-to-the-app" class="nav-link" data-scroll-target="#upload-files-to-the-app">Upload files to the app</a></li>
   <li><a href="#text-extraction" id="toc-text-extraction" class="nav-link" data-scroll-target="#text-extraction">Text extraction</a></li>
-  <li><a href="#optional---select-signature-extraction" id="toc-optional---select-signature-extraction" class="nav-link" data-scroll-target="#optional---select-signature-extraction">Optional - select signature extraction</a></li>
+  <li><a href="#enable-aws-textract-signature-extraction" id="toc-enable-aws-textract-signature-extraction" class="nav-link" data-scroll-target="#enable-aws-textract-signature-extraction">Enable AWS Textract signature extraction</a></li>
   <li><a href="#pii-redaction-method" id="toc-pii-redaction-method" class="nav-link" data-scroll-target="#pii-redaction-method">PII redaction method</a></li>
   <li><a href="#optional---costs-and-time-estimation" id="toc-optional---costs-and-time-estimation" class="nav-link" data-scroll-target="#optional---costs-and-time-estimation">Optional - costs and time estimation</a></li>
   <li><a href="#optional---cost-code-selection" id="toc-optional---cost-code-selection" class="nav-link" data-scroll-target="#optional---cost-code-selection">Optional - cost code selection</a></li>
@@ -166,14 +210,17 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#redacting-copy-and-pasted-text" id="toc-redacting-copy-and-pasted-text" class="nav-link" data-scroll-target="#redacting-copy-and-pasted-text">Redacting copy and pasted text</a></li>
   <li><a href="#redaction-log-outputs" id="toc-redaction-log-outputs" class="nav-link" data-scroll-target="#redaction-log-outputs">Redaction log outputs</a></li>
   </ul></li>
-  <li><a href="#advanced-user-guide" id="toc-advanced-user-guide" class="nav-link" data-scroll-target="#advanced-user-guide">ADVANCED USER GUIDE</a>
+  <li><a href="#identifying-and-redacting-duplicate-pages" id="toc-identifying-and-redacting-duplicate-pages" class="nav-link" data-scroll-target="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a>
   <ul class="collapse">
-  <li><a href="#table-of-contents-1" id="toc-table-of-contents-1" class="nav-link" data-scroll-target="#table-of-contents-1">Table of contents</a></li>
-  <li><a href="#merging-redaction-review-files" id="toc-merging-redaction-review-files" class="nav-link" data-scroll-target="#merging-redaction-review-files">Merging redaction review files</a></li>
-  <li><a href="#identifying-and-redacting-duplicate-pages" id="toc-identifying-and-redacting-duplicate-pages" class="nav-link" data-scroll-target="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a></li>
+  <li><a href="#duplicate-page-detection-in-documents" id="toc-duplicate-page-detection-in-documents" class="nav-link" data-scroll-target="#duplicate-page-detection-in-documents">Duplicate page detection in documents</a></li>
+  <li><a href="#duplicate-detection-in-tabular-data" id="toc-duplicate-detection-in-tabular-data" class="nav-link" data-scroll-target="#duplicate-detection-in-tabular-data">Duplicate detection in tabular data</a></li>
+  </ul></li>
+  <li><a href="#advanced-user-guide-1" id="toc-advanced-user-guide-1" class="nav-link" data-scroll-target="#advanced-user-guide-1">Advanced user guide</a>
+  <ul class="collapse">
   <li><a href="#fuzzy-search-and-redaction" id="toc-fuzzy-search-and-redaction" class="nav-link" data-scroll-target="#fuzzy-search-and-redaction">Fuzzy search and redaction</a></li>
   <li><a href="#export-to-and-import-from-adobe" id="toc-export-to-and-import-from-adobe" class="nav-link" data-scroll-target="#export-to-and-import-from-adobe">Export to and import from Adobe</a>
   <ul class="collapse">
+  <li><a href="#using-_for_review.pdf-files-with-adobe-acrobat" id="toc-using-_for_review.pdf-files-with-adobe-acrobat" class="nav-link" data-scroll-target="#using-_for_review.pdf-files-with-adobe-acrobat">Using _for_review.pdf files with Adobe Acrobat</a></li>
   <li><a href="#exporting-to-adobe-acrobat" id="toc-exporting-to-adobe-acrobat" class="nav-link" data-scroll-target="#exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</a></li>
   <li><a href="#importing-from-adobe-acrobat" id="toc-importing-from-adobe-acrobat" class="nav-link" data-scroll-target="#importing-from-adobe-acrobat">Importing from Adobe Acrobat</a></li>
   </ul></li>
@@ -182,12 +229,38 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#starting-a-new-textract-api-job" id="toc-starting-a-new-textract-api-job" class="nav-link" data-scroll-target="#starting-a-new-textract-api-job">Starting a new Textract API job</a></li>
   <li><a href="#textract-api-job-outputs" id="toc-textract-api-job-outputs" class="nav-link" data-scroll-target="#textract-api-job-outputs">Textract API job outputs</a></li>
   </ul></li>
+  <li><a href="#modifying-existing-redaction-review-files" id="toc-modifying-existing-redaction-review-files" class="nav-link" data-scroll-target="#modifying-existing-redaction-review-files">Modifying existing redaction review files</a>
+  <ul class="collapse">
+  <li><a href="#inside-the-app" id="toc-inside-the-app" class="nav-link" data-scroll-target="#inside-the-app">Inside the app</a></li>
+  <li><a href="#outside-the-app" id="toc-outside-the-app" class="nav-link" data-scroll-target="#outside-the-app">Outside the app</a></li>
+  </ul></li>
+  <li><a href="#merging-redaction-review-files" id="toc-merging-redaction-review-files" class="nav-link" data-scroll-target="#merging-redaction-review-files">Merging redaction review files</a></li>
+  </ul></li>
+  <li><a href="#features-for-expert-userssystem-administrators-1" id="toc-features-for-expert-userssystem-administrators-1" class="nav-link" data-scroll-target="#features-for-expert-userssystem-administrators-1">Features for expert users/system administrators</a>
+  <ul class="collapse">
   <li><a href="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment" id="toc-using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment" class="nav-link" data-scroll-target="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</a>
   <ul class="collapse">
   <li><a href="#direct-access-by-passing-aws-access-keys-through-app" id="toc-direct-access-by-passing-aws-access-keys-through-app" class="nav-link" data-scroll-target="#direct-access-by-passing-aws-access-keys-through-app">Direct access by passing AWS access keys through app</a></li>
   <li><a href="#picking-up-aws-access-keys-through-an-.env-file" id="toc-picking-up-aws-access-keys-through-an-.env-file" class="nav-link" data-scroll-target="#picking-up-aws-access-keys-through-an-.env-file">Picking up AWS access keys through an .env file</a></li>
   </ul></li>
-  <li><a href="#modifying-existing-redaction-review-files" id="toc-modifying-existing-redaction-review-files" class="nav-link" data-scroll-target="#modifying-existing-redaction-review-files">Modifying existing redaction review files</a></li>
+  <li><a href="#advanced-ocr-options-hybrid-ocr" id="toc-advanced-ocr-options-hybrid-ocr" class="nav-link" data-scroll-target="#advanced-ocr-options-hybrid-ocr">Advanced OCR options (Hybrid OCR)</a>
+  <ul class="collapse">
+  <li><a href="#available-ocr-models" id="toc-available-ocr-models" class="nav-link" data-scroll-target="#available-ocr-models">Available OCR models</a></li>
+  <li><a href="#enabling-advanced-ocr-options" id="toc-enabling-advanced-ocr-options" class="nav-link" data-scroll-target="#enabling-advanced-ocr-options">Enabling advanced OCR options</a></li>
+  <li><a href="#hybrid-ocr-configuration" id="toc-hybrid-ocr-configuration" class="nav-link" data-scroll-target="#hybrid-ocr-configuration">Hybrid OCR configuration</a></li>
+  <li><a href="#when-to-use-different-ocr-models" id="toc-when-to-use-different-ocr-models" class="nav-link" data-scroll-target="#when-to-use-different-ocr-models">When to use different OCR models</a></li>
+  </ul></li>
+  <li><a href="#command-line-interface-cli" id="toc-command-line-interface-cli" class="nav-link" data-scroll-target="#command-line-interface-cli">Command Line Interface (CLI)</a>
+  <ul class="collapse">
+  <li><a href="#getting-started-with-the-cli" id="toc-getting-started-with-the-cli" class="nav-link" data-scroll-target="#getting-started-with-the-cli">Getting started with the CLI</a></li>
+  <li><a href="#basic-cli-syntax" id="toc-basic-cli-syntax" class="nav-link" data-scroll-target="#basic-cli-syntax">Basic CLI syntax</a></li>
+  <li><a href="#redaction-examples" id="toc-redaction-examples" class="nav-link" data-scroll-target="#redaction-examples">Redaction examples</a></li>
+  <li><a href="#tabular-data-redaction" id="toc-tabular-data-redaction" class="nav-link" data-scroll-target="#tabular-data-redaction">Tabular data redaction</a></li>
+  <li><a href="#duplicate-detection" id="toc-duplicate-detection" class="nav-link" data-scroll-target="#duplicate-detection">Duplicate detection</a></li>
+  <li><a href="#aws-textract-operations" id="toc-aws-textract-operations" class="nav-link" data-scroll-target="#aws-textract-operations">AWS Textract operations</a></li>
+  <li><a href="#common-cli-options" id="toc-common-cli-options" class="nav-link" data-scroll-target="#common-cli-options">Common CLI options</a></li>
+  <li><a href="#output-files" id="toc-output-files" class="nav-link" data-scroll-target="#output-files">Output files</a></li>
+  </ul></li>
   </ul></li>
   </ul>
 </nav>
@@ -216,8 +289,10 @@ ul.task-list li input[type="checkbox"] {
 
 <section id="table-of-contents" class="level2">
 <h2 class="anchored" data-anchor-id="table-of-contents">Table of contents</h2>
+<section id="getting-started" class="level3">
+<h3 class="anchored" data-anchor-id="getting-started">Getting Started</h3>
 <ul>
-<li><a href="#example-data-files">Example data files</a></li>
+<li><a href="#built-in-example-data">Built-in example data</a></li>
 <li><a href="#basic-redaction">Basic redaction</a></li>
 <li><a href="#customising-redaction-options">Customising redaction options</a>
 <ul>
@@ -233,12 +308,73 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><a href="#reviewing-and-modifying-suggested-redactions">Reviewing and modifying suggested redactions</a></li>
 <li><a href="#redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text">Redacting Word, tabular data files (CSV/XLSX) or copy and pasted text</a></li>
+<li><a href="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a></li>
 </ul>
-<p>See the <a href="#advanced-user-guide">advanced user guide here</a>: - <a href="#merging-redaction-review-files">Merging redaction review files</a> - <a href="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a> - <a href="#fuzzy-search-and-redaction">Fuzzy search and redaction</a> - <a href="#export-to-and-import-from-adobe">Export redactions to and import from Adobe Acrobat</a> - <a href="#exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</a> - <a href="#importing-from-adobe-acrobat">Importing from Adobe Acrobat</a> - <a href="#using-the-aws-textract-document-api">Using the AWS Textract document API</a> - <a href="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</a> - <a href="#modifying-existing-redaction-review-files">Modifying existing redaction review files</a></p>
 </section>
-<section id="example-data-files" class="level2">
-<h2 class="anchored" data-anchor-id="example-data-files">Example data files</h2>
-<p>Please try these example files to follow along with this guide: - <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf">Example of files sent to a professor before applying</a> - <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_complaint_letter.jpg">Example complaint letter (jpg)</a> - <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership Agreement Toolkit (for signatures and more advanced usage)</a> - <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv">Dummy case note data</a></p>
+<section id="advanced-user-guide" class="level3">
+<h3 class="anchored" data-anchor-id="advanced-user-guide">Advanced user guide</h3>
+<ul>
+<li><a href="#advanced-user-guide">Advanced user guide</a></li>
+<li><a href="#fuzzy-search-and-redaction">Fuzzy search and redaction</a></li>
+<li><a href="#export-to-and-import-from-adobe">Export redactions to and import from Adobe Acrobat</a>
+<ul>
+<li><a href="#using-_for_reviewpdf-files-with-adobe-acrobat">Using _for_review.pdf files with Adobe Acrobat</a></li>
+<li><a href="#exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</a></li>
+<li><a href="#importing-from-adobe-acrobat">Importing from Adobe Acrobat</a></li>
+</ul></li>
+<li><a href="#using-the-aws-textract-document-api">Using the AWS Textract document API</a></li>
+<li><a href="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</a></li>
+<li><a href="#modifying-existing-redaction-review-files">Modifying existing redaction review files</a></li>
+<li><a href="#merging-redaction-review-files">Merging redaction review files</a></li>
+</ul>
+</section>
+<section id="features-for-expert-userssystem-administrators" class="level3">
+<h3 class="anchored" data-anchor-id="features-for-expert-userssystem-administrators">Features for expert users/system administrators</h3>
+<ul>
+<li><a href="#features-for-expert-userssystem-administrators">Features for expert users/system administrators</a></li>
+<li><a href="#advanced-ocr-options-hybrid-ocr">Advanced OCR options (Hybrid OCR)</a></li>
+<li><a href="#command-line-interface-cli">Command Line Interface (CLI)</a></li>
+</ul>
+</section>
+</section>
+<section id="built-in-example-data" class="level2">
+<h2 class="anchored" data-anchor-id="built-in-example-data">Built-in example data</h2>
+<p>The app now includes built-in example files that you can use to quickly test different features. These examples are automatically loaded and can be accessed directly from the interface without needing to download files separately.</p>
+<section id="using-built-in-examples" class="level3">
+<h3 class="anchored" data-anchor-id="using-built-in-examples">Using built-in examples</h3>
+<p><strong>For PDF/image redaction:</strong> On the ‘Redact PDFs/images’ tab, you’ll see a section titled “Try an example - Click on an example below and then the ‘Extract text and redact document’ button”. Simply click on any of the available examples to load them with pre-configured settings:</p>
+<ul>
+<li><strong>PDF with selectable text redaction</strong> - Uses local text extraction with standard PII detection</li>
+<li><strong>Image redaction with local OCR</strong> - Processes an image file using OCR</li>
+<li><strong>PDF redaction with custom entities</strong> - Demonstrates custom entity selection (Titles, Person, Dates)</li>
+<li><strong>PDF redaction with AWS services and signature detection</strong> - Shows AWS Textract with signature extraction (if AWS is enabled)</li>
+<li><strong>PDF redaction with custom deny list and whole page redaction</strong> - Demonstrates advanced redaction features</li>
+</ul>
+<p>Once you have clicked on an example, you can click the ‘Extract text and redact document’ button to load the example into the app and redact it.</p>
+<p><strong>For tabular data:</strong> On the ‘Word or Excel/csv files’ tab, you’ll find examples for both redaction and duplicate detection:</p>
+<ul>
+<li><strong>CSV file redaction</strong> - Shows how to redact specific columns in tabular data</li>
+<li><strong>Word document redaction</strong> - Demonstrates Word document processing</li>
+<li><strong>Excel file duplicate detection</strong> - Shows how to find duplicate rows in spreadsheet data</li>
+</ul>
+<p>Once you have clicked on an example, you can click the ‘Redact text/data files’ button to load the example into the app and redact it. For the duplicate detection example, you can click the ‘Find duplicate cells/rows’ button to load the example into the app and find duplicates.</p>
+<p><strong>For duplicate page detection:</strong> On the ‘Identify duplicate pages’ tab, you’ll find examples for finding duplicate content in documents:</p>
+<ul>
+<li><strong>Find duplicate pages of text in document OCR outputs</strong> - Uses page-level analysis with a similarity threshold of 0.95 and minimum word count of 10</li>
+<li><strong>Find duplicate text lines in document OCR outputs</strong> - Uses line-level analysis with a similarity threshold of 0.95 and minimum word count of 3</li>
+</ul>
+<p>Once you have clicked on an example, you can click the ‘Identify duplicate pages/subdocuments’ button to load the example into the app and find duplicate content.</p>
+</section>
+<section id="external-example-files-optional" class="level3">
+<h3 class="anchored" data-anchor-id="external-example-files-optional">External example files (optional)</h3>
+<p>If you prefer to use your own example files or want to follow along with specific tutorials, you can still download these external example files:</p>
+<ul>
+<li><a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf">Example of files sent to a professor before applying</a></li>
+<li><a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_complaint_letter.jpg">Example complaint letter (jpg)</a></li>
+<li><a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership Agreement Toolkit (for signatures and more advanced usage)</a></li>
+<li><a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv">Dummy case note data</a></li>
+</ul>
+</section>
 </section>
 <section id="basic-redaction" class="level2">
 <h2 class="anchored" data-anchor-id="basic-redaction">Basic redaction</h2>
@@ -256,10 +392,11 @@ ul.task-list li input[type="checkbox"] {
 </section>
 <section id="text-extraction" class="level3">
 <h3 class="anchored" data-anchor-id="text-extraction">Text extraction</h3>
-<p>First, select one of the three text extraction options: - <strong>‘Local model - selectable text’</strong> - This will read text directly from PDFs that have selectable text to redact (using PikePDF). This is fine for most PDFs, but will find nothing if the PDF does not have selectable text, and it is not good for handwriting or signatures. If it encounters an image file, it will send it onto the second option below. - <strong>‘Local OCR model - PDFs without selectable text’</strong> - This option will use a simple Optical Character Recognition (OCR) model (Tesseract) to pull out text from a PDF/image that it ‘sees’. This can handle most typed text in PDFs/images without selectable text, but struggles with handwriting/signatures. If you are interested in the latter, then you should use the third option if available. - <strong>‘AWS Textract service - all PDF types’</strong> - Only available for instances of the app running on AWS. AWS Textract is a service that performs OCR on documents within their secure service. This is a more advanced version of OCR compared to the local option, and carries a (relatively small) cost. Textract excels in complex documents based on images, or documents that contain a lot of handwriting and signatures.</p>
+<p>You can modify default text extraction methods by clicking on the ‘Change default text extraction method…’ box’.</p>
+<p>Here you can select one of the three text extraction options: - <strong>‘Local model - selectable text’</strong> - This will read text directly from PDFs that have selectable text to redact (using PikePDF). This is fine for most PDFs, but will find nothing if the PDF does not have selectable text, and it is not good for handwriting or signatures. If it encounters an image file, it will send it onto the second option below. - <strong>‘Local OCR model - PDFs without selectable text’</strong> - This option will use a simple Optical Character Recognition (OCR) model (Tesseract) to pull out text from a PDF/image that it ‘sees’. This can handle most typed text in PDFs/images without selectable text, but struggles with handwriting/signatures. If you are interested in the latter, then you should use the third option if available. - <strong>‘AWS Textract service - all PDF types’</strong> - Only available for instances of the app running on AWS. AWS Textract is a service that performs OCR on documents within their secure service. This is a more advanced version of OCR compared to the local option, and carries a (relatively small) cost. Textract excels in complex documents based on images, or documents that contain a lot of handwriting and signatures.</p>
 </section>
-<section id="optional---select-signature-extraction" class="level3">
-<h3 class="anchored" data-anchor-id="optional---select-signature-extraction">Optional - select signature extraction</h3>
+<section id="enable-aws-textract-signature-extraction" class="level3">
+<h3 class="anchored" data-anchor-id="enable-aws-textract-signature-extraction">Enable AWS Textract signature extraction</h3>
 <p>If you chose the AWS Textract service above, you can choose if you want handwriting and/or signatures redacted by default. Choosing signatures here will have a cost implication, as identifying signatures will cost ~£2.66 ($3.50) per 1,000 pages vs ~£1.14 ($1.50) per 1,000 pages without signature detection.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -267,6 +404,7 @@ ul.task-list li input[type="checkbox"] {
 <figcaption>AWS Textract handwriting and signature options</figcaption>
 </figure>
 </div>
+<p><strong>NOTE:</strong> it is also possible to enable form extraction, layout extraction, and table extraction with AWS Textract. This is not enabled by default, but it is possible for your system admin to enable this feature in the config file.</p>
 </section>
 <section id="pii-redaction-method" class="level3">
 <h3 class="anchored" data-anchor-id="pii-redaction-method">PII redaction method</h3>
@@ -317,6 +455,7 @@ ul.task-list li input[type="checkbox"] {
 </div>
 <ul>
 <li><strong>‘…redacted.pdf’</strong> files contain the original pdf with suggested redacted text deleted and replaced by a black box on top of the document.</li>
+<li><strong>‘…redactions_for_review.pdf’</strong> files contain the original PDF with redaction boxes overlaid but the original text still visible underneath. This file is designed for use in Adobe Acrobat and other PDF viewers where you can see the suggested redactions without the text being permanently removed. This is particularly useful for reviewing redactions before finalising them.</li>
 <li><strong>‘…ocr_results.csv’</strong> files contain the line-by-line text outputs from the entire document. This file can be useful for later searching through for any terms of interest in the document (e.g.&nbsp;using Excel or a similar program).</li>
 <li><strong>‘…review_file.csv’</strong> files are the review files that contain details and locations of all of the suggested redactions in the document. This file is key to the <a href="#reviewing-and-modifying-suggested-redactions">review process</a>, and should be downloaded to use later for this.</li>
 </ul>
@@ -394,7 +533,6 @@ ul.task-list li input[type="checkbox"] {
 <figcaption>Manually modify allow or deny list filled</figcaption>
 </figure>
 </div>
-<p><strong>Note:</strong> As of version 0.7.0 you can now apply your whole page redaction list directly to the document file currently under review by clicking the ‘Apply whole page redaction list to document currently under review’ button that appears here.</p>
 </section>
 </section>
 <section id="redacting-additional-types-of-personal-information" class="level3">
@@ -413,7 +551,7 @@ ul.task-list li input[type="checkbox"] {
 </section>
 <section id="redacting-only-specific-pages" class="level2">
 <h2 class="anchored" data-anchor-id="redacting-only-specific-pages">Redacting only specific pages</h2>
-<p>Say also we are only interested in redacting page 1 of the loaded documents. On the Redaction settings tab, select ‘Lowest page to redact’ as 1, and ‘Highest page to redact’ also as 1. When you next redact your documents, only the first page will be modified.</p>
+<p>Say also we are only interested in redacting page 1 of the loaded documents. On the Redaction settings tab, select ‘Lowest page to redact’ as 1, and ‘Highest page to redact’ also as 1. When you next redact your documents, only the first page will be modified. The output files should now have a suffix similar to ’…_1_1.pdf’, indicating the lowest and highest page numbers that were redacted.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/select_pages.PNG" class="img-fluid figure-img"></p>
@@ -711,46 +849,13 @@ ul.task-list li input[type="checkbox"] {
 <p>A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the Redaction settings page under ‘Log file outputs’.</p>
 </section>
 </section>
-<section id="advanced-user-guide" class="level1">
-<h1>ADVANCED USER GUIDE</h1>
-<p>This advanced user guide will go over some of the features recently added to the app, including: modifying and merging redaction review files, identifying and redacting duplicate pages across multiple PDFs, ‘fuzzy’ search and redact, and exporting redactions to Adobe Acrobat.</p>
-<section id="table-of-contents-1" class="level2">
-<h2 class="anchored" data-anchor-id="table-of-contents-1">Table of contents</h2>
-<ul>
-<li><a href="#merging-redaction-review-files">Merging redaction review files</a></li>
-<li><a href="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a></li>
-<li><a href="#fuzzy-search-and-redaction">Fuzzy search and redaction</a></li>
-<li><a href="#export-to-and-import-from-adobe">Export redactions to and import from Adobe Acrobat</a>
-<ul>
-<li><a href="#exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</a></li>
-<li><a href="#importing-from-adobe-acrobat">Importing from Adobe Acrobat</a></li>
-</ul></li>
-<li><a href="#using-the-aws-textract-document-api">Using the AWS Textract document API</a></li>
-<li><a href="#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</a></li>
-<li><a href="#modifying-existing-redaction-review-files">Modifying existing redaction review files</a></li>
-</ul>
-</section>
-<section id="merging-redaction-review-files" class="level2">
-<h2 class="anchored" data-anchor-id="merging-redaction-review-files">Merging redaction review files</h2>
-<p>Say you have run multiple redaction tasks on the same document, and you want to merge all of these redactions together. You could do this in your spreadsheet editor, but this could be fiddly especially if dealing with multiple review files or large numbers of redactions. The app has a feature to combine multiple review files together to create a ‘merged’ review file.</p>
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merge_review_files_interface.PNG" class="img-fluid figure-img"></p>
-<figcaption>Merging review files in the user interface</figcaption>
-</figure>
-</div>
-<p>You can find this option at the bottom of the ‘Redaction Settings’ tab. Upload multiple review files here to get a single output ‘merged’ review_file. In the examples file, merging the ‘review_file_custom.csv’ and ‘review_file_local.csv’ files give you an output containing redaction boxes from both. This combined review file can then be uploaded into the review tab following the usual procedure.</p>
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merged_review_file_outputs_csv.PNG" class="img-fluid figure-img"></p>
-<figcaption>Merging review files outputs in spreadsheet</figcaption>
-</figure>
-</div>
-</section>
 <section id="identifying-and-redacting-duplicate-pages" class="level2">
 <h2 class="anchored" data-anchor-id="identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</h2>
 <p>The files for this section are stored <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/">here</a>.</p>
 <p>Some redaction tasks involve removing duplicate pages of text that may exist across multiple documents. This feature helps you find and remove duplicate content that may exist in single or multiple documents. It can identify everything from single identical pages to multi-page sections (subdocuments). The process involves three main steps: configuring the analysis, reviewing the results in the interactive interface, and then using the generated files to perform the redactions.</p>
+<section id="duplicate-page-detection-in-documents" class="level3">
+<h3 class="anchored" data-anchor-id="duplicate-page-detection-in-documents">Duplicate page detection in documents</h3>
+<p>This section covers finding duplicate pages across PDF documents using OCR output files.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_input_interface_new.PNG" class="img-fluid figure-img"></p>
@@ -798,10 +903,33 @@ ul.task-list li input[type="checkbox"] {
 </div>
 <p>If you want to combine the results from this redaction process with previous redaction tasks for the same PDF, you could merge review file outputs following the steps described in <a href="#merging-existing-redaction-review-files">Merging existing redaction review files</a> above.</p>
 </section>
+<section id="duplicate-detection-in-tabular-data" class="level3">
+<h3 class="anchored" data-anchor-id="duplicate-detection-in-tabular-data">Duplicate detection in tabular data</h3>
+<p>The app also includes functionality to find duplicate cells or rows in CSV, Excel, or Parquet files. This is particularly useful for cleaning datasets where you need to identify and remove duplicate entries.</p>
+<p><strong>Step 1: Upload files and configure analysis</strong></p>
+<p>Navigate to the ‘Word or Excel/csv files’ tab and scroll down to the “Find duplicate cells in tabular data” section. Upload your tabular files (CSV, Excel, or Parquet) and configure the analysis parameters:</p>
+<ul>
+<li><strong>Similarity threshold</strong>: Score (0-1) to consider cells a match. 1 = perfect match</li>
+<li><strong>Minimum word count</strong>: Cells with fewer words than this value are ignored</li>
+<li><strong>Do initial clean of text</strong>: Remove URLs, HTML tags, and non-ASCII characters</li>
+<li><strong>Remove duplicate rows</strong>: Automatically remove duplicate rows from deduplicated files</li>
+<li><strong>Select Excel sheet names</strong>: Choose which sheets to analyze (for Excel files)</li>
+<li><strong>Select text columns</strong>: Choose which columns contain text to analyze</li>
+</ul>
+<p><strong>Step 2: Review results</strong></p>
+<p>After clicking “Find duplicate cells/rows”, the results will be displayed in a table showing: - File1, Row1, File2, Row2 - Similarity_Score - Text1, Text2 (the actual text content being compared)</p>
+<p>Click on any row to see more details about the duplicate match in the preview boxes below.</p>
+<p><strong>Step 3: Remove duplicates</strong></p>
+<p>Select a file from the dropdown and click “Remove duplicate rows from selected file” to create a cleaned version with duplicates removed. The cleaned file will be available for download.</p>
+</section>
+</section>
+<section id="advanced-user-guide-1" class="level1">
+<h1>Advanced user guide</h1>
+<p>This advanced user guide covers features that require system administration access or command-line usage. These features are typically used by system administrators or advanced users who need more control over the redaction process.</p>
 <section id="fuzzy-search-and-redaction" class="level2">
 <h2 class="anchored" data-anchor-id="fuzzy-search-and-redaction">Fuzzy search and redaction</h2>
 <p>The files for this section are stored <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/">here</a>.</p>
-<p>Sometimes you may be searching for terns that are slightly mispelled throughout a document, for example names. The document redaction app gives the option for searching for long phrases that may contain spelling mistakes, a method called ‘fuzzy matching’.</p>
+<p>Sometimes you may be searching for terms that are slightly mispelled throughout a document, for example names. The document redaction app gives the option for searching for long phrases that may contain spelling mistakes, a method called ‘fuzzy matching’.</p>
 <p>To do this, go to the Redaction Settings, and the ‘Select entity types to redact’ area. In the box below relevant to your chosen redaction method (local or AWS Comprehend), select ‘CUSTOM_FUZZY’ from the list. Next, we can select the maximum number of spelling mistakes allowed in the search (up to nine). Here, you can either type in a number or use the small arrows to the right of the box. Change this option to 3. This will allow for a maximum of three ‘changes’ in text needed to match to the desired search terms.</p>
 <p>The other option we can leave as is (should fuzzy search match on entire phrases in deny list) - this option would allow you to fuzzy search on each individual word in the search phrase (apart from stop words).</p>
 <p>Next, we can upload a deny list on the same page to do the fuzzy search. A relevant deny list file can be found <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv">here</a> - you can upload it following <a href="#deny-list-example">these steps</a>. You will notice that the suggested deny list has spelling mistakes compared to phrases found in the example document.</p>
@@ -823,9 +951,20 @@ ul.task-list li input[type="checkbox"] {
 <section id="export-to-and-import-from-adobe" class="level2">
 <h2 class="anchored" data-anchor-id="export-to-and-import-from-adobe">Export to and import from Adobe</h2>
 <p>Files for this section are stored <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/export_to_adobe/">here</a>.</p>
+<p>The Document Redaction app has enhanced features for working with Adobe Acrobat. You can now export suggested redactions to Adobe, import Adobe comment files into the app, and use the new <code>_for_review.pdf</code> files directly in Adobe Acrobat.</p>
+<section id="using-_for_review.pdf-files-with-adobe-acrobat" class="level3">
+<h3 class="anchored" data-anchor-id="using-_for_review.pdf-files-with-adobe-acrobat">Using _for_review.pdf files with Adobe Acrobat</h3>
+<p>The app now generates <code>...redactions_for_review.pdf</code> files that contain the original PDF with redaction boxes overlaid but the original text still visible underneath. These files are specifically designed for use in Adobe Acrobat and other PDF viewers where you can:</p>
+<ul>
+<li>See the suggested redactions without the text being permanently removed</li>
+<li>Review redactions before finalising them</li>
+<li>Use Adobe Acrobat’s built-in redaction tools to modify or apply the redactions</li>
+<li>Export the final redacted version directly from Adobe</li>
+</ul>
+<p>Simply open the <code>...redactions_for_review.pdf</code> file in Adobe Acrobat to begin reviewing and modifying the suggested redactions.</p>
+</section>
 <section id="exporting-to-adobe-acrobat" class="level3">
 <h3 class="anchored" data-anchor-id="exporting-to-adobe-acrobat">Exporting to Adobe Acrobat</h3>
-<p>The Document Redaction app has a feature to export suggested redactions to Adobe, and likewise to import Adobe comment files into the app. The file format used is the .xfdf Adobe comment file format - <a href="https://helpx.adobe.com/uk/acrobat/using/importing-exporting-comments.html">you can find more information about how to use these files here</a>.</p>
 <p>To convert suggested redactions to Adobe format, you need to have the original PDF and a review file csv in the input box at the top of the Review redactions page.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -894,28 +1033,16 @@ ul.task-list li input[type="checkbox"] {
 <p>You can now easily get the ’…_ocr_output.csv’ redaction output based on this ’_textract.json’ (described in <a href="#redaction-outputs">Redaction outputs</a>) by clicking on the button ‘Convert Textract job outputs to OCR results’. You can now use this file e.g.&nbsp;for <a href="#identifying-and-redacting-duplicate-pages">identifying duplicate pages</a>, or for redaction review.</p>
 </section>
 </section>
-<section id="using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment" class="level2">
-<h2 class="anchored" data-anchor-id="using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</h2>
-<p>AWS Textract and Comprehend give much better results for text extraction and document redaction than the local model options in the app. The most secure way to access them in the Redaction app is to run the app in a secure AWS environment with relevant permissions. Alternatively, you could run the app on your own system while logged in to AWS SSO with relevant permissions.</p>
-<p>However, it is possible to access these services directly via API from outside an AWS environment by creating IAM users and access keys with relevant permissions to access AWS Textract and Comprehend services. Please check with your IT and data security teams that this approach is acceptable for your data before trying the following approaches.</p>
-<p>To do the following, in your AWS environment you will need to create a new user with permissions for “textract:AnalyzeDocument”, “textract:DetectDocumentText”, and “comprehend:DetectPiiEntities”. Under security credentials, create new access keys - note down the access key and secret key.</p>
-<section id="direct-access-by-passing-aws-access-keys-through-app" class="level3">
-<h3 class="anchored" data-anchor-id="direct-access-by-passing-aws-access-keys-through-app">Direct access by passing AWS access keys through app</h3>
-<p>The Redaction Settings tab now has boxes for entering the AWS access key and secret key. If you paste the relevant keys into these boxes before performing redaction, you should be able to use these services in the app.</p>
-</section>
-<section id="picking-up-aws-access-keys-through-an-.env-file" class="level3">
-<h3 class="anchored" data-anchor-id="picking-up-aws-access-keys-through-an-.env-file">Picking up AWS access keys through an .env file</h3>
-<p>The app also has the capability of picking up AWS access key details through a .env file located in a ‘/config/aws_config.env’ file (default), or alternative .env file location specified by the environment variable AWS_CONFIG_PATH. The env file should look like the following with just two lines:</p>
-<p>AWS_ACCESS_KEY= your-access-key AWS_SECRET_KEY= your-secret-key</p>
-<p>The app should then pick up these keys when trying to access the AWS Textract and Comprehend services during redaction.</p>
-<p>Again, a lot can potentially go wrong with AWS solutions that are insecure, so before trying the above please consult with your AWS and data security teams.</p>
-</section>
-</section>
 <section id="modifying-existing-redaction-review-files" class="level2">
 <h2 class="anchored" data-anchor-id="modifying-existing-redaction-review-files">Modifying existing redaction review files</h2>
-<p><em>Note:</em> As of version 0.7.0 you can now modify redaction review files directly in the app on the ‘Review redactions’ tab. Open the accordion ‘View and edit review data’ under the file input area. You can edit review file data cells here - press Enter to apply changes. You should see the effect on the current page if you click the ‘Save changes on current page to file’ button to the right.</p>
 <p>You can find the folder containing the files discussed in this section <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/">here</a>.</p>
-<p>As well as serving as inputs to the document redaction app’s review function, the ‘review_file.csv’ output can be modified outside of the app, and also merged with others from multiple redaction attempts on the same file. This gives you the flexibility to change redaction details outside of the app.</p>
+<p>As well as serving as inputs to the document redaction app’s review function, the ‘review_file.csv’ output can be modified insider or outside of the app. This gives you the flexibility to change redaction details outside of the app.</p>
+<section id="inside-the-app" class="level3">
+<h3 class="anchored" data-anchor-id="inside-the-app">Inside the app</h3>
+<p>You can now modify redaction review files directly in the app on the ‘Review redactions’ tab. Open the accordion ‘View and edit review data’ under the file input area. You can edit review file data cells here - press Enter to apply changes. You should see the effect on the current page if you click the ‘Save changes on current page to file’ button to the right.</p>
+</section>
+<section id="outside-the-app" class="level3">
+<h3 class="anchored" data-anchor-id="outside-the-app">Outside the app</h3>
 <p>If you open up a ‘review_file’ csv output using a spreadsheet software program such as Microsoft Excel you can easily modify redaction properties. Open the file ‘<a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/Partnership-Agreement-Toolkit_0_0.pdf_review_file_local.csv">Partnership-Agreement-Toolkit_0_0_redacted.pdf_review_file_local.csv</a>’, and you should see a spreadshet with just four suggested redactions (see below). The following instructions are for using Excel.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -934,8 +1061,169 @@ ul.task-list li input[type="checkbox"] {
 </figure>
 </div>
 <p>We can see from the above that we have successfully removed a redaction box, changed labels, colours, and redaction box sizes.</p>
+</section>
+</section>
+<section id="merging-redaction-review-files" class="level2">
+<h2 class="anchored" data-anchor-id="merging-redaction-review-files">Merging redaction review files</h2>
+<p>Say you have run multiple redaction tasks on the same document, and you want to merge all of these redactions together. You could do this in your spreadsheet editor, but this could be fiddly especially if dealing with multiple review files or large numbers of redactions. The app has a feature to combine multiple review files together to create a ‘merged’ review file.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merge_review_files_interface.PNG" class="img-fluid figure-img"></p>
+<figcaption>Merging review files in the user interface</figcaption>
+</figure>
+</div>
+<p>You can find this option at the bottom of the ‘Redaction Settings’ tab. Upload multiple review files here to get a single output ‘merged’ review_file. In the examples file, merging the ‘review_file_custom.csv’ and ‘review_file_local.csv’ files give you an output containing redaction boxes from both. This combined review file can then be uploaded into the review tab following the usual procedure.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merged_review_file_outputs_csv.PNG" class="img-fluid figure-img"></p>
+<figcaption>Merging review files outputs in spreadsheet</figcaption>
+</figure>
+</div>
+</section>
+</section>
+<section id="features-for-expert-userssystem-administrators-1" class="level1">
+<h1>Features for expert users/system administrators</h1>
+<p>This advanced user guide covers features that require system administration access or command-line usage. These options are not enabled by default but can be configured by your system administrator, and are not available to users who are just using the graphical user interface. These features are typically used by system administrators or advanced users who need more control over the redaction process.</p>
+<section id="using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment" class="level2">
+<h2 class="anchored" data-anchor-id="using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment">Using AWS Textract and Comprehend when not running in an AWS environment</h2>
+<p>AWS Textract and Comprehend give much better results for text extraction and document redaction than the local model options in the app. The most secure way to access them in the Redaction app is to run the app in a secure AWS environment with relevant permissions. Alternatively, you could run the app on your own system while logged in to AWS SSO with relevant permissions.</p>
+<p>However, it is possible to access these services directly via API from outside an AWS environment by creating IAM users and access keys with relevant permissions to access AWS Textract and Comprehend services. Please check with your IT and data security teams that this approach is acceptable for your data before trying the following approaches.</p>
+<p>To do the following, in your AWS environment you will need to create a new user with permissions for “textract:AnalyzeDocument”, “textract:DetectDocumentText”, and “comprehend:DetectPiiEntities”. Under security credentials, create new access keys - note down the access key and secret key.</p>
+<section id="direct-access-by-passing-aws-access-keys-through-app" class="level3">
+<h3 class="anchored" data-anchor-id="direct-access-by-passing-aws-access-keys-through-app">Direct access by passing AWS access keys through app</h3>
+<p>The Redaction Settings tab now has boxes for entering the AWS access key and secret key. If you paste the relevant keys into these boxes before performing redaction, you should be able to use these services in the app.</p>
+</section>
+<section id="picking-up-aws-access-keys-through-an-.env-file" class="level3">
+<h3 class="anchored" data-anchor-id="picking-up-aws-access-keys-through-an-.env-file">Picking up AWS access keys through an .env file</h3>
+<p>The app also has the capability of picking up AWS access key details through a .env file located in a ‘/config/aws_config.env’ file (default), or alternative .env file location specified by the environment variable AWS_CONFIG_PATH. The env file should look like the following with just two lines:</p>
+<p>AWS_ACCESS_KEY= your-access-key AWS_SECRET_KEY= your-secret-key</p>
+<p>The app should then pick up these keys when trying to access the AWS Textract and Comprehend services during redaction.</p>
+<p>Again, a lot can potentially go wrong with AWS solutions that are insecure, so before trying the above please consult with your AWS and data security teams.</p>
+</section>
+</section>
+<section id="advanced-ocr-options-hybrid-ocr" class="level2">
+<h2 class="anchored" data-anchor-id="advanced-ocr-options-hybrid-ocr">Advanced OCR options (Hybrid OCR)</h2>
+<p>The app supports advanced OCR options that combine multiple OCR engines for improved accuracy. These options are not enabled by default but can be configured by your system administrator.</p>
+<section id="available-ocr-models" class="level3">
+<h3 class="anchored" data-anchor-id="available-ocr-models">Available OCR models</h3>
+<ul>
+<li><strong>Tesseract</strong> (default): The standard OCR engine that works well for most documents</li>
+<li><strong>PaddleOCR</strong>: More accurate for whole line text extraction, but word-level bounding boxes may be less precise</li>
+<li><strong>Hybrid</strong>: Combines Tesseract and PaddleOCR - uses Tesseract for initial extraction, then PaddleOCR for re-extraction of low-confidence text</li>
+</ul>
+</section>
+<section id="enabling-advanced-ocr-options" class="level3">
+<h3 class="anchored" data-anchor-id="enabling-advanced-ocr-options">Enabling advanced OCR options</h3>
+<p>To enable these options, your system administrator needs to modify the configuration file (<code>config.py</code>) and set:</p>
+<pre><code>SHOW_LOCAL_OCR_MODEL_OPTIONS = "True"</code></pre>
+<p>Once enabled, users will see a “Change default local OCR model” section in the redaction settings where they can choose between: - tesseract - hybrid<br>
+- paddle</p>
+</section>
+<section id="hybrid-ocr-configuration" class="level3">
+<h3 class="anchored" data-anchor-id="hybrid-ocr-configuration">Hybrid OCR configuration</h3>
+<p>The hybrid OCR mode uses several configurable parameters:</p>
+<ul>
+<li><strong>HYBRID_OCR_CONFIDENCE_THRESHOLD</strong> (default: 65): Tesseract confidence score below which PaddleOCR will be used for re-extraction</li>
+<li><strong>HYBRID_OCR_PADDING</strong> (default: 1): Padding added to word bounding boxes before re-extraction</li>
+<li><strong>SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES</strong> (default: False): Save comparison images when using hybrid mode</li>
+<li><strong>SAVE_PADDLE_VISUALISATIONS</strong> (default: False): Save images with PaddleOCR bounding boxes overlaid</li>
+</ul>
+</section>
+<section id="when-to-use-different-ocr-models" class="level3">
+<h3 class="anchored" data-anchor-id="when-to-use-different-ocr-models">When to use different OCR models</h3>
+<ul>
+<li><strong>Tesseract</strong>: Best for general use, good balance of speed and accuracy</li>
+<li><strong>PaddleOCR</strong>: Best for documents with clear, well-formatted text where line-level accuracy is more important than word-level precision</li>
+<li><strong>Hybrid</strong>: Best for challenging documents where some text has low confidence scores, providing the benefits of both engines</li>
+</ul>
+</section>
+</section>
+<section id="command-line-interface-cli" class="level2">
+<h2 class="anchored" data-anchor-id="command-line-interface-cli">Command Line Interface (CLI)</h2>
+<p>The app includes a comprehensive command-line interface (<code>cli_redact.py</code>) that allows you to perform redaction, deduplication, and AWS Textract operations directly from the terminal. This is particularly useful for batch processing, automation, and integration with other systems.</p>
+<section id="getting-started-with-the-cli" class="level3">
+<h3 class="anchored" data-anchor-id="getting-started-with-the-cli">Getting started with the CLI</h3>
+<p>To use the CLI, you need to:</p>
+<ol type="1">
+<li>Open a terminal window</li>
+<li>Navigate to the app folder containing <code>cli_redact.py</code></li>
+<li>Activate your virtual environment (conda or venv)</li>
+<li>Run commands using <code>python cli_redact.py</code> followed by your options</li>
+</ol>
+</section>
+<section id="basic-cli-syntax" class="level3">
+<h3 class="anchored" data-anchor-id="basic-cli-syntax">Basic CLI syntax</h3>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> [redact<span class="kw">|</span><span class="ex">deduplicate</span><span class="kw">|</span><span class="ex">textract]</span> <span class="at">--input_file</span> <span class="pp">[</span><span class="ss">file_path</span><span class="pp">]</span> <span class="pp">[</span><span class="ss">additional_options</span><span class="pp">]</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="redaction-examples" class="level3">
+<h3 class="anchored" data-anchor-id="redaction-examples">Redaction examples</h3>
+<p><strong>Basic PDF redaction with default settings:</strong></p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Extract text only (no redaction) with whole page redaction:</strong></p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--redact_whole_page_file</span> example_data/partnership_toolkit_redact_some_pages.csv <span class="at">--pii_detector</span> None</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Redact with custom entities and allow list:</strong></p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/graduate-job-example-cover-letter.pdf <span class="at">--allow_list_file</span> example_data/test_allow_list_graduate.csv <span class="at">--local_redact_entities</span> TITLES PERSON DATE_TIME</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Redact with fuzzy matching and custom deny list:</strong></p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--deny_list_file</span> example_data/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv <span class="at">--local_redact_entities</span> CUSTOM_FUZZY <span class="at">--page_min</span> 1 <span class="at">--page_max</span> 3 <span class="at">--fuzzy_mistakes</span> 3</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Redact with AWS services:</strong></p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--pii_detector</span> <span class="st">"AWS Comprehend"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Redact specific pages with signature extraction:</strong></p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--page_min</span> 6 <span class="at">--page_max</span> 7 <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--handwrite_signature_extraction</span> <span class="st">"Extract handwriting"</span> <span class="st">"Extract signatures"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="tabular-data-redaction" class="level3">
+<h3 class="anchored" data-anchor-id="tabular-data-redaction">Tabular data redaction</h3>
+<p><strong>Anonymize CSV file with specific columns:</strong></p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.csv <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Anonymize Excel file:</strong></p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.xlsx <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--excel_sheets</span> combined_case_notes <span class="at">--anon_strategy</span> redact</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Anonymize Word document:</strong></p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> <span class="st">"example_data/Bold minimalist professional cover letter.docx"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="duplicate-detection" class="level3">
+<h3 class="anchored" data-anchor-id="duplicate-detection">Duplicate detection</h3>
+<p><strong>Find duplicate pages in OCR files:</strong></p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Find duplicates at line level:</strong></p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95 <span class="at">--combine_pages</span> False <span class="at">--min_word_count</span> 3</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Find duplicate rows in tabular data:</strong></p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv <span class="at">--duplicate_type</span> tabular <span class="at">--text_columns</span> <span class="st">"text"</span> <span class="at">--similarity_threshold</span> 0.95</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="aws-textract-operations" class="level3">
+<h3 class="anchored" data-anchor-id="aws-textract-operations">AWS Textract operations</h3>
+<p><strong>Submit document for analysis:</strong></p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Submit with signature extraction:</strong></p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--extract_signatures</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>Retrieve results by job ID:</strong></p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> retrieve <span class="at">--job_id</span> 12345678-1234-1234-1234-123456789012</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><strong>List recent jobs:</strong></p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> list</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="common-cli-options" class="level3">
+<h3 class="anchored" data-anchor-id="common-cli-options">Common CLI options</h3>
+<ul>
+<li><code>--task</code>: Choose between “redact”, “deduplicate”, or “textract”</li>
+<li><code>--input_file</code>: Path to input file(s)</li>
+<li><code>--output_dir</code>: Directory for output files (default: output/)</li>
+<li><code>--page_min</code> / <code>--page_max</code>: Process only specific page range</li>
+<li><code>--ocr_method</code>: Choose text extraction method</li>
+<li><code>--pii_detector</code>: Choose PII detection method</li>
+<li><code>--local_redact_entities</code>: Specify local entities to redact</li>
+<li><code>--allow_list_file</code> / <code>--deny_list_file</code>: Custom lists</li>
+<li><code>--redact_whole_page_file</code>: List of pages to redact completely</li>
+<li><code>--fuzzy_mistakes</code>: Number of spelling mistakes allowed in fuzzy matching</li>
+<li><code>--similarity_threshold</code>: Threshold for duplicate detection</li>
+<li><code>--anon_strategy</code>: Anonymization strategy for tabular data</li>
+</ul>
+</section>
+<section id="output-files" class="level3">
+<h3 class="anchored" data-anchor-id="output-files">Output files</h3>
+<p>The CLI generates the same output files as the GUI: - <code>...redacted.pdf</code>: Final redacted document - <code>...redactions_for_review.pdf</code>: Document with redaction boxes for review - <code>...review_file.csv</code>: Detailed redaction information - <code>...ocr_results.csv</code>: Extracted text results - <code>..._textract.json</code>: AWS Textract results (if applicable)</p>
+<p>For more advanced options and configuration, refer to the help text by running:</p>
+<div class="sourceCode" id="cb19"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 
 
+</section>
 </section>
 </section>
 
