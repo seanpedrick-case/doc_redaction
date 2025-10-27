@@ -1473,10 +1473,6 @@ def update_annotator_object_and_filter_df(
         )  # Present blank/non-interactive
     else:
         if current_page_image_annotator_object["image"].startswith("placeholder_image"):
-
-            print(
-                "current_page_image_annotator_object['image'] is None. Replacing with real image."
-            )
             current_page_image_annotator_object["image"], page_sizes_df = (
                 replace_placeholder_image_with_real_image(
                     doc_full_file_name_textbox,

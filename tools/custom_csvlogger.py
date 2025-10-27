@@ -226,7 +226,7 @@ class CSVLogger_custom(FlaggingCallback):
 
         if save_to_dynamodb is True:
 
-            if RUN_AWS_FUNCTIONS == "1":
+            if RUN_AWS_FUNCTIONS:
                 try:
                     print("Connecting to DynamoDB via existing SSO connection")
                     dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
@@ -236,7 +236,9 @@ class CSVLogger_custom(FlaggingCallback):
                 except Exception as e:
                     print("No SSO credentials found:", e)
                     if AWS_ACCESS_KEY and AWS_SECRET_KEY:
-                        print("Trying DynamoDB credentials from environment variables")
+                        print(
+                            "Trying to get DynamoDB credentials from environment variables"
+                        )
                         dynamodb = boto3.resource(
                             "dynamodb",
                             aws_access_key_id=AWS_ACCESS_KEY,
