@@ -145,8 +145,8 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
     && chown user:user /usr/share/tessdata \
     && chmod 755 /usr/share/tessdata
 
-# Fix ownership if needed
-RUN chown -R user:user /home/user/app
+# Fix apply user ownership to all files in the home directory
+RUN chown -R user:user /home/user
 
 # Set permissions for Python executable
 RUN chmod 755 /usr/local/bin/python
