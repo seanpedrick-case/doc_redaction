@@ -9,7 +9,8 @@ format:
 
 ## Table of contents
 
-- [Example data files](#example-data-files)
+### Getting Started
+- [Built-in example data](#built-in-example-data)
 - [Basic redaction](#basic-redaction)
 - [Customising redaction options](#customising-redaction-options)
     - [Custom allow, deny, and page redaction lists](#custom-allow-deny-and-page-redaction-lists)
@@ -21,21 +22,58 @@ format:
     - [Handwriting and signature redaction](#handwriting-and-signature-redaction)
 - [Reviewing and modifying suggested redactions](#reviewing-and-modifying-suggested-redactions)
 - [Redacting Word, tabular data files (CSV/XLSX) or copy and pasted text](#redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text)
-
-See the [advanced user guide here](#advanced-user-guide):
-- [Merging redaction review files](#merging-redaction-review-files)
 - [Identifying and redacting duplicate pages](#identifying-and-redacting-duplicate-pages)
+
+### Advanced user guide
 - [Fuzzy search and redaction](#fuzzy-search-and-redaction)
 - [Export redactions to and import from Adobe Acrobat](#export-to-and-import-from-adobe)
+    - [Using _for_review.pdf files with Adobe Acrobat](#using-_for_reviewpdf-files-with-adobe-acrobat)
     - [Exporting to Adobe Acrobat](#exporting-to-adobe-acrobat)
     - [Importing from Adobe Acrobat](#importing-from-adobe-acrobat)
 - [Using the AWS Textract document API](#using-the-aws-textract-document-api)
 - [Using AWS Textract and Comprehend when not running in an AWS environment](#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment)
 - [Modifying existing redaction review files](#modifying-existing-redaction-review-files)
+- [Merging redaction review files](#merging-redaction-review-files)
 
-## Example data files
+### Features for expert users/system administrators
+- [Advanced OCR options (Hybrid OCR)](#advanced-ocr-options-hybrid-ocr)
+- [Command Line Interface (CLI)](#command-line-interface-cli)
 
-Please try these example files to follow along with this guide: 
+## Built-in example data
+
+The app now includes built-in example files that you can use to quickly test different features. These examples are automatically loaded and can be accessed directly from the interface without needing to download files separately.
+
+### Using built-in examples
+
+**For PDF/image redaction:** On the 'Redact PDFs/images' tab, you'll see a section titled "Try an example - Click on an example below and then the 'Extract text and redact document' button". Simply click on any of the available examples to load them with pre-configured settings:
+
+- **PDF with selectable text redaction** - Uses local text extraction with standard PII detection
+- **Image redaction with local OCR** - Processes an image file using OCR
+- **PDF redaction with custom entities** - Demonstrates custom entity selection (Titles, Person, Dates)
+- **PDF redaction with AWS services and signature detection** - Shows AWS Textract with signature extraction (if AWS is enabled)
+- **PDF redaction with custom deny list and whole page redaction** - Demonstrates advanced redaction features
+
+Once you have clicked on an example, you can click the 'Extract text and redact document' button to load the example into the app and redact it.
+
+**For tabular data:** On the 'Word or Excel/csv files' tab, you'll find examples for both redaction and duplicate detection:
+
+- **CSV file redaction** - Shows how to redact specific columns in tabular data
+- **Word document redaction** - Demonstrates Word document processing
+- **Excel file duplicate detection** - Shows how to find duplicate rows in spreadsheet data
+
+Once you have clicked on an example, you can click the 'Redact text/data files' button to load the example into the app and redact it. For the duplicate detection example, you can click the 'Find duplicate cells/rows' button to load the example into the app and find duplicates.
+
+**For duplicate page detection:** On the 'Identify duplicate pages' tab, you'll find examples for finding duplicate content in documents:
+
+- **Find duplicate pages of text in document OCR outputs** - Uses page-level analysis with a similarity threshold of 0.95 and minimum word count of 10
+- **Find duplicate text lines in document OCR outputs** - Uses line-level analysis with a similarity threshold of 0.95 and minimum word count of 3
+
+Once you have clicked on an example, you can click the 'Identify duplicate pages/subdocuments' button to load the example into the app and find duplicate content.
+
+### External example files (optional)
+
+If you prefer to use your own example files or want to follow along with specific tutorials, you can still download these external example files:
+
 - [Example of files sent to a professor before applying](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf)
 - [Example complaint letter (jpg)](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_complaint_letter.jpg)
 - [Partnership Agreement Toolkit (for signatures and more advanced usage)](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf)
@@ -55,15 +93,19 @@ The 'Redact PDFs/images tab' currently accepts PDFs and image files (JPG, PNG) f
 
 ### Text extraction
 
-First, select one of the three text extraction options:
+You can modify default text extraction methods by clicking on the 'Change default text extraction method...' box'.
+
+Here you can select one of the three text extraction options:
 - **'Local model - selectable text'** - This will read text directly from PDFs that have selectable text to redact (using PikePDF). This is fine for most PDFs, but will find nothing if the PDF does not have selectable text, and it is not good for handwriting or signatures. If it encounters an image file, it will send it onto the second option below.
 - **'Local OCR model - PDFs without selectable text'** - This option will use a simple Optical Character Recognition (OCR) model (Tesseract) to pull out text from a PDF/image that it 'sees'. This can handle most typed text in PDFs/images without selectable text, but struggles with handwriting/signatures. If you are interested in the latter, then you should use the third option if available.
 - **'AWS Textract service - all PDF types'** - Only available for instances of the app running on AWS. AWS Textract is a service that performs OCR on documents within their secure service. This is a more advanced version of OCR compared to the local option, and carries a (relatively small) cost. Textract excels in complex documents based on images, or documents that contain a lot of handwriting and signatures.
 
-### Optional - select signature extraction
+### Enable AWS Textract signature extraction
 If you chose the AWS Textract service above, you can choose if you want handwriting and/or signatures redacted by default. Choosing signatures here will have a cost implication, as identifying signatures will cost ~£2.66 ($3.50) per 1,000 pages vs ~£1.14 ($1.50) per 1,000 pages without signature detection. 
 
 ![AWS Textract handwriting and signature options](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_handwriting_signatures.PNG)
+
+**NOTE:** it is also possible to enable form extraction, layout extraction, and table extraction with AWS Textract. This is not enabled by default, but it is possible for your system admin to enable this feature in the config file.
 
 ### PII redaction method
 
@@ -98,6 +140,7 @@ Click 'Redact document'. After loading in the document, the app should be able t
 ![Redaction outputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/redaction_outputs.PNG)
 
 - **'...redacted.pdf'** files contain the original pdf with suggested redacted text deleted and replaced by a black box on top of the document.
+- **'...redactions_for_review.pdf'** files contain the original PDF with redaction boxes overlaid but the original text still visible underneath. This file is designed for use in Adobe Acrobat and other PDF viewers where you can see the suggested redactions without the text being permanently removed. This is particularly useful for reviewing redactions before finalising them.
 - **'...ocr_results.csv'** files contain the line-by-line text outputs from the entire document. This file can be useful for later searching through for any terms of interest in the document (e.g. using Excel or a similar program).
 - **'...review_file.csv'** files are the review files that contain details and locations of all of the suggested redactions in the document. This file is key to the [review process](#reviewing-and-modifying-suggested-redactions), and should be downloaded to use later for this.
 
@@ -166,8 +209,6 @@ If the table is empty, you can add a new entry, you can add a new row by clickin
 
 ![Manually modify allow or deny list filled](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/manually_modify_filled.PNG)
 
-**Note:** As of version 0.7.0 you can now apply your whole page redaction list directly to the document file currently under review by clicking the 'Apply whole page redaction list to document currently under review' button that appears here.
-
 ### Redacting additional types of personal information
 
 You may want to redact additional types of information beyond the defaults, or you may not be interested in default suggested entity types. There are dates in the example complaint letter. Say we wanted to redact those dates also?
@@ -182,7 +223,7 @@ If you want to redact different files, I suggest you refresh your browser page t
 
 ## Redacting only specific pages
 
-Say also we are only interested in redacting page 1 of the loaded documents. On the Redaction settings tab, select 'Lowest page to redact' as 1, and 'Highest page to redact' also as 1. When you next redact your documents, only the first page will be modified.
+Say also we are only interested in redacting page 1 of the loaded documents. On the Redaction settings tab, select 'Lowest page to redact' as 1, and 'Highest page to redact' also as 1. When you next redact your documents, only the first page will be modified. The output files should now have a suffix similar to '..._1_1.pdf', indicating the lowest and highest page numbers that were redacted.
 
 ![Selecting specific pages to redact](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/select_pages.PNG)
 
@@ -419,38 +460,15 @@ You can also write open text into an input box and redact that using the same me
 ### Redaction log outputs
 A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the Redaction settings page under 'Log file outputs'.
 
-# ADVANCED USER GUIDE
-
-This advanced user guide will go over some of the features recently added to the app, including: modifying and merging redaction review files, identifying and redacting duplicate pages across multiple PDFs, 'fuzzy' search and redact, and exporting redactions to Adobe Acrobat.
-
-## Table of contents
-
-- [Merging redaction review files](#merging-redaction-review-files)
-- [Identifying and redacting duplicate pages](#identifying-and-redacting-duplicate-pages)
-- [Fuzzy search and redaction](#fuzzy-search-and-redaction)
-- [Export redactions to and import from Adobe Acrobat](#export-to-and-import-from-adobe)
-    - [Exporting to Adobe Acrobat](#exporting-to-adobe-acrobat)
-    - [Importing from Adobe Acrobat](#importing-from-adobe-acrobat)
-- [Using the AWS Textract document API](#using-the-aws-textract-document-api)
-- [Using AWS Textract and Comprehend when not running in an AWS environment](#using-aws-textract-and-comprehend-when-not-running-in-an-aws-environment)
-- [Modifying existing redaction review files](#modifying-existing-redaction-review-files)
-
-
-## Merging redaction review files
-
-Say you have run multiple redaction tasks on the same document, and you want to merge all of these redactions together. You could do this in your spreadsheet editor, but this could be fiddly especially if dealing with multiple review files or large numbers of redactions. The app has a feature to combine multiple review files together to create a 'merged' review file.
-
-![Merging review files in the user interface](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merge_review_files_interface.PNG)
-
-You can find this option at the bottom of the 'Redaction Settings' tab. Upload multiple review files here to get a single output 'merged' review_file. In the examples file, merging the 'review_file_custom.csv' and 'review_file_local.csv' files give you an output containing redaction boxes from both. This combined review file can then be uploaded into the review tab following the usual procedure.
-
-![Merging review files outputs in spreadsheet](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merged_review_file_outputs_csv.PNG)
-
 ## Identifying and redacting duplicate pages
 
 The files for this section are stored [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/).
 
 Some redaction tasks involve removing duplicate pages of text that may exist across multiple documents. This feature helps you find and remove duplicate content that may exist in single or multiple documents.  It can identify everything from single identical pages to multi-page sections (subdocuments). The process involves three main steps: configuring the analysis, reviewing the results in the interactive interface, and then using the generated files to perform the redactions.
+
+### Duplicate page detection in documents
+
+This section covers finding duplicate pages across PDF documents using OCR output files.
 
 ![Example duplicate page inputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_input_interface_new.PNG)
 
@@ -496,11 +514,43 @@ The analysis also generates a set of downloadable files for your records and for
 
 If you want to combine the results from this redaction process with previous redaction tasks for the same PDF, you could merge review file outputs following the steps described in [Merging existing redaction review files](#merging-existing-redaction-review-files) above.
 
+### Duplicate detection in tabular data
+
+The app also includes functionality to find duplicate cells or rows in CSV, Excel, or Parquet files. This is particularly useful for cleaning datasets where you need to identify and remove duplicate entries.
+
+**Step 1: Upload files and configure analysis**
+
+Navigate to the 'Word or Excel/csv files' tab and scroll down to the "Find duplicate cells in tabular data" section. Upload your tabular files (CSV, Excel, or Parquet) and configure the analysis parameters:
+
+- **Similarity threshold**: Score (0-1) to consider cells a match. 1 = perfect match
+- **Minimum word count**: Cells with fewer words than this value are ignored
+- **Do initial clean of text**: Remove URLs, HTML tags, and non-ASCII characters
+- **Remove duplicate rows**: Automatically remove duplicate rows from deduplicated files
+- **Select Excel sheet names**: Choose which sheets to analyze (for Excel files)
+- **Select text columns**: Choose which columns contain text to analyze
+
+**Step 2: Review results**
+
+After clicking "Find duplicate cells/rows", the results will be displayed in a table showing:
+- File1, Row1, File2, Row2
+- Similarity_Score
+- Text1, Text2 (the actual text content being compared)
+
+Click on any row to see more details about the duplicate match in the preview boxes below.
+
+**Step 3: Remove duplicates**
+
+Select a file from the dropdown and click "Remove duplicate rows from selected file" to create a cleaned version with duplicates removed. The cleaned file will be available for download.
+
+# Advanced user guide
+
+This advanced user guide covers features that require system administration access or command-line usage. These features are typically used by system administrators or advanced users who need more control over the redaction process.
+
 ## Fuzzy search and redaction
 
 The files for this section are stored [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/).
 
-Sometimes you may be searching for terns that are slightly mispelled throughout a document, for example names. The document redaction app gives the option for searching for long phrases that may contain spelling mistakes, a method called 'fuzzy matching'.
+Sometimes you may be searching for terms that are slightly mispelled throughout a document, for example names. The document redaction app gives the option for searching for long phrases that may contain spelling mistakes, a method called 'fuzzy matching'.
 
 To do this, go to the Redaction Settings, and the 'Select entity types to redact' area. In the box below relevant to your chosen redaction method (local or AWS Comprehend), select 'CUSTOM_FUZZY' from the list. Next, we can select the maximum number of spelling mistakes allowed in the search (up to nine). Here, you can either type in a number or use the small arrows to the right of the box. Change this option to 3. This will allow for a maximum of three 'changes' in text needed to match to the desired search terms.
 
@@ -520,9 +570,20 @@ Using these deny list with spelling mistakes, the app fuzzy match these terms to
 
 Files for this section are stored [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/export_to_adobe/).
 
-### Exporting to Adobe Acrobat
+The Document Redaction app has enhanced features for working with Adobe Acrobat. You can now export suggested redactions to Adobe, import Adobe comment files into the app, and use the new `_for_review.pdf` files directly in Adobe Acrobat.
 
-The Document Redaction app has a feature to export suggested redactions to Adobe, and likewise to import Adobe comment files into the app. The file format used is the .xfdf Adobe comment file format - [you can find more information about how to use these files here](https://helpx.adobe.com/uk/acrobat/using/importing-exporting-comments.html).
+### Using _for_review.pdf files with Adobe Acrobat
+
+The app now generates `...redactions_for_review.pdf` files that contain the original PDF with redaction boxes overlaid but the original text still visible underneath. These files are specifically designed for use in Adobe Acrobat and other PDF viewers where you can:
+
+- See the suggested redactions without the text being permanently removed
+- Review redactions before finalising them
+- Use Adobe Acrobat's built-in redaction tools to modify or apply the redactions
+- Export the final redacted version directly from Adobe
+
+Simply open the `...redactions_for_review.pdf` file in Adobe Acrobat to begin reviewing and modifying the suggested redactions.
+
+### Exporting to Adobe Acrobat
 
 To convert suggested redactions to Adobe format, you need to have the original PDF and a review file csv in the input box at the top of the Review redactions page.
 
@@ -570,6 +631,46 @@ The '_textract.json' output can be used to speed up further redaction tasks as [
 
 You can now easily get the '..._ocr_output.csv' redaction output based on this '_textract.json' (described in [Redaction outputs](#redaction-outputs)) by clicking on the button 'Convert Textract job outputs to OCR results'. You can now use this file e.g. for [identifying duplicate pages](#identifying-and-redacting-duplicate-pages), or for redaction review.
 
+
+
+## Modifying existing redaction review files
+You can find the folder containing the files discussed in this section [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/).
+
+As well as serving as inputs to the document redaction app's review function, the 'review_file.csv' output can be modified insider or outside of the app. This gives you the flexibility to change redaction details outside of the app.
+
+### Inside the app
+You can now modify redaction review files directly in the app on the 'Review redactions' tab. Open the accordion 'View and edit review data' under the file input area. You can edit review file data cells here - press Enter to apply changes. You should see the effect on the current page if you click the 'Save changes on current page to file' button to the right.
+
+### Outside the app
+If you open up a 'review_file' csv output using a spreadsheet software program such as Microsoft Excel you can easily modify redaction properties. Open the file '[Partnership-Agreement-Toolkit_0_0_redacted.pdf_review_file_local.csv](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/Partnership-Agreement-Toolkit_0_0.pdf_review_file_local.csv)', and you should see a spreadshet with just four suggested redactions (see below). The following instructions are for using Excel.
+
+![Review file before](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/review_file_before.PNG)
+
+The first thing we can do is remove the first row - 'et' is suggested as a person, but is obviously not a genuine instance of personal information. Right click on the row number and select delete on this menu. Next, let's imagine that what the app identified as a 'phone number' was in fact another type of number and so we wanted to change the label. Simply click on the relevant label cells, let's change it to 'SECURITY_NUMBER'. You could also use 'Find & Select' -> 'Replace' from the top ribbon menu if you wanted to change a number of labels simultaneously.
+
+How about we wanted to change the colour of the 'email address' entry on the redaction review tab of the redaction app? The colours in a review file are based on an RGB scale with three numbers ranging from 0-255. [You can find suitable colours here](https://rgbcolorpicker.com). Using this scale, if I wanted my review box to be pure blue, I can change the cell value to (0,0,255).
+
+Imagine that a redaction box was slightly too small, and I didn't want to use the in-app options to change the size. In the review file csv, we can modify e.g. the ymin and ymax values for any box to increase the extent of the redaction box. For the 'email address' entry, let's decrease ymin by 5, and increase ymax by 5.
+
+I have saved an output file following the above steps as '[Partnership-Agreement-Toolkit_0_0_redacted.pdf_review_file_local_mod.csv](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/outputs/Partnership-Agreement-Toolkit_0_0.pdf_review_file_local_mod.csv)' in the same folder that the original was found. Let's upload this file to the app along with the original pdf to see how the redactions look now.
+
+![Review file after modification](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/partnership_redactions_after.PNG)
+
+We can see from the above that we have successfully removed a redaction box, changed labels, colours, and redaction box sizes.
+
+## Merging redaction review files
+
+Say you have run multiple redaction tasks on the same document, and you want to merge all of these redactions together. You could do this in your spreadsheet editor, but this could be fiddly especially if dealing with multiple review files or large numbers of redactions. The app has a feature to combine multiple review files together to create a 'merged' review file.
+
+![Merging review files in the user interface](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merge_review_files_interface.PNG)
+
+You can find this option at the bottom of the 'Redaction Settings' tab. Upload multiple review files here to get a single output 'merged' review_file. In the examples file, merging the 'review_file_custom.csv' and 'review_file_local.csv' files give you an output containing redaction boxes from both. This combined review file can then be uploaded into the review tab following the usual procedure.
+
+![Merging review files outputs in spreadsheet](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/merged_review_file_outputs_csv.PNG)
+
+# Features for expert users/system administrators
+This advanced user guide covers features that require system administration access or command-line usage. These options are not enabled by default but can be configured by your system administrator, and are not available to users who are just using the graphical user interface. These features are typically used by system administrators or advanced users who need more control over the redaction process.
+
 ## Using AWS Textract and Comprehend when not running in an AWS environment
 
 AWS Textract and Comprehend give much better results for text extraction and document redaction than the local model options in the app. The most secure way to access them in the Redaction app is to run the app in a secure AWS environment with relevant permissions. Alternatively, you could run the app on your own system while logged in to AWS SSO with relevant permissions.
@@ -591,26 +692,180 @@ The app should then pick up these keys when trying to access the AWS Textract an
 
 Again, a lot can potentially go wrong with AWS solutions that are insecure, so before trying the above please consult with your AWS and data security teams.
 
-## Modifying existing redaction review files
+## Advanced OCR options (Hybrid OCR)
 
-*Note:* As of version 0.7.0 you can now modify redaction review files directly in the app on the 'Review redactions' tab. Open the accordion 'View and edit review data' under the file input area. You can edit review file data cells here - press Enter to apply changes. You should see the effect on the current page if you click the 'Save changes on current page to file' button to the right.
+The app supports advanced OCR options that combine multiple OCR engines for improved accuracy. These options are not enabled by default but can be configured by your system administrator.
 
-You can find the folder containing the files discussed in this section [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/).
+### Available OCR models
 
-As well as serving as inputs to the document redaction app's review function, the 'review_file.csv' output can be modified outside of the app, and also merged with others from multiple redaction attempts on the same file. This gives you the flexibility to change redaction details outside of the app.
+- **Tesseract** (default): The standard OCR engine that works well for most documents
+- **PaddleOCR**: More accurate for whole line text extraction, but word-level bounding boxes may be less precise
+- **Hybrid**: Combines Tesseract and PaddleOCR - uses Tesseract for initial extraction, then PaddleOCR for re-extraction of low-confidence text
 
-If you open up a 'review_file' csv output using a spreadsheet software program such as Microsoft Excel you can easily modify redaction properties. Open the file '[Partnership-Agreement-Toolkit_0_0_redacted.pdf_review_file_local.csv](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/Partnership-Agreement-Toolkit_0_0.pdf_review_file_local.csv)', and you should see a spreadshet with just four suggested redactions (see below). The following instructions are for using Excel.
+### Enabling advanced OCR options
 
-![Review file before](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/review_file_before.PNG)
+To enable these options, your system administrator needs to modify the configuration file (`config.py`) and set:
 
-The first thing we can do is remove the first row - 'et' is suggested as a person, but is obviously not a genuine instance of personal information. Right click on the row number and select delete on this menu. Next, let's imagine that what the app identified as a 'phone number' was in fact another type of number and so we wanted to change the label. Simply click on the relevant label cells, let's change it to 'SECURITY_NUMBER'. You could also use 'Find & Select' -> 'Replace' from the top ribbon menu if you wanted to change a number of labels simultaneously.
+```
+SHOW_LOCAL_OCR_MODEL_OPTIONS = "True"
+```
 
-How about we wanted to change the colour of the 'email address' entry on the redaction review tab of the redaction app? The colours in a review file are based on an RGB scale with three numbers ranging from 0-255. [You can find suitable colours here](https://rgbcolorpicker.com). Using this scale, if I wanted my review box to be pure blue, I can change the cell value to (0,0,255).
+Once enabled, users will see a "Change default local OCR model" section in the redaction settings where they can choose between:
+- tesseract
+- hybrid  
+- paddle
 
-Imagine that a redaction box was slightly too small, and I didn't want to use the in-app options to change the size. In the review file csv, we can modify e.g. the ymin and ymax values for any box to increase the extent of the redaction box. For the 'email address' entry, let's decrease ymin by 5, and increase ymax by 5.
+### Hybrid OCR configuration
 
-I have saved an output file following the above steps as '[Partnership-Agreement-Toolkit_0_0_redacted.pdf_review_file_local_mod.csv](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/outputs/Partnership-Agreement-Toolkit_0_0.pdf_review_file_local_mod.csv)' in the same folder that the original was found. Let's upload this file to the app along with the original pdf to see how the redactions look now.
+The hybrid OCR mode uses several configurable parameters:
 
-![Review file after modification](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/img/partnership_redactions_after.PNG)
+- **HYBRID_OCR_CONFIDENCE_THRESHOLD** (default: 65): Tesseract confidence score below which PaddleOCR will be used for re-extraction
+- **HYBRID_OCR_PADDING** (default: 1): Padding added to word bounding boxes before re-extraction
+- **SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES** (default: False): Save comparison images when using hybrid mode
+- **SAVE_PADDLE_VISUALISATIONS** (default: False): Save images with PaddleOCR bounding boxes overlaid
 
-We can see from the above that we have successfully removed a redaction box, changed labels, colours, and redaction box sizes.
+### When to use different OCR models
+
+- **Tesseract**: Best for general use, good balance of speed and accuracy
+- **PaddleOCR**: Best for documents with clear, well-formatted text where line-level accuracy is more important than word-level precision
+- **Hybrid**: Best for challenging documents where some text has low confidence scores, providing the benefits of both engines
+
+
+
+
+
+## Command Line Interface (CLI)
+
+The app includes a comprehensive command-line interface (`cli_redact.py`) that allows you to perform redaction, deduplication, and AWS Textract operations directly from the terminal. This is particularly useful for batch processing, automation, and integration with other systems.
+
+### Getting started with the CLI
+
+To use the CLI, you need to:
+
+1. Open a terminal window
+2. Navigate to the app folder containing `cli_redact.py`
+3. Activate your virtual environment (conda or venv)
+4. Run commands using `python cli_redact.py` followed by your options
+
+### Basic CLI syntax
+
+```bash
+python cli_redact.py --task [redact|deduplicate|textract] --input_file [file_path] [additional_options]
+```
+
+### Redaction examples
+
+**Basic PDF redaction with default settings:**
+```bash
+python cli_redact.py --input_file example_data/example_of_emails_sent_to_a_professor_before_applying.pdf
+```
+
+**Extract text only (no redaction) with whole page redaction:**
+```bash
+python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --redact_whole_page_file example_data/partnership_toolkit_redact_some_pages.csv --pii_detector None
+```
+
+**Redact with custom entities and allow list:**
+```bash
+python cli_redact.py --input_file example_data/graduate-job-example-cover-letter.pdf --allow_list_file example_data/test_allow_list_graduate.csv --local_redact_entities TITLES PERSON DATE_TIME
+```
+
+**Redact with fuzzy matching and custom deny list:**
+```bash
+python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --deny_list_file example_data/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv --local_redact_entities CUSTOM_FUZZY --page_min 1 --page_max 3 --fuzzy_mistakes 3
+```
+
+**Redact with AWS services:**
+```bash
+python cli_redact.py --input_file example_data/example_of_emails_sent_to_a_professor_before_applying.pdf --ocr_method "AWS Textract" --pii_detector "AWS Comprehend"
+```
+
+**Redact specific pages with signature extraction:**
+```bash
+python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --page_min 6 --page_max 7 --ocr_method "AWS Textract" --handwrite_signature_extraction "Extract handwriting" "Extract signatures"
+```
+
+### Tabular data redaction
+
+**Anonymize CSV file with specific columns:**
+```bash
+python cli_redact.py --input_file example_data/combined_case_notes.csv --text_columns "Case Note" "Client" --anon_strategy replace_redacted
+```
+
+**Anonymize Excel file:**
+```bash
+python cli_redact.py --input_file example_data/combined_case_notes.xlsx --text_columns "Case Note" "Client" --excel_sheets combined_case_notes --anon_strategy redact
+```
+
+**Anonymize Word document:**
+```bash
+python cli_redact.py --input_file "example_data/Bold minimalist professional cover letter.docx" --anon_strategy replace_redacted
+```
+
+### Duplicate detection
+
+**Find duplicate pages in OCR files:**
+```bash
+python cli_redact.py --task deduplicate --input_file example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv --duplicate_type pages --similarity_threshold 0.95
+```
+
+**Find duplicates at line level:**
+```bash
+python cli_redact.py --task deduplicate --input_file example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv --duplicate_type pages --similarity_threshold 0.95 --combine_pages False --min_word_count 3
+```
+
+**Find duplicate rows in tabular data:**
+```bash
+python cli_redact.py --task deduplicate --input_file example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv --duplicate_type tabular --text_columns "text" --similarity_threshold 0.95
+```
+
+### AWS Textract operations
+
+**Submit document for analysis:**
+```bash
+python cli_redact.py --task textract --textract_action submit --input_file example_data/example_of_emails_sent_to_a_professor_before_applying.pdf
+```
+
+**Submit with signature extraction:**
+```bash
+python cli_redact.py --task textract --textract_action submit --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --extract_signatures
+```
+
+**Retrieve results by job ID:**
+```bash
+python cli_redact.py --task textract --textract_action retrieve --job_id 12345678-1234-1234-1234-123456789012
+```
+
+**List recent jobs:**
+```bash
+python cli_redact.py --task textract --textract_action list
+```
+
+### Common CLI options
+
+- `--task`: Choose between "redact", "deduplicate", or "textract"
+- `--input_file`: Path to input file(s)
+- `--output_dir`: Directory for output files (default: output/)
+- `--page_min` / `--page_max`: Process only specific page range
+- `--ocr_method`: Choose text extraction method
+- `--pii_detector`: Choose PII detection method
+- `--local_redact_entities`: Specify local entities to redact
+- `--allow_list_file` / `--deny_list_file`: Custom lists
+- `--redact_whole_page_file`: List of pages to redact completely
+- `--fuzzy_mistakes`: Number of spelling mistakes allowed in fuzzy matching
+- `--similarity_threshold`: Threshold for duplicate detection
+- `--anon_strategy`: Anonymization strategy for tabular data
+
+### Output files
+
+The CLI generates the same output files as the GUI:
+- `...redacted.pdf`: Final redacted document
+- `...redactions_for_review.pdf`: Document with redaction boxes for review
+- `...review_file.csv`: Detailed redaction information
+- `...ocr_results.csv`: Extracted text results
+- `..._textract.json`: AWS Textract results (if applicable)
+
+For more advanced options and configuration, refer to the help text by running:
+```bash
+python cli_redact.py --help
+```

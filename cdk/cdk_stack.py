@@ -941,6 +941,9 @@ class CdkStack(Stack):
                             "AWS_ACCOUNT_ID": codebuild.BuildEnvironmentVariable(
                                 value=AWS_ACCOUNT_ID
                             ),
+                            "APP_MODE": codebuild.BuildEnvironmentVariable(
+                                value="gradio"
+                            ),
                         },
                     ),
                     build_spec=codebuild.BuildSpec.from_object(
@@ -956,7 +959,7 @@ class CdkStack(Stack):
                                 "build": {
                                     "commands": [
                                         "echo Building the Docker image",
-                                        "docker build -t $ECR_REPO_NAME:latest .",
+                                        "docker build --build-args APP_MODE=$APP_MODE --target $APP_MODE -t $ECR_REPO_NAME:latest .",
                                         "docker tag $ECR_REPO_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest",
                                     ]
                                 },

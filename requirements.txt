@@ -6,13 +6,13 @@ presidio_analyzer==2.2.360
 presidio_anonymizer==2.2.360
 presidio-image-redactor==0.0.57
 pikepdf==9.11.0
-pandas==2.3.2
+pandas==2.3.3
 scikit-learn==1.7.2
 spacy==3.8.7
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
-gradio==5.48.0
+gradio==5.49.1
 polars==1.33.1
-boto3==1.40.43
+boto3==1.40.57
 pyarrow==21.0.0
 openpyxl==3.1.5
 Faker==37.8.0
@@ -26,7 +26,7 @@ python-docx==1.2.0
 defusedxml==0.7.1
 # Optional: uncomment the below to install paddleOCR if you want to use hybrid text extraction (tesseract plus paddleocr)
 # paddlepaddle==3.2.0 # Consider installing the GPU version for faster local OCR inference with PaddleOCR: paddlepaddle-gpu==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/ , compatible with CUDA 12.6. See this for more details: https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/linux-pip_en.html#span-id-gpu-gpu-version-of-paddlepaddle-span
-# paddleocr==3.2.0
+# paddleocr==3.3.0
 
 # Test dependencies
 pytest>=7.0.0

@@ -496,6 +496,7 @@ def anonymise_files_with_open_text(
 
     tic = time.perf_counter()
     comprehend_client = ""
+    out_message_out = ""
 
     # If output folder doesn't end with a forward slash, add one
     if not output_folder.endswith("/"):
@@ -544,7 +545,7 @@ def anonymise_files_with_open_text(
     # Try to connect to AWS services directly only if RUN_AWS_FUNCTIONS environmental variable is 1, otherwise an environment variable or direct textbox input is needed.
     if pii_identification_method == "AWS Comprehend":
         print("Trying to connect to AWS Comprehend service")
-        if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+        if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Comprehend via existing SSO connection")
             comprehend_client = boto3.client("comprehend", region_name=AWS_REGION)
         elif aws_access_key_textbox and aws_secret_key_textbox:
@@ -556,7 +557,7 @@ def anonymise_files_with_open_text(
                 aws_access_key_id=aws_access_key_textbox,
                 aws_secret_access_key=aws_secret_key_textbox,
             )
-        elif RUN_AWS_FUNCTIONS == "1":
+        elif RUN_AWS_FUNCTIONS:
             print("Connecting to Comprehend via existing SSO connection")
             comprehend_client = boto3.client("comprehend")
         elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
@@ -682,7 +683,6 @@ def anonymise_files_with_open_text(
 
             elif file_type == "xlsx":
                 print("Running through all xlsx sheets")
-                # anon_xlsx = pd.ExcelFile(anon_file)
                 if not in_excel_sheets:
                     out_message.append(
                         "No Excel sheets selected. Please select at least one to anonymise."
@@ -773,6 +773,8 @@ def anonymise_files_with_open_text(
                     output_folder=output_folder,
                     do_initial_clean=do_initial_clean,
                 )
+
+        out_message_out = ""
 
         # Increase latest file completed count unless we are at the last file
         if latest_file_completed != len(file_paths):

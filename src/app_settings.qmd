@@ -2,529 +2,573 @@
 title: "App settings management guide"
 format:
   html:
-    toc: true # Enable the table of contents
-    toc-depth: 3 # Include headings up to level 2 (##)
-    toc-title: "On this page" # Optional: Title for your TOC
+    toc: true 
+    toc-depth: 3
+    toc-title: "On this page"
 ---
 
-Settings for the redaction app can be set from outside by changing values in the  `config.env` file stored in your local config folder, or in S3 if running on AWS. This guide provides an overview of how to configure the application using environment variables. The application loads configurations using `os.environ.get()`. It first attempts to load variables from the file specified by `APP_CONFIG_PATH` (which defaults to `config/app_config.env`). If `AWS_CONFIG_PATH` is also set (e.g., to `config/aws_config.env`), variables are loaded from that file as well. Environment variables set directly in the system will always take precedence over those defined in these `.env` files.
+Settings for the redaction app can be set from outside by changing values in the `.env` file stored in your local config folder, or in S3 if running on AWS. This guide provides an overview of how to configure the application using environment variables. The application loads configurations using `os.environ.get()`. It first attempts to load variables from the file specified by `APP_CONFIG_PATH` (which defaults to `config/app_config.env`). If `AWS_CONFIG_PATH` is also set (e.g., to `config/aws_config.env`), variables are loaded from that file as well. Environment variables set directly in the system will always take precedence over those defined in these `.env` files.
 
-## App Configuration File (config.env)
+## App Configuration File (`config.env`)
 
 This section details variables related to the main application configuration file.
 
-*   **`APP_CONFIG_PATH`**
-    *   **Description:** Specifies the path to the application configuration `.env` file. This file contains various settings that control the application's behavior.
-    *   **Default Value:** `config/app_config.env`
-    *   **Configuration:** Set as an environment variable directly. This variable defines where to load other application configurations, so it cannot be set within `config/app_config.env` itself.
+* **`CONFIG_FOLDER`**
+    * **Description:** The folder where configuration files are stored.
+    * **Default Value:** `config/`
+
+* **`APP_CONFIG_PATH`**
+    * **Description:** Specifies the path to the application configuration `.env` file. This file contains various settings that control the application's behavior.
+    * **Default Value:** `config/app_config.env`
 
 ## AWS Options
 
 This section covers configurations related to AWS services used by the application.
 
-*   **`AWS_CONFIG_PATH`**
-    *   **Description:** Specifies the path to the AWS configuration `.env` file. This file is intended to store AWS credentials and specific settings.
-    *   **Default Value:** `''` (empty string)
-    *   **Configuration:** Set as an environment variable directly. This variable defines an additional source for AWS-specific configurations.
+* **`AWS_CONFIG_PATH`**
+    * **Description:** Specifies the path to the AWS configuration `.env` file. This file is intended to store AWS credentials and specific settings.
+    * **Default Value:** `''` (empty string)
 
-*   **`RUN_AWS_FUNCTIONS`**
-    *   **Description:** Enables or disables AWS-specific functionalities within the application. Set to `"1"` to enable and `"0"` to disable.
-    *   **Default Value:** `"0"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`RUN_AWS_FUNCTIONS`**
+    * **Description:** Enables or disables AWS-specific functionalities within the application. Set to `"True"` to enable.
+    * **Default Value:** `"False"`
 
-*   **`AWS_REGION`**
-    *   **Description:** Defines the AWS region where services like S3, Cognito, and Textract are located.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/aws_config.env` (if `AWS_CONFIG_PATH` is configured).
+* **`AWS_REGION`**
+    * **Description:** Defines the AWS region where services like S3, Cognito, and Textract are located.
+    * **Default Value:** `''`
 
-*   **`AWS_CLIENT_ID`**
-    *   **Description:** The client ID for AWS Cognito, used for user authentication.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/aws_config.env` (if `AWS_CONFIG_PATH` is configured).
+* **`AWS_CLIENT_ID`**
+    * **Description:** The client ID for AWS Cognito, used for user authentication.
+    * **Default Value:** `''`
 
-*   **`AWS_CLIENT_SECRET`**
-    *   **Description:** The client secret for AWS Cognito, used in conjunction with the client ID for authentication.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/aws_config.env` (if `AWS_CONFIG_PATH` is configured).
+* **`AWS_CLIENT_SECRET`**
+    * **Description:** The client secret for AWS Cognito, used in conjunction with the client ID for authentication.
+    * **Default Value:** `''`
 
-*   **`AWS_USER_POOL_ID`**
-    *   **Description:** The user pool ID for AWS Cognito, identifying the user directory.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/aws_config.env` (if `AWS_CONFIG_PATH` is configured).
+* **`AWS_USER_POOL_ID`**
+    * **Description:** The user pool ID for AWS Cognito, identifying the user directory.
+    * **Default Value:** `''`
 
-*   **`AWS_ACCESS_KEY`**
-    *   **Description:** The AWS access key ID for programmatic access to AWS services.
-    *   **Default Value:** `''` (Note: Often found in the environment or AWS credentials file.)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/aws_config.env` (if `AWS_CONFIG_PATH` is configured). It's also commonly configured via shared AWS credentials files or IAM roles.
+* **`AWS_ACCESS_KEY`**
+    * **Description:** The AWS access key ID for programmatic access to AWS services.
+    * **Default Value:** `''`
 
-*   **`AWS_SECRET_KEY`**
-    *   **Description:** The AWS secret access key corresponding to the AWS access key ID.
-    *   **Default Value:** `''` (Note: Often found in the environment or AWS credentials file.)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/aws_config.env` (if `AWS_CONFIG_PATH` is configured). It's also commonly configured via shared AWS credentials files or IAM roles.
+* **`AWS_SECRET_KEY`**
+    * **Description:** The AWS secret access key corresponding to the AWS access key ID.
+    * **Default Value:** `''`
 
-*   **`DOCUMENT_REDACTION_BUCKET`**
-    *   **Description:** The name of the S3 bucket used for storing documents related to the redaction process.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/aws_config.env` (if `AWS_CONFIG_PATH` is configured).
+* **`DOCUMENT_REDACTION_BUCKET`**
+    * **Description:** The name of the S3 bucket used for storing documents related to the redaction process.
+    * **Default Value:** `''`
 
-*   **`CUSTOM_HEADER`**
-    *   **Description:** Specifies a custom header name to be included in requests, often used for services like AWS CloudFront.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS`**
+    * **Description:** If set to `"True"`, the app will prioritize using AWS SSO credentials over access keys stored in environment variables.
+    * **Default Value:** `"True"`
 
-*   **`CUSTOM_HEADER_VALUE`**
-    *   **Description:** The value for the custom header specified by `CUSTOM_HEADER`.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`CUSTOM_HEADER`**
+    * **Description:** Specifies a custom header name to be included in requests, often used for services like AWS CloudFront.
+    * **Default Value:** `''`
+
+* **`CUSTOM_HEADER_VALUE`**
+    * **Description:** The value for the custom header specified by `CUSTOM_HEADER`.
+    * **Default Value:** `''`
 
 ## Image Options
 
 Settings related to image processing within the application.
 
-*   **`IMAGES_DPI`**
-    *   **Description:** Dots Per Inch (DPI) setting for image processing, affecting the resolution and quality of processed images.
-    *   **Default Value:** `'300.0'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`IMAGES_DPI`**
+    * **Description:** Dots Per Inch (DPI) setting for image processing, affecting the resolution and quality of processed images.
+    * **Default Value:** `'300.0'`
 
-*   **`LOAD_TRUNCATED_IMAGES`**
-    *   **Description:** Controls whether the application attempts to load truncated images. Set to `'True'` to enable.
-    *   **Default Value:** `'True'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`LOAD_TRUNCATED_IMAGES`**
+    * **Description:** Controls whether the application attempts to load truncated images. Set to `'True'` to enable.
+    * **Default Value:** `'True'`
 
-*   **`MAX_IMAGE_PIXELS`**
-    *   **Description:** Sets the maximum number of pixels for an image that the application will process. Leave blank for no limit. This can help prevent issues with very large images.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`MAX_IMAGE_PIXELS`**
+    * **Description:** Sets the maximum number of pixels for an image that the application will process. Leave blank for no limit. This can help prevent issues with very large images.
+    * **Default Value:** `''`
 
 ## File I/O Options
 
 Configuration for input and output file handling.
 
-*   **`SESSION_OUTPUT_FOLDER`**
-    *   **Description:** If set to `'True'`, the application will save output and input files into session-specific subfolders, helping to organise files from different user sessions.
-    *   **Default Value:** `'False'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`SESSION_OUTPUT_FOLDER`**
+    * **Description:** If set to `'True'`, the application will save output and input files into session-specific subfolders.
+    * **Default Value:** `'False'`
 
-*   **`GRADIO_OUTPUT_FOLDER`** (aliased as `OUTPUT_FOLDER`)
-    *   **Description:** Specifies the default output folder for files generated by Gradio components. Can be set to "TEMP" to use a temporary directory.
-    *   **Default Value:** `'output/'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`OUTPUT_FOLDER`**
+    * **Description:** Specifies the default output folder for generated files. Can be set to `"TEMP"` to use a temporary directory.
+    * **Default Value:** `'output/'`
 
-*   **`GRADIO_INPUT_FOLDER`** (aliased as `INPUT_FOLDER`)
-    *   **Description:** Specifies the default input folder for files used by Gradio components. Can be set to "TEMP" to use a temporary directory.
-    *   **Default Value:** `'input/'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`INPUT_FOLDER`**
+    * **Description:** Specifies the default input folder for files. Can be set to `"TEMP"` to use a temporary directory.
+    * **Default Value:** `'input/'`
 
-*   **`GRADIO_TEMP_DIR`**
-    *   **Description:** Defines the path for Gradio's temporary file storage.
-    *   **Default Value:** `'tmp/gradio_tmp/'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`GRADIO_TEMP_DIR`**
+    * **Description:** Defines the path for Gradio's temporary file storage.
+    * **Default Value:** `''`
 
-*   **`MPLCONFIGDIR`**
-    *   **Description:** Specifies the cache directory for the Matplotlib library, which is used for plotting and image handling.
-    *   **Default Value:** `'tmp/matplotlib_cache/'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`MPLCONFIGDIR`**
+    * **Description:** Specifies the cache directory for the Matplotlib library.
+    * **Default Value:** `''`
 
 ## Logging Options
 
-Settings for configuring application logging, including log formats and storage locations.
+Settings for configuring application logging.
 
-*   **`SAVE_LOGS_TO_CSV`**
-    *   **Description:** Enables or disables saving logs to CSV files. Set to `'True'` to enable.
-    *   **Default Value:** `'True'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`SAVE_LOGS_TO_CSV`**
+    * **Description:** Enables or disables saving logs to CSV files. Set to `'True'` to enable.
+    * **Default Value:** `'True'`
 
-*   **`USE_LOG_SUBFOLDERS`**
-    *   **Description:** If enabled (`'True'`), logs will be stored in subfolders based on date and hostname, aiding in log organisation.
-    *   **Default Value:** `'True'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`USE_LOG_SUBFOLDERS`**
+    * **Description:** If enabled (`'True'`), logs will be stored in subfolders based on date and hostname.
+    * **Default Value:** `'True'`
 
-*   **`FEEDBACK_LOGS_FOLDER`**
-    *   **Description:** Specifies the base folder for storing feedback logs. If `USE_LOG_SUBFOLDERS` is true, date/hostname subfolders will be created within this folder.
-    *   **Default Value:** `'feedback/'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`FEEDBACK_LOGS_FOLDER`**, **`ACCESS_LOGS_FOLDER`**, **`USAGE_LOGS_FOLDER`**
+    * **Description:** Base folders for feedback, access, and usage logs respectively.
+    * **Default Values:** `'feedback/'`, `'logs/'`, `'usage/'`
 
-*   **`ACCESS_LOGS_FOLDER`**
-    *   **Description:** Specifies the base folder for storing access logs. If `USE_LOG_SUBFOLDERS` is true, date/hostname subfolders will be created within this folder.
-    *   **Default Value:** `'logs/'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`S3_FEEDBACK_LOGS_FOLDER`**, **`S3_ACCESS_LOGS_FOLDER`**, **`S3_USAGE_LOGS_FOLDER`**
+    * **Description:** S3 paths where feedback, access, and usage logs will be stored if `RUN_AWS_FUNCTIONS` is enabled.
+    * **Default Values:** Dynamically generated based on date and hostname, e.g., `'feedback/YYYYMMDD/hostname/'`.
 
-*   **`USAGE_LOGS_FOLDER`**
-    *   **Description:** Specifies the base folder for storing usage logs. If `USE_LOG_SUBFOLDERS` is true, date/hostname subfolders will be created within this folder.
-    *   **Default Value:** `'usage/'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`LOG_FILE_NAME`**, **`USAGE_LOG_FILE_NAME`**, **`FEEDBACK_LOG_FILE_NAME`**
+    * **Description:** Specifies the name for log files. `USAGE_LOG_FILE_NAME` and `FEEDBACK_LOG_FILE_NAME` default to the value of `LOG_FILE_NAME`.
+    * **Default Value:** `'log.csv'`
 
-*   **`DISPLAY_FILE_NAMES_IN_LOGS`**
-    *   **Description:** If set to `'True'`, file names will be included in the log entries.
-    *   **Default Value:** `'False'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`DISPLAY_FILE_NAMES_IN_LOGS`**
+    * **Description:** If set to `'True'`, file names will be included in log entries.
+    * **Default Value:** `'False'`
 
-*   **`CSV_ACCESS_LOG_HEADERS`**
-    *   **Description:** Defines custom headers for CSV access logs. If left blank, component labels will be used as headers.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`CSV_ACCESS_LOG_HEADERS`**, **`CSV_FEEDBACK_LOG_HEADERS`**, **`CSV_USAGE_LOG_HEADERS`**
+    * **Description:** Defines custom headers for the respective CSV logs as a string representation of a list. If blank, component labels are used.
+    * **Default Value:** Varies; see script for `CSV_USAGE_LOG_HEADERS` default.
 
-*   **`CSV_FEEDBACK_LOG_HEADERS`**
-    *   **Description:** Defines custom headers for CSV feedback logs. If left blank, component labels will be used as headers.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`SAVE_LOGS_TO_DYNAMODB`**
+    * **Description:** Enables or disables saving logs to AWS DynamoDB. Set to `'True'` to enable.
+    * **Default Value:** `'False'`
 
-*   **`CSV_USAGE_LOG_HEADERS`**
-    *   **Description:** Defines custom headers for CSV usage logs.
-    *   **Default Value:** A predefined list of header names. Refer to `config.py` for the complete list.
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`ACCESS_LOG_DYNAMODB_TABLE_NAME`**, **`FEEDBACK_LOG_DYNAMODB_TABLE_NAME`**, **`USAGE_LOG_DYNAMODB_TABLE_NAME`**
+    * **Description:** Names of the DynamoDB tables for storing access, feedback, and usage logs.
+    * **Default Values:** `'redaction_access_log'`, `'redaction_feedback'`, `'redaction_usage'`
 
-*   **`SAVE_LOGS_TO_DYNAMODB`**
-    *   **Description:** Enables or disables saving logs to AWS DynamoDB. Set to `'True'` to enable. Requires appropriate AWS setup.
-    *   **Default Value:** `'False'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`DYNAMODB_ACCESS_LOG_HEADERS`**, **`DYNAMODB_FEEDBACK_LOG_HEADERS`**, **`DYNAMODB_USAGE_LOG_HEADERS`**
+    * **Description:** Specifies the headers (attributes) for the respective DynamoDB log tables.
+    * **Default Value:** `''`
 
-*   **`ACCESS_LOG_DYNAMODB_TABLE_NAME`**
-    *   **Description:** The name of the DynamoDB table used for storing access logs.
-    *   **Default Value:** `'redaction_access_log'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`LOGGING`**
+    * **Description:** Enables or disables general console logging. Set to `'True'` to enable.
+    * **Default Value:** `'False'`
 
-*   **`DYNAMODB_ACCESS_LOG_HEADERS`**
-    *   **Description:** Specifies the headers (attributes) for the DynamoDB access log table.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+## Gradio & General App Options
 
-*   **`FEEDBACK_LOG_DYNAMODB_TABLE_NAME`**
-    *   **Description:** The name of the DynamoDB table used for storing feedback logs.
-    *   **Default Value:** `'redaction_feedback'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+Configurations for the Gradio UI, server behavior, and application limits.
 
-*   **`DYNAMODB_FEEDBACK_LOG_HEADERS`**
-    *   **Description:** Specifies the headers (attributes) for the DynamoDB feedback log table.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`FAVICON_PATH`**
+    * **Description:** Path to the favicon icon file for the web interface.
+    * **Default Value:** `"favicon.png"`
 
-*   **`USAGE_LOG_DYNAMODB_TABLE_NAME`**
-    *   **Description:** The name of the DynamoDB table used for storing usage logs.
-    *   **Default Value:** `'redaction_usage'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`RUN_FASTAPI`**
+    * **Description:** If set to `"True"`, the application will be served via FastAPI, allowing for API endpoint integration.
+    * **Default Value:** `"False"`
 
-*   **`DYNAMODB_USAGE_LOG_HEADERS`**
-    *   **Description:** Specifies the headers (attributes) for the DynamoDB usage log table.
-    *   **Default Value:** `''`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`GRADIO_SERVER_NAME`**
+    * **Description:** The IP address the Gradio server will bind to. Use `"0.0.0.0"` to allow external access.
+    * **Default Value:** `"0.0.0.0"`
 
-*   **`LOGGING`**
-    *   **Description:** Enables or disables general console logging. Set to `'True'` to enable.
-    *   **Default Value:** `'False'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`GRADIO_SERVER_PORT`**
+    * **Description:** The network port on which the Gradio server will listen.
+    * **Default Value:** `7860`
 
-*   **`LOG_FILE_NAME`**
-    *   **Description:** Specifies the name for the CSV log file if `SAVE_LOGS_TO_CSV` is enabled.
-    *   **Default Value:** `'log.csv'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`ALLOWED_ORIGINS`**
+    * **Description:** A comma-separated list of allowed origins for Cross-Origin Resource Sharing (CORS).
+    * **Default Value:** `''`
 
-## Redaction Options
+* **`ALLOWED_HOSTS`**
+    * **Description:** A comma-separated list of allowed hostnames.
+    * **Default Value:** `''`
 
-Configurations related to the text redaction process, including PII detection models and external tool paths.
+* **`ROOT_PATH`**
+    * **Description:** The root path for the application, useful if running behind a reverse proxy (e.g., `/app`).
+    * **Default Value:** `''`
 
-*   **`TESSERACT_FOLDER`**
-    *   **Description:** Path to the local Tesseract OCR installation folder. Only required if Tesseract is not in the system's PATH, or when running a packaged executable (e.g., via PyInstaller).
-    *   **Default Value:** `""` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`FASTAPI_ROOT_PATH`**
+    * **Description:** The root path for the FastAPI application, used when `RUN_FASTAPI` is true.
+    * **Default Value:** `"/"`
 
-*   **`TESSERACT_DATA_FOLDER`**
-    *   **Description:** Path to the Tesseract trained data files (e.g., `tessdata`).
-    *   **Default Value:** `"/usr/share/tessdata"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`MAX_QUEUE_SIZE`**
+    * **Description:** The maximum number of requests that can be queued in the Gradio interface.
+    * **Default Value:** `5`
 
-*   **`POPPLER_FOLDER`**
-    *   **Description:** Path to the local Poppler installation's `bin` folder. Poppler is used for PDF processing. Only required if Poppler is not in the system's PATH.
-    *   **Default Value:** `""` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`MAX_FILE_SIZE`**
+    * **Description:** Maximum file size allowed for uploads (e.g., "250mb", "1gb").
+    * **Default Value:** `'250mb'`
 
-*   **`SELECTABLE_TEXT_EXTRACT_OPTION`**
-    *   **Description:** Display name in the UI for the text extraction method that processes selectable text directly from PDFs.
-    *   **Default Value:** `"Local model - selectable text"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`DEFAULT_CONCURRENCY_LIMIT`**
+    * **Description:** The default concurrency limit for Gradio event handlers, controlling how many requests can be processed simultaneously.
+    * **Default Value:** `3`
 
-*   **`TESSERACT_TEXT_EXTRACT_OPTION`**
-    *   **Description:** Display name in the UI for the text extraction method using local Tesseract OCR (for PDFs without selectable text).
-    *   **Default Value:** `"Local OCR model - PDFs without selectable text"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`MAX_SIMULTANEOUS_FILES`**
+    * **Description:** The maximum number of files that can be processed at once.
+    * **Default Value:** `10`
 
-*   **`TEXTRACT_TEXT_EXTRACT_OPTION`**
-    *   **Description:** Display name in the UI for the text extraction method using AWS Textract service.
-    *   **Default Value:** `"AWS Textract service - all PDF types"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`MAX_DOC_PAGES`**
+    * **Description:** The maximum number of pages a document can have.
+    * **Default Value:** `3000`
 
-*   **`NO_REDACTION_PII_OPTION`**
-    *   **Description:** Display name in the UI for the option to only extract text without performing any PII detection or redaction.
-    *   **Default Value:** `"Only extract text (no redaction)"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`MAX_TABLE_ROWS`** / **`MAX_TABLE_COLUMNS`**
+    * **Description:** Maximum number of rows and columns for tabular data processing.
+    * **Default Values:** `250000` / `100`
 
-*   **`LOCAL_PII_OPTION`**
-    *   **Description:** Display name in the UI for the PII detection method using a local model.
-    *   **Default Value:** `"Local"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`MAX_OPEN_TEXT_CHARACTERS`**
+    * **Description:** Maximum number of characters for open text input.
+    * **Default Value:** `50000`
 
-*   **`AWS_PII_OPTION`**
-    *   **Description:** Display name in the UI for the PII detection method using AWS Comprehend.
-    *   **Default Value:** `"AWS Comprehend"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`TLDEXTRACT_CACHE`**
+    * **Description:** Path to the cache directory used by the `tldextract` library.
+    * **Default Value:** `'tmp/tld/'`
 
-*   **`SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS`**
-    *   **Description:** Controls whether local text extraction options (selectable text, Tesseract) are shown in the UI. Set to `'True'` to show.
-    *   **Default Value:** `'True'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`COGNITO_AUTH`**
+    * **Description:** Enables or disables AWS Cognito authentication. Set to `'True'` to enable.
+    * **Default Value:** `'False'`
 
-*   **`SHOW_AWS_TEXT_EXTRACTION_OPTIONS`**
-    *   **Description:** Controls whether AWS Textract text extraction option is shown in the UI. Set to `'True'` to show.
-    *   **Default Value:** `'True'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`USER_GUIDE_URL`**
+    * **Description:** A safe URL pointing to the user guide. The URL is validated against a list of allowed domains.
+    * **Default Value:** `"https://seanpedrick-case.github.io/doc_redaction"`
 
-*   **`DEFAULT_TEXT_EXTRACTION_MODEL`**
-    *   **Description:** Sets the default text extraction model selected in the UI. Defaults to `TEXTRACT_TEXT_EXTRACT_OPTION` if AWS options are shown; otherwise, defaults to `SELECTABLE_TEXT_EXTRACT_OPTION`.
-    *   **Default Value:** Value of `TEXTRACT_TEXT_EXTRACT_OPTION` if `SHOW_AWS_TEXT_EXTRACTION_OPTIONS` is True, else value of `SELECTABLE_TEXT_EXTRACT_OPTION`.
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`. Provide one of the text extraction option display names.
+* **`SHOW_EXAMPLES`**
+    * **Description:** If set to `"True"`, displays example files in the Gradio interface.
+    * **Default Value:** `"True"`
 
-*   **`SHOW_LOCAL_PII_DETECTION_OPTIONS`**
-    *   **Description:** Controls whether the local PII detection option is shown in the UI. Set to `'True'` to show.
-    *   **Default Value:** `'True'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`SHOW_AWS_EXAMPLES`**
+    * **Description:** If set to `"True"`, includes AWS-specific examples.
+    * **Default Value:** `"False"`
 
-*   **`SHOW_AWS_PII_DETECTION_OPTIONS`**
-    *   **Description:** Controls whether the AWS Comprehend PII detection option is shown in the UI. Set to `'True'` to show.
-    *   **Default Value:** `'True'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`FILE_INPUT_HEIGHT`**
+    * **Description:** Sets the height (in pixels) of the file input component in the Gradio UI.
+    * **Default Value:** `200`
 
-*   **`DEFAULT_PII_DETECTION_MODEL`**
-    *   **Description:** Sets the default PII detection model selected in the UI. Defaults to `AWS_PII_OPTION` if AWS options are shown; otherwise, defaults to `LOCAL_PII_OPTION`.
-    *   **Default Value:** Value of `AWS_PII_OPTION` if `SHOW_AWS_PII_DETECTION_OPTIONS` is True, else value of `LOCAL_PII_OPTION`.
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`. Provide one of the PII detection option display names.
+## Redaction & PII Options
 
-*   **`CHOSEN_LOCAL_OCR_MODEL`**
-    *   **Description:** Choose the engine for local OCR: `"tesseract"`, `"paddle"`, or `"hybrid"`. "paddle" is effective for line extraction but not word-level redaction. "hybrid" uses Tesseract first, then PaddleOCR for low-confidence words.
-    *   **Default Value:** `"tesseract"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+Configurations related to text extraction, PII detection, and the redaction process.
 
-*   **`PREPROCESS_LOCAL_OCR_IMAGES`**
-    *   **Description:** If set to `"True"`, images will be preprocessed (e.g., deskewed, contrast adjusted) before being sent to the local OCR engine. This can sometimes yield worse results on clean scans.
-    *   **Default Value:** `"False"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+### UI and Model Selection
 
-*   **`CHOSEN_COMPREHEND_ENTITIES`**
-    *   **Description:** A list of AWS Comprehend PII entity types to be redacted when using AWS Comprehend.
-    *   **Default Value:** A predefined list of entity types. Refer to `config.py` for the complete list.
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`. This should be a string representation of a Python list.
+* **`EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT`**
+    * **Description:** If set to `"True"`, the "Extraction and PII Options" accordion in the UI will be open by default.
+    * **Default Value:** `"True"`
 
-*   **`FULL_COMPREHEND_ENTITY_LIST`**
-    *   **Description:** The complete list of PII entity types supported by AWS Comprehend that can be selected for redaction.
-    *   **Default Value:** A predefined list of entity types. Refer to `config.py` for the complete list.
-    *   **Configuration:** This is typically an informational variable reflecting the capabilities of AWS Comprehend and is not meant to be changed by users directly affecting redaction behavior (use `CHOSEN_COMPREHEND_ENTITIES` for that). Set as an environment variable directly, or include in `config/app_config.env`.
+* **`SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS`** / **`SHOW_AWS_TEXT_EXTRACTION_OPTIONS`**
+    * **Description:** Controls whether local (Tesseract) or AWS (Textract) text extraction options are shown in the UI.
+    * **Default Value:** `"True"` for both.
 
-*   **`CHOSEN_REDACT_ENTITIES`**
-    *   **Description:** A list of local PII entity types to be redacted when using the local PII detection model.
-    *   **Default Value:** A predefined list of entity types. Refer to `config.py` for the complete list.
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`. This should be a string representation of a Python list.
+* **`SHOW_LOCAL_PII_DETECTION_OPTIONS`** / **`SHOW_AWS_PII_DETECTION_OPTIONS`**
+    * **Description:** Controls whether local or AWS (Comprehend) PII detection options are shown in the UI.
+    * **Default Value:** `"True"` for both.
 
-*   **`FULL_ENTITY_LIST`**
-    *   **Description:** The complete list of PII entity types supported by the local PII detection model that can be selected for redaction.
-    *   **Default Value:** A predefined list of entity types. Refer to `config.py` for the complete list.
-    *   **Configuration:** This is typically an informational variable reflecting the capabilities of the local model and is not meant to be changed by users directly affecting redaction behavior (use `CHOSEN_REDACT_ENTITIES` for that). Set as an environment variable directly, or include in `config/app_config.env`.
+* **`DEFAULT_TEXT_EXTRACTION_MODEL`**
+    * **Description:** Sets the default text extraction model selected in the UI.
+    * **Default Value:** Defaults to AWS Textract if available, otherwise local selectable text.
 
-*   **`PAGE_BREAK_VALUE`**
-    *   **Description:** Defines a page count after which a function might restart. (Note: Currently not activated).
-    *   **Default Value:** `'99999'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`DEFAULT_PII_DETECTION_MODEL`**
+    * **Description:** Sets the default PII detection model selected in the UI.
+    * **Default Value:** Defaults to AWS Comprehend if available, otherwise the local model.
 
-*   **`MAX_TIME_VALUE`**
-    *   **Description:** Specifies a maximum time value for long-running processes.
-    *   **Default Value:** `'999999'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`LOAD_REDACTION_ANNOTATIONS_FROM_PDF`**
+    * **Description:** If set to `"True"`, the application will load existing redaction annotations from PDFs during the review step.
+    * **Default Value:** `"True"`
 
-*   **`CUSTOM_BOX_COLOUR`**
-    *   **Description:** Allows specifying a custom color for the redaction boxes drawn on documents. Only `"grey"` is currently supported as a custom value. If empty, a default color is used.
-    *   **Default Value:** `""` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+### External Tool Paths
 
-*   **`RETURN_PDF_END_OF_REDACTION`**
-    *   **Description:** If set to `'True'`, the application will return a PDF document at the end of the redaction task.
-    *   **Default Value:** `"True"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`TESSERACT_FOLDER`**
+    * **Description:** Path to the local Tesseract OCR installation folder.
+    * **Default Value:** `''`
 
-*   **`COMPRESS_REDACTED_PDF`**
-    *   **Description:** If set to `'True'`, the redacted PDF output will be compressed. This can reduce file size but may cause issues on systems with low memory.
-    *   **Default Value:** `"False"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`TESSERACT_DATA_FOLDER`**
+    * **Description:** Path to the Tesseract trained data files (`tessdata`).
+    * **Default Value:** `"/usr/share/tessdata"`
+
+* **`POPPLER_FOLDER`**
+    * **Description:** Path to the local Poppler installation's `bin` folder.
+    * **Default Value:** `''`
+
+* **`PADDLE_MODEL_PATH`** / **`SPACY_MODEL_PATH`**
+    * **Description:** Custom directory for PaddleOCR and spaCy model storage, useful for environments like AWS Lambda.
+    * **Default Value:** `''` (uses default location).
+
+### Local OCR (Tesseract & PaddleOCR)
+
+* **`CHOSEN_LOCAL_OCR_MODEL`**
+    * **Description:** Choose the engine for local OCR: `"tesseract"`, `"paddle"`, or `"hybrid"`.
+    * **Default Value:** `"tesseract"`
+
+* **`SHOW_LOCAL_OCR_MODEL_OPTIONS`**
+    * **Description:** If set to `"True"`, allows the user to select the local OCR model from the UI.
+    * **Default Value:** `"False"`
+
+* **`HYBRID_OCR_CONFIDENCE_THRESHOLD`**
+    * **Description:** In "hybrid" mode, this is the Tesseract confidence score below which PaddleOCR will be used for re-extraction.
+    * **Default Value:** `65`
+
+* **`HYBRID_OCR_PADDING`**
+    * **Description:** In "hybrid" mode, padding added to the word's bounding box before re-extraction.
+    * **Default Value:** `1`
+
+* **`PADDLE_USE_TEXTLINE_ORIENTATION`**
+    * **Description:** Toggles textline orientation detection for PaddleOCR.
+    * **Default Value:** `"False"`
+
+* **`PADDLE_DET_DB_UNCLIP_RATIO`**
+    * **Description:** Controls the expansion ratio of the detected text region in PaddleOCR.
+    * **Default Value:** `1.2`
+
+* **`SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES`**
+    * **Description:** Saves comparison images when using "hybrid" OCR mode.
+    * **Default Value:** `"False"`
+
+* **`SAVE_PADDLE_VISUALISATIONS`**
+    * **Description:** Saves images with PaddleOCR's detected bounding boxes overlaid.
+    * **Default Value:** `"False"`
+
+* **`PREPROCESS_LOCAL_OCR_IMAGES`**
+    * **Description:** If set to `"True"`, images will be preprocessed before local OCR. Can slow down processing.
+    * **Default Value:** `"False"`
+
+### Entity and Search Options
+
+* **`CHOSEN_COMPREHEND_ENTITIES`** / **`FULL_COMPREHEND_ENTITY_LIST`**
+    * **Description:** The selected and available PII entity types for AWS Comprehend.
+    * **Default Value:** Predefined lists of entities (see script).
+
+* **`CHOSEN_REDACT_ENTITIES`** / **`FULL_ENTITY_LIST`**
+    * **Description:** The selected and available PII entity types for the local model.
+    * **Default Value:** Predefined lists of entities (see script).
+
+* **`CUSTOM_ENTITIES`**
+    * **Description:** A list of entities that are considered "custom" and may have special handling.
+    * **Default Value:** `['TITLES', 'UKPOSTCODE', 'STREETNAME', 'CUSTOM']`
+
+* **`DEFAULT_SEARCH_QUERY`**
+    * **Description:** The default text for the custom search/redact input box.
+    * **Default Value:** `''`
+
+* **`DEFAULT_FUZZY_SPELLING_MISTAKES_NUM`**
+    * **Description:** Default number of allowed spelling mistakes for fuzzy searches.
+    * **Default Value:** `1`
+
+* **`DEFAULT_PAGE_MIN`** / **`DEFAULT_PAGE_MAX`**
+    * **Description:** Default start and end pages for processing. `0` for max means process all pages.
+    * **Default Value:** `0` for both.
+
+### Textract Feature Selection
+
+* **`DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX`**
+    * **Description:** The default options selected for Textract's handwriting and signature detection.
+    * **Default Value:** `['Extract handwriting']`
+
+* **`INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION`**
+* **`INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION`**
+* **`INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION`**
+    * **Description:** Booleans (`"True"`/`"False"`) to include Forms, Layout, and Tables as selectable options for Textract analysis.
+    * **Default Value:** `"False"` for all.
+
+### Tabular Data Options
+
+* **`DO_INITIAL_TABULAR_DATA_CLEAN`**
+    * **Description:** If `"True"`, performs an initial cleaning step on tabular data.
+    * **Default Value:** `"True"`
+
+* **`DEFAULT_TEXT_COLUMNS`** / **`DEFAULT_EXCEL_SHEETS`**
+    * **Description:** Default values for specifying which columns or sheets to process in tabular files.
+    * **Default Value:** `[]` (empty list)
+
+* **`DEFAULT_TABULAR_ANONYMISATION_STRATEGY`**
+    * **Description:** The default method for anonymizing tabular data (e.g., "redact completely").
+    * **Default Value:** `"redact completely"`
 
 ## Language Options
 
-Settings for multi-language support in OCR and PII detection.
+Settings for multi-language support.
 
-*   **`SHOW_LANGUAGE_SELECTION`**
-    *   **Description:** If set to `"True"`, a dropdown menu for language selection will be visible in the user interface.
-    *   **Default Value:** `"False"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`SHOW_LANGUAGE_SELECTION`**
+    * **Description:** If set to `"True"`, a language selection dropdown will be visible in the UI.
+    * **Default Value:** `"False"`
 
-*   **`DEFAULT_LANGUAGE_FULL_NAME`**
-    *   **Description:** The default language's full name (e.g., "english") to be displayed in the UI.
-    *   **Default Value:** `"english"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`DEFAULT_LANGUAGE_FULL_NAME`** / **`DEFAULT_LANGUAGE`**
+    * **Description:** The default language's full name (e.g., "english") and its short code (e.g., "en").
+    * **Default Values:** `"english"`, `"en"`
 
-*   **`DEFAULT_LANGUAGE`**
-    *   **Description:** The default language's short code (e.g., "en") used by the backend engines. Ensure the corresponding Tesseract/PaddleOCR language packs are installed.
-    *   **Default Value:** `"en"`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`textract_language_choices`** / **`aws_comprehend_language_choices`**
+    * **Description:** Lists of supported language codes for Textract and Comprehend.
+    * **Default Value:** `['en', 'es', 'fr', 'de', 'it', 'pt']` and `['en', 'es']`
 
-*   **`MAPPED_LANGUAGE_CHOICES`**
-    *   **Description:** A string list of full language names (e.g., 'english', 'french') presented to the user in the language dropdown.
-    *   **Default Value:** A predefined list. See `config.py`.
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`MAPPED_LANGUAGE_CHOICES`** / **`LANGUAGE_CHOICES`**
+    * **Description:** Paired lists of full language names and their corresponding short codes for the UI dropdown.
+    * **Default Value:** Predefined lists (see script).
 
-*   **`LANGUAGE_CHOICES`**
-    *   **Description:** A string list of short language codes (e.g., 'en', 'fr') that correspond to `MAPPED_LANGUAGE_CHOICES`. This is what the backend uses.
-    *   **Default Value:** A predefined list. See `config.py`.
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+## Duplicate Detection Settings
 
-## App Run Options
+* **`DEFAULT_DUPLICATE_DETECTION_THRESHOLD`**
+    * **Description:** The similarity score (0.0 to 1.0) above which documents/pages are considered duplicates.
+    * **Default Value:** `0.95`
 
-General runtime configurations for the application.
+* **`DEFAULT_MIN_CONSECUTIVE_PAGES`**
+    * **Description:** Minimum number of consecutive pages that must be duplicates to be flagged.
+    * **Default Value:** `1`
 
-*   **`TLDEXTRACT_CACHE`**
-    *   **Description:** Path to the cache directory used by the `tldextract` library, which helps in accurately extracting top-level domains (TLDs) from URLs.
-    *   **Default Value:** `'tmp/tld/'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`USE_GREEDY_DUPLICATE_DETECTION`**
+    * **Description:** If `"True"`, uses a greedy algorithm that may find more duplicates but can be less precise.
+    * **Default Value:** `"True"`
 
-*   **`COGNITO_AUTH`**
-    *   **Description:** Enables or disables AWS Cognito authentication for the application. Set to `'1'` to enable.
-    *   **Default Value:** `'0'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`DEFAULT_COMBINE_PAGES`**
+    * **Description:** If `"True"`, text from the same page number across different files is combined before checking for duplicates.
+    * **Default Value:** `"True"`
 
-*   **`RUN_DIRECT_MODE`**
-    *   **Description:** If set to `'1'`, runs the application in a "direct mode", which might alter certain behaviors (e.g., UI elements, processing flow).
-    *   **Default Value:** `'0'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`DEFAULT_MIN_WORD_COUNT`**
+    * **Description:** Pages with fewer words than this value will be ignored by the duplicate detector.
+    * **Default Value:** `10`
 
-*   **`MAX_QUEUE_SIZE`**
-    *   **Description:** The maximum number of requests that can be queued in the Gradio interface.
-    *   **Default Value:** `'5'` (integer)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`REMOVE_DUPLICATE_ROWS`**
+    * **Description:** If `"True"`, enables duplicate row detection in tabular data.
+    * **Default Value:** `"False"`
 
-*   **`MAX_FILE_SIZE`**
-    *   **Description:** Maximum file size allowed for uploads (e.g., "250mb", "1gb").
-    *   **Default Value:** `'250mb'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+## File Output Options
 
-*   **`GRADIO_SERVER_PORT`**
-    *   **Description:** The network port on which the Gradio server will listen.
-    *   **Default Value:** `'7860'` (integer)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`USE_GUI_BOX_COLOURS_FOR_OUTPUTS`**
+    * **Description:** If `"True"`, the final redacted PDF will use the same redaction box colors as shown in the review UI.
+    * **Default Value:** `"False"`
 
-*   **`ROOT_PATH`**
-    *   **Description:** The root path for the application, useful if running behind a reverse proxy (e.g., `/app`).
-    *   **Default Value:** `''` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`CUSTOM_BOX_COLOUR`**
+    * **Description:** Specifies the color for redaction boxes as an RGB tuple string, e.g., `"(0, 0, 0)"` for black.
+    * **Default Value:** `"(0, 0, 0)"`
 
-*   **`DEFAULT_CONCURRENCY_LIMIT`**
-    *   **Description:** The default concurrency limit for Gradio event handlers, controlling how many requests can be processed simultaneously.
-    *   **Default Value:** `'3'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`APPLY_REDACTIONS_IMAGES`**, **`APPLY_REDACTIONS_GRAPHICS`**, **`APPLY_REDACTIONS_TEXT`**
+    * **Description:** Advanced control over how redactions are applied to underlying images, vector graphics, and text in the PDF, based on PyMuPDF options. `0` is the default for a standard redaction workflow.
+    * **Default Value:** `0` for all.
 
-*   **`GET_DEFAULT_ALLOW_LIST`**
-    *   **Description:** If set, enables the use of a default allow list for user access or specific functionalities. The exact behavior depends on application logic.
-    *   **Default Value:** `''` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`RETURN_PDF_FOR_REVIEW`**
+    * **Description:** If set to `"True"`, a PDF with redaction boxes drawn on it (but text not removed) is generated for the "Review" tab.
+    * **Default Value:** `"True"`
 
-*   **`ALLOW_LIST_PATH`**
-    *   **Description:** Path to a local CSV file containing an allow list (e.g., `config/default_allow_list.csv`).
-    *   **Default Value:** `''` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`RETURN_REDACTED_PDF`**
+    * **Description:** If set to `'True'`, the application will return a fully redacted PDF at the end of the main task.
+    * **Default Value:** `"True"`
 
-*   **`S3_ALLOW_LIST_PATH`**
-    *   **Description:** Path to an allow list CSV file stored in an S3 bucket (e.g., `default_allow_list.csv`). Requires `DOCUMENT_REDACTION_BUCKET` to be set.
-    *   **Default Value:** `''` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`COMPRESS_REDACTED_PDF`**
+    * **Description:** If set to `'True'`, the redacted PDF output will be compressed.
+    * **Default Value:** `"False"`
 
-*   **`FILE_INPUT_HEIGHT`**
-    *   **Description:** Sets the height (in pixels or other CSS unit) of the file input component in the Gradio UI.
-    *   **Default Value:** `'200'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+## Direct Mode & Lambda Configuration
+
+Settings for running the application from the command line (Direct Mode) or as an AWS Lambda function.
+
+### Direct Mode
+
+* **`RUN_DIRECT_MODE`**
+    * **Description:** Set to `'True'` to enable direct command-line mode.
+    * **Default Value:** `'False'`
+
+* **`DIRECT_MODE_DEFAULT_USER`**
+    * **Description:** Default username for CLI requests.
+    * **Default Value:** `''`
+
+* **`DIRECT_MODE_TASK`**
+    * **Description:** The task to perform: `'redact'` or `'deduplicate'`.
+    * **Default Value:** `'redact'`
+
+* **`DIRECT_MODE_INPUT_FILE`** / **`DIRECT_MODE_OUTPUT_DIR`**
+    * **Description:** Path to the input file and output directory for the task.
+    * **Default Values:** `''`, `output/`
+
+* **Other `DIRECT_MODE_*` variables:**
+    * **Description:** These variables allow for setting nearly all application options (e.g., `DIRECT_MODE_PII_DETECTOR`, `DIRECT_MODE_SIMILARITY_THRESHOLD`) directly for a single CLI run, overriding other configurations.
+    * **Default Value:** Defaults are inherited from the main application settings (e.g., `LOCAL_PII_OPTION`, `DEFAULT_DUPLICATE_DETECTION_THRESHOLD`).
+
+### Lambda Configuration
+
+* **`LAMBDA_POLL_INTERVAL`**
+    * **Description:** Polling interval in seconds for checking Textract job status.
+    * **Default Value:** `30`
+
+* **`LAMBDA_MAX_POLL_ATTEMPTS`**
+    * **Description:** Maximum number of polling attempts before timeout.
+    * **Default Value:** `120`
+
+* **`LAMBDA_PREPARE_IMAGES`**
+    * **Description:** If `"True"`, prepares images for OCR processing within the Lambda environment.
+    * **Default Value:** `"True"`
+
+* **`LAMBDA_EXTRACT_SIGNATURES`**
+    * **Description:** Enables signature extraction during Textract analysis in Lambda.
+    * **Default Value:** `"False"`
+
+* **`LAMBDA_DEFAULT_USERNAME`**
+    * **Description:** Default username for operations initiated by Lambda.
+    * **Default Value:** `"lambda_user"`
+
+## Allow, Deny, & Whole Page Redaction Lists
+
+* **`GET_DEFAULT_ALLOW_LIST`**, **`GET_DEFAULT_DENY_LIST`**, **`GET_DEFAULT_WHOLE_PAGE_REDACTION_LIST`**
+    * **Description:** Booleans (`"True"`/`"False"`) to enable the use of allow, deny, or whole-page redaction lists.
+    * **Default Value:** `"False"`
+
+* **`ALLOW_LIST_PATH`**, **`DENY_LIST_PATH`**, **`WHOLE_PAGE_REDACTION_LIST_PATH`**
+    * **Description:** Local paths to the respective CSV list files.
+    * **Default Value:** `''`
+
+* **`S3_ALLOW_LIST_PATH`**, **`S3_DENY_LIST_PATH`**, **`S3_WHOLE_PAGE_REDACTION_LIST_PATH`**
+    * **Description:** Paths to the respective list files within the `DOCUMENT_REDACTION_BUCKET`.
+    * **Default Value:** `''`
 
 ## Cost Code Options
 
-Settings related to tracking and applying cost codes for application usage.
+* **`SHOW_COSTS`**
+    * **Description:** If set to `'True'`, cost-related information will be displayed in the UI.
+    * **Default Value:** `'False'`
 
-*   **`SHOW_COSTS`**
-    *   **Description:** If set to `'True'`, cost-related information will be displayed in the UI.
-    *   **Default Value:** `'False'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`GET_COST_CODES`**
+    * **Description:** Enables fetching and using cost codes. Set to `'True'` to enable.
+    * **Default Value:** `'False'`
 
-*   **`GET_COST_CODES`**
-    *   **Description:** Enables fetching and using cost codes within the application. Set to `'True'` to enable.
-    *   **Default Value:** `'False'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`DEFAULT_COST_CODE`**
+    * **Description:** Specifies a default cost code.
+    * **Default Value:** `''`
 
-*   **`DEFAULT_COST_CODE`**
-    *   **Description:** Specifies a default cost code to be used if cost codes are enabled but none is selected by the user.
-    *   **Default Value:** `''` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`COST_CODES_PATH`** / **`S3_COST_CODES_PATH`**
+    * **Description:** Local or S3 path to a CSV file containing available cost codes.
+    * **Default Value:** `''`
 
-*   **`COST_CODES_PATH`**
-    *   **Description:** Path to a local CSV file containing available cost codes (e.g., `config/COST_CENTRES.csv`).
-    *   **Default Value:** `''` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`ENFORCE_COST_CODES`**
+    * **Description:** If set to `'True'`, makes the selection of a cost code mandatory.
+    * **Default Value:** `'False'`
 
-*   **`S3_COST_CODES_PATH`**
-    *   **Description:** Path to a cost codes CSV file stored in an S3 bucket (e.g., `COST_CENTRES.csv`). Requires `DOCUMENT_REDACTION_BUCKET` to be set.
-    *   **Default Value:** `''` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+## Whole Document API Options (Textract Async)
 
-*   **`ENFORCE_COST_CODES`**
-    *   **Description:** If set to `'True'` and `GET_COST_CODES` is also enabled, makes the selection of a cost code mandatory for users.
-    *   **Default Value:** `'False'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS`**
+    * **Description:** Controls whether UI options for asynchronous whole document Textract calls are displayed.
+    * **Default Value:** `'False'`
 
-## Whole Document API Options
+* **`TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET`**
+    * **Description:** The S3 bucket used for asynchronous Textract analysis.
+    * **Default Value:** `''`
 
-Configurations for features related to processing whole documents via APIs, particularly AWS Textract for large documents.
+* **`TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER`** / **`..._OUTPUT_SUBFOLDER`**
+    * **Description:** Input and output subfolders within the analysis bucket.
+    * **Default Values:** `'input'`, `'output'`
 
-*   **`SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS`**
-    *   **Description:** Controls whether UI options for whole document Textract calls are displayed.
-    *   **Default Value:** `'False'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`LOAD_PREVIOUS_TEXTRACT_JOBS_S3`**
+    * **Description:** If set to `'True'`, the application will load data from previous Textract jobs stored in S3.
+    * **Default Value:** `'False'`
 
-*   **`TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET`**
-    *   **Description:** The S3 bucket used for input and output of whole document analysis with AWS Textract.
-    *   **Default Value:** `''` (empty string)
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`TEXTRACT_JOBS_S3_LOC`** / **`TEXTRACT_JOBS_S3_INPUT_LOC`**
+    * **Description:** S3 subfolders where Textract job output and input are stored.
+    * **Default Value:** `'output'`, `'input'`
 
-*   **`TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER`**
-    *   **Description:** The subfolder within `TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET` where input documents for Textract analysis are placed.
-    *   **Default Value:** `'input'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
+* **`TEXTRACT_JOBS_LOCAL_LOC`**
+    * **Description:** The local subfolder for storing Textract job data.
+    * **Default Value:** `'output'`
 
-*   **`TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER`**
-    *   **Description:** The subfolder within `TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET` where output results from Textract analysis are stored.
-    *   **Default Value:** `'output'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
-
-*   **`LOAD_PREVIOUS_TEXTRACT_JOBS_S3`**
-    *   **Description:** If set to `'True'`, the application will attempt to load data from previous Textract jobs stored in S3.
-    *   **Default Value:** `'False'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
-
-*   **`TEXTRACT_JOBS_S3_LOC`**
-    *   **Description:** The S3 subfolder (within the main redaction bucket) where Textract job data (output) is stored.
-    *   **Default Value:** `'output'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
-
-*   **`TEXTRACT_JOBS_S3_INPUT_LOC`**
-    *   **Description:** The S3 subfolder (within the main redaction bucket) where Textract job input is stored.
-    *   **Default Value:** `'input'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env` (or `config/aws_config.env` if `AWS_CONFIG_PATH` is configured).
-
-*   **`TEXTRACT_JOBS_LOCAL_LOC`**
-    *   **Description:** The local subfolder where Textract job data is stored if not using S3 or as a cache.
-    *   **Default Value:** `'output'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
-
-*   **`DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS`**
-    *   **Description:** Specifies the number of past days for which to display whole document Textract jobs in the UI.
-    *   **Default Value:** `'7'`
-    *   **Configuration:** Set as an environment variable directly, or include in `config/app_config.env`.
+* **`DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS`**
+    * **Description:** Specifies the number of past days for which to display whole document Textract jobs.
+    * **Default Value:** `7`

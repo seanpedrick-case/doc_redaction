@@ -1,4 +1,5 @@
 import copy
+import os
 import re
 import time
 from copy import deepcopy
@@ -17,12 +18,23 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from tools.config import (
     AWS_PII_OPTION,
     DEFAULT_LANGUAGE,
+    HYBRID_OCR_CONFIDENCE_THRESHOLD,
+    HYBRID_OCR_PADDING,
+    LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
+    OUTPUT_FOLDER,
+    PADDLE_DET_DB_UNCLIP_RATIO,
+    PADDLE_MODEL_PATH,
+    PADDLE_USE_TEXTLINE_ORIENTATION,
     PREPROCESS_LOCAL_OCR_IMAGES,
+    SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES,
+    SAVE_PADDLE_VISUALISATIONS,
 )
 from tools.helper_functions import clean_unicode_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
+from tools.secure_path_utils import validate_folder_containment
+from tools.secure_regex_utils import safe_sanitize_text
 
 if PREPROCESS_LOCAL_OCR_IMAGES == "True":
     PREPROCESS_LOCAL_OCR_IMAGES = True
@@ -464,6 +476,7 @@ class CustomImageAnalyzerEngine:
         paddle_kwargs: Optional[Dict[str, Any]] = None,
         image_preprocessor: Optional[ImagePreprocessor] = None,
         language: Optional[str] = DEFAULT_LANGUAGE,
+        output_folder: str = OUTPUT_FOLDER,
     ):
         """
         Initializes the CustomImageAnalyzerEngine.
@@ -474,10 +487,11 @@ class CustomImageAnalyzerEngine:
         :param paddle_kwargs: Dictionary of keyword arguments for PaddleOCR constructor.
         :param image_preprocessor: Optional image preprocessor.
         :param language: Preferred OCR language (e.g., "en", "fr", "de"). Defaults to DEFAULT_LANGUAGE.
+        :param output_folder: The folder to save the output images to.
         """
-        if ocr_engine not in ["tesseract", "paddle", "hybrid"]:
+        if ocr_engine not in LOCAL_OCR_MODEL_OPTIONS:
             raise ValueError(
-                "ocr_engine must be either 'tesseract', 'hybrid', or 'paddle'"
+                f"ocr_engine must be one of the following: {LOCAL_OCR_MODEL_OPTIONS}"
             )
 
         self.ocr_engine = ocr_engine
@@ -487,15 +501,36 @@ class CustomImageAnalyzerEngine:
         self.tesseract_lang = _tesseract_lang_code(self.language)
         self.paddle_lang = _paddle_lang_code(self.language)
 
+        # Security: Validate and normalize output_folder at construction time
+        # This ensures the object is always in a secure state and prevents
+        # any future code from accidentally using an untrusted directory
+        normalized_output_folder = os.path.normpath(os.path.abspath(output_folder))
+        if not validate_folder_containment(normalized_output_folder, OUTPUT_FOLDER):
+            raise ValueError(
+                f"Unsafe output folder path: {output_folder}. Must be contained within {OUTPUT_FOLDER}"
+            )
+        self.output_folder = normalized_output_folder
+
         if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid":
             if PaddleOCR is None:
                 raise ImportError(
-                    "paddleocr is not installed. Please run 'pip install paddleocr paddlepaddle'"
+                    "paddleocr is not installed. Please run 'pip install paddleocr paddlepaddle' in your python environment and retry."
                 )
+
+            # Set PaddleOCR model directory environment variable (only if specified).
+            if PADDLE_MODEL_PATH and PADDLE_MODEL_PATH.strip():
+                os.environ["PADDLEOCR_MODEL_DIR"] = PADDLE_MODEL_PATH
+                print(f"Setting PaddleOCR model path to: {PADDLE_MODEL_PATH}")
+            else:
+                print("Using default PaddleOCR model storage location")
+
             # Default paddle configuration if none provided
             if paddle_kwargs is None:
                 paddle_kwargs = {
-                    "use_textline_orientation": True,
+                    "det_db_unclip_ratio": PADDLE_DET_DB_UNCLIP_RATIO,
+                    "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
+                    "use_doc_orientation_classify": False,
+                    "use_doc_unwarping": False,
                     "lang": self.paddle_lang,
                 }
             else:
@@ -525,7 +560,6 @@ class CustomImageAnalyzerEngine:
         # Remove or replace invalid filename characters
         # Windows: < > : " | ? * \ /
         # Unix: / (forward slash)
-        from tools.secure_regex_utils import safe_sanitize_text
 
         sanitized = safe_sanitize_text(text)
 
@@ -550,12 +584,12 @@ class CustomImageAnalyzerEngine:
         """Converts PaddleOCR result format to Tesseract's dictionary format. NOTE: This attempts to create word-level bounding boxes by estimating the distance between characters in sentence-level text output. This is currently quite inaccurate, and word-level bounding boxes should not be relied upon."""
 
         output = {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
+            "text": list(),
+            "left": list(),
+            "top": list(),
+            "width": list(),
+            "height": list(),
+            "conf": list(),
         }
 
         # paddle_results is now a list of dictionaries with detailed information
@@ -564,9 +598,9 @@ class CustomImageAnalyzerEngine:
 
         for page_result in paddle_results:
             # Extract text recognition results from the new format
-            rec_texts = page_result.get("rec_texts", [])
-            rec_scores = page_result.get("rec_scores", [])
-            rec_polys = page_result.get("rec_polys", [])
+            rec_texts = page_result.get("rec_texts", list())
+            rec_scores = page_result.get("rec_scores", list())
+            rec_polys = page_result.get("rec_polys", list())
 
             for line_text, line_confidence, bounding_box in zip(
                 rec_texts, rec_scores, rec_polys
@@ -582,11 +616,10 @@ class CustomImageAnalyzerEngine:
                 x_coords = [p[0] for p in box]
                 y_coords = [p[1] for p in box]
 
-                line_left = int(min(x_coords))
-                line_top = int(min(y_coords))
-                line_width = int(max(x_coords) - line_left)
-                line_height = int(max(y_coords) - line_top)
-                # line_y_center = (max(y_coords) + min(y_coords)) / 2
+                line_left = float(min(x_coords))
+                line_top = float(min(y_coords))
+                line_width = float(max(x_coords) - line_left)
+                line_height = float(max(y_coords) - line_top)
 
                 # 2. Split the line into words
                 words = line_text.split()
@@ -601,8 +634,8 @@ class CustomImageAnalyzerEngine:
                 current_char_offset = 0
 
                 for word in words:
-                    word_width = int(len(word) * avg_char_width)
-                    word_left = line_left + int(current_char_offset * avg_char_width)
+                    word_width = float(len(word) * avg_char_width)
+                    word_left = line_left + float(current_char_offset * avg_char_width)
 
                     output["text"].append(word)
                     output["left"].append(word_left)
@@ -620,9 +653,10 @@ class CustomImageAnalyzerEngine:
     def _perform_hybrid_ocr(
         self,
         image: Image.Image,
-        confidence_threshold: int = 65,
-        padding: int = 5,
+        confidence_threshold: int = HYBRID_OCR_CONFIDENCE_THRESHOLD,
+        padding: int = HYBRID_OCR_PADDING,
         ocr: Optional[Any] = None,
+        image_name: str = "unknown_image_name",
     ) -> Dict[str, list]:
         """
         Performs OCR using Tesseract for bounding boxes and PaddleOCR for low-confidence text.
@@ -646,15 +680,13 @@ class CustomImageAnalyzerEngine:
             lang=self.tesseract_lang,
         )
 
-        # tesseract_data['abs_line_id'] = tesseract_data.groupby(['block_num', 'par_num', 'line_num']).ngroup()
-
         final_data = {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
+            "text": list(),
+            "left": list(),
+            "top": list(),
+            "width": list(),
+            "height": list(),
+            "conf": list(),
         }
 
         num_words = len(tesseract_data["text"])
@@ -714,8 +746,40 @@ class CustomImageAnalyzerEngine:
                             # For exporting example image comparisons, not used here
                             safe_text = self._sanitize_filename(text, max_length=20)
                             self._sanitize_filename(new_text, max_length=20)
-                            output_image_path = f"examples/tess_vs_paddle_examples/{conf}_conf_{safe_text}_to_{new_text}_{new_conf}.png"
-                            cropped_image.save(output_image_path)
+
+                            if SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES is True:
+                                # Normalize and validate image_name to prevent path traversal attacks
+                                normalized_image_name = os.path.normpath(image_name)
+                                # Ensure the image name doesn't contain path traversal characters
+                                if (
+                                    ".." in normalized_image_name
+                                    or "/" in normalized_image_name
+                                    or "\\" in normalized_image_name
+                                ):
+                                    normalized_image_name = (
+                                        "safe_image"  # Fallback to safe default
+                                    )
+
+                                tess_vs_paddle_examples_folder = (
+                                    self.output_folder
+                                    + f"/tess_vs_paddle_examples/{normalized_image_name}"
+                                )
+                                # Validate the constructed path is safe before creating directories
+                                if not validate_folder_containment(
+                                    tess_vs_paddle_examples_folder, OUTPUT_FOLDER
+                                ):
+                                    raise ValueError(
+                                        f"Unsafe tess_vs_paddle_examples folder path: {tess_vs_paddle_examples_folder}"
+                                    )
+
+                                if not os.path.exists(tess_vs_paddle_examples_folder):
+                                    os.makedirs(tess_vs_paddle_examples_folder)
+                                output_image_path = (
+                                    tess_vs_paddle_examples_folder
+                                    + f"/{safe_text}_conf_{conf}_to_{new_text}_conf_{new_conf}.png"
+                                )
+                                print(f"Saving example image to {output_image_path}")
+                                cropped_image.save(output_image_path)
 
                             text = new_text
                             conf = new_conf
@@ -756,9 +820,13 @@ class CustomImageAnalyzerEngine:
         Performs OCR on the given image using the configured engine.
         """
         if isinstance(image, str):
+            image_path = image
+            image_name = os.path.basename(image)
             image = Image.open(image)
         elif isinstance(image, np.ndarray):
             image = Image.fromarray(image)
+            image_path = ""
+            image_name = "unknown_image_name"
 
         # Pre-process image - currently seems to give worse results!
         if str(PREPROCESS_LOCAL_OCR_IMAGES).lower() == "true":
@@ -766,12 +834,14 @@ class CustomImageAnalyzerEngine:
                 image
             )
         else:
-            preprocessing_metadata = {}
+            preprocessing_metadata = dict()
+
+        image_width, image_height = image.size
 
         # Note: In testing I haven't seen that this necessarily improves results
         if self.ocr_engine == "hybrid":
             # Try hybrid with original image for cropping:
-            ocr_data = self._perform_hybrid_ocr(image)
+            ocr_data = self._perform_hybrid_ocr(image, image_name=image_name)
 
         elif self.ocr_engine == "tesseract":
 
@@ -782,15 +852,7 @@ class CustomImageAnalyzerEngine:
                 lang=self.tesseract_lang,  # Ensure the Tesseract language data (e.g., fra.traineddata) is installed on your system.
             )
 
-            # ocr_data['abs_line_id'] = ocr_data.groupby(['block_num', 'par_num', 'line_num']).ngroup()
-
         elif self.ocr_engine == "paddle":
-
-            image_np = np.array(image)  # image_processed
-
-            # PaddleOCR may need an RGB image. Ensure it has 3 channels.
-            if len(image_np.shape) == 2:
-                image_np = np.stack([image_np] * 3, axis=-1)
 
             if ocr is None:
                 if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
@@ -800,8 +862,45 @@ class CustomImageAnalyzerEngine:
                         "No OCR object provided and 'paddle_ocr' is not initialised."
                     )
 
-            # ocr = PaddleOCR(use_textline_orientation=True, lang='en')
-            paddle_results = ocr.predict(image_np)
+            if not image_path:
+                image_np = np.array(image)  # image_processed
+
+                # Check that sizes are the same
+                image_np_height, image_np_width = image_np.shape[:2]
+                if image_np_width != image_width or image_np_height != image_height:
+                    raise ValueError(
+                        f"Image size mismatch: {image_np_width}x{image_np_height} != {image_width}x{image_height}"
+                    )
+
+                # PaddleOCR may need an RGB image. Ensure it has 3 channels.
+                if len(image_np.shape) == 2:
+                    image_np = np.stack([image_np] * 3, axis=-1)
+                else:
+                    image_np = np.array(image)
+
+                paddle_results = ocr.predict(image_np)
+            else:
+                paddle_results = ocr.predict(image_path)
+
+            # Save PaddleOCR visualization with bounding boxes
+            if paddle_results and SAVE_PADDLE_VISUALISATIONS is True:
+
+                for res in paddle_results:
+                    # self.output_folder is already validated and normalized at construction time
+                    paddle_viz_folder = os.path.join(
+                        self.output_folder, "paddle_visualisations"
+                    )
+                    # Double-check the constructed path is safe
+                    if not validate_folder_containment(
+                        paddle_viz_folder, OUTPUT_FOLDER
+                    ):
+                        raise ValueError(
+                            f"Unsafe paddle visualisations folder path: {paddle_viz_folder}"
+                        )
+
+                    os.makedirs(paddle_viz_folder, exist_ok=True)
+                    res.save_to_img(paddle_viz_folder)
+
             ocr_data = self._convert_paddle_to_tesseract_format(paddle_results)
 
         else:
@@ -809,6 +908,9 @@ class CustomImageAnalyzerEngine:
 
         if preprocessing_metadata:
             scale_factor = preprocessing_metadata.get("scale_factor", 1.0)
+            if scale_factor != 1.0:
+                print(f"Rescaling OCR data by scale factor: {scale_factor}")
+                print(f"OCR data before rescaling: {ocr_data}")
             ocr_data = rescale_ocr_data(ocr_data, scale_factor)
 
         # The rest of your processing pipeline now works for both engines

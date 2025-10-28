@@ -25,7 +25,12 @@ import Levenshtein
 import requests
 from spacy.cli.download import download
 
-from tools.config import CUSTOM_ENTITIES, DEFAULT_LANGUAGE, TESSERACT_DATA_FOLDER
+from tools.config import (
+    CUSTOM_ENTITIES,
+    DEFAULT_LANGUAGE,
+    SPACY_MODEL_PATH,
+    TESSERACT_DATA_FOLDER,
+)
 
 score_threshold = 0.001
 custom_entities = CUSTOM_ENTITIES
@@ -57,6 +62,15 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
     Falls back through sensible candidates and will download if missing.
     """
 
+    # Set spaCy data path for custom model storage (only if specified)
+    import os
+
+    if SPACY_MODEL_PATH and SPACY_MODEL_PATH.strip():
+        os.environ["SPACY_DATA"] = SPACY_MODEL_PATH
+        print(f"Setting spaCy model path to: {SPACY_MODEL_PATH}")
+    else:
+        print("Using default spaCy model storage location")
+
     synonyms = {
         "english": "en",
         "catalan": "ca",
@@ -85,7 +99,7 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
     base_lang = _base_language_code(lang_norm)
 
     candidates_by_lang = {
-        # English
+        # English - prioritize lg, then trf, then md, then sm
         "en": [
             "en_core_web_lg",
             "en_core_web_trf",
@@ -96,7 +110,7 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
         "en_trf": ["en_core_web_trf"],
         "en_md": ["en_core_web_md"],
         "en_sm": ["en_core_web_sm"],
-        # Major languages (news pipelines)
+        # Major languages (news pipelines) - prioritize lg, then md, then sm
         "ca": ["ca_core_news_lg", "ca_core_news_md", "ca_core_news_sm"],  # Catalan
         "da": ["da_core_news_lg", "da_core_news_md", "da_core_news_sm"],  # Danish
         "de": ["de_core_news_lg", "de_core_news_md", "de_core_news_sm"],  # German
@@ -142,11 +156,22 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
         candidates = candidates_by_lang["xx"]
 
     last_error = None
-    for candidate in candidates:
+    if language != "en":
+        print(
+            f"Attempting to load spaCy model for language '{language}' with candidates: {candidates}"
+        )
+        print(
+            "Note: Models are prioritized by size (lg > md > sm) - will stop after first successful load"
+        )
+
+    for i, candidate in enumerate(candidates):
+        if language != "en":
+            print(f"Trying candidate {i+1}/{len(candidates)}: {candidate}")
+
         # Try importable package first (fast-path when installed as a package)
         try:
             module = __import__(candidate)
-            print(f"Successfully imported spaCy model: {candidate}")
+            print(f"✓ Successfully imported spaCy model: {candidate}")
             return module.load()
         except Exception as e:
             last_error = e
@@ -154,38 +179,76 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
         # Try spacy.load if package is linked/installed
         try:
             nlp = spacy.load(candidate)
-            print(f"Successfully loaded spaCy model via spacy.load: {candidate}")
-            return nlp
-        except Exception as e:
-            last_error = e
-
-        # Check if model is already downloaded before attempting to download
-        try:
-            # Try to load the model to see if it's already available
-            nlp = spacy.load(candidate)
-            print(f"Model {candidate} is already available, skipping download")
+            print(f"✓ Successfully loaded spaCy model via spacy.load: {candidate}")
             return nlp
         except OSError:
             # Model not found, proceed with download
-            pass
+            print(f"Model {candidate} not found, attempting to download...")
+            try:
+                download(candidate)
+                print(f"✓ Successfully downloaded spaCy model: {candidate}")
+
+                # Refresh spaCy's model registry after download
+                import importlib
+                import sys
+
+                importlib.reload(spacy)
+
+                # Clear any cached imports that might interfere
+                if candidate in sys.modules:
+                    del sys.modules[candidate]
+
+                # Small delay to ensure model is fully registered
+                import time
+
+                time.sleep(0.5)
+
+                # Try to load the downloaded model
+                nlp = spacy.load(candidate)
+                print(f"✓ Successfully loaded downloaded spaCy model: {candidate}")
+                return nlp
+            except Exception as download_error:
+                print(f"✗ Failed to download or load {candidate}: {download_error}")
+                # Try alternative loading methods
+                try:
+                    # Try importing the module directly after download
+                    module = __import__(candidate)
+                    print(
+                        f"✓ Successfully loaded {candidate} via direct import after download"
+                    )
+                    return module.load()
+                except Exception as import_error:
+                    print(f"✗ Direct import also failed: {import_error}")
+
+                    # Try one more approach - force spaCy to refresh its model registry
+                    try:
+                        from spacy.util import get_model_path
+
+                        model_path = get_model_path(candidate)
+                        if model_path and os.path.exists(model_path):
+                            print(f"Found model at path: {model_path}")
+                            nlp = spacy.load(model_path)
+                            print(
+                                f"✓ Successfully loaded {candidate} from path: {model_path}"
+                            )
+                            return nlp
+                    except Exception as path_error:
+                        print(f"✗ Path-based loading also failed: {path_error}")
+
+                    last_error = download_error
+                    continue
         except Exception as e:
+            print(f"✗ Failed to load {candidate}: {e}")
             last_error = e
             continue
 
-        # Attempt to download then load
-        try:
-            print(f"Downloading spaCy model: {candidate}")
-            download(candidate)
-            nlp = spacy.load(candidate)
-            print(f"Successfully downloaded and loaded spaCy model: {candidate}")
-            return nlp
-        except Exception as e:
-            last_error = e
-            continue
+    # Provide more helpful error message
+    error_msg = f"Failed to load spaCy model for language '{language}'"
+    if last_error:
+        error_msg += f". Last error: {last_error}"
+    error_msg += f". Tried candidates: {candidates}"
 
-    raise RuntimeError(
-        f"Failed to load spaCy model for language '{language}'. Last error: {last_error}"
-    )
+    raise RuntimeError(error_msg)
 
 
 # Language-aware spaCy model loader

@@ -6,6 +6,18 @@ from dotenv import load_dotenv
 # Set or retrieve configuration variables for CDK redaction deployment
 
 
+def convert_string_to_boolean(value: str) -> bool:
+    """Convert string to boolean, handling various formats."""
+    if isinstance(value, bool):
+        return value
+    elif value in ["True", "1", "true", "TRUE"]:
+        return True
+    elif value in ["False", "0", "false", "FALSE"]:
+        return False
+    else:
+        raise ValueError(f"Invalid boolean value: {value}")
+
+
 def get_or_create_env_var(var_name: str, default_value: str, print_val: bool = False):
     """
     Get an environmental variable, and set it to a default value if it doesn't exist
