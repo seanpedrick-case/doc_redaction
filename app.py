@@ -1242,16 +1242,7 @@ with blocks:
                 label=f"Change default redaction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
                 open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
             ):
-                text_extract_method_radio.render()
-
-                if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
-                    with gr.Accordion(
-                        "Enable AWS Textract signature detection (default is off)",
-                        open=False,
-                    ):
-                        handwrite_signature_checkbox.render()
-                else:
-                    handwrite_signature_checkbox.render()
+                text_extract_method_radio.render()                
 
                 if SHOW_LOCAL_OCR_MODEL_OPTIONS:
                     with gr.Accordion(
@@ -1259,7 +1250,7 @@ with blocks:
                         open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                     ):
                         local_ocr_method_radio = gr.Radio(
-                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence.""",
+                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence.""",
                             value=CHOSEN_LOCAL_OCR_MODEL,
                             choices=LOCAL_OCR_MODEL_OPTIONS,
                             interactive=True,
@@ -1273,6 +1264,15 @@ with blocks:
                         interactive=False,
                         visible=False,
                     )
+
+                if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
+                    with gr.Accordion(
+                        "Enable AWS Textract signature detection (default is off)",
+                        open=False,
+                    ):
+                        handwrite_signature_checkbox.render()
+                else:
+                    handwrite_signature_checkbox.render()
 
                 with gr.Row(equal_height=True):
                     pii_identification_method_drop.render()
@@ -1378,16 +1378,20 @@ with blocks:
                     with gr.Row(equal_height=False):
                         with gr.Column(scale=2):
                             textract_job_detail_df = gr.Dataframe(
-                                label="Previous job details",
-                                visible=True,
-                                type="pandas",
-                                wrap=True,
-                                interactive=True,
-                                row_count=(0, "fixed"),
-                                col_count=(5, "fixed"),
-                                static_columns=[0, 1, 2, 3, 4],
-                                max_height=400,
-                            )
+                            pd.DataFrame(
+                                columns=[
+                                    "job_id",
+                                    "file_name",
+                                    "job_type",
+                                    "signature_extraction",
+                                    "job_date_time",
+                                ]
+                            ),
+                            label="Previous job details",
+                            visible=True,
+                            type="pandas",
+                            wrap=True,
+                        )
                         with gr.Column(scale=1):
                             job_id_textbox = gr.Textbox(
                                 label="Job ID to check status",

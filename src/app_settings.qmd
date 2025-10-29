@@ -300,7 +300,7 @@ Configurations related to text extraction, PII detection, and the redaction proc
 ### Local OCR (Tesseract & PaddleOCR)
 
 * **`CHOSEN_LOCAL_OCR_MODEL`**
-    * **Description:** Choose the engine for local OCR: `"tesseract"`, `"paddle"`, or `"hybrid"`.
+    * **Description:** Choose the engine for local OCR: `"tesseract"`, `"paddle"`, or `"hybrid-paddle"`.
     * **Default Value:** `"tesseract"`
 
 * **`SHOW_LOCAL_OCR_MODEL_OPTIONS`**
@@ -308,11 +308,11 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Default Value:** `"False"`
 
 * **`HYBRID_OCR_CONFIDENCE_THRESHOLD`**
-    * **Description:** In "hybrid" mode, this is the Tesseract confidence score below which PaddleOCR will be used for re-extraction.
+    * **Description:** In "hybrid-paddle" mode, this is the Tesseract confidence score below which PaddleOCR will be used for re-extraction.
     * **Default Value:** `65`
 
 * **`HYBRID_OCR_PADDING`**
-    * **Description:** In "hybrid" mode, padding added to the word's bounding box before re-extraction.
+    * **Description:** In "hybrid-paddle" mode, padding added to the word's bounding box before re-extraction.
     * **Default Value:** `1`
 
 * **`PADDLE_USE_TEXTLINE_ORIENTATION`**
@@ -323,8 +323,8 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Controls the expansion ratio of the detected text region in PaddleOCR.
     * **Default Value:** `1.2`
 
-* **`SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES`**
-    * **Description:** Saves comparison images when using "hybrid" OCR mode.
+* **`SAVE_EXAMPLE_HYBRID_IMAGES`**
+    * **Description:** Saves comparison images when using "hybrid-paddle" OCR mode.
     * **Default Value:** `"False"`
 
 * **`SAVE_PADDLE_VISUALISATIONS`**

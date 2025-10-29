@@ -162,7 +162,7 @@ These settings are useful for all users, regardless of whether you are using AWS
     *   Set to `True` to display a language selection dropdown in the UI for OCR processing.
 
 *   `CHOSEN_LOCAL_OCR_MODEL=tesseract`"
-    *   Choose the backend for local OCR. Options are `tesseract`, `paddle`, or `hybrid`. "Tesseract" is the default, and is recommended. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence. "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. 
+    *   Choose the backend for local OCR. Options are `tesseract`, `paddle`, or `hybrid`. "Tesseract" is the default, and is recommended. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence. "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. 
 
 *   `SESSION_OUTPUT_FOLDER=False`
     *   If `True`, redacted files will be saved in unique subfolders within the `output/` directory for each session.
@@ -922,7 +922,7 @@ The hybrid OCR mode uses several configurable parameters:
 
 - **HYBRID_OCR_CONFIDENCE_THRESHOLD** (default: 65): Tesseract confidence score below which PaddleOCR will be used for re-extraction
 - **HYBRID_OCR_PADDING** (default: 1): Padding added to word bounding boxes before re-extraction
-- **SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES** (default: False): Save comparison images when using hybrid mode
+- **SAVE_EXAMPLE_HYBRID_IMAGES** (default: False): Save comparison images when using hybrid mode
 - **SAVE_PADDLE_VISUALISATIONS** (default: False): Save images with PaddleOCR bounding boxes overlaid
 
 ### When to use different OCR models
