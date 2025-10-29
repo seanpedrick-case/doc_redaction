@@ -1016,6 +1016,8 @@ with blocks:
     updated_nlp_analyser_state = gr.State(list())
     tesseract_lang_data_file_path = gr.Textbox("", visible=False)
 
+    flag_value_placeholder = gr.Textbox(value="", visible=False) # Placeholder for flag value
+
     ###
     # UI DESIGN
     ###
@@ -5933,7 +5935,7 @@ with blocks:
             replacement_headers=CSV_ACCESS_LOG_HEADERS,
         ),
         [session_hash_textbox, host_name_textbox],
-        None,
+        outputs=[flag_value_placeholder],
         preprocess=False,
     ).success(
         fn=upload_log_file_to_s3,
@@ -5969,7 +5971,7 @@ with blocks:
                 pdf_further_details_text,
                 doc_file_name_no_extension_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6000,7 +6002,7 @@ with blocks:
                 data_further_details_text,
                 data_file_name_with_extension_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6031,7 +6033,7 @@ with blocks:
                 pdf_further_details_text,
                 placeholder_doc_file_name_no_extension_textbox_for_logs,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6062,7 +6064,7 @@ with blocks:
                 data_further_details_text,
                 placeholder_data_file_name_no_extension_textbox_for_logs,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6120,7 +6122,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
             api_name="usage_logs",
         ).success(
@@ -6154,7 +6156,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6187,7 +6189,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6220,7 +6222,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6253,7 +6255,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6306,7 +6308,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6339,7 +6341,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6372,7 +6374,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6407,7 +6409,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6441,7 +6443,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,

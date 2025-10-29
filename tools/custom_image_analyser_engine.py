@@ -31,6 +31,7 @@ from tools.config import (
     PREPROCESS_LOCAL_OCR_IMAGES,
     SAVE_EXAMPLE_HYBRID_IMAGES,
     SAVE_PADDLE_VISUALISATIONS,
+    SAVE_PREPROCESS_IMAGES,
     SAVE_TESSERACT_VISUALISATIONS,
     SELECTED_MODEL,
     TESSERACT_SEGMENTATION_LEVEL,
@@ -583,6 +584,10 @@ def _vlm_ocr_predict(
             # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
+            # If text has more than 5 words, assume something went wrong and skip it
+            if len(words) > 5:
+                return {"rec_texts": [], "rec_scores": []}
+
             # Create PaddleOCR-compatible result
             result = {
                 "rec_texts": words,
@@ -767,27 +772,86 @@ class CustomImageAnalyzerEngine:
 
         return f"{safe_original}_conf_{conf}_to_{safe_new}_conf_{new_conf}"
 
+    # def _convert_line_to_word_level(
+    #     self, line_data: Dict[str, List], image_width: int, image_height: int
+    # ) -> Dict[str, List]:
+    #     """
+    #     Converts line-level OCR results to word-level results by splitting text and estimating word positions.
+
+    #     Args:
+    #         line_data: Dictionary with line-level OCR data (text, left, top, width, height, conf)
+    #         image_width: Width of the original image
+    #         image_height: Height of the original image
+
+    #     Returns:
+    #         Dictionary with word-level OCR data in Tesseract format
+    #     """
+    #     output = {
+    #         "text": list(),
+    #         "left": list(),
+    #         "top": list(),
+    #         "width": list(),
+    #         "height": list(),
+    #         "conf": list(),
+    #     }
+
+    #     if not line_data or not line_data.get("text"):
+    #         return output
+
+    #     for i in range(len(line_data["text"])):
+    #         line_text = line_data["text"][i]
+    #         line_left = line_data["left"][i]
+    #         line_top = line_data["top"][i]
+    #         line_width = line_data["width"][i]
+    #         line_height = line_data["height"][i]
+    #         line_conf = line_data["conf"][i]
+
+    #         # Skip empty lines
+    #         if not line_text.strip():
+    #             continue
+
+    #         # Split line into words
+    #         words = line_text.split()
+    #         if not words:
+    #             continue
+
+    #         # Calculate character width for this line
+    #         total_chars = len(line_text)
+    #         avg_char_width = line_width / total_chars if total_chars > 0 else 0
+
+    #         current_char_offset = 0
+
+    #         for word in words:
+    #             # Calculate word width based on character count
+    #             word_width = float(len(word) * avg_char_width)
+    #             word_left = line_left + float(current_char_offset * avg_char_width)
+
+    #             # Ensure word doesn't exceed image boundaries
+    #             word_left = max(0, min(word_left, image_width - word_width))
+    #             word_width = min(word_width, image_width - word_left)
+
+    #             output["text"].append(word)
+    #             output["left"].append(word_left)
+    #             output["top"].append(line_top)
+    #             output["width"].append(word_width)
+    #             output["height"].append(line_height)
+    #             output["conf"].append(line_conf)
+
+    #             # Update offset for the next word (add word length + 1 for the space)
+    #             current_char_offset += len(word) + 1
+
+    #     return output
+
     def _convert_line_to_word_level(
         self, line_data: Dict[str, List], image_width: int, image_height: int
     ) -> Dict[str, List]:
         """
-        Converts line-level OCR results to word-level results by splitting text and estimating word positions.
-
-        Args:
-            line_data: Dictionary with line-level OCR data (text, left, top, width, height, conf)
-            image_width: Width of the original image
-            image_height: Height of the original image
-
-        Returns:
-            Dictionary with word-level OCR data in Tesseract format
+        Converts line-level OCR results to word-level by using a more robust
+        proportional estimation method.
         """
         output = {
-            "text": list(),
-            "left": list(),
-            "top": list(),
-            "width": list(),
-            "height": list(),
-            "conf": list(),
+            "text": list(), "left": list(), "top": list(), "width": list(),
+            "height": list(), "conf": list(),
         }
 
         if not line_data or not line_data.get("text"):
@@ -795,45 +859,63 @@ class CustomImageAnalyzerEngine:
 
         for i in range(len(line_data["text"])):
             line_text = line_data["text"][i]
-            line_left = line_data["left"][i]
-            line_top = line_data["top"][i]
-            line_width = line_data["width"][i]
-            line_height = line_data["height"][i]
+            line_left = round(float(line_data["left"][i]), 2)
+            line_top = round(float(line_data["top"][i]), 2)
+            line_width = round(float(line_data["width"][i]), 2)
+            line_height = round(float(line_data["height"][i]), 2)
             line_conf = line_data["conf"][i]
 
-            # Skip empty lines
             if not line_text.strip():
                 continue
 
-            # Split line into words
             words = line_text.split()
             if not words:
                 continue
 
-            # Calculate character width for this line
-            total_chars = len(line_text)
-            avg_char_width = line_width / total_chars if total_chars > 0 else 0
+            # --- Improved Logic Starts Here ---
 
-            current_char_offset = 0
+            # 1. Calculate counts of characters and spaces
+            num_chars = len("".join(words))
+            num_spaces = len(words) - 1
+
+            if num_chars == 0:
+                continue
+
+            # 2. Estimate the width of a single space. A common heuristic is that
+            # the total space between words takes up a certain fraction of the line.
+            # Let's assume text characters are, on average, twice as wide as a space.
+            # So, line_width = (num_chars * 2*space_width) + (num_spaces * space_width)
+            # This allows us to solve for space_width.
+            if (num_chars * 2 + num_spaces) > 0:
+                # Heuristic ratio: average char is 2x a space width
+                char_space_ratio = 2.0
+                estimated_space_width = line_width / (num_chars * char_space_ratio + num_spaces)
+                avg_char_width = estimated_space_width * char_space_ratio
+            else:
+                # Fallback to your original method if line has no spaces
+                avg_char_width = line_width / (num_chars if num_chars > 0 else 1)
+                estimated_space_width = avg_char_width
+
+            # --- End of Improved Logic ---
+
+            current_left = line_left
 
             for word in words:
-                # Calculate word width based on character count
-                word_width = float(len(word) * avg_char_width)
-                word_left = line_left + float(current_char_offset * avg_char_width)
+                word_width = len(word) * avg_char_width
 
-                # Ensure word doesn't exceed image boundaries
-                word_left = max(0, min(word_left, image_width - word_width))
-                word_width = min(word_width, image_width - word_left)
+                # Clamp values to be within image boundaries
+                clamped_left = max(0, min(current_left, image_width))
+                clamped_width = max(0, min(word_width, image_width - clamped_left))
 
                 output["text"].append(word)
-                output["left"].append(word_left)
+                output["left"].append(clamped_left)
                 output["top"].append(line_top)
-                output["width"].append(word_width)
+                output["width"].append(clamped_width)
                 output["height"].append(line_height)
-                output["conf"].append(line_conf)
+                output["conf"].append(line_conf) # Still a simplification
 
-                # Update offset for the next word (add word length + 1 for the space)
-                current_char_offset += len(word) + 1
+                # Update the left offset for the next word
+                current_left += word_width + estimated_space_width
 
         return output
 
@@ -858,9 +940,19 @@ class CustomImageAnalyzerEngine:
         return False
 
     def _convert_paddle_to_tesseract_format(
-        self, paddle_results: List[Any]
+        self, paddle_results: List[Any], input_image_width: int = None, input_image_height: int = None
     ) -> Dict[str, List]:
-        """Converts PaddleOCR result format to Tesseract's dictionary format. NOTE: This attempts to create word-level bounding boxes by estimating the distance between characters in sentence-level text output. This is currently quite inaccurate, and word-level bounding boxes should not be relied upon."""
+        """Converts PaddleOCR result format to Tesseract's dictionary format using relative coordinates.
+        
+        This function uses a safer approach: converts PaddleOCR coordinates to relative (0-1) coordinates
+        based on whatever coordinate space PaddleOCR uses, then scales them to the input image dimensions.
+        This avoids issues with PaddleOCR's internal image resizing.
+        
+        Args:
+            paddle_results: List of PaddleOCR result dictionaries
+            input_image_width: Width of the input image passed to PaddleOCR (target dimensions for scaling)
+            input_image_height: Height of the input image passed to PaddleOCR (target dimensions for scaling)
+        """
 
         output = {
             "text": list(),
@@ -875,12 +967,60 @@ class CustomImageAnalyzerEngine:
         if not paddle_results:
             return output
 
+        # Validate that we have target dimensions
+        if input_image_width is None or input_image_height is None:
+            print("Warning: Input image dimensions not provided. PaddleOCR coordinates may be incorrectly scaled.")
+            # Fallback: we'll try to detect from coordinates, but this is less reliable
+            use_relative_coords = False
+        else:
+            use_relative_coords = False
+
         for page_result in paddle_results:
             # Extract text recognition results from the new format
             rec_texts = page_result.get("rec_texts", list())
             rec_scores = page_result.get("rec_scores", list())
             rec_polys = page_result.get("rec_polys", list())
 
+            # PaddleOCR may return image dimensions in the result - check for them
+            # Some versions of PaddleOCR include this information
+            result_image_width = page_result.get("image_width")
+            result_image_height = page_result.get("image_height")
+            
+            # First pass: determine PaddleOCR's coordinate space by finding max coordinates
+            # This tells us what coordinate space PaddleOCR is actually using
+            max_x_coord = 0
+            max_y_coord = 0
+            
+            for bounding_box in rec_polys:
+                if hasattr(bounding_box, "tolist"):
+                    box = bounding_box.tolist()
+                else:
+                    box = bounding_box
+                
+                if box and len(box) > 0:
+                    x_coords = [p[0] for p in box]
+                    y_coords = [p[1] for p in box]
+                    max_x_coord = max(max_x_coord, max(x_coords) if x_coords else 0)
+                    max_y_coord = max(max_y_coord, max(y_coords) if y_coords else 0)
+            
+            # Determine PaddleOCR's coordinate space dimensions
+            # Priority: result metadata > detected from coordinates > input dimensions
+            paddle_coord_width = result_image_width if result_image_width is not None else max_x_coord if max_x_coord > 0 else input_image_width
+            paddle_coord_height = result_image_height if result_image_height is not None else max_y_coord if max_y_coord > 0 else input_image_height
+            
+            # If we couldn't determine PaddleOCR's coordinate space, fall back to input dimensions
+            if paddle_coord_width is None or paddle_coord_height is None:
+                paddle_coord_width = input_image_width
+                paddle_coord_height = input_image_height
+                use_relative_coords = False
+            
+            if paddle_coord_width <= 0 or paddle_coord_height <= 0:
+                print(f"Warning: Invalid PaddleOCR coordinate space dimensions ({paddle_coord_width}x{paddle_coord_height}). Using input dimensions.")
+                paddle_coord_width = input_image_width or 1
+                paddle_coord_height = input_image_height or 1
+                use_relative_coords = False
+            
+            # Second pass: convert coordinates using relative coordinate approach
             for line_text, line_confidence, bounding_box in zip(
                 rec_texts, rec_scores, rec_polys
             ):
@@ -891,21 +1031,57 @@ class CustomImageAnalyzerEngine:
                 else:
                     box = bounding_box
 
+                if not box or len(box) == 0:
+                    continue
+
                 # box is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
                 x_coords = [p[0] for p in box]
                 y_coords = [p[1] for p in box]
 
-                line_left = float(min(x_coords))
-                line_top = float(min(y_coords))
-                line_width = float(max(x_coords) - line_left)
-                line_height = float(max(y_coords) - line_top)
+                # Extract bounding box coordinates in PaddleOCR's coordinate space
+                line_left_paddle = float(min(x_coords))
+                line_top_paddle = float(min(y_coords))
+                line_right_paddle = float(max(x_coords))
+                line_bottom_paddle = float(max(y_coords))
+                line_width_paddle = line_right_paddle - line_left_paddle
+                line_height_paddle = line_bottom_paddle - line_top_paddle
+                
+                # Convert to relative coordinates (0-1) based on PaddleOCR's coordinate space
+                # Then scale to input image dimensions
+                if use_relative_coords and paddle_coord_width > 0 and paddle_coord_height > 0:
+                    # Normalize to relative coordinates [0-1]
+                    rel_left = line_left_paddle / paddle_coord_width
+                    rel_top = line_top_paddle / paddle_coord_height
+                    rel_width = line_width_paddle / paddle_coord_width
+                    rel_height = line_height_paddle / paddle_coord_height
+                    
+                    # Scale to input image dimensions
+                    line_left = rel_left * input_image_width
+                    line_top = rel_top * input_image_height
+                    line_width = rel_width * input_image_width
+                    line_height = rel_height * input_image_height
+                else:
+                    # Fallback: use coordinates directly (may cause issues if coordinate spaces don't match)
+                    line_left = line_left_paddle
+                    line_top = line_top_paddle
+                    line_width = line_width_paddle
+                    line_height = line_height_paddle
+                    # if input_image_width and input_image_height:
+                    #     print(f"Warning: Using PaddleOCR coordinates directly. This may cause scaling issues.")
+                
+                # Ensure coordinates are within valid bounds
+                if input_image_width and input_image_height:
+                    line_left = max(0, min(line_left, input_image_width))
+                    line_top = max(0, min(line_top, input_image_height))
+                    line_width = max(0, min(line_width, input_image_width - line_left))
+                    line_height = max(0, min(line_height, input_image_height - line_top))
 
                 # Add line-level data
                 output["text"].append(line_text)
-                output["left"].append(line_left)
-                output["top"].append(line_top)
-                output["width"].append(line_width)
-                output["height"].append(line_height)
+                output["left"].append(round(line_left, 2))
+                output["top"].append(round(line_top, 2))
+                output["width"].append(round(line_width, 2))
+                output["height"].append(round(line_height, 2))
                 output["conf"].append(int(line_confidence * 100))
 
         return output
@@ -1297,13 +1473,32 @@ class CustomImageAnalyzerEngine:
             image_path = ""
             image_name = "unknown_image_name"
 
-        # Pre-process image - currently seems to give worse results!
-        if str(PREPROCESS_LOCAL_OCR_IMAGES).lower() == "true":
+        # Pre-process image
+        # Store original dimensions BEFORE preprocessing (needed for coordinate conversion)
+        original_image_width = None
+        original_image_height = None
+        
+        if PREPROCESS_LOCAL_OCR_IMAGES:
+            print("Pre-processing image...")
+            # Get original dimensions before preprocessing
+            original_image_width, original_image_height = image.size
             image, preprocessing_metadata = self.image_preprocessor.preprocess_image(
                 image
             )
+            if SAVE_PREPROCESS_IMAGES:
+                print("Saving pre-processed image...")
+                image_basename = os.path.basename(image_name)
+                output_path = os.path.join(
+                    self.output_folder,
+                    "preprocessed_images",
+                    image_basename + "_preprocessed_image.png"
+                )
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                image.save(output_path)
+                print(f"Pre-processed image saved to {output_path}")
         else:
             preprocessing_metadata = dict()
+            original_image_width, original_image_height = image.size
 
         image_width, image_height = image.size
 
@@ -1324,15 +1519,6 @@ class CustomImageAnalyzerEngine:
                 config=self.tesseract_config,
                 lang=self.tesseract_lang,  # Ensure the Tesseract language data (e.g., fra.traineddata) is installed on your system.
             )
-
-            # Save Tesseract visualization with bounding boxes
-            # if SAVE_TESSERACT_VISUALISATIONS is True:
-            #     self._visualize_tesseract_bounding_boxes(
-            #         image,
-            #         ocr_data,
-            #         image_name,
-            #         visualisation_folder="tesseract_visualisations",
-            #     )
 
         elif self.ocr_engine == "paddle":
 
@@ -1360,8 +1546,17 @@ class CustomImageAnalyzerEngine:
                 else:
                     image_np = np.array(image)
 
+                # Store dimensions of the image we're passing to PaddleOCR (preprocessed dimensions)
+                paddle_input_width = image_np.shape[1]
+                paddle_input_height = image_np.shape[0]
+
                 paddle_results = ocr.predict(image_np)
             else:
+                # When using image path, load image to get dimensions
+                temp_image = Image.open(image_path)
+                paddle_input_width, paddle_input_height = temp_image.size
+                # For file path, use the original dimensions (before preprocessing)
+                # original_image_width and original_image_height are already set above
                 paddle_results = ocr.predict(image_path)
 
             # Save PaddleOCR visualization with bounding boxes
@@ -1382,17 +1577,12 @@ class CustomImageAnalyzerEngine:
 
                     os.makedirs(paddle_viz_folder, exist_ok=True)
                     res.save_to_img(paddle_viz_folder)
-
-            ocr_data = self._convert_paddle_to_tesseract_format(paddle_results)
-
-            # if SAVE_PADDLE_VISUALISATIONS is True:
-            #     # Save Paddle visualization with bounding boxes
-            #     self._visualize_tesseract_bounding_boxes(
-            #         image,
-            #         ocr_data,
-            #         image_name,
-            #         visualisation_folder="paddle_visualisations",
-            #     )
+                    
+            ocr_data = self._convert_paddle_to_tesseract_format(
+                paddle_results, 
+                input_image_width=original_image_width, 
+                input_image_height=original_image_height
+            )
 
         else:
             raise RuntimeError(f"Unsupported OCR engine: {self.ocr_engine}")
@@ -1408,10 +1598,13 @@ class CustomImageAnalyzerEngine:
         # This ensures rescaling happens correctly when preprocessing was applied
         scale_factor = preprocessing_metadata.get("scale_factor", 1.0) if preprocessing_metadata else 1.0
         if scale_factor != 1.0:
-            # print(f"Rescaling OCR data by scale factor: {scale_factor} (converting from preprocessed to original image coordinates)")
-            # print(f"OCR data before rescaling (first 3 entries): {dict((k, v[:3] if isinstance(v, list) else v) for k, v in list(ocr_data.items())[:3])}")
-            ocr_data = rescale_ocr_data(ocr_data, scale_factor)
-            # print(f"OCR data after rescaling (first 3 entries): {dict((k, v[:3] if isinstance(v, list) else v) for k, v in list(ocr_data.items())[:3])}")
+            # Skip rescaling for PaddleOCR since _convert_paddle_to_tesseract_format 
+            # already scales coordinates directly to original image dimensions
+            if self.ocr_engine == "paddle":
+                pass
+                #print(f"Skipping rescale_ocr_data for PaddleOCR (already scaled to original dimensions)")
+            else:
+                ocr_data = rescale_ocr_data(ocr_data, scale_factor)
 
         # The rest of your processing pipeline now works for both engines
         ocr_result = ocr_data

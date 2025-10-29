@@ -28,15 +28,18 @@ defusedxml==0.7.1
 pytest>=7.0.0
 pytest-cov>=4.0.0
 spaces==0.42.1
-# Optional: uncomment the below to install paddleOCR if you want to use hybrid text extraction (tesseract plus paddleocr)
-# paddlepaddle==3.2.0 # Consider installing the GPU version for faster local OCR inference paddlepaddle-gpu==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/ , compatible with CUDA 12.6. See this for more details: https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/linux-pip_en.html#span-id-gpu-gpu-version-of-paddlepaddle-span
-# paddleocr==3.3.0
-For running VLMs
-torch==2.6.0 torchvision --index-url https://download.pytorch.org/whl/cu126
+# paddleOCR if you want to use better quality local text extraction
+# paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ # CPU version
+# Below compatible with CUDA 12.6. See this for more details: # https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/linux-pip_en.html#span-id-gpu-gpu-version-of-paddlepaddle-span 
+#paddlepaddle-gpu==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+#https://paddle-whl.bj.bcebos.com/stable/cu126/paddlepaddle-gpu/paddlepaddle_gpu-3.2.1-cp311-cp311-win_amd64.whl
+paddleocr==3.3.0
+# Uncomment the following to run VLMs
+torch==2.6.0 torchvision==0.21 --index-url https://download.pytorch.org/whl/cu126
 transformers==4.57.1
 accelerate==1.11.0
-bitsandbytes==0.48.1
-flash-attn==2.8.3 # Only compatible with Linux systems
+numpy==2.2.6
+#flash-attn==2.8.3 # Commented out as only compatible with Linux systems
 
 
 

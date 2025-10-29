@@ -484,7 +484,7 @@ OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-)  # Choose between "tesseract", "hybrid-paddle", and "paddle". "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence.
+)  # Choose between "tesseract", "hybrid-paddle", and "paddle". "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence.
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "False")
@@ -518,7 +518,7 @@ TESSERACT_SEGMENTATION_LEVEL = get_or_create_env_var(
 
 CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
     get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "False")
-)  # Whether to convert line-level OCR results to word-level for better precision
+)  # Whether to convert paddle line-level OCR results to word-level for better precision
 
 PADDLE_USE_TEXTLINE_ORIENTATION = convert_string_to_boolean(
     get_or_create_env_var("PADDLE_USE_TEXTLINE_ORIENTATION", "False")
@@ -556,6 +556,10 @@ SPACY_MODEL_PATH = get_or_create_env_var(
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
     "PREPROCESS_LOCAL_OCR_IMAGES", "True"
 )  # Whether to try and preprocess images before extracting text. NOTE: I have found in testing that this doesn't necessarily imporove results, and greatly slows down extraction.
+
+SAVE_PREPROCESS_IMAGES = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_PREPROCESS_IMAGES", "False")
+)  # Whether to save the pre-processed images.
 
 # Entities for redaction
 CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var(
