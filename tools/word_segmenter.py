@@ -26,6 +26,72 @@ class AdaptiveSegmenter:
     def __init__(self, output_folder: str = OUTPUT_FOLDER):
         self.output_folder = output_folder
 
+    def _correct_orientation(self, gray_image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Detects and corrects 90-degree orientation issues (e.g., vertical text).
+        This runs *before* the fine-grained _deskew_image function.
+        
+        Returns the oriented image and the transformation matrix.
+        """
+        h, w = gray_image.shape
+        center = (w // 2, h // 2)
+
+        # --- Binarization (copied from _deskew_image) ---
+        # A quick binarization is needed to find the text block angle
+        block_size = 21 
+        if h < block_size:
+            block_size = h if h % 2 != 0 else h - 1
+
+        if block_size > 3:
+            binary = cv2.adaptiveThreshold(gray_image, 255, 
+                                          cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                          cv2.THRESH_BINARY_INV, block_size, 4)
+        else:
+            _, binary = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        opening_kernel = np.ones((2, 2), np.uint8)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, opening_kernel)
+        
+        coords = np.column_stack(np.where(binary > 0))
+        if len(coords) < 50:
+            print("Warning: Not enough text pixels for orientation. Assuming horizontal.")
+            M_orient = cv2.getRotationMatrix2D(center, 0, 1.0)
+            return gray_image, M_orient
+        # --- End Binarization ---
+
+        rect = cv2.minAreaRect(coords[:, ::-1])
+        rect_width, rect_height = rect[1] # Get the (width, height) tuple
+        # angle = rect[2] # We don't need the angle for this decision
+
+        orientation_angle = 0.0
+
+        # THE FIX: Use dimensions, not angle, to check orientation.
+        # If the box is TALL (height > width), it's vertical.
+        if rect_height > rect_width:
+            print(f"Detected vertical orientation (W:{rect_width:.0f} < H:{rect_height:.0f}). Applying 90-degree correction.")
+            orientation_angle = 90.0
+        else:
+            print(f"Detected horizontal orientation (W:{rect_width:.0f} >= H:{rect_height:.0f}). No orientation correction.")
+            M_orient = cv2.getRotationMatrix2D(center, 0, 1.0)
+            return gray_image, M_orient
+        
+        # --- Apply 90-degree correction ---
+        M_orient = cv2.getRotationMatrix2D(center, orientation_angle, 1.0)
+
+        # Calculate new image bounds (they will be swapped)
+        new_w, new_h = h, w
+        
+        # Adjust translation part of M_orient to center the new image
+        M_orient[0, 2] += (new_w - w) / 2
+        M_orient[1, 2] += (new_h - h) / 2
+        
+        # Apply the rotation
+        oriented_gray = cv2.warpAffine(gray_image, M_orient, (new_w, new_h),
+                                       flags=cv2.INTER_CUBIC,
+                                       borderMode=cv2.BORDER_REPLICATE)
+        
+        return oriented_gray, M_orient
+
     def _deskew_image(self, gray_image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Detects skew using a robust method that normalizes the output of
@@ -127,7 +193,23 @@ class AdaptiveSegmenter:
         return unlabeled_boxes
 
     def segment(self, line_data: Dict[str, List], line_image: np.ndarray, min_space_factor=MIN_SPACE_FACTOR, match_tolerance=MATCH_TOLERANCE, image_name: str = None) -> Tuple[Dict[str, List], bool]:
-        if line_image is None: return ({}, False)
+        if line_image is None:
+            print(f"Error: line_image is None in segment function (image_name: {image_name})")
+            return ({}, False)
+        
+        # Validate line_image is a valid numpy array
+        if not isinstance(line_image, np.ndarray):
+            print(f"Error: line_image is not a numpy array (type: {type(line_image)}, image_name: {image_name})")
+            return ({}, False)
+        
+        # Validate line_image has valid shape and size
+        if line_image.size == 0:
+            print(f"Error: line_image is empty (shape: {line_image.shape}, image_name: {image_name})")
+            return ({}, False)
+        
+        if len(line_image.shape) < 2:
+            print(f"Error: line_image has invalid shape {line_image.shape} (image_name: {image_name})")
+            return ({}, False)
         
         # Early return if 1 or fewer words
         if line_data and line_data.get("text") and len(line_data["text"]) > 0:
@@ -146,12 +228,36 @@ class AdaptiveSegmenter:
 
 
         gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
-        # Store the transformation matrix M
-        deskewed_gray, M = self._deskew_image(gray)
+
+        # --- STEP 1: Correct major orientation (e.g., 90 degrees) ---
+        # M_orient transforms from ORIGINAL -> ORIENTED
+        oriented_gray, M_orient = self._correct_orientation(gray)
+        
+        # --- STEP 2: Correct minor skew (e.g., -2 degrees) ---
+        # M_skew transforms from ORIENTED -> DESKEWED
+        deskewed_gray, M_skew = self._deskew_image(oriented_gray)
+
+        # --- STEP 3: Combine Transformations ---
+        # We need a single matrix 'M' that transforms from ORIGINAL -> DESKEWED
+        # We do this by converting to 3x3 matrices and multiplying: M = M_skew * M_orient
+        
+        # Convert to 3x3
+        M_orient_3x3 = np.vstack([M_orient, [0, 0, 1]])
+        M_skew_3x3 = np.vstack([M_skew, [0, 0, 1]])
+        
+        # Combine transformations
+        M_total_3x3 = M_skew_3x3 @ M_orient_3x3
+        
+        # Get the final 2x3 transformation matrix
+        M = M_total_3x3[0:2, :]
+        
+        # --- Apply TOTAL transformation to the original color image ---
+        # The final dimensions are those of the *last* image in the chain: deskewed_gray
         h, w = deskewed_gray.shape
+        
         deskewed_line_image = cv2.warpAffine(line_image, M, (w, h),
-                                              flags=cv2.INTER_CUBIC,
-                                              borderMode=cv2.BORDER_REPLICATE)
+                                             flags=cv2.INTER_CUBIC,
+                                             borderMode=cv2.BORDER_REPLICATE)
 
 
         # Save deskewed image (optional, only if image_name is provided)
@@ -169,7 +275,12 @@ class AdaptiveSegmenter:
         avg_char_width_approx = img_w / approx_char_count
         block_size = int(avg_char_width_approx * BLOCK_SIZE_FACTOR)
         if block_size % 2 == 0: block_size += 1
-        binary = cv2.adaptiveThreshold(deskewed_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C_VALUE)
+        # Ensure block_size is valid for OpenCV (must be odd and > 1)
+        if block_size < 3:
+            # Fall back to Otsu thresholding for very small images
+            _, binary = cv2.threshold(deskewed_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        else:
+            binary = cv2.adaptiveThreshold(deskewed_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C_VALUE)
         
        # --- Step 2: Intelligent Noise Removal (Improved) ---
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, 8, cv2.CV_32S)

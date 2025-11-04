@@ -5028,15 +5028,23 @@ def visualise_ocr_words_bounding_boxes(
 
     if visualisation_folder is None:
         if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+            base_model_name = "Textract"
             visualisation_folder = "textract_visualisations"
         elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "tesseract":
+            base_model_name = "Tesseract"
             visualisation_folder = "tesseract_visualisations"
         elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "hybrid-paddle":
+            base_model_name = "Tesseract"
             visualisation_folder = "hybrid_paddle_visualisations"
         elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "paddle":
+            base_model_name = "Paddle"
             visualisation_folder = "paddle_visualisations"
         elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "hybrid-vlm":
+            base_model_name = "Tesseract"
             visualisation_folder = "hybrid_vlm_visualisations"
+        elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "hybrid-paddle-vlm":
+            base_model_name = "Paddle"
+            visualisation_folder = "hybrid_paddle_vlm_visualisations"
         else:
             visualisation_folder = "ocr_visualisations"
 
@@ -5104,7 +5112,7 @@ def visualise_ocr_words_bounding_boxes(
             
             # Check if word was replaced by a different model
             model = word_data.get('model', None)
-            is_replaced = model and model.lower() != chosen_local_ocr_model.lower()
+            is_replaced = model and model.lower() != base_model_name.lower()
             
             # Determine bounding box color: grey for replaced words, otherwise based on confidence
             # if is_replaced:
@@ -5165,7 +5173,7 @@ def visualise_ocr_words_bounding_boxes(
             
             # Check if word was replaced by a different model (for reference, but text color always uses confidence)
             model = word_data.get('model', None)
-            is_replaced = model and model.lower() != chosen_local_ocr_model.lower()
+            is_replaced = model and model.lower() != base_model_name.lower()
             
             # Text color always based on confidence (not affected by model replacement)
             text_color = (0, 0, 180)  # Default to dark red

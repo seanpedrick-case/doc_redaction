@@ -987,6 +987,16 @@ class CustomImageAnalyzerEngine:
             image_np = image.copy()
             if len(image_np.shape) == 2:
                 image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
+        
+        # Validate that image_np dimensions match the expected image_width and image_height
+        # PIL Image.size returns (width, height), but numpy array shape is (height, width, channels)
+        actual_height, actual_width = image_np.shape[:2]
+        if actual_width != image_width or actual_height != image_height:
+            print(f"Warning: Image dimension mismatch! Expected {image_width}x{image_height}, but got {actual_width}x{actual_height}")
+            print(f"Using actual dimensions: {actual_width}x{actual_height}")
+            # Update to use actual dimensions
+            image_width = actual_width
+            image_height = actual_height
 
         segmenter = AdaptiveSegmenter(output_folder=self.output_folder)
 
@@ -1028,12 +1038,45 @@ class CustomImageAnalyzerEngine:
             line_height = int(max(1, min(line_height, image_height - line_top)))
 
             print(f"Line left: {line_left}, Line top: {line_top}, Line width: {line_width}, Line height: {line_height}")
+            print(f"Image_np shape: {image_np.shape}, Image dimensions: {image_width}x{image_height}")
+
+            # Validate crop coordinates are within bounds
+            if line_left >= image_width or line_top >= image_height:
+                print(f"Warning: Line coordinates out of bounds. Skipping line '{line_text[:50]}...'")
+                continue
+            
+            if line_left + line_width > image_width:
+                line_width = image_width - line_left
+                print(f"Warning: Adjusted line_width to {line_width} to fit within image")
+            
+            if line_top + line_height > image_height:
+                line_height = image_height - line_top
+                print(f"Warning: Adjusted line_height to {line_height} to fit within image")
+
+            # Ensure we have valid dimensions
+            if line_width <= 0 or line_height <= 0:
+                print(f"Warning: Invalid line dimensions ({line_width}x{line_height}). Skipping line '{line_text[:50]}...'")
+                continue
 
             # Crop the line image from the full image
-            line_image = image_np[line_top:line_top + line_height, line_left:line_left + line_width]
-
-            if line_image.size == 0:
+            try:
+                line_image = image_np[line_top:line_top + line_height, line_left:line_left + line_width]
+            except IndexError as e:
+                print(f"Error cropping line image: {e}")
+                print(f"Attempted to crop: [{line_top}:{line_top + line_height}, {line_left}:{line_left + line_width}]")
+                print(f"Image_np shape: {image_np.shape}")
                 continue
+
+            if line_image is None or line_image.size == 0:
+                print(f"Warning: Cropped line_image is None or empty. Skipping line '{line_text[:50]}...'")
+                continue
+            
+            # Validate line_image has valid shape
+            if len(line_image.shape) < 2:
+                print(f"Warning: line_image has invalid shape {line_image.shape}. Skipping line '{line_text[:50]}...'")
+                continue
+            
+            print(f"Cropped line_image shape: {line_image.shape}")
 
             # Create single-line data structure for segment method
             single_line_data = {
@@ -1045,8 +1088,18 @@ class CustomImageAnalyzerEngine:
                 "conf": [line_conf],
             }
 
+            # Validate line_image before passing to segmenter
+            if line_image is None:
+                print(f"Error: line_image is None for line '{line_text[:50]}...'")
+                continue
+            
             # Use AdaptiveSegmenter.segment() to segment this line
-            word_output, _ = segmenter.segment(single_line_data, line_image, image_name=image_name)
+            try:
+                word_output, _ = segmenter.segment(single_line_data, line_image, image_name=image_name)
+            except Exception as e:
+                print(f"Error in segmenter.segment for line '{line_text[:50]}...': {e}")
+                print(f"line_image shape: {line_image.shape if line_image is not None else 'None'}")
+                raise
 
             if not word_output or not word_output.get("text"):
                 # If segmentation failed, fall back to proportional estimation
@@ -1080,8 +1133,6 @@ class CustomImageAnalyzerEngine:
                 output["width"].append(word_output["width"][j])
                 output["height"].append(word_output["height"][j])
                 output["conf"].append(word_output["conf"][j])
-        
-        print(f"Output: {output}")
 
         return output
 
