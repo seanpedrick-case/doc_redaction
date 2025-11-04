@@ -450,7 +450,7 @@ SHOW_VLM_MODEL_OPTIONS = convert_string_to_boolean(
 
 SELECTED_MODEL = get_or_create_env_var(
     "SELECTED_MODEL", "Dots.OCR"
-)  # Selected vision model. Choose from: "olmOCR-2-7B-1025", "Nanonets-OCR2-3B", "Chandra-OCR", "Dots.OCR"
+)  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "PaddleOCR-VL"
 
 if SHOW_VLM_MODEL_OPTIONS:
     VLM_MODEL_OPTIONS = [

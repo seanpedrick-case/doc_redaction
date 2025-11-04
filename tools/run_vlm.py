@@ -26,12 +26,6 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         MAX_NEW_TOKENS,
     )
 
-    # Configuration: Choose which vision model to load
-    # Options: "olmOCR-2-7B-1025", "Nanonets-OCR2-3B", "Chandra-OCR", "Dots.OCR"
-    # SELECTED_MODEL = os.getenv("VISION_MODEL", "Dots.OCR")
-
-    # This code is uses significant amounts of code from the Hugging Face space here: https://huggingface.co/spaces/prithivMLmods/Multimodal-OCR3 . Thanks!
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     print("CUDA_VISIBLE_DEVICES=", os.environ.get("CUDA_VISIBLE_DEVICES"))
