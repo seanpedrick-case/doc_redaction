@@ -23,7 +23,6 @@ from tools.config import (
     HYBRID_OCR_PADDING,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
-    MAX_NEW_TOKENS,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
     PADDLE_MODEL_PATH,
@@ -32,7 +31,6 @@ from tools.config import (
     SAVE_EXAMPLE_HYBRID_IMAGES,
     SAVE_PADDLE_VISUALISATIONS,
     SAVE_PREPROCESS_IMAGES,
-    SAVE_TESSERACT_VISUALISATIONS,
     SELECTED_MODEL,
     TESSERACT_SEGMENTATION_LEVEL,
 )
@@ -185,7 +183,9 @@ class OCRResult:
     height: int
     conf: float = None
     line: int = None
-    model: str = None  # Track which OCR model was used (e.g., "Tesseract", "Paddle", "VLM")
+    model: str = (
+        None  # Track which OCR model was used (e.g., "Tesseract", "Paddle", "VLM")
+    )
 
 
 @dataclass
@@ -383,20 +383,24 @@ class ContrastSegmentedImageEnhancer(ImagePreprocessor):
         This method works best on a grayscaled image.
         """
         # We'll work with a copy for angle detection
-        gray = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY) if len(image_np.shape) == 3 else image_np.copy()
-        
+        gray = (
+            cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
+            if len(image_np.shape) == 3
+            else image_np.copy()
+        )
+
         # Invert the image for contour finding
         thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
-        
+
         coords = np.column_stack(np.where(thresh > 0))
         angle = cv2.minAreaRect(coords)[-1]
-        
+
         # Adjust the angle for rotation
         if angle < -45:
             angle = -(90 + angle)
         else:
             angle = -angle
-            
+
         # Don't rotate if the angle is negligible
         if abs(angle) < 0.1:
             return image_np
@@ -404,14 +408,12 @@ class ContrastSegmentedImageEnhancer(ImagePreprocessor):
         (h, w) = image_np.shape[:2]
         center = (w // 2, h // 2)
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        
+
         # Use the original numpy image for the rotation to preserve quality
         rotated = cv2.warpAffine(
-            image_np, M, (w, h),
-            flags=cv2.INTER_CUBIC,
-            borderMode=cv2.BORDER_REPLICATE
+            image_np, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
         )
-        
+
         return rotated
 
     def preprocess_image(
@@ -438,7 +440,7 @@ class ContrastSegmentedImageEnhancer(ImagePreprocessor):
             deskewed_image_np = self._deskew(image_np_bgr)
         else:
             deskewed_image_np = image_np_bgr
-            
+
         # 3. Convert to greyscale
         # Your convert_image_to_array probably does this, but for clarity:
         gray_image_np = cv2.cvtColor(deskewed_image_np, cv2.COLOR_BGR2GRAY)
@@ -472,7 +474,7 @@ class ContrastSegmentedImageEnhancer(ImagePreprocessor):
 
         # Convert final numpy array back to PIL Image for return
         # The final image is greyscale, so it's safe to use 'L' mode
-        return Image.fromarray(final_image_np).convert('L'), final_metadata
+        return Image.fromarray(final_image_np).convert("L"), final_metadata
 
 
 def rescale_ocr_data(ocr_data, scale_factor: float):
@@ -650,7 +652,11 @@ class CustomImageAnalyzerEngine:
             )
         self.output_folder = normalized_output_folder
 
-        if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle" or self.ocr_engine == "hybrid-paddle-vlm":
+        if (
+            self.ocr_engine == "paddle"
+            or self.ocr_engine == "hybrid-paddle"
+            or self.ocr_engine == "hybrid-paddle-vlm"
+        ):
             if PaddleOCR is None:
                 raise ImportError(
                     "paddleocr is not installed. Please run 'pip install paddleocr paddlepaddle' in your python environment and retry."
@@ -682,11 +688,13 @@ class CustomImageAnalyzerEngine:
             # The VLM model is loaded when run_vlm.py is imported
             print(f"Initializing hybrid VLM OCR with model: {SELECTED_MODEL}")
             self.paddle_ocr = None  # Not using PaddleOCR
-        
+
         if self.ocr_engine == "hybrid-paddle-vlm":
             # Hybrid PaddleOCR + VLM - requires both PaddleOCR and VLM
             # The VLM model is loaded when run_vlm.py is imported
-            print(f"Initializing hybrid PaddleOCR + VLM OCR with model: {SELECTED_MODEL}")
+            print(
+                f"Initializing hybrid PaddleOCR + VLM OCR with model: {SELECTED_MODEL}"
+            )
 
         if not analyzer_engine:
             analyzer_engine = AnalyzerEngine()
@@ -697,7 +705,7 @@ class CustomImageAnalyzerEngine:
             self.tesseract_config = tesseract_config
         else:
             # Following function does not actually work correctly, so always use PSM 11
-            psm_value = TESSERACT_SEGMENTATION_LEVEL #_get_tesseract_psm(TESSERACT_SEGMENTATION_LEVEL)
+            psm_value = TESSERACT_SEGMENTATION_LEVEL  # _get_tesseract_psm(TESSERACT_SEGMENTATION_LEVEL)
             self.tesseract_config = f"--oem 3 --psm {psm_value}"
             # print(
             #     f"Tesseract configured for {TESSERACT_SEGMENTATION_LEVEL}-level segmentation (PSM {psm_value})"
@@ -781,7 +789,6 @@ class CustomImageAnalyzerEngine:
 
         return f"{safe_original}_conf_{conf}_to_{safe_new}_conf_{new_conf}"
 
-
     def _is_line_level_data(self, ocr_data: Dict[str, List]) -> bool:
         """
         Determines if OCR data contains line-level results (multiple words per bounding box).
@@ -803,14 +810,17 @@ class CustomImageAnalyzerEngine:
         return False
 
     def _convert_paddle_to_tesseract_format(
-        self, paddle_results: List[Any], input_image_width: int = None, input_image_height: int = None
+        self,
+        paddle_results: List[Any],
+        input_image_width: int = None,
+        input_image_height: int = None,
     ) -> Dict[str, List]:
         """Converts PaddleOCR result format to Tesseract's dictionary format using relative coordinates.
-        
+
         This function uses a safer approach: converts PaddleOCR coordinates to relative (0-1) coordinates
         based on whatever coordinate space PaddleOCR uses, then scales them to the input image dimensions.
         This avoids issues with PaddleOCR's internal image resizing.
-        
+
         Args:
             paddle_results: List of PaddleOCR result dictionaries
             input_image_width: Width of the input image passed to PaddleOCR (target dimensions for scaling)
@@ -832,7 +842,9 @@ class CustomImageAnalyzerEngine:
 
         # Validate that we have target dimensions
         if input_image_width is None or input_image_height is None:
-            print("Warning: Input image dimensions not provided. PaddleOCR coordinates may be incorrectly scaled.")
+            print(
+                "Warning: Input image dimensions not provided. PaddleOCR coordinates may be incorrectly scaled."
+            )
             # Fallback: we'll try to detect from coordinates, but this is less reliable
             use_relative_coords = False
         else:
@@ -848,41 +860,51 @@ class CustomImageAnalyzerEngine:
             # Some versions of PaddleOCR include this information
             result_image_width = page_result.get("image_width")
             result_image_height = page_result.get("image_height")
-            
+
             # First pass: determine PaddleOCR's coordinate space by finding max coordinates
             # This tells us what coordinate space PaddleOCR is actually using
             max_x_coord = 0
             max_y_coord = 0
-            
+
             for bounding_box in rec_polys:
                 if hasattr(bounding_box, "tolist"):
                     box = bounding_box.tolist()
                 else:
                     box = bounding_box
-                
+
                 if box and len(box) > 0:
                     x_coords = [p[0] for p in box]
                     y_coords = [p[1] for p in box]
                     max_x_coord = max(max_x_coord, max(x_coords) if x_coords else 0)
                     max_y_coord = max(max_y_coord, max(y_coords) if y_coords else 0)
-            
+
             # Determine PaddleOCR's coordinate space dimensions
             # Priority: result metadata > detected from coordinates > input dimensions
-            paddle_coord_width = result_image_width if result_image_width is not None else max_x_coord if max_x_coord > 0 else input_image_width
-            paddle_coord_height = result_image_height if result_image_height is not None else max_y_coord if max_y_coord > 0 else input_image_height
-            
+            paddle_coord_width = (
+                result_image_width
+                if result_image_width is not None
+                else max_x_coord if max_x_coord > 0 else input_image_width
+            )
+            paddle_coord_height = (
+                result_image_height
+                if result_image_height is not None
+                else max_y_coord if max_y_coord > 0 else input_image_height
+            )
+
             # If we couldn't determine PaddleOCR's coordinate space, fall back to input dimensions
             if paddle_coord_width is None or paddle_coord_height is None:
                 paddle_coord_width = input_image_width
                 paddle_coord_height = input_image_height
                 use_relative_coords = False
-            
+
             if paddle_coord_width <= 0 or paddle_coord_height <= 0:
-                print(f"Warning: Invalid PaddleOCR coordinate space dimensions ({paddle_coord_width}x{paddle_coord_height}). Using input dimensions.")
+                print(
+                    f"Warning: Invalid PaddleOCR coordinate space dimensions ({paddle_coord_width}x{paddle_coord_height}). Using input dimensions."
+                )
                 paddle_coord_width = input_image_width or 1
                 paddle_coord_height = input_image_height or 1
                 use_relative_coords = False
-            
+
             # Second pass: convert coordinates using relative coordinate approach
             for line_text, line_confidence, bounding_box in zip(
                 rec_texts, rec_scores, rec_polys
@@ -908,16 +930,20 @@ class CustomImageAnalyzerEngine:
                 line_bottom_paddle = float(max(y_coords))
                 line_width_paddle = line_right_paddle - line_left_paddle
                 line_height_paddle = line_bottom_paddle - line_top_paddle
-                
+
                 # Convert to relative coordinates (0-1) based on PaddleOCR's coordinate space
                 # Then scale to input image dimensions
-                if use_relative_coords and paddle_coord_width > 0 and paddle_coord_height > 0:
+                if (
+                    use_relative_coords
+                    and paddle_coord_width > 0
+                    and paddle_coord_height > 0
+                ):
                     # Normalize to relative coordinates [0-1]
                     rel_left = line_left_paddle / paddle_coord_width
                     rel_top = line_top_paddle / paddle_coord_height
                     rel_width = line_width_paddle / paddle_coord_width
                     rel_height = line_height_paddle / paddle_coord_height
-                    
+
                     # Scale to input image dimensions
                     line_left = rel_left * input_image_width
                     line_top = rel_top * input_image_height
@@ -931,13 +957,15 @@ class CustomImageAnalyzerEngine:
                     line_height = line_height_paddle
                     # if input_image_width and input_image_height:
                     #     print(f"Warning: Using PaddleOCR coordinates directly. This may cause scaling issues.")
-                
+
                 # Ensure coordinates are within valid bounds
                 if input_image_width and input_image_height:
                     line_left = max(0, min(line_left, input_image_width))
                     line_top = max(0, min(line_top, input_image_height))
                     line_width = max(0, min(line_width, input_image_width - line_left))
-                    line_height = max(0, min(line_height, input_image_height - line_top))
+                    line_height = max(
+                        0, min(line_height, input_image_height - line_top)
+                    )
 
                 # Add line-level data
                 output["text"].append(line_text)
@@ -950,12 +978,17 @@ class CustomImageAnalyzerEngine:
         return output
 
     def _convert_line_to_word_level(
-        self, line_data: Dict[str, List], image_width: int, image_height: int, image: Image.Image, image_name: str = None
+        self,
+        line_data: Dict[str, List],
+        image_width: int,
+        image_height: int,
+        image: Image.Image,
+        image_name: str = None,
     ) -> Dict[str, List]:
         """
         Converts line-level OCR results to word-level using AdaptiveSegmenter.segment().
         This method processes each line individually using the adaptive segmentation algorithm.
-        
+
         Args:
             line_data: Dictionary with keys "text", "left", "top", "width", "height", "conf" (all lists)
             image_width: Width of the full image
@@ -966,15 +999,19 @@ class CustomImageAnalyzerEngine:
             Dictionary with same keys as input, containing word-level bounding boxes
         """
         output = {
-            "text": list(), "left": list(), "top": list(), "width": list(),
-            "height": list(), "conf": list(),
+            "text": list(),
+            "left": list(),
+            "top": list(),
+            "width": list(),
+            "height": list(),
+            "conf": list(),
         }
 
         if not line_data or not line_data.get("text"):
             return output
 
         # Convert PIL Image to numpy array (BGR format for OpenCV)
-        if hasattr(image, 'size'):  # PIL Image
+        if hasattr(image, "size"):  # PIL Image
             image_np = np.array(image)
             if len(image_np.shape) == 3:
                 # Convert RGB to BGR for OpenCV
@@ -987,12 +1024,14 @@ class CustomImageAnalyzerEngine:
             image_np = image.copy()
             if len(image_np.shape) == 2:
                 image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
-        
+
         # Validate that image_np dimensions match the expected image_width and image_height
         # PIL Image.size returns (width, height), but numpy array shape is (height, width, channels)
         actual_height, actual_width = image_np.shape[:2]
         if actual_width != image_width or actual_height != image_height:
-            print(f"Warning: Image dimension mismatch! Expected {image_width}x{image_height}, but got {actual_width}x{actual_height}")
+            print(
+                f"Warning: Image dimension mismatch! Expected {image_width}x{image_height}, but got {actual_width}x{actual_height}"
+            )
             print(f"Using actual dimensions: {actual_width}x{actual_height}")
             # Update to use actual dimensions
             image_width = actual_width
@@ -1013,7 +1052,9 @@ class CustomImageAnalyzerEngine:
 
             # A simple heuristic to check if coords are normalized
             # If any value is > 1.0, assume they are already pixels
-            is_normalized = (f_left <= 1.0 and f_top <= 1.0 and f_width <= 1.0 and f_height <= 1.0)
+            is_normalized = (
+                f_left <= 1.0 and f_top <= 1.0 and f_width <= 1.0 and f_height <= 1.0
+            )
 
             if is_normalized:
                 # Convert from normalized (0.0-1.0) to absolute pixels
@@ -1039,40 +1080,43 @@ class CustomImageAnalyzerEngine:
 
             # Validate crop coordinates are within bounds
             if line_left >= image_width or line_top >= image_height:
-                #print(f"Warning: Line coordinates out of bounds. Skipping line '{line_text[:50]}...'")
+                # print(f"Warning: Line coordinates out of bounds. Skipping line '{line_text[:50]}...'")
                 continue
-            
+
             if line_left + line_width > image_width:
                 line_width = image_width - line_left
-                #print(f"Warning: Adjusted line_width to {line_width} to fit within image")
-            
+                # print(f"Warning: Adjusted line_width to {line_width} to fit within image")
+
             if line_top + line_height > image_height:
                 line_height = image_height - line_top
-                #print(f"Warning: Adjusted line_height to {line_height} to fit within image")
+                # print(f"Warning: Adjusted line_height to {line_height} to fit within image")
 
             # Ensure we have valid dimensions
             if line_width <= 0 or line_height <= 0:
-                #print(f"Warning: Invalid line dimensions ({line_width}x{line_height}). Skipping line '{line_text[:50]}...'")
+                # print(f"Warning: Invalid line dimensions ({line_width}x{line_height}). Skipping line '{line_text[:50]}...'")
                 continue
 
             # Crop the line image from the full image
             try:
-                line_image = image_np[line_top:line_top + line_height, line_left:line_left + line_width]
-            except IndexError as e:
-                #print(f"Error cropping line image: {e}")
-                #print(f"Attempted to crop: [{line_top}:{line_top + line_height}, {line_left}:{line_left + line_width}]")
-                #print(f"Image_np shape: {image_np.shape}")
+                line_image = image_np[
+                    line_top : line_top + line_height,
+                    line_left : line_left + line_width,
+                ]
+            except IndexError:
+                # print(f"Error cropping line image: {e}")
+                # print(f"Attempted to crop: [{line_top}:{line_top + line_height}, {line_left}:{line_left + line_width}]")
+                # print(f"Image_np shape: {image_np.shape}")
                 continue
 
             if line_image is None or line_image.size == 0:
-                #print(f"Warning: Cropped line_image is None or empty. Skipping line '{line_text[:50]}...'")
+                # print(f"Warning: Cropped line_image is None or empty. Skipping line '{line_text[:50]}...'")
                 continue
-            
+
             # Validate line_image has valid shape
             if len(line_image.shape) < 2:
-                #print(f"Warning: line_image has invalid shape {line_image.shape}. Skipping line '{line_text[:50]}...'")
+                # print(f"Warning: line_image has invalid shape {line_image.shape}. Skipping line '{line_text[:50]}...'")
                 continue
-            
+
             # Create single-line data structure for segment method
             single_line_data = {
                 "text": [line_text],
@@ -1085,15 +1129,17 @@ class CustomImageAnalyzerEngine:
 
             # Validate line_image before passing to segmenter
             if line_image is None:
-                #print(f"Error: line_image is None for line '{line_text[:50]}...'")
+                # print(f"Error: line_image is None for line '{line_text[:50]}...'")
                 continue
-            
+
             # Use AdaptiveSegmenter.segment() to segment this line
             try:
-                word_output, _ = segmenter.segment(single_line_data, line_image, image_name=image_name)
-            except Exception as e:
-                #print(f"Error in segmenter.segment for line '{line_text[:50]}...': {e}")
-                #print(f"line_image shape: {line_image.shape if line_image is not None else 'None'}")
+                word_output, _ = segmenter.segment(
+                    single_line_data, line_image, image_name=image_name
+                )
+            except Exception:
+                # print(f"Error in segmenter.segment for line '{line_text[:50]}...': {e}")
+                # print(f"line_image shape: {line_image.shape if line_image is not None else 'None'}")
                 raise
 
             if not word_output or not word_output.get("text"):
@@ -1104,15 +1150,23 @@ class CustomImageAnalyzerEngine:
                     num_spaces = len(words) - 1
                     if num_chars > 0:
                         char_space_ratio = 2.0
-                        estimated_space_width = line_width / (num_chars * char_space_ratio + num_spaces) if (num_chars * char_space_ratio + num_spaces) > 0 else line_width / num_chars
+                        estimated_space_width = (
+                            line_width / (num_chars * char_space_ratio + num_spaces)
+                            if (num_chars * char_space_ratio + num_spaces) > 0
+                            else line_width / num_chars
+                        )
                         avg_char_width = estimated_space_width * char_space_ratio
                         current_left = 0
                         for word in words:
                             word_width = len(word) * avg_char_width
                             clamped_left = max(0, min(current_left, line_width))
-                            clamped_width = max(0, min(word_width, line_width - clamped_left))
+                            clamped_width = max(
+                                0, min(word_width, line_width - clamped_left)
+                            )
                             output["text"].append(word)
-                            output["left"].append(line_left + clamped_left)  # Add line offset
+                            output["left"].append(
+                                line_left + clamped_left
+                            )  # Add line offset
                             output["top"].append(line_top)
                             output["width"].append(clamped_width)
                             output["height"].append(line_height)
@@ -1442,7 +1496,9 @@ class CustomImageAnalyzerEngine:
 
                         if SAVE_EXAMPLE_HYBRID_IMAGES is True:
                             # Normalize and validate image_name to prevent path traversal attacks
-                            normalized_image_name = os.path.normpath(image_name + "_" + ocr_type)
+                            normalized_image_name = os.path.normpath(
+                                image_name + "_" + ocr_type
+                            )
                             # Ensure the image name doesn't contain path traversal characters
                             if (
                                 ".." in normalized_image_name
@@ -1516,7 +1572,7 @@ class CustomImageAnalyzerEngine:
         """
         Performs OCR using PaddleOCR at line level, then VLM for low-confidence lines.
         Returns data in the same dictionary format as pytesseract.image_to_data.
-        
+
         Args:
             image: PIL Image to process
             ocr: PaddleOCR instance (optional, uses self.paddle_ocr if not provided)
@@ -1525,7 +1581,7 @@ class CustomImageAnalyzerEngine:
             image_name: Name of the image for logging/debugging
             input_image_width: Original image width (before preprocessing)
             input_image_height: Original image height (before preprocessing)
-        
+
         Returns:
             Dictionary with OCR results in Tesseract format
         """
@@ -1541,7 +1597,7 @@ class CustomImageAnalyzerEngine:
 
         # Get image dimensions
         img_width, img_height = image.size
-        
+
         # Use original dimensions if provided, otherwise use current image dimensions
         if input_image_width is None:
             input_image_width = img_width
@@ -1552,14 +1608,14 @@ class CustomImageAnalyzerEngine:
         image_np = np.array(image)
         if len(image_np.shape) == 2:
             image_np = np.stack([image_np] * 3, axis=-1)
-        
+
         paddle_results = ocr.predict(image_np)
-        
+
         # Convert PaddleOCR results to line-level format
         paddle_line_data = self._convert_paddle_to_tesseract_format(
             paddle_results,
             input_image_width=input_image_width,
-            input_image_height=input_image_height
+            input_image_height=input_image_height,
         )
 
         # Prepare final output structure
@@ -1645,7 +1701,9 @@ class CustomImageAnalyzerEngine:
 
                         if SAVE_EXAMPLE_HYBRID_IMAGES is True:
                             # Normalize and validate image_name to prevent path traversal attacks
-                            normalized_image_name = os.path.normpath(image_name + "_hybrid_paddle_vlm")
+                            normalized_image_name = os.path.normpath(
+                                image_name + "_hybrid_paddle_vlm"
+                            )
                             if (
                                 ".." in normalized_image_name
                                 or "/" in normalized_image_name
@@ -1714,7 +1772,7 @@ class CustomImageAnalyzerEngine:
         # Store original dimensions BEFORE preprocessing (needed for coordinate conversion)
         original_image_width = None
         original_image_height = None
-        
+
         if PREPROCESS_LOCAL_OCR_IMAGES:
             print("Pre-processing image...")
             # Get original dimensions before preprocessing
@@ -1728,7 +1786,7 @@ class CustomImageAnalyzerEngine:
                 output_path = os.path.join(
                     self.output_folder,
                     "preprocessed_images",
-                    image_basename + "_preprocessed_image.png"
+                    image_basename + "_preprocessed_image.png",
                 )
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 image.save(output_path)
@@ -1831,11 +1889,11 @@ class CustomImageAnalyzerEngine:
 
                     os.makedirs(paddle_viz_folder, exist_ok=True)
                     res.save_to_img(paddle_viz_folder)
-                    
+
             ocr_data = self._convert_paddle_to_tesseract_format(
-                paddle_results, 
-                input_image_width=original_image_width, 
-                input_image_height=original_image_height
+                paddle_results,
+                input_image_width=original_image_width,
+                input_image_height=original_image_height,
             )
 
         else:
@@ -1850,17 +1908,26 @@ class CustomImageAnalyzerEngine:
             # For Tesseract: OCR runs on preprocessed image, so coordinates are already in preprocessed space,
             #   matching the preprocessed image we're cropping from - no scaling needed
             needs_scaling = False
-            if PREPROCESS_LOCAL_OCR_IMAGES and original_image_width and original_image_height:
-                if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle-vlm":
+            if (
+                PREPROCESS_LOCAL_OCR_IMAGES
+                and original_image_width
+                and original_image_height
+            ):
+                if (
+                    self.ocr_engine == "paddle"
+                    or self.ocr_engine == "hybrid-paddle-vlm"
+                ):
                     # PaddleOCR coordinates are converted to original space by _convert_paddle_to_tesseract_format
                     # hybrid-paddle-vlm also uses PaddleOCR and converts to original space
                     needs_scaling = True
-            
+
             if needs_scaling:
                 # Calculate scale factors from original to preprocessed
                 scale_x = image_width / original_image_width
                 scale_y = image_height / original_image_height
-                print(f"Scaling coordinates from original ({original_image_width}x{original_image_height}) to preprocessed ({image_width}x{image_height})")
+                print(
+                    f"Scaling coordinates from original ({original_image_width}x{original_image_height}) to preprocessed ({image_width}x{image_height})"
+                )
                 print(f"Scale factors: x={scale_x:.3f}, y={scale_y:.3f}")
                 # Scale coordinates to preprocessed image space for cropping
                 scaled_ocr_data = {
@@ -1872,7 +1939,11 @@ class CustomImageAnalyzerEngine:
                     "conf": ocr_data["conf"],
                 }
                 ocr_data = self._convert_line_to_word_level(
-                    scaled_ocr_data, image_width, image_height, image, image_name=image_name
+                    scaled_ocr_data,
+                    image_width,
+                    image_height,
+                    image,
+                    image_name=image_name,
                 )
                 # Scale word-level results back to original image space
                 scale_factor_x = original_image_width / image_width
@@ -1889,14 +1960,18 @@ class CustomImageAnalyzerEngine:
 
         # Always check for scale_factor, even if preprocessing_metadata is empty
         # This ensures rescaling happens correctly when preprocessing was applied
-        scale_factor = preprocessing_metadata.get("scale_factor", 1.0) if preprocessing_metadata else 1.0
+        scale_factor = (
+            preprocessing_metadata.get("scale_factor", 1.0)
+            if preprocessing_metadata
+            else 1.0
+        )
         if scale_factor != 1.0:
-            # Skip rescaling for PaddleOCR since _convert_paddle_to_tesseract_format 
+            # Skip rescaling for PaddleOCR since _convert_paddle_to_tesseract_format
             # already scales coordinates directly to original image dimensions
             # hybrid-paddle-vlm also uses PaddleOCR and converts to original space
             if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle-vlm":
                 pass
-                #print(f"Skipping rescale_ocr_data for PaddleOCR (already scaled to original dimensions)")
+                # print(f"Skipping rescale_ocr_data for PaddleOCR (already scaled to original dimensions)")
             else:
                 ocr_data = rescale_ocr_data(ocr_data, scale_factor)
 
@@ -1911,19 +1986,39 @@ class CustomImageAnalyzerEngine:
         ]
 
         # Determine default model based on OCR engine if model field is not present
-        if "model" in ocr_result and len(ocr_result["model"]) == len(ocr_result["text"]):
+        if "model" in ocr_result and len(ocr_result["model"]) == len(
+            ocr_result["text"]
+        ):
             # Model field exists and has correct length - use it
-            get_model = lambda idx: ocr_result["model"][idx]
+            def get_model(idx):
+                return ocr_result["model"][idx]
+
         else:
             # Model field not present or incorrect length - use default based on engine
             default_model = (
-                "Tesseract" if self.ocr_engine == "tesseract" else
-                "Paddle" if self.ocr_engine == "paddle" else
-                "hybrid-paddle" if self.ocr_engine == "hybrid-paddle" else
-                "VLM" if self.ocr_engine == "hybrid-vlm" else
-                "hybrid-paddle-vlm" if self.ocr_engine == "hybrid-paddle-vlm" else None
+                "Tesseract"
+                if self.ocr_engine == "tesseract"
+                else (
+                    "Paddle"
+                    if self.ocr_engine == "paddle"
+                    else (
+                        "hybrid-paddle"
+                        if self.ocr_engine == "hybrid-paddle"
+                        else (
+                            "VLM"
+                            if self.ocr_engine == "hybrid-vlm"
+                            else (
+                                "hybrid-paddle-vlm"
+                                if self.ocr_engine == "hybrid-paddle-vlm"
+                                else None
+                            )
+                        )
+                    )
+                )
             )
-            get_model = lambda idx: default_model
+
+            def get_model(idx):
+                return default_model
 
         return [
             OCRResult(

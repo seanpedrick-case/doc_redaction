@@ -61,8 +61,8 @@ from tools.config import (
     RETURN_PDF_FOR_REVIEW,
     RETURN_REDACTED_PDF,
     RUN_AWS_FUNCTIONS,
-    SAVE_TEXTRACT_VISUALISATIONS,
     SAVE_TESSERACT_VISUALISATIONS,
+    SAVE_TEXTRACT_VISUALISATIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
@@ -987,7 +987,9 @@ def choose_and_run_redactor(
             if (
                 not OVERWRITE_EXISTING_OCR_RESULTS
                 and local_ocr_output_found_checkbox is True
-                and os.path.exists(all_page_line_level_ocr_results_with_words_json_file_path)
+                and os.path.exists(
+                    all_page_line_level_ocr_results_with_words_json_file_path
+                )
             ):
                 (
                     all_page_line_level_ocr_results_with_words,
@@ -1706,7 +1708,7 @@ def choose_and_run_redactor(
 
         textract_metadata_filename = (
             output_folder + pdf_file_name_without_ext + "_textract_metadata.txt"
-        )        
+        )
 
         # Add page range suffix if partial processing
         all_textract_request_metadata_file_path = add_page_range_suffix_to_file_path(
@@ -3311,19 +3313,29 @@ def redact_image_pdf(
                     print("Successfully opened image from path")
                 else:
                     # If validation fails and input file is an image file, try using file_path as fallback
-                    if is_pdf(file_path) is False and isinstance(file_path, str) and file_path:
-                        normalized_file_path = os.path.normpath(os.path.abspath(file_path))
+                    if (
+                        is_pdf(file_path) is False
+                        and isinstance(file_path, str)
+                        and file_path
+                    ):
+                        normalized_file_path = os.path.normpath(
+                            os.path.abspath(file_path)
+                        )
                         # Check if it's a Gradio temporary file (often in temp directories)
                         is_gradio_temp = (
                             "gradio" in normalized_file_path.lower()
                             and "temp" in normalized_file_path.lower()
                         )
-                        if is_gradio_temp or validate_path_containment(normalized_file_path, input_folder):
+                        if is_gradio_temp or validate_path_containment(
+                            normalized_file_path, input_folder
+                        ):
                             try:
                                 image = Image.open(normalized_file_path)
                                 page_width, page_height = image.size
                             except Exception as e:
-                                print(f"Could not open image from file_path {file_path}: {e}")
+                                print(
+                                    f"Could not open image from file_path {file_path}: {e}"
+                                )
                                 image = None
                                 page_width = pymupdf_page.mediabox.width
                                 page_height = pymupdf_page.mediabox.height
@@ -3339,18 +3351,26 @@ def redact_image_pdf(
                         page_height = pymupdf_page.mediabox.height
             elif not isinstance(image_path, Image.Image):
                 # If image_path is not a string or Image, and input file is an image file, try file_path
-                if is_pdf(file_path) is False and isinstance(file_path, str) and file_path:
+                if (
+                    is_pdf(file_path) is False
+                    and isinstance(file_path, str)
+                    and file_path
+                ):
                     normalized_file_path = os.path.normpath(os.path.abspath(file_path))
                     is_gradio_temp = (
                         "gradio" in normalized_file_path.lower()
                         and "temp" in normalized_file_path.lower()
                     )
-                    if is_gradio_temp or validate_path_containment(normalized_file_path, input_folder):
+                    if is_gradio_temp or validate_path_containment(
+                        normalized_file_path, input_folder
+                    ):
                         try:
                             image = Image.open(normalized_file_path)
                             page_width, page_height = image.size
                         except Exception as e:
-                            print(f"Could not open image from file_path {file_path}: {e}")
+                            print(
+                                f"Could not open image from file_path {file_path}: {e}"
+                            )
                             image = None
                             page_width = pymupdf_page.mediabox.width
                             page_height = pymupdf_page.mediabox.height
@@ -3383,21 +3403,27 @@ def redact_image_pdf(
                     print(f"Detected placeholder image path: {image_path}")
                     try:
                         # Extract page number from placeholder path
-                        page_num_from_placeholder = int(image_path.split("_")[-1].split(".")[0])
-                        
-                        # Create the actual image using process_single_page_for_image_conversion
-                        _, created_image_path, page_width, page_height = process_single_page_for_image_conversion(
-                            pdf_path=file_path,
-                            page_num=page_num_from_placeholder,
-                            image_dpi=IMAGES_DPI,
-                            create_images=True,
-                            input_folder=input_folder
+                        page_num_from_placeholder = int(
+                            image_path.split("_")[-1].split(".")[0]
                         )
-                        
+
+                        # Create the actual image using process_single_page_for_image_conversion
+                        _, created_image_path, page_width, page_height = (
+                            process_single_page_for_image_conversion(
+                                pdf_path=file_path,
+                                page_num=page_num_from_placeholder,
+                                image_dpi=IMAGES_DPI,
+                                create_images=True,
+                                input_folder=input_folder,
+                            )
+                        )
+
                         # Load the created image
                         if os.path.exists(created_image_path):
                             image = Image.open(created_image_path)
-                            print(f"Successfully created and loaded image from: {created_image_path}")
+                            print(
+                                f"Successfully created and loaded image from: {created_image_path}"
+                            )
                         else:
                             print(f"Failed to create image at: {created_image_path}")
                             page_width = pymupdf_page.mediabox.width
@@ -3407,7 +3433,9 @@ def redact_image_pdf(
                         page_width = pymupdf_page.mediabox.width
                         page_height = pymupdf_page.mediabox.height
                 else:
-                    print("Image is None and not a placeholder - using mediabox coordinates")
+                    print(
+                        "Image is None and not a placeholder - using mediabox coordinates"
+                    )
 
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
             # If using Tesseract
@@ -3635,7 +3663,10 @@ def redact_image_pdf(
                 text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
                 and SAVE_TESSERACT_VISUALISATIONS is True
             ):
-                if page_line_level_ocr_results_with_words and "results" in page_line_level_ocr_results_with_words:
+                if (
+                    page_line_level_ocr_results_with_words
+                    and "results" in page_line_level_ocr_results_with_words
+                ):
                     # Ensure image is set - if None, try to use image_path or file_path for image files
                     image_for_visualization = image
                     if image_for_visualization is None:
@@ -3651,7 +3682,7 @@ def redact_image_pdf(
                             # For PDF files, we need an image object or image path
                             if isinstance(image_path, str) and image_path:
                                 image_for_visualization = image_path
-                    
+
                     # Only proceed if we have a valid image or image path
                     if image_for_visualization is not None:
                         log_files_output_paths = visualise_ocr_words_bounding_boxes(
@@ -3664,7 +3695,9 @@ def redact_image_pdf(
                             log_files_output_paths=log_files_output_paths,
                         )
                     else:
-                        print(f"Warning: Could not determine image for visualization at page {reported_page_number}. Skipping visualization.")
+                        print(
+                            f"Warning: Could not determine image for visualization at page {reported_page_number}. Skipping visualization."
+                        )
 
             if (
                 pii_identification_method != NO_REDACTION_PII_OPTION
@@ -5030,19 +5063,34 @@ def visualise_ocr_words_bounding_boxes(
         if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
             base_model_name = "Textract"
             visualisation_folder = "textract_visualisations"
-        elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "tesseract":
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "tesseract"
+        ):
             base_model_name = "Tesseract"
             visualisation_folder = "tesseract_visualisations"
-        elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "hybrid-paddle":
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "hybrid-paddle"
+        ):
             base_model_name = "Tesseract"
             visualisation_folder = "hybrid_paddle_visualisations"
-        elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "paddle":
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "paddle"
+        ):
             base_model_name = "Paddle"
             visualisation_folder = "paddle_visualisations"
-        elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "hybrid-vlm":
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "hybrid-vlm"
+        ):
             base_model_name = "Tesseract"
             visualisation_folder = "hybrid_vlm_visualisations"
-        elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION and chosen_local_ocr_model == "hybrid-paddle-vlm":
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "hybrid-paddle-vlm"
+        ):
             base_model_name = "Paddle"
             visualisation_folder = "hybrid_paddle_vlm_visualisations"
         else:
@@ -5065,7 +5113,7 @@ def visualise_ocr_words_bounding_boxes(
         (50, 79, (0, 165, 255), "Medium (50-79%)"),  # Orange
         (0, 49, (0, 0, 255), "Low (0-49%)"),  # Red
     ]
-    
+
     # Define darker colors for text on white background
     text_confidence_ranges = [
         (80, 100, (0, 150, 0), "High (80-100%)"),  # Dark Green
@@ -5075,45 +5123,45 @@ def visualise_ocr_words_bounding_boxes(
 
     # Process each line's words
     for line_key, line_data in ocr_results.items():
-        if not isinstance(line_data, dict) or 'words' not in line_data:
+        if not isinstance(line_data, dict) or "words" not in line_data:
             continue
-            
-        words = line_data.get('words', [])
-        
+
+        words = line_data.get("words", [])
+
         # Process each word in the line
         for word_data in words:
             if not isinstance(word_data, dict):
                 continue
-                
-            text = word_data.get('text', '')
+
+            text = word_data.get("text", "")
             # Handle both 'conf' and 'confidence' field names for compatibility
-            conf = int(word_data.get('conf', word_data.get('confidence', 0)))
-            
+            conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+
             # Skip empty text or invalid confidence
             if not text.strip() or conf == -1:
                 continue
-                
+
             # Get bounding box coordinates
-            bbox = word_data.get('bounding_box', (0, 0, 0, 0))
+            bbox = word_data.get("bounding_box", (0, 0, 0, 0))
             if len(bbox) != 4:
                 continue
-                
+
             x1, y1, x2, y2 = bbox
-            
+
             # Ensure coordinates are within image bounds
             x1 = max(0, min(int(x1), width))
             y1 = max(0, min(int(y1), height))
             x2 = max(0, min(int(x2), width))
             y2 = max(0, min(int(y2), height))
-            
+
             # Skip if bounding box is invalid
             if x2 <= x1 or y2 <= y1:
                 continue
-            
+
             # Check if word was replaced by a different model
-            model = word_data.get('model', None)
+            model = word_data.get("model", None)
             is_replaced = model and model.lower() != base_model_name.lower()
-            
+
             # Determine bounding box color: grey for replaced words, otherwise based on confidence
             # if is_replaced:
             #     box_color = (128, 128, 128)  # Grey for model replacements (bounding box only)
@@ -5123,7 +5171,7 @@ def visualise_ocr_words_bounding_boxes(
                 if min_conf <= conf <= max_conf:
                     box_color = conf_color
                     break
-            
+
             # Draw bounding box
             cv2.rectangle(image_cv, (x1, y1), (x2, y2), box_color, 1)
 
@@ -5136,90 +5184,92 @@ def visualise_ocr_words_bounding_boxes(
 
     # Process each line's words for text overlay
     for line_key, line_data in ocr_results.items():
-        if not isinstance(line_data, dict) or 'words' not in line_data:
+        if not isinstance(line_data, dict) or "words" not in line_data:
             continue
-            
-        words = line_data.get('words', [])
-        
+
+        words = line_data.get("words", [])
+
         # Process each word in the line
         for word_data in words:
             if not isinstance(word_data, dict):
                 continue
-                
-            text = word_data.get('text', '')
+
+            text = word_data.get("text", "")
             # Handle both 'conf' and 'confidence' field names for compatibility
-            conf = int(word_data.get('conf', word_data.get('confidence', 0)))
-            
+            conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+
             # Skip empty text or invalid confidence
             if not text.strip() or conf == -1:
                 continue
-                
+
             # Get bounding box coordinates
-            bbox = word_data.get('bounding_box', (0, 0, 0, 0))
+            bbox = word_data.get("bounding_box", (0, 0, 0, 0))
             if len(bbox) != 4:
                 continue
-                
+
             x1, y1, x2, y2 = bbox
-            
+
             # Ensure coordinates are within image bounds
             x1 = max(0, min(int(x1), width))
             y1 = max(0, min(int(y1), height))
             x2 = max(0, min(int(x2), width))
             y2 = max(0, min(int(y2), height))
-            
+
             # Skip if bounding box is invalid
             if x2 <= x1 or y2 <= y1:
                 continue
-            
+
             # Check if word was replaced by a different model (for reference, but text color always uses confidence)
-            model = word_data.get('model', None)
+            model = word_data.get("model", None)
             is_replaced = model and model.lower() != base_model_name.lower()
-            
+
             # Text color always based on confidence (not affected by model replacement)
             text_color = (0, 0, 180)  # Default to dark red
             for min_conf, max_conf, conf_color, _ in text_confidence_ranges:
                 if min_conf <= conf <= max_conf:
                     text_color = conf_color
                     break
-            
+
             # Calculate font size to fit text within bounding box
             box_width = x2 - x1
             box_height = y2 - y1
-            
+
             # Start with a reasonable font scale
             font_scale = 0.5
             font_thickness = 1
             font = cv2.FONT_HERSHEY_SIMPLEX
-            
+
             # Get text size and adjust to fit
             (text_width, text_height), baseline = cv2.getTextSize(
                 text, font, font_scale, font_thickness
             )
-            
+
             # Scale font to fit width (with some padding)
             if text_width > 0:
                 width_scale = (box_width * 0.9) / text_width
             else:
                 width_scale = 1.0
-            
+
             # Scale font to fit height (with some padding)
             if text_height > 0:
                 height_scale = (box_height * 0.8) / text_height
             else:
                 height_scale = 1.0
-            
+
             # Use the smaller scale to ensure text fits both dimensions
-            font_scale = min(font_scale * min(width_scale, height_scale), 2.0)  # Cap at 2.0
-            
+            font_scale = min(
+                font_scale * min(width_scale, height_scale), 2.0
+            )  # Cap at 2.0
+
             # Recalculate text size with adjusted font scale
             (text_width, text_height), baseline = cv2.getTextSize(
                 text, font, font_scale, font_thickness
             )
-            
+
             # Center text within bounding box
             text_x = x1 + (box_width - text_width) // 2
             text_y = y1 + (box_height + text_height) // 2  # Baseline adjustment
-            
+
             # Draw text
             cv2.putText(
                 text_page,
@@ -5229,17 +5279,19 @@ def visualise_ocr_words_bounding_boxes(
                 font_scale,
                 text_color,
                 font_thickness,
-                cv2.LINE_AA
+                cv2.LINE_AA,
             )
 
             # Draw grey bounding box for replaced words on text page
             if is_replaced:
                 box_color = (128, 128, 128)  # Grey for model replacements
-                cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)    
+                cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)
 
     # Add legend to second page
     if add_legend:
-        add_confidence_legend(text_page, text_confidence_ranges, show_model_replacement=True)
+        add_confidence_legend(
+            text_page, text_confidence_ranges, show_model_replacement=True
+        )
 
     # Concatenate images horizontally
     combined_image = np.hstack([image_cv, text_page])
@@ -5277,9 +5329,9 @@ def visualise_ocr_words_bounding_boxes(
 
 
 def add_confidence_legend(
-    image_cv: np.ndarray, 
-    confidence_ranges: List[Tuple], 
-    show_model_replacement: bool = False
+    image_cv: np.ndarray,
+    confidence_ranges: List[Tuple],
+    show_model_replacement: bool = False,
 ) -> None:
     """
     Adds a confidence legend to the visualization image.
@@ -5295,7 +5347,7 @@ def add_confidence_legend(
     num_items = len(confidence_ranges)
     if show_model_replacement:
         num_items += 1  # Add one more for model replacement entry
-    
+
     # Legend parameters
     legend_width = 200
     legend_height = 70 + (num_items * 25)  # Dynamic height based on number of items
@@ -5357,7 +5409,11 @@ def add_confidence_legend(
         box_y = item_y - box_size
         replacement_color = (128, 128, 128)  # Grey in BGR
         cv2.rectangle(
-            image_cv, (box_x, box_y), (box_x + box_size, box_y + box_size), replacement_color, -1
+            image_cv,
+            (box_x, box_y),
+            (box_x + box_size, box_y + box_size),
+            replacement_color,
+            -1,
         )
         cv2.rectangle(
             image_cv,
@@ -5411,4 +5467,3 @@ def add_confidence_legend(
             (0, 0, 0),  # Black text
             1,
         )
-

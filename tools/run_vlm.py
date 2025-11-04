@@ -6,11 +6,11 @@ from threading import Thread
 import spaces
 from PIL import Image
 
-from tools.config import SHOW_VLM_MODEL_OPTIONS, MAX_SPACES_GPU_RUN_TIME
+from tools.config import MAX_SPACES_GPU_RUN_TIME, SHOW_VLM_MODEL_OPTIONS
 
 if SHOW_VLM_MODEL_OPTIONS is True:
     import torch
-    from huggingface_hub import snapshot_download    
+    from huggingface_hub import snapshot_download
     from transformers import (
         AutoModelForCausalLM,
         AutoProcessor,
@@ -20,10 +20,10 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     )
 
     from tools.config import (
+        MAX_NEW_TOKENS,
+        MODEL_CACHE_PATH,
         SELECTED_MODEL,
         USE_FLASH_ATTENTION,
-        MODEL_CACHE_PATH,
-        MAX_NEW_TOKENS,
     )
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -46,7 +46,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     # Initialize model and processor variables
     processor = None
     model = None
-    
+
     # Initialize model-specific generation parameters (will be set by specific models if needed)
     model_default_prompt = None
     model_default_greedy = None
@@ -109,7 +109,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
                     f.write("\n".join(output_lines))
                 print("Patched configuration_dots.py successfully.")
 
-        sys.path.append(model_path_d_local)        
+        sys.path.append(model_path_d_local)
 
         MODEL_ID = model_path_d_local
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -139,7 +139,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
         model_default_max_new_tokens = MAX_NEW_TOKENS
-    
+
     elif SELECTED_MODEL == "Qwen3-VL-4B-Instruct":
         MODEL_ID = "Qwen/3-VL-4B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -158,14 +158,17 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_MODEL == "PaddleOCR-VL":
         MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID, trust_remote_code=True, torch_dtype=torch.bfloat16
-        ).to(device).eval()
+        model = (
+            AutoModelForCausalLM.from_pretrained(
+                MODEL_ID, trust_remote_code=True, torch_dtype=torch.bfloat16
+            )
+            .to(device)
+            .eval()
+        )
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
 
         model_default_prompt = """OCR:"""
-        model_default_max_new_tokens = MAX_NEW_TOKENS 
-    
+        model_default_max_new_tokens = MAX_NEW_TOKENS
 
     else:
         raise ValueError(
@@ -190,11 +193,11 @@ def generate_image(
     """
     Generates responses using the configured vision model for image input.
     Streams text to console and returns complete text only at the end.
-    
+
     Uses model-specific defaults if they were set during model initialization,
     falling back to function argument defaults if provided, and finally to sensible
     general defaults if neither are available.
-    
+
     Args:
         text (str): The text prompt to send to the vision model. If empty and model
             has a default prompt, the model default will be used.
@@ -215,7 +218,7 @@ def generate_image(
         presence_penalty (float, optional): Penalty for token presence.
             Defaults to model-specific value (1.5 for Qwen3-VL models) or None.
             Note: Not all models support this parameter.
-    
+
     Returns:
         str: The complete generated text response from the model.
     """
@@ -224,7 +227,7 @@ def generate_image(
 
     # Determine parameter values with priority: function args > model defaults > general defaults
     # Priority order: function argument (if not None) > model default > general default
-    
+
     # Text/prompt handling
     if text and text.strip():
         actual_text = text
@@ -232,7 +235,7 @@ def generate_image(
         actual_text = model_default_prompt
     else:
         actual_text = "Read all the text in the image."  # General default
-    
+
     # max_new_tokens: function arg > model default > general default
     if max_new_tokens is not None:
         actual_max_new_tokens = max_new_tokens
@@ -240,7 +243,7 @@ def generate_image(
         actual_max_new_tokens = model_default_max_new_tokens
     else:
         actual_max_new_tokens = MAX_NEW_TOKENS  # General default (from config)
-    
+
     # temperature: function arg > model default > general default
     if temperature is not None:
         actual_temperature = temperature
@@ -248,7 +251,7 @@ def generate_image(
         actual_temperature = model_default_temperature
     else:
         actual_temperature = 0.7  # General default
-    
+
     # top_p: function arg > model default > general default
     if top_p is not None:
         actual_top_p = top_p
@@ -256,7 +259,7 @@ def generate_image(
         actual_top_p = model_default_top_p
     else:
         actual_top_p = 0.9  # General default
-    
+
     # top_k: function arg > model default > general default
     if top_k is not None:
         actual_top_k = top_k
@@ -264,7 +267,7 @@ def generate_image(
         actual_top_k = model_default_top_k
     else:
         actual_top_k = 50  # General default
-    
+
     # repetition_penalty: function arg > model default > general default
     if repetition_penalty is not None:
         actual_repetition_penalty = repetition_penalty
@@ -272,7 +275,7 @@ def generate_image(
         actual_repetition_penalty = model_default_repetition_penalty
     else:
         actual_repetition_penalty = 1.3  # General default
-    
+
     # greedy/do_sample: function arg > model default > general default
     # greedy=False means do_sample=True (sampling), greedy=True means do_sample=False (greedy)
     if greedy is not None:
@@ -281,7 +284,7 @@ def generate_image(
         actual_do_sample = not model_default_greedy
     else:
         actual_do_sample = True  # General default: use sampling
-    
+
     # presence_penalty: function arg > model default > None (not used if not available)
     actual_presence_penalty = None
     if presence_penalty is not None:
@@ -309,7 +312,7 @@ def generate_image(
     streamer = TextIteratorStreamer(
         processor, skip_prompt=True, skip_special_tokens=True
     )
-    
+
     # Build generation kwargs with resolved parameters
     generation_kwargs = {
         **inputs,
@@ -321,7 +324,7 @@ def generate_image(
         "top_k": actual_top_k,
         "repetition_penalty": actual_repetition_penalty,
     }
-    
+
     # Add presence_penalty if it's set (some models may support it)
     if actual_presence_penalty is not None:
         generation_kwargs["presence_penalty"] = actual_presence_penalty

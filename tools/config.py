@@ -492,7 +492,7 @@ SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
 if SHOW_LOCAL_OCR_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS = [
         "tesseract",
-        "hybrid-paddle",        
+        "hybrid-paddle",
         "paddle",
     ]
 else:
@@ -512,9 +512,9 @@ HYBRID_OCR_PADDING = int(
     get_or_create_env_var("HYBRID_OCR_PADDING", "1")
 )  # The padding to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
 
-TESSERACT_SEGMENTATION_LEVEL = int(get_or_create_env_var(
-    "TESSERACT_SEGMENTATION_LEVEL", "11"
-))  # Tesseract segmentation level: PSM level to use for Tesseract OCR
+TESSERACT_SEGMENTATION_LEVEL = int(
+    get_or_create_env_var("TESSERACT_SEGMENTATION_LEVEL", "11")
+)  # Tesseract segmentation level: PSM level to use for Tesseract OCR
 
 CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
     get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "False")
@@ -1081,7 +1081,6 @@ TEXTRACT_JOBS_LOCAL_LOC = get_or_create_env_var(
 DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(
     get_or_create_env_var("DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS", "7")
 )  # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.
-
 
 
 ###

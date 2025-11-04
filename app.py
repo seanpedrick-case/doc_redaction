@@ -1016,7 +1016,9 @@ with blocks:
     updated_nlp_analyser_state = gr.State(list())
     tesseract_lang_data_file_path = gr.Textbox("", visible=False)
 
-    flag_value_placeholder = gr.Textbox(value="", visible=False) # Placeholder for flag value
+    flag_value_placeholder = gr.Textbox(
+        value="", visible=False
+    )  # Placeholder for flag value
 
     ###
     # UI DESIGN
@@ -1244,7 +1246,7 @@ with blocks:
                 label=f"Change default redaction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
                 open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
             ):
-                text_extract_method_radio.render()                
+                text_extract_method_radio.render()
 
                 if SHOW_LOCAL_OCR_MODEL_OPTIONS:
                     with gr.Accordion(
@@ -1380,20 +1382,20 @@ with blocks:
                     with gr.Row(equal_height=False):
                         with gr.Column(scale=2):
                             textract_job_detail_df = gr.Dataframe(
-                            pd.DataFrame(
-                                columns=[
-                                    "job_id",
-                                    "file_name",
-                                    "job_type",
-                                    "signature_extraction",
-                                    "job_date_time",
-                                ]
-                            ),
-                            label="Previous job details",
-                            visible=True,
-                            type="pandas",
-                            wrap=True,
-                        )
+                                pd.DataFrame(
+                                    columns=[
+                                        "job_id",
+                                        "file_name",
+                                        "job_type",
+                                        "signature_extraction",
+                                        "job_date_time",
+                                    ]
+                                ),
+                                label="Previous job details",
+                                visible=True,
+                                type="pandas",
+                                wrap=True,
+                            )
                         with gr.Column(scale=1):
                             job_id_textbox = gr.Textbox(
                                 label="Job ID to check status",
