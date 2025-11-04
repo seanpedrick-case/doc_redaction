@@ -721,7 +721,7 @@ The hybrid OCR mode uses several configurable parameters:
 
 - **HYBRID_OCR_CONFIDENCE_THRESHOLD** (default: 65): Tesseract confidence score below which PaddleOCR will be used for re-extraction
 - **HYBRID_OCR_PADDING** (default: 1): Padding added to word bounding boxes before re-extraction
-- **SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES** (default: False): Save comparison images when using hybrid mode
+- **SAVE_EXAMPLE_HYBRID_IMAGES** (default: False): Save comparison images when using hybrid mode
 - **SAVE_PADDLE_VISUALISATIONS** (default: False): Save images with PaddleOCR bounding boxes overlaid
 
 ### When to use different OCR models

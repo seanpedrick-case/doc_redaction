@@ -1016,6 +1016,10 @@ with blocks:
     updated_nlp_analyser_state = gr.State(list())
     tesseract_lang_data_file_path = gr.Textbox("", visible=False)
 
+    flag_value_placeholder = gr.Textbox(
+        value="", visible=False
+    )  # Placeholder for flag value
+
     ###
     # UI DESIGN
     ###
@@ -1244,22 +1248,13 @@ with blocks:
             ):
                 text_extract_method_radio.render()
 
-                if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
-                    with gr.Accordion(
-                        "Enable AWS Textract signature detection (default is off)",
-                        open=False,
-                    ):
-                        handwrite_signature_checkbox.render()
-                else:
-                    handwrite_signature_checkbox.render()
-
                 if SHOW_LOCAL_OCR_MODEL_OPTIONS:
                     with gr.Accordion(
                         label="Change default local OCR model",
                         open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                     ):
                         local_ocr_method_radio = gr.Radio(
-                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence.""",
+                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence.""",
                             value=CHOSEN_LOCAL_OCR_MODEL,
                             choices=LOCAL_OCR_MODEL_OPTIONS,
                             interactive=True,
@@ -1273,6 +1268,15 @@ with blocks:
                         interactive=False,
                         visible=False,
                     )
+
+                if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
+                    with gr.Accordion(
+                        "Enable AWS Textract signature detection (default is off)",
+                        open=False,
+                    ):
+                        handwrite_signature_checkbox.render()
+                else:
+                    handwrite_signature_checkbox.render()
 
                 with gr.Row(equal_height=True):
                     pii_identification_method_drop.render()
@@ -1378,15 +1382,19 @@ with blocks:
                     with gr.Row(equal_height=False):
                         with gr.Column(scale=2):
                             textract_job_detail_df = gr.Dataframe(
+                                pd.DataFrame(
+                                    columns=[
+                                        "job_id",
+                                        "file_name",
+                                        "job_type",
+                                        "signature_extraction",
+                                        "job_date_time",
+                                    ]
+                                ),
                                 label="Previous job details",
                                 visible=True,
                                 type="pandas",
                                 wrap=True,
-                                interactive=True,
-                                row_count=(0, "fixed"),
-                                col_count=(5, "fixed"),
-                                static_columns=[0, 1, 2, 3, 4],
-                                max_height=400,
                             )
                         with gr.Column(scale=1):
                             job_id_textbox = gr.Textbox(
@@ -5929,7 +5937,7 @@ with blocks:
             replacement_headers=CSV_ACCESS_LOG_HEADERS,
         ),
         [session_hash_textbox, host_name_textbox],
-        None,
+        outputs=[flag_value_placeholder],
         preprocess=False,
     ).success(
         fn=upload_log_file_to_s3,
@@ -5965,7 +5973,7 @@ with blocks:
                 pdf_further_details_text,
                 doc_file_name_no_extension_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -5996,7 +6004,7 @@ with blocks:
                 data_further_details_text,
                 data_file_name_with_extension_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6027,7 +6035,7 @@ with blocks:
                 pdf_further_details_text,
                 placeholder_doc_file_name_no_extension_textbox_for_logs,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6058,7 +6066,7 @@ with blocks:
                 data_further_details_text,
                 placeholder_data_file_name_no_extension_textbox_for_logs,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6116,7 +6124,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
             api_name="usage_logs",
         ).success(
@@ -6150,7 +6158,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6183,7 +6191,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6216,7 +6224,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6249,7 +6257,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6302,7 +6310,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6335,7 +6343,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6368,7 +6376,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6403,7 +6411,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
@@ -6437,7 +6445,7 @@ with blocks:
                 is_a_textract_api_call,
                 task_textbox,
             ],
-            None,
+            outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,

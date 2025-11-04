@@ -437,10 +437,54 @@ DEFAULT_TABULAR_ANONYMISATION_STRATEGY = get_or_create_env_var(
     "DEFAULT_TABULAR_ANONYMISATION_STRATEGY", "redact completely"
 )
 
+###
+# LOCAL OCR MODEL OPTIONS
+###
+
+
+### VLM OPTIONS
+
+SHOW_VLM_MODEL_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_VLM_MODEL_OPTIONS", "False")
+)  # Whether to show the VLM model options in the UI
+
+SELECTED_MODEL = get_or_create_env_var(
+    "SELECTED_MODEL", "Dots.OCR"
+)  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "PaddleOCR-VL"
+
+if SHOW_VLM_MODEL_OPTIONS:
+    VLM_MODEL_OPTIONS = [
+        SELECTED_MODEL,
+    ]
+
+MAX_SPACES_GPU_RUN_TIME = int(
+    get_or_create_env_var("MAX_SPACES_GPU_RUN_TIME", "60")
+)  # Maximum number of seconds to run the GPU on Spaces
+
+MAX_NEW_TOKENS = int(
+    get_or_create_env_var("MAX_NEW_TOKENS", "30")
+)  # Maximum number of tokens to generate
+
+DEFAULT_MAX_NEW_TOKENS = int(
+    get_or_create_env_var("DEFAULT_MAX_NEW_TOKENS", "30")
+)  # Default maximum number of tokens to generate
+
+MAX_INPUT_TOKEN_LENGTH = int(
+    get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "4096")
+)  # Maximum number of tokens to input to the VLM
+
+USE_FLASH_ATTENTION = convert_string_to_boolean(
+    get_or_create_env_var("USE_FLASH_ATTENTION", "False")
+)  # Whether to use flash attention for the VLM
+
+OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
+    get_or_create_env_var("OVERWRITE_EXISTING_OCR_RESULTS", "False")
+)  # If True, always create new OCR results instead of loading from existing JSON files
+
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-)  # Choose between "tesseract", "hybrid", and "paddle". "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence.
+)  # Choose between "tesseract", "hybrid-paddle", and "paddle". "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence.
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "False")
@@ -448,11 +492,18 @@ SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
 if SHOW_LOCAL_OCR_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS = [
         "tesseract",
-        "hybrid",
+        "hybrid-paddle",
         "paddle",
     ]
 else:
     LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
+
+vlm_options = ["hybrid-vlm", "hybrid-paddle-vlm"]
+if SHOW_VLM_MODEL_OPTIONS:
+    LOCAL_OCR_MODEL_OPTIONS.extend(vlm_options)
+
+MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
+
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
     get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "65")
@@ -460,6 +511,14 @@ HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
 HYBRID_OCR_PADDING = int(
     get_or_create_env_var("HYBRID_OCR_PADDING", "1")
 )  # The padding to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
+
+TESSERACT_SEGMENTATION_LEVEL = int(
+    get_or_create_env_var("TESSERACT_SEGMENTATION_LEVEL", "11")
+)  # Tesseract segmentation level: PSM level to use for Tesseract OCR
+
+CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
+    get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "False")
+)  # Whether to convert paddle line-level OCR results to word-level for better precision
 
 PADDLE_USE_TEXTLINE_ORIENTATION = convert_string_to_boolean(
     get_or_create_env_var("PADDLE_USE_TEXTLINE_ORIENTATION", "False")
@@ -469,13 +528,21 @@ PADDLE_DET_DB_UNCLIP_RATIO = float(
     get_or_create_env_var("PADDLE_DET_DB_UNCLIP_RATIO", "1.2")
 )
 
-SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES = convert_string_to_boolean(
-    get_or_create_env_var("SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES", "False")
+SAVE_EXAMPLE_HYBRID_IMAGES = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_EXAMPLE_HYBRID_IMAGES", "False")
 )  # Whether to save example images of Tesseract vs PaddleOCR re-extraction in hybrid OCR mode.
 
 SAVE_PADDLE_VISUALISATIONS = convert_string_to_boolean(
     get_or_create_env_var("SAVE_PADDLE_VISUALISATIONS", "False")
 )  # Whether to save visualisations of PaddleOCR bounding boxes.
+
+SAVE_TESSERACT_VISUALISATIONS = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_TESSERACT_VISUALISATIONS", "False")
+)  # Whether to save visualisations of Tesseract bounding boxes.
+
+SAVE_TEXTRACT_VISUALISATIONS = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_TEXTRACT_VISUALISATIONS", "False")
+)  # Whether to save visualisations of AWS Textract bounding boxes.
 
 # Model storage paths for Lambda compatibility
 PADDLE_MODEL_PATH = get_or_create_env_var(
@@ -487,8 +554,12 @@ SPACY_MODEL_PATH = get_or_create_env_var(
 )  # Directory for spaCy model storage. Uses default location if not set.
 
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
-    "PREPROCESS_LOCAL_OCR_IMAGES", "False"
+    "PREPROCESS_LOCAL_OCR_IMAGES", "True"
 )  # Whether to try and preprocess images before extracting text. NOTE: I have found in testing that this doesn't necessarily imporove results, and greatly slows down extraction.
+
+SAVE_PREPROCESS_IMAGES = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_PREPROCESS_IMAGES", "False")
+)  # Whether to save the pre-processed images.
 
 # Entities for redaction
 CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var(

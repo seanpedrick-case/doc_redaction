@@ -16,16 +16,21 @@ RUN apt-get update \
 
 WORKDIR /src
 
-COPY requirements.txt .
+COPY requirements_lightweight.txt .
 
-RUN pip install --verbose --no-cache-dir --target=/install -r requirements.txt && rm requirements.txt
+RUN pip install --verbose --no-cache-dir --target=/install -r requirements_lightweight.txt && rm requirements_lightweight.txt
 
-# Optionally install PaddleOCR if the INSTALL_PADDLEOCR environment variable is set to True. See requirements.txt for more details, including installing the GPU version of PaddleOCR.
+# Optionally install PaddleOCR if the INSTALL_PADDLEOCR environment variable is set to True. See requirements_lightweight.txt for more details, including installing the GPU version of PaddleOCR.
 ARG INSTALL_PADDLEOCR=False
 ENV INSTALL_PADDLEOCR=${INSTALL_PADDLEOCR}
 
 RUN if [ "$INSTALL_PADDLEOCR" = "True" ]; then \
     pip install --verbose --no-cache-dir --target=/install paddleocr==3.3.0 paddlepaddle==3.2.0; \
+fi
+
+RUN if [ "$INSTALL_VLM" = "True" ]; then \
+    pip install --verbose --no-cache-dir --target=/install torch==2.6.0 torchvision --index-url https://download.pytorch.org/whl/cu126; \
+    pip install --verbose --no-cache-dir --target=/install transformers==4.57.1 accelerate==1.11.0 bitsandbytes==0.48.1; \
 fi
 
 # ===================================================================

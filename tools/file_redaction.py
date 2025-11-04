@@ -5,10 +5,12 @@ import os
 import time
 from collections import defaultdict  # For efficient grouping
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import boto3
+import cv2
 import gradio as gr
+import numpy as np
 import pandas as pd
 import pymupdf
 from gradio import Progress
@@ -53,11 +55,14 @@ from tools.config import (
     MAX_TIME_VALUE,
     NO_REDACTION_PII_OPTION,
     OUTPUT_FOLDER,
+    OVERWRITE_EXISTING_OCR_RESULTS,
     PAGE_BREAK_VALUE,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RETURN_PDF_FOR_REVIEW,
     RETURN_REDACTED_PDF,
     RUN_AWS_FUNCTIONS,
+    SAVE_TESSERACT_VISUALISATIONS,
+    SAVE_TEXTRACT_VISUALISATIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
@@ -104,6 +109,7 @@ from tools.load_spacy_model_custom_recognisers import (
 )
 from tools.secure_path_utils import (
     secure_file_write,
+    validate_folder_containment,
     validate_path_containment,
 )
 
@@ -265,7 +271,7 @@ def choose_and_run_redactor(
     all_page_line_level_ocr_results: list[dict] = list(),
     all_page_line_level_ocr_results_with_words: list[dict] = list(),
     all_page_line_level_ocr_results_with_words_df: pd.DataFrame = None,
-    chosen_local_model: str = CHOSEN_LOCAL_OCR_MODEL,
+    chosen_local_ocr_model: str = CHOSEN_LOCAL_OCR_MODEL,
     language: str = DEFAULT_LANGUAGE,
     ocr_review_files: list = list(),
     prepare_images: bool = True,
@@ -322,7 +328,7 @@ def choose_and_run_redactor(
     - all_page_line_level_ocr_results (list, optional): All line level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words (list, optional): All word level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words_df (pd.Dataframe, optional): All word level text on the page with bounding boxes as a dataframe.
-    - chosen_local_model (str): Which local model is being used for OCR on images - uses the value of CHOSEN_LOCAL_OCR_MODEL by default, choices are "tesseract", "paddle" for PaddleOCR, or "hybrid" to combine both.
+    - chosen_local_ocr_model (str): Which local model is being used for OCR on images - uses the value of CHOSEN_LOCAL_OCR_MODEL by default, choices are "tesseract", "paddle" for PaddleOCR, or "hybrid-paddle" to combine both.
     - language (str, optional): The language of the text in the files. Defaults to English.
     - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
     - ocr_review_files (list, optional): A list of OCR review files to be used for the redaction process. Defaults to an empty list.
@@ -359,7 +365,7 @@ def choose_and_run_redactor(
         text_extraction_method = TEXTRACT_TEXT_EXTRACT_OPTION
     if text_extraction_method == "Local OCR":
         text_extraction_method = TESSERACT_TEXT_EXTRACT_OPTION
-        print("Performing local OCR with" + chosen_local_model + " model.")
+        print("Performing local OCR with" + chosen_local_ocr_model + " model.")
     if text_extraction_method == "Local text":
         text_extraction_method = SELECTABLE_TEXT_EXTRACT_OPTION
     if pii_identification_method == "None":
@@ -880,7 +886,7 @@ def choose_and_run_redactor(
     try:
         if (
             text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
-            and chosen_local_model == "tesseract"
+            and chosen_local_ocr_model == "tesseract"
         ):
             if language != "en":
                 progress(
@@ -978,8 +984,12 @@ def choose_and_run_redactor(
         )
 
         if not all_page_line_level_ocr_results_with_words:
-            if local_ocr_output_found_checkbox is True and os.path.exists(
-                all_page_line_level_ocr_results_with_words_json_file_path
+            if (
+                not OVERWRITE_EXISTING_OCR_RESULTS
+                and local_ocr_output_found_checkbox is True
+                and os.path.exists(
+                    all_page_line_level_ocr_results_with_words_json_file_path
+                )
             ):
                 (
                     all_page_line_level_ocr_results_with_words,
@@ -1010,7 +1020,7 @@ def choose_and_run_redactor(
             (
                 pymupdf_doc,
                 all_pages_decision_process_table,
-                out_file_paths,
+                log_files_output_paths,
                 new_textract_request_metadata,
                 annotations_all_pages,
                 current_loop_page,
@@ -1051,7 +1061,7 @@ def choose_and_run_redactor(
                 text_extraction_only,
                 all_page_line_level_ocr_results,
                 all_page_line_level_ocr_results_with_words,
-                chosen_local_model,
+                chosen_local_ocr_model,
                 log_files_output_paths=log_files_output_paths,
                 nlp_analyser=nlp_analyser,
                 output_folder=output_folder,
@@ -1696,28 +1706,23 @@ def choose_and_run_redactor(
     ):
         all_request_metadata_str = "\n".join(all_textract_request_metadata).strip()
 
-        # all_textract_request_metadata_file_path is constructed by output_folder + filename
-        # Split output_folder (trusted base) from pdf_file_name_without_ext + "_textract_metadata.txt" (untrusted)
         textract_metadata_filename = (
-            pdf_file_name_without_ext + "_textract_metadata.txt"
-        )
-        secure_file_write(
-            output_folder,
-            textract_metadata_filename,
-            all_request_metadata_str,
+            output_folder + pdf_file_name_without_ext + "_textract_metadata.txt"
         )
 
-        # Reconstruct the full path for logging purposes
-        all_textract_request_metadata_file_path = (
-            output_folder + textract_metadata_filename
-        )
         # Add page range suffix if partial processing
         all_textract_request_metadata_file_path = add_page_range_suffix_to_file_path(
-            all_textract_request_metadata_file_path,
+            textract_metadata_filename,
             page_min,
             current_loop_page,
             number_of_pages,
             page_max,
+        )
+
+        secure_file_write(
+            output_folder,
+            all_textract_request_metadata_file_path,
+            all_request_metadata_str,
         )
 
         # Add the request metadata to the log outputs if not there already
@@ -3077,7 +3082,7 @@ def redact_image_pdf(
     text_extraction_only: bool = False,
     all_page_line_level_ocr_results=list(),
     all_page_line_level_ocr_results_with_words=list(),
-    chosen_local_model: str = CHOSEN_LOCAL_OCR_MODEL,
+    chosen_local_ocr_model: str = CHOSEN_LOCAL_OCR_MODEL,
     page_break_val: int = int(PAGE_BREAK_VALUE),
     log_files_output_paths: List = list(),
     max_time: int = int(MAX_TIME_VALUE),
@@ -3118,7 +3123,7 @@ def redact_image_pdf(
     - text_extraction_only (bool, optional): Should the function only extract text, or also do redaction.
     - all_page_line_level_ocr_results (optional): List of all page line level OCR results.
     - all_page_line_level_ocr_results_with_words (optional): List of all page line level OCR results with words.
-    - chosen_local_model (str, optional): The local model chosen for OCR. Defaults to CHOSEN_LOCAL_OCR_MODEL, other choices are "paddle" for PaddleOCR, or "hybrid" for a combination of both.
+    - chosen_local_ocr_model (str, optional): The local model chosen for OCR. Defaults to CHOSEN_LOCAL_OCR_MODEL, other choices are "paddle" for PaddleOCR, or "hybrid-paddle" for a combination of both.
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to PAGE_BREAK_VALUE.
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
@@ -3175,7 +3180,7 @@ def redact_image_pdf(
     else:
         image_analyser = CustomImageAnalyzerEngine(
             analyzer_engine=nlp_analyser,
-            ocr_engine=chosen_local_model,
+            ocr_engine=chosen_local_ocr_model,
             language=language,
             output_folder=output_folder,
         )
@@ -3207,11 +3212,16 @@ def redact_image_pdf(
     # If running Textract, check if file already exists. If it does, load in existing data
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         textract_json_file_path = output_folder + file_name + "_textract.json"
-        textract_data, is_missing, log_files_output_paths = (
-            load_and_convert_textract_json(
-                textract_json_file_path, log_files_output_paths, page_sizes_df
+        if OVERWRITE_EXISTING_OCR_RESULTS:
+            # Skip loading existing results, start fresh
+            textract_data = {}
+            is_missing = True
+        else:
+            textract_data, is_missing, log_files_output_paths = (
+                load_and_convert_textract_json(
+                    textract_json_file_path, log_files_output_paths, page_sizes_df
+                )
             )
-        )
         original_textract_data = textract_data.copy()
 
         # print("Successfully loaded in Textract analysis results from file")
@@ -3221,15 +3231,20 @@ def redact_image_pdf(
         all_page_line_level_ocr_results_with_words_json_file_path = (
             output_folder + file_name + "_ocr_results_with_words_local_ocr.json"
         )
-        (
-            all_page_line_level_ocr_results_with_words,
-            is_missing,
-            log_files_output_paths,
-        ) = load_and_convert_ocr_results_with_words_json(
-            all_page_line_level_ocr_results_with_words_json_file_path,
-            log_files_output_paths,
-            page_sizes_df,
-        )
+        if OVERWRITE_EXISTING_OCR_RESULTS:
+            # Skip loading existing results, start fresh
+            all_page_line_level_ocr_results_with_words = []
+            is_missing = True
+        else:
+            (
+                all_page_line_level_ocr_results_with_words,
+                is_missing,
+                log_files_output_paths,
+            ) = load_and_convert_ocr_results_with_words_json(
+                all_page_line_level_ocr_results_with_words_json_file_path,
+                log_files_output_paths,
+                page_sizes_df,
+            )
         original_all_page_line_level_ocr_results_with_words = (
             all_page_line_level_ocr_results_with_words.copy()
         )
@@ -3292,21 +3307,84 @@ def redact_image_pdf(
             if isinstance(image_path, str):
                 # Normalize and validate path safety before checking existence
                 normalized_path = os.path.normpath(os.path.abspath(image_path))
-                if validate_path_containment(normalized_path, INPUT_FOLDER):
+                if validate_path_containment(normalized_path, input_folder):
                     image = Image.open(normalized_path)
                     page_width, page_height = image.size
+                    print("Successfully opened image from path")
                 else:
-                    # print("Image path does not exist, using mediabox coordinates as page sizes")
+                    # If validation fails and input file is an image file, try using file_path as fallback
+                    if (
+                        is_pdf(file_path) is False
+                        and isinstance(file_path, str)
+                        and file_path
+                    ):
+                        normalized_file_path = os.path.normpath(
+                            os.path.abspath(file_path)
+                        )
+                        # Check if it's a Gradio temporary file (often in temp directories)
+                        is_gradio_temp = (
+                            "gradio" in normalized_file_path.lower()
+                            and "temp" in normalized_file_path.lower()
+                        )
+                        if is_gradio_temp or validate_path_containment(
+                            normalized_file_path, input_folder
+                        ):
+                            try:
+                                image = Image.open(normalized_file_path)
+                                page_width, page_height = image.size
+                            except Exception as e:
+                                print(
+                                    f"Could not open image from file_path {file_path}: {e}"
+                                )
+                                image = None
+                                page_width = pymupdf_page.mediabox.width
+                                page_height = pymupdf_page.mediabox.height
+                        else:
+                            # For image files, at least keep image_path as a string for later use
+                            image = None
+                            page_width = pymupdf_page.mediabox.width
+                            page_height = pymupdf_page.mediabox.height
+                    else:
+                        # print("Image path does not exist, using mediabox coordinates as page sizes")
+                        image = None
+                        page_width = pymupdf_page.mediabox.width
+                        page_height = pymupdf_page.mediabox.height
+            elif not isinstance(image_path, Image.Image):
+                # If image_path is not a string or Image, and input file is an image file, try file_path
+                if (
+                    is_pdf(file_path) is False
+                    and isinstance(file_path, str)
+                    and file_path
+                ):
+                    normalized_file_path = os.path.normpath(os.path.abspath(file_path))
+                    is_gradio_temp = (
+                        "gradio" in normalized_file_path.lower()
+                        and "temp" in normalized_file_path.lower()
+                    )
+                    if is_gradio_temp or validate_path_containment(
+                        normalized_file_path, input_folder
+                    ):
+                        try:
+                            image = Image.open(normalized_file_path)
+                            page_width, page_height = image.size
+                        except Exception as e:
+                            print(
+                                f"Could not open image from file_path {file_path}: {e}"
+                            )
+                            image = None
+                            page_width = pymupdf_page.mediabox.width
+                            page_height = pymupdf_page.mediabox.height
+                    else:
+                        image = None
+                        page_width = pymupdf_page.mediabox.width
+                        page_height = pymupdf_page.mediabox.height
+                else:
+                    print(
+                        f"Unexpected image_path type: {type(image_path)}, using page mediabox coordinates as page sizes"
+                    )  # Ensure image_path is valid
                     image = None
                     page_width = pymupdf_page.mediabox.width
                     page_height = pymupdf_page.mediabox.height
-            elif not isinstance(image_path, Image.Image):
-                print(
-                    f"Unexpected image_path type: {type(image_path)}, using page mediabox coordinates as page sizes"
-                )  # Ensure image_path is valid
-                image = None
-                page_width = pymupdf_page.mediabox.width
-                page_height = pymupdf_page.mediabox.height
 
             try:
                 if not page_sizes_df.empty:
@@ -3318,6 +3396,46 @@ def redact_image_pdf(
                     "Can't find original cropbox details for page, using current PyMuPDF page cropbox"
                 )
                 original_cropbox = pymupdf_page.cropbox.irect
+
+            if image is None:
+                # Check if image_path is a placeholder and create the actual image
+                if isinstance(image_path, str) and "placeholder_image" in image_path:
+                    print(f"Detected placeholder image path: {image_path}")
+                    try:
+                        # Extract page number from placeholder path
+                        page_num_from_placeholder = int(
+                            image_path.split("_")[-1].split(".")[0]
+                        )
+
+                        # Create the actual image using process_single_page_for_image_conversion
+                        _, created_image_path, page_width, page_height = (
+                            process_single_page_for_image_conversion(
+                                pdf_path=file_path,
+                                page_num=page_num_from_placeholder,
+                                image_dpi=IMAGES_DPI,
+                                create_images=True,
+                                input_folder=input_folder,
+                            )
+                        )
+
+                        # Load the created image
+                        if os.path.exists(created_image_path):
+                            image = Image.open(created_image_path)
+                            print(
+                                f"Successfully created and loaded image from: {created_image_path}"
+                            )
+                        else:
+                            print(f"Failed to create image at: {created_image_path}")
+                            page_width = pymupdf_page.mediabox.width
+                            page_height = pymupdf_page.mediabox.height
+                    except Exception as e:
+                        print(f"Error creating image from placeholder: {e}")
+                        page_width = pymupdf_page.mediabox.width
+                        page_height = pymupdf_page.mediabox.height
+                else:
+                    print(
+                        "Image is None and not a placeholder - using mediabox coordinates"
+                    )
 
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
             # If using Tesseract
@@ -3375,6 +3493,7 @@ def redact_image_pdf(
 
                 if not textract_data:
                     try:
+                        print(f"Image object: {image}")
                         # Convert the image_path to bytes using an in-memory buffer
                         image_buffer = io.BytesIO()
                         image.save(
@@ -3432,7 +3551,7 @@ def redact_image_pdf(
                                     os.path.abspath(image_path)
                                 )
                                 if validate_path_containment(
-                                    normalized_path, INPUT_FOLDER
+                                    normalized_path, input_folder
                                 ):
                                     image = Image.open(normalized_path)
                                 else:
@@ -3535,6 +3654,50 @@ def redact_image_pdf(
                 all_line_level_ocr_results_list.extend(
                     line_level_ocr_results_df.to_dict("records")
                 )
+
+            # Save OCR visualization with bounding boxes (works for all OCR methods)
+            if (
+                text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                and SAVE_TEXTRACT_VISUALISATIONS is True
+            ) or (
+                text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+                and SAVE_TESSERACT_VISUALISATIONS is True
+            ):
+                if (
+                    page_line_level_ocr_results_with_words
+                    and "results" in page_line_level_ocr_results_with_words
+                ):
+                    # Ensure image is set - if None, try to use image_path or file_path for image files
+                    image_for_visualization = image
+                    if image_for_visualization is None:
+                        # If image is None and input file is an image file, try to use image_path or file_path
+                        if is_pdf(file_path) is False:
+                            if isinstance(image_path, str) and image_path:
+                                # Try to use image_path if it's a valid string
+                                image_for_visualization = image_path
+                            elif isinstance(file_path, str) and file_path:
+                                # Fall back to using the original file_path for image files
+                                image_for_visualization = file_path
+                        else:
+                            # For PDF files, we need an image object or image path
+                            if isinstance(image_path, str) and image_path:
+                                image_for_visualization = image_path
+
+                    # Only proceed if we have a valid image or image path
+                    if image_for_visualization is not None:
+                        log_files_output_paths = visualise_ocr_words_bounding_boxes(
+                            image_for_visualization,
+                            page_line_level_ocr_results_with_words["results"],
+                            image_name=f"{file_name}_{reported_page_number}",
+                            output_folder=output_folder,
+                            text_extraction_method=text_extraction_method,
+                            chosen_local_ocr_model=chosen_local_ocr_model,
+                            log_files_output_paths=log_files_output_paths,
+                        )
+                    else:
+                        print(
+                            f"Warning: Could not determine image for visualization at page {reported_page_number}. Skipping visualization."
+                        )
 
             if (
                 pii_identification_method != NO_REDACTION_PII_OPTION
@@ -4867,3 +5030,440 @@ def redact_text_pdf(
         comprehend_query_number,
         all_page_line_level_ocr_results_with_words,
     )
+
+
+def visualise_ocr_words_bounding_boxes(
+    image: Union[str, Image.Image],
+    ocr_results: Dict[str, Any],
+    image_name: str = None,
+    output_folder: str = OUTPUT_FOLDER,
+    text_extraction_method: str = None,
+    visualisation_folder: str = None,
+    add_legend: bool = True,
+    chosen_local_ocr_model: str = None,
+    log_files_output_paths: List[str] = list(),
+) -> None:
+    """
+    Visualizes OCR bounding boxes with confidence-based colors and a legend.
+    Handles word-level OCR results from Textract and Tesseract.
+
+    Args:
+        image: The PIL Image object or image path
+        ocr_results: Dictionary containing word-level OCR results
+        image_name: Optional name for the saved image file
+        output_folder: Output folder path
+        text_extraction_method: The text extraction method being used (determines folder name)
+        visualisation_folder: Subfolder name for visualizations (auto-determined if not provided)
+        add_legend: Whether to add a legend to the visualization
+        log_files_output_paths: List of file paths used for saving redaction process logging results.
+    """
+    # Determine visualization folder based on text extraction method
+
+    if visualisation_folder is None:
+        if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+            base_model_name = "Textract"
+            visualisation_folder = "textract_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "tesseract"
+        ):
+            base_model_name = "Tesseract"
+            visualisation_folder = "tesseract_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "hybrid-paddle"
+        ):
+            base_model_name = "Tesseract"
+            visualisation_folder = "hybrid_paddle_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "paddle"
+        ):
+            base_model_name = "Paddle"
+            visualisation_folder = "paddle_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "hybrid-vlm"
+        ):
+            base_model_name = "Tesseract"
+            visualisation_folder = "hybrid_vlm_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "hybrid-paddle-vlm"
+        ):
+            base_model_name = "Paddle"
+            visualisation_folder = "hybrid_paddle_vlm_visualisations"
+        else:
+            visualisation_folder = "ocr_visualisations"
+
+    if not ocr_results:
+        return
+
+    if isinstance(image, str):
+        image = Image.open(image)
+    # Convert PIL image to OpenCV format
+    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+    # Get image dimensions
+    height, width = image_cv.shape[:2]
+
+    # Define confidence ranges and colors for bounding boxes (bright colors)
+    confidence_ranges = [
+        (80, 100, (0, 255, 0), "High (80-100%)"),  # Green
+        (50, 79, (0, 165, 255), "Medium (50-79%)"),  # Orange
+        (0, 49, (0, 0, 255), "Low (0-49%)"),  # Red
+    ]
+
+    # Define darker colors for text on white background
+    text_confidence_ranges = [
+        (80, 100, (0, 150, 0), "High (80-100%)"),  # Dark Green
+        (50, 79, (0, 100, 200), "Medium (50-79%)"),  # Dark Orange
+        (0, 49, (0, 0, 180), "Low (0-49%)"),  # Dark Red
+    ]
+
+    # Process each line's words
+    for line_key, line_data in ocr_results.items():
+        if not isinstance(line_data, dict) or "words" not in line_data:
+            continue
+
+        words = line_data.get("words", [])
+
+        # Process each word in the line
+        for word_data in words:
+            if not isinstance(word_data, dict):
+                continue
+
+            text = word_data.get("text", "")
+            # Handle both 'conf' and 'confidence' field names for compatibility
+            conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+
+            # Skip empty text or invalid confidence
+            if not text.strip() or conf == -1:
+                continue
+
+            # Get bounding box coordinates
+            bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+            if len(bbox) != 4:
+                continue
+
+            x1, y1, x2, y2 = bbox
+
+            # Ensure coordinates are within image bounds
+            x1 = max(0, min(int(x1), width))
+            y1 = max(0, min(int(y1), height))
+            x2 = max(0, min(int(x2), width))
+            y2 = max(0, min(int(y2), height))
+
+            # Skip if bounding box is invalid
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            # Check if word was replaced by a different model
+            model = word_data.get("model", None)
+            is_replaced = model and model.lower() != base_model_name.lower()
+
+            # Determine bounding box color: grey for replaced words, otherwise based on confidence
+            # if is_replaced:
+            #     box_color = (128, 128, 128)  # Grey for model replacements (bounding box only)
+            # else:
+            box_color = (0, 0, 255)  # Default to red
+            for min_conf, max_conf, conf_color, _ in confidence_ranges:
+                if min_conf <= conf <= max_conf:
+                    box_color = conf_color
+                    break
+
+            # Draw bounding box
+            cv2.rectangle(image_cv, (x1, y1), (x2, y2), box_color, 1)
+
+    # Add legend
+    if add_legend:
+        add_confidence_legend(image_cv, confidence_ranges, show_model_replacement=False)
+
+    # Create second page with text overlay
+    text_page = np.ones((height, width, 3), dtype=np.uint8) * 255  # White background
+
+    # Process each line's words for text overlay
+    for line_key, line_data in ocr_results.items():
+        if not isinstance(line_data, dict) or "words" not in line_data:
+            continue
+
+        words = line_data.get("words", [])
+
+        # Process each word in the line
+        for word_data in words:
+            if not isinstance(word_data, dict):
+                continue
+
+            text = word_data.get("text", "")
+            # Handle both 'conf' and 'confidence' field names for compatibility
+            conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+
+            # Skip empty text or invalid confidence
+            if not text.strip() or conf == -1:
+                continue
+
+            # Get bounding box coordinates
+            bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+            if len(bbox) != 4:
+                continue
+
+            x1, y1, x2, y2 = bbox
+
+            # Ensure coordinates are within image bounds
+            x1 = max(0, min(int(x1), width))
+            y1 = max(0, min(int(y1), height))
+            x2 = max(0, min(int(x2), width))
+            y2 = max(0, min(int(y2), height))
+
+            # Skip if bounding box is invalid
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            # Check if word was replaced by a different model (for reference, but text color always uses confidence)
+            model = word_data.get("model", None)
+            is_replaced = model and model.lower() != base_model_name.lower()
+
+            # Text color always based on confidence (not affected by model replacement)
+            text_color = (0, 0, 180)  # Default to dark red
+            for min_conf, max_conf, conf_color, _ in text_confidence_ranges:
+                if min_conf <= conf <= max_conf:
+                    text_color = conf_color
+                    break
+
+            # Calculate font size to fit text within bounding box
+            box_width = x2 - x1
+            box_height = y2 - y1
+
+            # Start with a reasonable font scale
+            font_scale = 0.5
+            font_thickness = 1
+            font = cv2.FONT_HERSHEY_SIMPLEX
+
+            # Get text size and adjust to fit
+            (text_width, text_height), baseline = cv2.getTextSize(
+                text, font, font_scale, font_thickness
+            )
+
+            # Scale font to fit width (with some padding)
+            if text_width > 0:
+                width_scale = (box_width * 0.9) / text_width
+            else:
+                width_scale = 1.0
+
+            # Scale font to fit height (with some padding)
+            if text_height > 0:
+                height_scale = (box_height * 0.8) / text_height
+            else:
+                height_scale = 1.0
+
+            # Use the smaller scale to ensure text fits both dimensions
+            font_scale = min(
+                font_scale * min(width_scale, height_scale), 2.0
+            )  # Cap at 2.0
+
+            # Recalculate text size with adjusted font scale
+            (text_width, text_height), baseline = cv2.getTextSize(
+                text, font, font_scale, font_thickness
+            )
+
+            # Center text within bounding box
+            text_x = x1 + (box_width - text_width) // 2
+            text_y = y1 + (box_height + text_height) // 2  # Baseline adjustment
+
+            # Draw text
+            cv2.putText(
+                text_page,
+                text,
+                (text_x, text_y),
+                font,
+                font_scale,
+                text_color,
+                font_thickness,
+                cv2.LINE_AA,
+            )
+
+            # Draw grey bounding box for replaced words on text page
+            if is_replaced:
+                box_color = (128, 128, 128)  # Grey for model replacements
+                cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)
+
+    # Add legend to second page
+    if add_legend:
+        add_confidence_legend(
+            text_page, text_confidence_ranges, show_model_replacement=True
+        )
+
+    # Concatenate images horizontally
+    combined_image = np.hstack([image_cv, text_page])
+
+    # Save the visualization
+    if output_folder:
+        textract_viz_folder = os.path.join(output_folder, visualisation_folder)
+
+        # Double-check the constructed path is safe
+        if not validate_folder_containment(textract_viz_folder, OUTPUT_FOLDER):
+            raise ValueError(
+                f"Unsafe textract visualisations folder path: {textract_viz_folder}"
+            )
+
+        os.makedirs(textract_viz_folder, exist_ok=True)
+
+        # Generate filename
+        if image_name:
+            # Remove file extension if present
+            base_name = os.path.splitext(image_name)[0]
+            filename = f"{base_name}_{visualisation_folder}.jpg"
+        else:
+            timestamp = int(time.time())
+            filename = f"{visualisation_folder}_{timestamp}.jpg"
+
+        output_path = os.path.join(textract_viz_folder, filename)
+
+        # Save the combined image
+        cv2.imwrite(output_path, combined_image)
+        print(f"OCR visualization saved to: {output_path}")
+
+        log_files_output_paths.append(output_path)
+
+        return log_files_output_paths
+
+
+def add_confidence_legend(
+    image_cv: np.ndarray,
+    confidence_ranges: List[Tuple],
+    show_model_replacement: bool = False,
+) -> None:
+    """
+    Adds a confidence legend to the visualization image.
+
+    Args:
+        image_cv: OpenCV image array
+        confidence_ranges: List of tuples containing (min_conf, max_conf, color, label)
+        show_model_replacement: Whether to include a legend entry for model replacements (grey)
+    """
+    height, width = image_cv.shape[:2]
+
+    # Calculate legend height based on number of items
+    num_items = len(confidence_ranges)
+    if show_model_replacement:
+        num_items += 1  # Add one more for model replacement entry
+
+    # Legend parameters
+    legend_width = 200
+    legend_height = 70 + (num_items * 25)  # Dynamic height based on number of items
+    legend_x = width - legend_width - 20
+    legend_y = 20
+
+    # Draw legend background
+    # Draw a translucent (semi-transparent) white rectangle for the legend background
+    overlay = image_cv.copy()
+    cv2.rectangle(
+        overlay,
+        (legend_x, legend_y),
+        (legend_x + legend_width, legend_y + legend_height),
+        (255, 255, 255),  # White background
+        -1,
+    )
+    alpha = 0.5  # Opacity: 1.0 = opaque, 0.0 = fully transparent
+    cv2.addWeighted(overlay, alpha, image_cv, 1 - alpha, 0, image_cv)
+    # cv2.rectangle(
+    #     image_cv,
+    #     (legend_x, legend_y),
+    #     (legend_x + legend_width, legend_y + legend_height),
+    #     (0, 0, 0),  # Black border
+    #     2,
+    # )
+
+    # Add title
+    title_text = "Confidence Levels"
+    font_scale = 0.6
+    font_thickness = 1
+    (title_width, title_height), _ = cv2.getTextSize(
+        title_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
+    )
+    title_x = legend_x + (legend_width - title_width) // 2
+    title_y = legend_y + title_height + 10
+    cv2.putText(
+        image_cv,
+        title_text,
+        (title_x, title_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale,
+        (0, 0, 0),  # Black text
+        font_thickness,
+    )
+
+    # Add confidence range items
+    item_spacing = 25
+    start_y = title_y + 25
+    item_index = 0
+
+    # Add model replacement entry first if enabled
+    if show_model_replacement:
+        item_y = start_y + item_index * item_spacing
+        item_index += 1
+
+        # Draw grey color box
+        box_size = 15
+        box_x = legend_x + 10
+        box_y = item_y - box_size
+        replacement_color = (128, 128, 128)  # Grey in BGR
+        cv2.rectangle(
+            image_cv,
+            (box_x, box_y),
+            (box_x + box_size, box_y + box_size),
+            replacement_color,
+            -1,
+        )
+        cv2.rectangle(
+            image_cv,
+            (box_x, box_y),
+            (box_x + box_size, box_y + box_size),
+            (0, 0, 0),  # Black border
+            1,
+        )
+
+        # Add label text
+        label_x = box_x + box_size + 10
+        label_y = item_y - 5
+        cv2.putText(
+            image_cv,
+            "Model Replacement",
+            (label_x, label_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 0, 0),  # Black text
+            1,
+        )
+
+    # Add confidence range items
+    for i, (min_conf, max_conf, color, label) in enumerate(confidence_ranges):
+        item_y = start_y + (item_index + i) * item_spacing
+
+        # Draw color box
+        box_size = 15
+        box_x = legend_x + 10
+        box_y = item_y - box_size
+        cv2.rectangle(
+            image_cv, (box_x, box_y), (box_x + box_size, box_y + box_size), color, -1
+        )
+        cv2.rectangle(
+            image_cv,
+            (box_x, box_y),
+            (box_x + box_size, box_y + box_size),
+            (0, 0, 0),  # Black border
+            1,
+        )
+
+        # Add label text
+        label_x = box_x + box_size + 10
+        label_y = item_y - 5
+        cv2.putText(
+            image_cv,
+            label,
+            (label_x, label_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 0, 0),  # Black text
+            1,
+        )
