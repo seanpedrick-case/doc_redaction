@@ -12,17 +12,18 @@ BLOCK_SIZE_FACTOR = 1.5 # Default 1.5
 MIN_SPACE_FACTOR = 0.3 # Default 0.4
 MATCH_TOLERANCE = 0 # Default 0
 MIN_AREA_THRESHOLD = 6 # Default 6
-DEFAULT_TRIM_PERCENTAGE = 0.15 # Default 0.15
+DEFAULT_TRIM_PERCENTAGE = 0.2 # Default 0.2
 SHOW_OUTPUT_IMAGES = True # Default False
 
 class AdaptiveSegmenter:
     """
-    The final, production-ready pipeline. It features:
+    Line to word segmentation pipeline. It features:
     1. Adaptive Thresholding.
     2. Targeted Noise Removal using Connected Component Analysis to isolate the main text body.
     3. The robust two-stage adaptive search (Valley -> Kernel).
     4. CCA for final pixel-perfect refinement.
     """
+
     def __init__(self, output_folder: str = OUTPUT_FOLDER):
         self.output_folder = output_folder
 
@@ -37,60 +38,67 @@ class AdaptiveSegmenter:
         center = (w // 2, h // 2)
 
         # --- Binarization (copied from _deskew_image) ---
-        # A quick binarization is needed to find the text block angle
         block_size = 21 
         if h < block_size:
             block_size = h if h % 2 != 0 else h - 1
 
         if block_size > 3:
-            binary = cv2.adaptiveThreshold(gray_image, 255, 
-                                          cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                          cv2.THRESH_BINARY_INV, block_size, 4)
+            binary = cv2.adaptiveThreshold(
+                gray_image, 255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY_INV,
+                block_size, 4
+            )
         else:
-            _, binary = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        
+            _, binary = cv2.threshold(
+                gray_image, 0, 255,
+                cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+            )
+
+        # Small noise removal
         opening_kernel = np.ones((2, 2), np.uint8)
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, opening_kernel)
-        
+
+        # --- Extract text pixel coordinates ---
         coords = np.column_stack(np.where(binary > 0))
         if len(coords) < 50:
             print("Warning: Not enough text pixels for orientation. Assuming horizontal.")
             M_orient = cv2.getRotationMatrix2D(center, 0, 1.0)
             return gray_image, M_orient
-        # --- End Binarization ---
 
-        rect = cv2.minAreaRect(coords[:, ::-1])
-        rect_width, rect_height = rect[1] # Get the (width, height) tuple
-        # angle = rect[2] # We don't need the angle for this decision
+        # --- Robust bounding-box check (no minAreaRect quirks) ---
+        ymin, xmin = coords.min(axis=0)
+        ymax, xmax = coords.max(axis=0)
+        box_height = ymax - ymin
+        box_width = xmax - xmin
 
         orientation_angle = 0.0
-
-        # THE FIX: Use dimensions, not angle, to check orientation.
-        # If the box is TALL (height > width), it's vertical.
-        if rect_height > rect_width:
-            print(f"Detected vertical orientation (W:{rect_width:.0f} < H:{rect_height:.0f}). Applying 90-degree correction.")
+        if box_height > box_width:
+            print(f"Detected vertical orientation (W:{box_width} < H:{box_height}). Applying 90-degree correction.")
             orientation_angle = 90.0
         else:
-            print(f"Detected horizontal orientation (W:{rect_width:.0f} >= H:{rect_height:.0f}). No orientation correction.")
+            print(f"Detected horizontal orientation (W:{box_width} >= H:{box_height}). No orientation correction.")
             M_orient = cv2.getRotationMatrix2D(center, 0, 1.0)
             return gray_image, M_orient
-        
+
         # --- Apply 90-degree correction ---
         M_orient = cv2.getRotationMatrix2D(center, orientation_angle, 1.0)
 
         # Calculate new image bounds (they will be swapped)
         new_w, new_h = h, w
-        
+
         # Adjust translation part of M_orient to center the new image
         M_orient[0, 2] += (new_w - w) / 2
         M_orient[1, 2] += (new_h - h) / 2
-        
-        # Apply the rotation
-        oriented_gray = cv2.warpAffine(gray_image, M_orient, (new_w, new_h),
-                                       flags=cv2.INTER_CUBIC,
-                                       borderMode=cv2.BORDER_REPLICATE)
-        
+
+        oriented_gray = cv2.warpAffine(
+            gray_image, M_orient, (new_w, new_h),
+            flags=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_REPLICATE
+        )
+
         return oriented_gray, M_orient
+
 
     def _deskew_image(self, gray_image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -118,7 +126,7 @@ class AdaptiveSegmenter:
         
         coords = np.column_stack(np.where(binary > 0))
         if len(coords) < 50:
-            print("Warning: Not enough text pixels to detect skew. Skipping.")
+            #print("Warning: Not enough text pixels to detect skew. Skipping.")
             M = cv2.getRotationMatrix2D((w // 2, h // 2), 0, 1.0)
             return gray_image, M
 
@@ -144,17 +152,17 @@ class AdaptiveSegmenter:
             
         correction_angle = angle
         
-        print(f"Normalized shape (W:{rect_width:.0f}, H:{rect_height:.0f}). Detected angle: {correction_angle:.2f} degrees.")
+        #print(f"Normalized shape (W:{rect_width:.0f}, H:{rect_height:.0f}). Detected angle: {correction_angle:.2f} degrees.")
         
         # Final sanity checks on the angle
         MIN_SKEW_THRESHOLD = 0.5  # Ignore angles smaller than this (likely noise)
         MAX_SKEW_THRESHOLD = 15.0  # Angles larger than this are extreme and likely errors
         
         if abs(correction_angle) < MIN_SKEW_THRESHOLD:
-            print(f"Detected angle {correction_angle:.2f}° is too small (likely noise). Skipping deskew.")
+            #print(f"Detected angle {correction_angle:.2f}° is too small (likely noise). Skipping deskew.")
             correction_angle = 0.0
         elif abs(correction_angle) > MAX_SKEW_THRESHOLD:
-            print(f"Warning: Corrected angle {correction_angle:.2f}° is extreme. Skipping deskew.")
+            #print(f"Warning: Corrected angle {correction_angle:.2f}° is extreme. Skipping deskew.")
             correction_angle = 0.0
 
         # Create rotation matrix and apply the final correction
@@ -193,6 +201,7 @@ class AdaptiveSegmenter:
         return unlabeled_boxes
 
     def segment(self, line_data: Dict[str, List], line_image: np.ndarray, min_space_factor=MIN_SPACE_FACTOR, match_tolerance=MATCH_TOLERANCE, image_name: str = None) -> Tuple[Dict[str, List], bool]:
+        
         if line_image is None:
             print(f"Error: line_image is None in segment function (image_name: {image_name})")
             return ({}, False)
@@ -213,11 +222,17 @@ class AdaptiveSegmenter:
         
         # Early return if 1 or fewer words
         if line_data and line_data.get("text") and len(line_data["text"]) > 0:
-            words = line_data["text"][0].split()
+            line_text = line_data["text"][0]
+            words = line_text.split()
             if len(words) <= 1:
                 return ({}, False)
+        else:
+            print(f"Error: line_data is empty or does not contain text (image_name: {image_name})")
+            return ({}, False)
+
         
-        shortened_line_text = line_data["text"][0].replace(" ", "_")[:10]
+        print(f"line_text: {line_text}")
+        shortened_line_text = line_text.replace(" ", "_")[:10]
 
         if SHOW_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
@@ -266,24 +281,50 @@ class AdaptiveSegmenter:
             output_path = f'{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_deskewed.png'
             os.makedirs(f'{self.output_folder}/paddle_visualisations', exist_ok=True)
             cv2.imwrite(output_path, deskewed_line_image)
-            print(f"\nSaved deskewed image to '{output_path}'")
-        
+            #print(f"\nSaved deskewed image to '{output_path}'")
+
         # --- Step 1: Binarization and Stable Width Calculation (Unchanged) ---
         approx_char_count = len(line_data["text"][0].replace(" ", ""))
-        if approx_char_count == 0: return ({}, False)
+        if approx_char_count == 0: return {}, False
         img_h, img_w = deskewed_gray.shape
         avg_char_width_approx = img_w / approx_char_count
         block_size = int(avg_char_width_approx * BLOCK_SIZE_FACTOR)
         if block_size % 2 == 0: block_size += 1
-        # Ensure block_size is valid for OpenCV (must be odd and > 1)
-        if block_size < 3:
-            # Fall back to Otsu thresholding for very small images
-            _, binary = cv2.threshold(deskewed_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        else:
-            binary = cv2.adaptiveThreshold(deskewed_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C_VALUE)
+        binary = cv2.adaptiveThreshold(deskewed_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C_VALUE)
+
+        # Save cropped image (optional, only if image_name is provided)
+        if SHOW_OUTPUT_IMAGES:
+            os.makedirs(self.output_folder, exist_ok=True)
+            output_path = f'{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_binary.png'
+            os.makedirs(f'{self.output_folder}/paddle_visualisations', exist_ok=True)
+            cv2.imwrite(output_path, binary)
+            #print(f"\nSaved cropped image to '{output_path}'")
+
+        # --- NEW STEP 1.5: Post-processing with Morphology ---
+        # This "closes" gaps in letters and joins nearby components.
+
+        # Create a small kernel (e.g., 3x3 rectangle)
+        # You may need to tune this size.
+        kernel_size = 3
+        kernel = np.ones((kernel_size, kernel_size), np.uint8)
+
+        # Use MORPH_CLOSE to close small holes and gaps within the letters
+        # It's a dilation followed by an erosion
+        closed_binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        # (Optional) You could also use a DILATE to make letters thicker
+        #dilated_binary = cv2.dilate(closed_binary, kernel, iterations=1)
+        # Use 'closed_binary' (or 'dilated_binary') from now on.
+
+        if SHOW_OUTPUT_IMAGES:
+            os.makedirs(self.output_folder, exist_ok=True)
+            output_path = f'{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_closed_binary.png'
+            os.makedirs(f'{self.output_folder}/paddle_visualisations', exist_ok=True)
+            cv2.imwrite(output_path, closed_binary)
+            #print(f"\nSaved dilated binary image to '{output_path}'")
         
-       # --- Step 2: Intelligent Noise Removal (Improved) ---
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, 8, cv2.CV_32S)
+        # --- Step 2: Intelligent Noise Removal (Improved) ---
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed_binary, 8, cv2.CV_32S)
         clean_binary = np.zeros_like(binary)
         
         if num_labels > 1:
@@ -304,7 +345,7 @@ class AdaptiveSegmenter:
             
             # This is the "safe" threshold that protects small letters on clean lines.
             area_threshold = max(MIN_AREA_THRESHOLD, min(p1, estimated_min_letter_area))
-            print(f"Noise Removal: Initial conservative threshold: {area_threshold:.1f} (p1={p1:.1f}, est_min={estimated_min_letter_area:.1f})")
+            #print(f"Noise Removal: Initial conservative threshold: {area_threshold:.1f} (p1={p1:.1f}, est_min={estimated_min_letter_area:.1f})")
 
             # --- 2. Find a "Noise-to-Text" Gap (to enable AGGRESSIVE mode) ---
             sorted_areas = np.sort(areas)
@@ -333,18 +374,53 @@ class AdaptiveSegmenter:
             # --- 3. ADAPTIVE DECISION: Override if conservative threshold is clearly noise ---
             if has_clear_gap:
                 print(f"Noise Removal: Gap detected. Noise cluster ends at {area_before_gap}px. Aggressive threshold = {aggressive_threshold:.1f}")
-                
-                # THIS IS THE KEY:
-                # Only use the aggressive threshold IF our "safe" threshold is clearly
+
+                # Only use a more aggressive threshold IF our "safe" threshold is clearly
                 # stuck *inside* the noise cluster.
                 # e.g., Safe threshold = 1, but noise goes up to 10.
                 # (We use 0.8 as a buffer, so if thresh=7 and gap=8, we don't switch)
                 if area_threshold < (area_before_gap * 0.8):
                     print(f"Noise Removal: Conservative threshold ({area_threshold:.1f}) is deep in noise cluster (ends at {area_before_gap}px).")
-                    print(f"Noise Removal: Switching to AGGRESSIVE threshold: {aggressive_threshold:.1f}")
-                    area_threshold = aggressive_threshold
+                    
+                    # Instead of using large percentage increases, use a very small absolute increment
+                    # This preserves legitimate small letters/words that might be just above the noise
+                    # Use a minimal fixed offset (2-3 pixels) above the noise cluster end
+                    # This ensures we only remove noise, not legitimate small components
+                    small_increment = 2  # Fixed small increment - just 2 pixels above noise
+                    
+                    moderate_threshold = area_before_gap + small_increment
+                    
+                    # Also check what the actual first component after the gap is
+                    # This gives us insight into where real text starts
+                    # If the gap is very large (e.g., noise ends at 229, text starts at 500),
+                    # we want to use a threshold closer to the noise end, not the text start
+                    if gap_idx + 1 < len(sorted_areas):
+                        first_after_gap = sorted_areas[gap_idx + 1]
+                        gap_size = first_after_gap - area_before_gap
+                        
+                        # If there's a large gap, stick close to the noise end (2 pixels above)
+                        # If the gap is small, we might be cutting into text, so be even more conservative
+                        if gap_size > 50:  # Large gap - safe to use noise_end + 2
+                            final_threshold = moderate_threshold
+                        else:  # Small gap - might be cutting into text, use just 1 pixel above noise
+                            final_threshold = area_before_gap + 1
+                    else:
+                        final_threshold = moderate_threshold
+                    
+                    # Ensure we're at least 1 pixel above the noise cluster
+                    final_threshold = max(final_threshold, area_before_gap + 1)
+                    
+                    # Cap at aggressive threshold as absolute upper bound (shouldn't be needed)
+                    final_threshold = min(final_threshold, aggressive_threshold)
+
+                    # Cap at 15 pixels as absolute upper bound
+                    final_threshold = min(final_threshold, 15)
+                    
+                    print(f"Noise Removal: Using MODERATE threshold: {final_threshold:.1f} (noise ends at {area_before_gap}px, increment: {small_increment}px)")
+                    area_threshold = final_threshold
                 else:
                     print(f"Noise Removal: Gap found, but conservative threshold ({area_threshold:.1f}) is sufficient. Sticking with conservative.")
+                    pass
 
             # --- 4. Apply the final, determined threshold ---
             print(f"Noise Removal: Final area threshold: {area_threshold:.1f}")
@@ -355,7 +431,7 @@ class AdaptiveSegmenter:
         else:
             # No components found, or only background
             clean_binary = binary
-            
+
         # Calculate the horizontal projection profile on the cleaned image
         horizontal_projection = np.sum(clean_binary, axis=1)
         
@@ -386,15 +462,6 @@ class AdaptiveSegmenter:
         else:
             # If no text is found, use the original cleaned image
             analysis_image = clean_binary
-
-        # Save cropped image (optional, only if image_name is provided)
-        if SHOW_OUTPUT_IMAGES:
-            if image_name is not None:
-                os.makedirs(self.output_folder, exist_ok=True)
-                output_path = f'{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_cropped_adaptive.png'
-                os.makedirs(f'{self.output_folder}/paddle_visualisations', exist_ok=True)
-                cv2.imwrite(output_path, analysis_image)
-                print(f"\nSaved cropped image to '{output_path}'")
         
         # --- Step 3: Hierarchical Adaptive Search (using the new clean_binary) ---
         # The rest of the pipeline is identical but now operates on a superior image.
@@ -402,6 +469,14 @@ class AdaptiveSegmenter:
         target_word_count = len(words)
 
         print(f"Target word count: {target_word_count}")
+
+        # Save cropped image (optional, only if image_name is provided)
+        if SHOW_OUTPUT_IMAGES:
+            os.makedirs(self.output_folder, exist_ok=True)
+            output_path = f'{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_clean_binary.png'
+            os.makedirs(f'{self.output_folder}/paddle_visualisations', exist_ok=True)
+            cv2.imwrite(output_path, analysis_image)
+            #print(f"\nSaved cropped image to '{output_path}'")
 
         best_boxes = None
         successful_binary_image = None
@@ -416,6 +491,7 @@ class AdaptiveSegmenter:
         for v_factor in valley_factors_to_try:
             # Pass the cropped image to the helper
             unlabeled_boxes = self._get_boxes_from_profile(analysis_image, avg_char_width_approx, min_space_factor, v_factor)
+            # ... (The rest of the Stage 1 loop is the same)
             if abs(target_word_count - len(unlabeled_boxes)) <= match_tolerance:
                  best_boxes = unlabeled_boxes
                  successful_binary_image = analysis_image
@@ -494,6 +570,9 @@ class AdaptiveSegmenter:
                     comp_w = stats[j, cv2.CC_STAT_WIDTH]
                     comp_r = comp_x + comp_w # Component right edge
 
+                    # --- THE CRITICAL FIX: Check for OVERLAP, not strict containment ---
+                    # Old logic: if box_x <= comp_x < box_r:
+                    # New logic:
                     if comp_x < box_r and box_x < comp_r:
                         components_in_box.append(stats[j])
                 
@@ -574,9 +653,11 @@ class AdaptiveSegmenter:
             for key in remapped_output.keys():
                 remapped_output[key].append(box[key])
 
+        # Visualisation
         if SHOW_OUTPUT_IMAGES:
-            # Visualisation
-            output_image_vis = deskewed_line_image.copy()
+            output_path = f'{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_final_boxes.png'
+            os.makedirs(f'{self.output_folder}/paddle_visualisations', exist_ok=True)
+            output_image_vis = line_image.copy()
             print(f"\nFinal refined {len(remapped_output['text'])} words:")
             for i in range(len(remapped_output['text'])):
                 word = remapped_output['text'][i]
@@ -586,9 +667,6 @@ class AdaptiveSegmenter:
                 )
                 print(f"- '{word}' at ({x}, {y}, {w}, {h})")
                 cv2.rectangle(output_image_vis, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            
-            output_path = f'{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_refined_adaptive.png'
-            os.makedirs(f'{self.output_folder}/paddle_visualisations', exist_ok=True)
             cv2.imwrite(output_path, output_image_vis)
             print(f"\nSaved visualisation to '{output_path}'")
         
@@ -806,10 +884,12 @@ class HybridWordSegmenter:
 # --- Example Usage ---
 if __name__ == '__main__':
     # Make sure you have the previous class available to import for the fallback
-    #image_path = 'inputs/example_partnership_p6_1.PNG'
-    #image_path = 'inputs/example_partnership_p6_2.PNG'
-    #image_path = 'inputs/example_partnership_p4_1.PNG'
-    image_path = 'inputs/line_image_3.png'
+    image_path = 'input/example_partnership_p6_1.PNG'
+    #image_path = 'input/example_partnership_p6_2.PNG'
+    #image_path = 'input/example_partnership_p4_1.PNG'
+    #image_path = 'input/line_image_3.png'
+    #image_path = 'input/cora_fuller.png'
+    #image_path = 'input/london_borough_of_lambeth.png'
     image_basename = os.path.basename(image_path)
     image_name = os.path.splitext(image_basename)[0]
     output_path = f'outputs/{image_name}_refined_morph.png'
@@ -819,14 +899,14 @@ if __name__ == '__main__':
     h, w, _ = line_image_cv.shape
 
     # Read in related text
-    with open(f'inputs/{image_name}_text.txt', 'r') as file:
+    with open(f'input/{image_name}_text.txt', 'r') as file:
         text = file.read()
     line_data = {
         "text": [text],
         "left": [0], "top": [0], "width": [w], "height": [h], "conf": [95.0]
     }
     segmenter = AdaptiveSegmenter()
-    final_word_data, used_fallback = segmenter.segment(line_data, line_image_cv)
+    final_word_data, used_fallback = segmenter.segment(line_data, line_image_cv, image_name=image_name)
 
     # Visualisation
     output_image_vis = line_image_cv.copy()
