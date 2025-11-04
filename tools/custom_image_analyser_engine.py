@@ -568,14 +568,16 @@ def _vlm_ocr_predict(
     """
     try:
         # Use the VLM to extract text
+        # Pass None for parameters to prioritize model-specific defaults from run_vlm.py
+        # If model defaults are not available, general defaults will be used (matching current values)
         extracted_text = vlm_generate_image(
             text=prompt,
             image=image,
-            max_new_tokens=MAX_NEW_TOKENS,
-            temperature=0.7,
-            top_p=0.9,
-            top_k=50,
-            repetition_penalty=1.3,
+            max_new_tokens=None,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
+            temperature=None,  # Use model default if available, otherwise 0.7
+            top_p=None,  # Use model default if available, otherwise 0.9
+            top_k=None,  # Use model default if available, otherwise 50
+            repetition_penalty=None,  # Use model default if available, otherwise 1.3
         )
 
         if extracted_text and extracted_text.strip():
