@@ -18,5 +18,5 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
-          HF_REPO_ID: ${{ secrets.HF_REPO_ID_ZERO_GPU }}
+          HF_REPO_ID_ZERO_GPU: ${{ secrets.HF_REPO_ID_ZERO_GPU }}
         run: git push https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID_ZERO_GPU dev
