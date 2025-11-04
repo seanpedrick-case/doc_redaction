@@ -129,6 +129,12 @@ class AdaptiveSegmenter:
     def segment(self, line_data: Dict[str, List], line_image: np.ndarray, min_space_factor=MIN_SPACE_FACTOR, match_tolerance=MATCH_TOLERANCE, image_name: str = None) -> Tuple[Dict[str, List], bool]:
         if line_image is None: return ({}, False)
         
+        # Early return if 1 or fewer words
+        if line_data and line_data.get("text") and len(line_data["text"]) > 0:
+            words = line_data["text"][0].split()
+            if len(words) <= 1:
+                return ({}, False)
+        
         shortened_line_text = line_data["text"][0].replace(" ", "_")[:10]
 
         if SHOW_OUTPUT_IMAGES:
@@ -607,6 +613,13 @@ class HybridWordSegmenter:
         """
         if line_image is None: return line_data
         
+        # Early return if 1 or fewer words
+        if line_data and line_data.get("text"):
+            words = line_data["text"][0].split()
+            if len(words) <= 1:
+                img_h, img_w = line_image.shape[:2]
+                return self._convert_line_to_word_level_improved(line_data, img_w, img_h)
+        
         gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
         _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         img_h, img_w = binary.shape
@@ -640,29 +653,30 @@ class HybridWordSegmenter:
         ltr_boxes = self._run_single_pass(initial_boxes, vertical_projection, max_scan_distance, img_w, 'ltr')
         rtl_boxes = self._run_single_pass(initial_boxes, vertical_projection, max_scan_distance, img_w, 'rtl')
 
-        # 3. Average the results
-        averaged_boxes = [box.copy() for box in initial_boxes]
-        for i in range(len(averaged_boxes)):
-            ltr_right = ltr_boxes[i]['left'] + ltr_boxes[i]['width']
+        # 3. Combine the results by taking the best edge from each pass
+        combined_boxes = [box.copy() for box in initial_boxes]
+        for i in range(len(combined_boxes)):
+            
+            # Get the "expert" left boundary from the LTR pass
+            final_left = ltr_boxes[i]['left']
+            
+            # Get the "expert" right boundary from the RTL pass
             rtl_right = rtl_boxes[i]['left'] + rtl_boxes[i]['width']
             
-            avg_left = (ltr_boxes[i]['left'] + rtl_boxes[i]['left']) / 2
-            avg_right = (ltr_right + rtl_right) / 2
-            
-            averaged_boxes[i]['left'] = int(avg_left)
-            averaged_boxes[i]['width'] = int(avg_right - avg_left)
+            combined_boxes[i]['left'] = final_left
+            combined_boxes[i]['width'] = max(1, rtl_right - final_left)
 
         # 4. Final De-overlap Pass
         last_corrected_right_edge = 0
-        for i, box in enumerate(averaged_boxes):
+        for i, box in enumerate(combined_boxes):
             if box['left'] < last_corrected_right_edge:
                 box['width'] = max(1, box['width'] - (last_corrected_right_edge - box['left']))
                 box['left'] = last_corrected_right_edge
             
             if box['width'] < 1:
                 # Handle edge case where a box is completely eliminated
-                if i < len(averaged_boxes) - 1:
-                     next_left = averaged_boxes[i+1]['left']
+                if i < len(combined_boxes) - 1:
+                     next_left = combined_boxes[i+1]['left']
                      box['width'] = max(1, next_left - box['left'])
                 else:
                     box['width'] = 1
@@ -671,254 +685,11 @@ class HybridWordSegmenter:
 
         # Convert back to Tesseract-style output dict
         final_output = {k: [] for k in estimated_data.keys()}
-        for box in averaged_boxes:
+        for box in combined_boxes:
             if box['width'] > 0: # Ensure we don't add zero-width boxes
                 for key in final_output.keys():
                     final_output[key].append(box[key])
         
-        return final_output
-
-    def refine_words_with_image(
-
-        self,
-
-        line_data: Dict[str, List],
-
-        line_image: np.ndarray,
-
-    ) -> Dict[str, List]:
-
-        """
-
-        Step 2: Refines the estimated boxes using image data and a
-
-        "Bounded Scan" to avoid aggressive corrections.
-
-        """
-
-       
-
-        # --- 2a. Get Binarized Image and Projection Profile ---
-
-        if line_image is None:
-
-            print("Error: Invalid image passed.")
-
-            return line_data
-
-
-
-        gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
-
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-        img_h, img_w = binary.shape
-
-        vertical_projection = np.sum(binary, axis=0)       
-
-        # --- Calculate Avg. Char Width and Max Scan Distance ---
-
-        char_blobs = []
-
-        in_blob = False
-
-        blob_start = 0
-
-        for x, col_sum in enumerate(vertical_projection):
-
-            if col_sum > 0 and not in_blob:
-
-                blob_start = x
-
-                in_blob = True
-
-            elif col_sum == 0 and in_blob:
-
-                char_blobs.append((blob_start, x))
-
-                in_blob = False
-
-        if in_blob:
-
-            char_blobs.append((blob_start, img_w))
-
-
-
-        if not char_blobs:
-
-            print("No text detected in image for refinement.")
-
-            return self._convert_line_to_word_level_improved(line_data, img_w, img_h)
-
-
-        avg_char_width = np.mean([end - start for start, end in char_blobs])
-       
-
-        # This is our "horizontal buffer". We won't scan further than this.
-
-        # We use 1.5 as a heuristic, you can tune this.
-
-        max_scan_distance = int(avg_char_width * 1.5)
-
-        print(f"Calculated avg char width: {avg_char_width:.2f}px. Max scan: {max_scan_distance}px")
-
-       
-
-        # --- 2b. Get Initial "Rough Draft" Estimates ---
-
-        estimated_data = self._convert_line_to_word_level_improved(line_data, img_w, img_h)
-
-       
-
-        if not estimated_data["text"]:
-
-            return estimated_data
-
-
-
-        initial_boxes = []
-
-        for i in range(len(estimated_data["text"])):
-
-            initial_boxes.append({
-
-                "text": estimated_data["text"][i],
-
-                "left": estimated_data["left"][i],
-
-                "top": estimated_data["top"][i],
-
-                "width": estimated_data["width"][i],
-
-                "height": estimated_data["height"][i],
-
-                "conf": estimated_data["conf"][i],
-
-            })       
-
-        # --- 2c. Iterate, Refine, and De-overlap (Now with Bounded Scan) ---
-
-        refined_boxes_list = []
-
-        last_corrected_right_edge = 0
-
-
-
-        for i, box in enumerate(initial_boxes):
-
-            left = int(box['left'])
-
-            right = int(box['left'] + box['width'])
-
-           
-
-            left = max(0, min(left, img_w - 1))
-
-            right = max(0, min(right, img_w - 1))
-
-
-
-            new_left = left
-
-            new_right = right
-
-
-
-            # **Check Right Boundary (Bounded Scan)**
-
-            if right < img_w and vertical_projection[right] > 0:
-
-                scan_limit = min(img_w, right + max_scan_distance) # Don't scan past buffer
-
-                for x in range(right + 1, scan_limit):
-
-                    if vertical_projection[x] == 0:
-
-                        new_right = x # Found clear space *within* buffer
-
-                        break
-
-                # If loop finishes without break, new_right is unchanged
-                # (i.e., we give up and keep the original estimate)
-
-            # **Check Left Boundary (Bounded Scan)**
-
-            if left > 0 and vertical_projection[left] > 0:
-
-                scan_limit = max(0, left - max_scan_distance) # Don't scan past buffer
-
-                for x in range(left - 1, scan_limit, -1):
-
-                    if vertical_projection[x] == 0:
-
-                        new_left = x # Found clear space *within* buffer
-
-                        break
-
-                # If loop finishes without break, new_left is unchanged
-
-
-
-            # **De-overlapping Logic:** (Unchanged)
-
-            if new_left < last_corrected_right_edge:
-
-                new_left = last_corrected_right_edge
-
-
-
-            # **Validity Check:** (Unchanged)
-
-            new_width = new_right - new_left
-
-            if new_width > 1:
-
-                box['left'] = new_left
-
-                box['width'] = new_width
-
-                refined_boxes_list.append(box)
-
-                last_corrected_right_edge = new_right
-
-            elif i > 0:
-
-                # If the box has collapsed (e.g., fully overlapped),
-
-                # try to give it a 1px space just to keep it from disappearing.
-
-                # This is an edge case.
-
-                new_left = last_corrected_right_edge + 1
-
-                new_right = new_left + 1
-
-                if new_right < img_w:
-
-                   box['left'] = new_left
-
-                   box['width'] = 1
-
-                   refined_boxes_list.append(box)
-
-                   last_corrected_right_edge = new_right
-
-
-
-
-
-        # --- 2d. Convert back to Tesseract-style output dict ---
-
-        final_output = {k: [] for k in estimated_data.keys()}
-
-        for box in refined_boxes_list:
-
-            for key in final_output.keys():
-
-                final_output[key].append(box[key])
-
-       
-
         return final_output
 
 # --- Example Usage ---

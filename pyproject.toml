@@ -46,27 +46,26 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+
+# For testing
 dev = ["pytest"]
 test = ["pytest", "pytest-cov"]
 
 # To install the app with paddle and vlm support with pip, example command (in base folder and correct python environment): pip install .[paddle,vlm], or uv pip install .[ocr,vlm] if using uv. Note need to GPU version of Torch below
 
-# New extra for PaddleOCR
+# Extra dependencies for PaddleOCR
 paddle = [
-    "paddlepaddle==3.2.0",
+    "paddlepaddle-gpu==3.2.0", # Specific version for compatibility with VLM and torch installation described below -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
     "paddleocr==3.3.0",
 ]
 
-# New extra for VLM models (including Torch)
+# Extra dependencies for VLM models
 vlm = [
     "torch==2.6.0", # should use --index-url https://download.pytorch.org/whl/cu126 for cuda support for paddleocr, need to install manually
     "torchvision==0.21",
     "transformers==4.57.1",
     "accelerate==1.11.0",
 ]
-
-
-
 
 # Configuration for Ruff linter:
 [tool.ruff]

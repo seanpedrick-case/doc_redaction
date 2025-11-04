@@ -618,7 +618,7 @@ class CustomImageAnalyzerEngine:
         """
         Initializes the CustomImageAnalyzerEngine.
 
-        :param ocr_engine: The OCR engine to use ("tesseract", "hybrid-paddle", "hybrid-vlm", or "paddle").
+        :param ocr_engine: The OCR engine to use ("tesseract", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", or "paddle").
         :param analyzer_engine: The Presidio AnalyzerEngine instance.
         :param tesseract_config: Configuration string for Tesseract. If None, uses TESSERACT_SEGMENTATION_LEVEL config.
         :param paddle_kwargs: Dictionary of keyword arguments for PaddleOCR constructor.
@@ -648,7 +648,7 @@ class CustomImageAnalyzerEngine:
             )
         self.output_folder = normalized_output_folder
 
-        if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle":
+        if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle" or self.ocr_engine == "hybrid-paddle-vlm":
             if PaddleOCR is None:
                 raise ImportError(
                     "paddleocr is not installed. Please run 'pip install paddleocr paddlepaddle' in your python environment and retry."
@@ -680,6 +680,11 @@ class CustomImageAnalyzerEngine:
             # The VLM model is loaded when run_vlm.py is imported
             print(f"Initializing hybrid VLM OCR with model: {SELECTED_MODEL}")
             self.paddle_ocr = None  # Not using PaddleOCR
+        
+        if self.ocr_engine == "hybrid-paddle-vlm":
+            # Hybrid PaddleOCR + VLM - requires both PaddleOCR and VLM
+            # The VLM model is loaded when run_vlm.py is imported
+            print(f"Initializing hybrid PaddleOCR + VLM OCR with model: {SELECTED_MODEL}")
 
         if not analyzer_engine:
             analyzer_engine = AnalyzerEngine()
@@ -1450,6 +1455,198 @@ class CustomImageAnalyzerEngine:
 
         return final_data
 
+    def _perform_hybrid_paddle_vlm_ocr(
+        self,
+        image: Image.Image,
+        ocr: Optional[Any] = None,
+        confidence_threshold: int = HYBRID_OCR_CONFIDENCE_THRESHOLD,
+        padding: int = HYBRID_OCR_PADDING,
+        image_name: str = "unknown_image_name",
+        input_image_width: int = None,
+        input_image_height: int = None,
+    ) -> Dict[str, list]:
+        """
+        Performs OCR using PaddleOCR at line level, then VLM for low-confidence lines.
+        Returns data in the same dictionary format as pytesseract.image_to_data.
+        
+        Args:
+            image: PIL Image to process
+            ocr: PaddleOCR instance (optional, uses self.paddle_ocr if not provided)
+            confidence_threshold: Confidence threshold below which VLM is used
+            padding: Padding to add around line crops
+            image_name: Name of the image for logging/debugging
+            input_image_width: Original image width (before preprocessing)
+            input_image_height: Original image height (before preprocessing)
+        
+        Returns:
+            Dictionary with OCR results in Tesseract format
+        """
+        if ocr is None:
+            if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
+                ocr = self.paddle_ocr
+            else:
+                raise ValueError(
+                    "No OCR object provided and 'paddle_ocr' is not initialized."
+                )
+
+        print("Starting hybrid PaddleOCR + VLM OCR process...")
+
+        # Get image dimensions
+        img_width, img_height = image.size
+        
+        # Use original dimensions if provided, otherwise use current image dimensions
+        if input_image_width is None:
+            input_image_width = img_width
+        if input_image_height is None:
+            input_image_height = img_height
+
+        # 1. Get initial line-level results from PaddleOCR
+        image_np = np.array(image)
+        if len(image_np.shape) == 2:
+            image_np = np.stack([image_np] * 3, axis=-1)
+        
+        paddle_results = ocr.predict(image_np)
+        
+        # Convert PaddleOCR results to line-level format
+        paddle_line_data = self._convert_paddle_to_tesseract_format(
+            paddle_results,
+            input_image_width=input_image_width,
+            input_image_height=input_image_height
+        )
+
+        # Prepare final output structure
+        final_data = {
+            "text": list(),
+            "left": list(),
+            "top": list(),
+            "width": list(),
+            "height": list(),
+            "conf": list(),
+            "model": list(),  # Track which model was used for each line
+        }
+
+        num_lines = len(paddle_line_data["text"])
+
+        # Process each line
+        for i in range(num_lines):
+            line_text = paddle_line_data["text"][i]
+            line_conf = int(paddle_line_data["conf"][i])
+            line_left = float(paddle_line_data["left"][i])
+            line_top = float(paddle_line_data["top"][i])
+            line_width = float(paddle_line_data["width"][i])
+            line_height = float(paddle_line_data["height"][i])
+
+            # Skip empty lines
+            if not line_text.strip():
+                continue
+
+            # Initialize model as PaddleOCR (default)
+            model_used = "Paddle"
+
+            # Count words in PaddleOCR output
+            paddle_words = line_text.split()
+            paddle_word_count = len(paddle_words)
+
+            # If confidence is low, use VLM for a second opinion
+            if line_conf < confidence_threshold:
+                # Calculate crop coordinates with padding
+                crop_left = max(0, int(line_left - padding))
+                crop_top = max(0, int(line_top - padding))
+                crop_right = min(img_width, int(line_left + line_width + padding))
+                crop_bottom = min(img_height, int(line_top + line_height + padding))
+
+                # Ensure crop dimensions are valid
+                if crop_right <= crop_left or crop_bottom <= crop_top:
+                    # Invalid crop, keep original PaddleOCR result
+                    final_data["text"].append(clean_unicode_text(line_text))
+                    final_data["left"].append(line_left)
+                    final_data["top"].append(line_top)
+                    final_data["width"].append(line_width)
+                    final_data["height"].append(line_height)
+                    final_data["conf"].append(line_conf)
+                    final_data["model"].append(model_used)
+                    continue
+
+                # Crop the line image
+                cropped_image = image.crop(
+                    (crop_left, crop_top, crop_right, crop_bottom)
+                )
+
+                # Use VLM for OCR on this line
+                vlm_result = _vlm_ocr_predict(cropped_image)
+                vlm_rec_texts = vlm_result.get("rec_texts", [])
+                vlm_rec_scores = vlm_result.get("rec_scores", [])
+
+                if vlm_rec_texts and vlm_rec_scores:
+                    # Combine VLM words into a single text string
+                    vlm_text = " ".join(vlm_rec_texts)
+                    vlm_word_count = len(vlm_rec_texts)
+                    vlm_conf = int(round(np.median(vlm_rec_scores) * 100, 0))
+
+                    # Only replace if word counts match
+                    if vlm_word_count == paddle_word_count:
+                        print(
+                            f"  Re-OCR'd line: '{line_text}' (conf: {line_conf}, words: {paddle_word_count}) "
+                            f"-> '{vlm_text}' (conf: {vlm_conf:.0f}, words: {vlm_word_count}) [VLM]"
+                        )
+
+                        # For exporting example image comparisons
+                        safe_filename = self._create_safe_filename_with_confidence(
+                            line_text, vlm_text, line_conf, vlm_conf, "VLM"
+                        )
+
+                        if SAVE_EXAMPLE_HYBRID_IMAGES is True:
+                            # Normalize and validate image_name to prevent path traversal attacks
+                            normalized_image_name = os.path.normpath(image_name + "_hybrid_paddle_vlm")
+                            if (
+                                ".." in normalized_image_name
+                                or "/" in normalized_image_name
+                                or "\\" in normalized_image_name
+                            ):
+                                normalized_image_name = "safe_image"
+
+                            hybrid_ocr_examples_folder = (
+                                self.output_folder
+                                + f"/hybrid_ocr_examples/{normalized_image_name}"
+                            )
+                            # Validate the constructed path is safe
+                            if not validate_folder_containment(
+                                hybrid_ocr_examples_folder, OUTPUT_FOLDER
+                            ):
+                                raise ValueError(
+                                    f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
+                                )
+
+                            if not os.path.exists(hybrid_ocr_examples_folder):
+                                os.makedirs(hybrid_ocr_examples_folder)
+                            output_image_path = (
+                                hybrid_ocr_examples_folder + f"/{safe_filename}.png"
+                            )
+                            print(f"Saving example image to {output_image_path}")
+                            cropped_image.save(output_image_path)
+
+                        # Replace with VLM result
+                        line_text = vlm_text
+                        line_conf = vlm_conf
+                        model_used = "VLM"
+                    else:
+                        print(
+                            f"  Line: '{line_text}' (conf: {line_conf}, words: {paddle_word_count}) -> "
+                            f"VLM result '{vlm_text}' (conf: {vlm_conf:.0f}, words: {vlm_word_count}) "
+                            f"word count mismatch. Keeping PaddleOCR result."
+                        )
+
+            # Append the final result (either original PaddleOCR or replaced VLM)
+            final_data["text"].append(clean_unicode_text(line_text))
+            final_data["left"].append(line_left)
+            final_data["top"].append(line_top)
+            final_data["width"].append(line_width)
+            final_data["height"].append(line_height)
+            final_data["conf"].append(int(line_conf))
+            final_data["model"].append(model_used)
+
+        return final_data
+
     def perform_ocr(
         self, image: Union[str, Image.Image, np.ndarray], ocr: Optional[Any] = None
     ) -> List[OCRResult]:
@@ -1502,6 +1699,23 @@ class CustomImageAnalyzerEngine:
         elif self.ocr_engine == "hybrid-vlm":
             # Try hybrid VLM with original image for cropping:
             ocr_data = self._perform_hybrid_ocr(image, image_name=image_name)
+
+        elif self.ocr_engine == "hybrid-paddle-vlm":
+            # Hybrid PaddleOCR + VLM: use PaddleOCR at line level, then VLM for low-confidence lines
+            if ocr is None:
+                if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
+                    ocr = self.paddle_ocr
+                else:
+                    raise ValueError(
+                        "No OCR object provided and 'paddle_ocr' is not initialized."
+                    )
+            ocr_data = self._perform_hybrid_paddle_vlm_ocr(
+                image,
+                ocr=ocr,
+                image_name=image_name,
+                input_image_width=original_image_width,
+                input_image_height=original_image_height,
+            )
 
         elif self.ocr_engine == "tesseract":
 
@@ -1589,8 +1803,9 @@ class CustomImageAnalyzerEngine:
             #   matching the preprocessed image we're cropping from - no scaling needed
             needs_scaling = False
             if PREPROCESS_LOCAL_OCR_IMAGES and original_image_width and original_image_height:
-                if self.ocr_engine == "paddle":
+                if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle-vlm":
                     # PaddleOCR coordinates are converted to original space by _convert_paddle_to_tesseract_format
+                    # hybrid-paddle-vlm also uses PaddleOCR and converts to original space
                     needs_scaling = True
             
             if needs_scaling:
@@ -1630,7 +1845,8 @@ class CustomImageAnalyzerEngine:
         if scale_factor != 1.0:
             # Skip rescaling for PaddleOCR since _convert_paddle_to_tesseract_format 
             # already scales coordinates directly to original image dimensions
-            if self.ocr_engine == "paddle":
+            # hybrid-paddle-vlm also uses PaddleOCR and converts to original space
+            if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle-vlm":
                 pass
                 #print(f"Skipping rescale_ocr_data for PaddleOCR (already scaled to original dimensions)")
             else:
@@ -1656,7 +1872,8 @@ class CustomImageAnalyzerEngine:
                 "Tesseract" if self.ocr_engine == "tesseract" else
                 "Paddle" if self.ocr_engine == "paddle" else
                 "hybrid-paddle" if self.ocr_engine == "hybrid-paddle" else
-                "VLM" if self.ocr_engine == "hybrid-vlm" else None
+                "VLM" if self.ocr_engine == "hybrid-vlm" else
+                "hybrid-paddle-vlm" if self.ocr_engine == "hybrid-paddle-vlm" else None
             )
             get_model = lambda idx: default_model
 

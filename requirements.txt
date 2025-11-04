@@ -31,7 +31,7 @@ spaces==0.42.1
 # paddleOCR if you want to use better quality local text extraction
 # paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ # CPU version
 # Below compatible with CUDA 12.6. See this for more details: # https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/linux-pip_en.html#span-id-gpu-gpu-version-of-paddlepaddle-span 
-#paddlepaddle-gpu==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+paddlepaddle-gpu==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
 #https://paddle-whl.bj.bcebos.com/stable/cu126/paddlepaddle-gpu/paddlepaddle_gpu-3.2.1-cp311-cp311-win_amd64.whl
 paddleocr==3.3.0
 # Uncomment the following to run VLMs

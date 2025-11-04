@@ -498,7 +498,7 @@ if SHOW_LOCAL_OCR_MODEL_OPTIONS:
 else:
     LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
 
-vlm_options = ["hybrid-vlm"]
+vlm_options = ["hybrid-vlm", "hybrid-paddle-vlm"]
 if SHOW_VLM_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(vlm_options)
 
