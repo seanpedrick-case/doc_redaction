@@ -20,13 +20,11 @@ transformers==4.57.1
 accelerate==1.11.0
 
 # --- PyTorch (CUDA 12.6) ---
---extra-index-url https://download.pytorch.org/whl/cu126
-torch==2.6.0
-torchvision==0.21
+torch torchvision --index-url https://download.pytorch.org/whl/cu126
 
 # --- PaddleOCR (CUDA 12.6) ---
 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
-paddlepaddle-gpu==3.2.0
+paddlepaddle-gpu==3.2.1
 paddleocr==3.3.0
 
 # --- PDF / OCR / Redaction tools ---
