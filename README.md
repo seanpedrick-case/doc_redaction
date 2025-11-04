@@ -105,13 +105,28 @@ source venv/bin/activate
 
 #### Step 3: Install Python Dependencies
 
+##### Lightweight version (without PaddleOCR and VLM support)
+
 This project uses `pyproject.toml` to manage dependencies. You can install everything with a single pip command. This process will also download the required Spacy models and other packages directly from their URLs.
 
 ```bash
-pip install .
+pip install .[paddle,vlm]
 ```
 
-Alternatively, you can use the `requirements.txt` file:
+Alternatively, you can install from the `requirements_lightweight.txt` file:
+```bash
+pip install -r requirements_lightweight.txt
+```
+
+##### Full version (with Paddle and VLM support)
+
+Run the following command to install the additional dependencies:
+
+```bash
+pip install .[paddle,vlm]
+```
+
+Alternatively, you can use the full `requirements.txt` file, that contains references to the PaddleOCR and related Torch/transformers dependencies (for cuda 12.6):
 ```bash
 pip install -r requirements.txt
 ```
