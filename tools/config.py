@@ -512,9 +512,9 @@ HYBRID_OCR_PADDING = int(
     get_or_create_env_var("HYBRID_OCR_PADDING", "1")
 )  # The padding to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
 
-TESSERACT_SEGMENTATION_LEVEL = get_or_create_env_var(
-    "TESSERACT_SEGMENTATION_LEVEL", "word"
-)  # Tesseract segmentation level: "word" (PSM 11) or "line" (PSM 6)
+TESSERACT_SEGMENTATION_LEVEL = int(get_or_create_env_var(
+    "TESSERACT_SEGMENTATION_LEVEL", "11"
+))  # Tesseract segmentation level: PSM level to use for Tesseract OCR
 
 CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
     get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "False")

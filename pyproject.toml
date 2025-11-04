@@ -4,10 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "1.4.1"
+version = "1.5.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 requires-python = ">=3.10"
+
+[project.urls]
+Homepage = "https://seanpedrick-case.github.io/doc_redaction/"
+repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 dependencies = [
     "pdfminer.six==20250506",
@@ -38,17 +42,31 @@ dependencies = [
     "python-docx==1.2.0",
     "polars==1.33.1",
     "defusedxml==0.7.1",
-    #"paddlepaddle==3.2.0", # Optional paddle imports - only if you want to use hybrid OCR mode with tesseract and paddleOCR
-    #"paddleocr==3.3.0"    
+    "numpy==2.2.6"
 ]
-
-[project.urls]
-Homepage = "https://seanpedrick-case.github.io/doc_redaction/"
-repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 [project.optional-dependencies]
 dev = ["pytest"]
 test = ["pytest", "pytest-cov"]
+
+# To install the app with paddle and vlm support with pip, example command (in base folder and correct python environment): pip install .[paddle,vlm], or uv pip install .[ocr,vlm] if using uv. Note need to GPU version of Torch below
+
+# New extra for PaddleOCR
+paddle = [
+    "paddlepaddle==3.2.0",
+    "paddleocr==3.3.0",
+]
+
+# New extra for VLM models (including Torch)
+vlm = [
+    "torch==2.6.0", # should use --index-url https://download.pytorch.org/whl/cu126 for cuda support for paddleocr, need to install manually
+    "torchvision==0.21",
+    "transformers==4.57.1",
+    "accelerate==1.11.0",
+]
+
+
+
 
 # Configuration for Ruff linter:
 [tool.ruff]

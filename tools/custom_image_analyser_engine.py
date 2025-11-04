@@ -42,6 +42,7 @@ from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.run_vlm import generate_image as vlm_generate_image
 from tools.secure_path_utils import validate_folder_containment
 from tools.secure_regex_utils import safe_sanitize_text
+from tools.word_segmenter import AdaptiveSegmenter
 
 if PREPROCESS_LOCAL_OCR_IMAGES == "True":
     PREPROCESS_LOCAL_OCR_IMAGES = True
@@ -553,7 +554,7 @@ def _get_tesseract_psm(segmentation_level: str) -> int:
 
 def _vlm_ocr_predict(
     image: Image.Image,
-    prompt: str = "Extract all text from this image. Return only the text, no other information.",
+    prompt: str = "Extract the text content from this image.",
 ) -> Dict[str, Any]:
     """
     VLM OCR prediction function that mimics PaddleOCR's interface.
@@ -688,7 +689,8 @@ class CustomImageAnalyzerEngine:
         if tesseract_config:
             self.tesseract_config = tesseract_config
         else:
-            psm_value = _get_tesseract_psm(TESSERACT_SEGMENTATION_LEVEL)
+            # Following function does not actually work correctly, so always use PSM 11
+            psm_value = TESSERACT_SEGMENTATION_LEVEL #_get_tesseract_psm(TESSERACT_SEGMENTATION_LEVEL)
             self.tesseract_config = f"--oem 3 --psm {psm_value}"
             # print(
             #     f"Tesseract configured for {TESSERACT_SEGMENTATION_LEVEL}-level segmentation (PSM {psm_value})"
@@ -772,152 +774,6 @@ class CustomImageAnalyzerEngine:
 
         return f"{safe_original}_conf_{conf}_to_{safe_new}_conf_{new_conf}"
 
-    # def _convert_line_to_word_level(
-    #     self, line_data: Dict[str, List], image_width: int, image_height: int
-    # ) -> Dict[str, List]:
-    #     """
-    #     Converts line-level OCR results to word-level results by splitting text and estimating word positions.
-
-    #     Args:
-    #         line_data: Dictionary with line-level OCR data (text, left, top, width, height, conf)
-    #         image_width: Width of the original image
-    #         image_height: Height of the original image
-
-    #     Returns:
-    #         Dictionary with word-level OCR data in Tesseract format
-    #     """
-    #     output = {
-    #         "text": list(),
-    #         "left": list(),
-    #         "top": list(),
-    #         "width": list(),
-    #         "height": list(),
-    #         "conf": list(),
-    #     }
-
-    #     if not line_data or not line_data.get("text"):
-    #         return output
-
-    #     for i in range(len(line_data["text"])):
-    #         line_text = line_data["text"][i]
-    #         line_left = line_data["left"][i]
-    #         line_top = line_data["top"][i]
-    #         line_width = line_data["width"][i]
-    #         line_height = line_data["height"][i]
-    #         line_conf = line_data["conf"][i]
-
-    #         # Skip empty lines
-    #         if not line_text.strip():
-    #             continue
-
-    #         # Split line into words
-    #         words = line_text.split()
-    #         if not words:
-    #             continue
-
-    #         # Calculate character width for this line
-    #         total_chars = len(line_text)
-    #         avg_char_width = line_width / total_chars if total_chars > 0 else 0
-
-    #         current_char_offset = 0
-
-    #         for word in words:
-    #             # Calculate word width based on character count
-    #             word_width = float(len(word) * avg_char_width)
-    #             word_left = line_left + float(current_char_offset * avg_char_width)
-
-    #             # Ensure word doesn't exceed image boundaries
-    #             word_left = max(0, min(word_left, image_width - word_width))
-    #             word_width = min(word_width, image_width - word_left)
-
-    #             output["text"].append(word)
-    #             output["left"].append(word_left)
-    #             output["top"].append(line_top)
-    #             output["width"].append(word_width)
-    #             output["height"].append(line_height)
-    #             output["conf"].append(line_conf)
-
-    #             # Update offset for the next word (add word length + 1 for the space)
-    #             current_char_offset += len(word) + 1
-
-    #     return output
-
-    def _convert_line_to_word_level(
-        self, line_data: Dict[str, List], image_width: int, image_height: int
-    ) -> Dict[str, List]:
-        """
-        Converts line-level OCR results to word-level by using a more robust
-        proportional estimation method.
-        """
-        output = {
-            "text": list(), "left": list(), "top": list(), "width": list(),
-            "height": list(), "conf": list(),
-        }
-
-        if not line_data or not line_data.get("text"):
-            return output
-
-        for i in range(len(line_data["text"])):
-            line_text = line_data["text"][i]
-            line_left = round(float(line_data["left"][i]), 2)
-            line_top = round(float(line_data["top"][i]), 2)
-            line_width = round(float(line_data["width"][i]), 2)
-            line_height = round(float(line_data["height"][i]), 2)
-            line_conf = line_data["conf"][i]
-
-            if not line_text.strip():
-                continue
-
-            words = line_text.split()
-            if not words:
-                continue
-
-            # --- Improved Logic Starts Here ---
-
-            # 1. Calculate counts of characters and spaces
-            num_chars = len("".join(words))
-            num_spaces = len(words) - 1
-
-            if num_chars == 0:
-                continue
-
-            # 2. Estimate the width of a single space. A common heuristic is that
-            # the total space between words takes up a certain fraction of the line.
-            # Let's assume text characters are, on average, twice as wide as a space.
-            # So, line_width = (num_chars * 2*space_width) + (num_spaces * space_width)
-            # This allows us to solve for space_width.
-            if (num_chars * 2 + num_spaces) > 0:
-                # Heuristic ratio: average char is 2x a space width
-                char_space_ratio = 2.0
-                estimated_space_width = line_width / (num_chars * char_space_ratio + num_spaces)
-                avg_char_width = estimated_space_width * char_space_ratio
-            else:
-                # Fallback to your original method if line has no spaces
-                avg_char_width = line_width / (num_chars if num_chars > 0 else 1)
-                estimated_space_width = avg_char_width
-
-            # --- End of Improved Logic ---
-
-            current_left = line_left
-
-            for word in words:
-                word_width = len(word) * avg_char_width
-
-                # Clamp values to be within image boundaries
-                clamped_left = max(0, min(current_left, image_width))
-                clamped_width = max(0, min(word_width, image_width - clamped_left))
-
-                output["text"].append(word)
-                output["left"].append(clamped_left)
-                output["top"].append(line_top)
-                output["width"].append(clamped_width)
-                output["height"].append(line_height)
-                output["conf"].append(line_conf) # Still a simplification
-
-                # Update the left offset for the next word
-                current_left += word_width + estimated_space_width
-
-        return output
 
     def _is_line_level_data(self, ocr_data: Dict[str, List]) -> bool:
         """
@@ -1083,6 +939,142 @@ class CustomImageAnalyzerEngine:
                 output["width"].append(round(line_width, 2))
                 output["height"].append(round(line_height, 2))
                 output["conf"].append(int(line_confidence * 100))
+
+        return output
+
+    def _convert_line_to_word_level(
+        self, line_data: Dict[str, List], image_width: int, image_height: int, image: Image.Image, image_name: str = None
+    ) -> Dict[str, List]:
+        """
+        Converts line-level OCR results to word-level using AdaptiveSegmenter.segment().
+        This method processes each line individually using the adaptive segmentation algorithm.
+        
+        Args:
+            line_data: Dictionary with keys "text", "left", "top", "width", "height", "conf" (all lists)
+            image_width: Width of the full image
+            image_height: Height of the full image
+            image: PIL Image object of the full image
+            image_name: Name of the image
+        Returns:
+            Dictionary with same keys as input, containing word-level bounding boxes
+        """
+        output = {
+            "text": list(), "left": list(), "top": list(), "width": list(),
+            "height": list(), "conf": list(),
+        }
+
+        if not line_data or not line_data.get("text"):
+            return output
+
+        # Convert PIL Image to numpy array (BGR format for OpenCV)
+        if hasattr(image, 'size'):  # PIL Image
+            image_np = np.array(image)
+            if len(image_np.shape) == 3:
+                # Convert RGB to BGR for OpenCV
+                image_np = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+            elif len(image_np.shape) == 2:
+                # Grayscale - convert to BGR
+                image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
+        else:
+            # Already numpy array
+            image_np = image.copy()
+            if len(image_np.shape) == 2:
+                image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
+
+        segmenter = AdaptiveSegmenter(output_folder=self.output_folder)
+
+        # Process each line
+        for i in range(len(line_data["text"])):
+            line_text = line_data["text"][i]
+            line_conf = line_data["conf"][i]
+
+            # Get the float values
+            f_left = float(line_data["left"][i])
+            f_top = float(line_data["top"][i])
+            f_width = float(line_data["width"][i])
+            f_height = float(line_data["height"][i])
+
+            # A simple heuristic to check if coords are normalized
+            # If any value is > 1.0, assume they are already pixels
+            is_normalized = (f_left <= 1.0 and f_top <= 1.0 and f_width <= 1.0 and f_height <= 1.0)
+
+            if is_normalized:
+                # Convert from normalized (0.0-1.0) to absolute pixels
+                line_left = float(round(f_left * image_width))
+                line_top = float(round(f_top * image_height))
+                line_width = float(round(f_width * image_width))
+                line_height = float(round(f_height * image_height))
+            else:
+                # They are already pixels, just convert to int
+                line_left = float(round(f_left))
+                line_top = float(round(f_top))
+                line_width = float(round(f_width))
+                line_height = float(round(f_height))
+
+            if not line_text.strip():
+                continue
+
+            # Clamp bounding box to image boundaries
+            line_left = int(max(0, min(line_left, image_width - 1)))
+            line_top = int(max(0, min(line_top, image_height - 1)))
+            line_width = int(max(1, min(line_width, image_width - line_left)))
+            line_height = int(max(1, min(line_height, image_height - line_top)))
+
+            print(f"Line left: {line_left}, Line top: {line_top}, Line width: {line_width}, Line height: {line_height}")
+
+            # Crop the line image from the full image
+            line_image = image_np[line_top:line_top + line_height, line_left:line_left + line_width]
+
+            if line_image.size == 0:
+                continue
+
+            # Create single-line data structure for segment method
+            single_line_data = {
+                "text": [line_text],
+                "left": [0],  # Relative to cropped image
+                "top": [0],
+                "width": [line_width],
+                "height": [line_height],
+                "conf": [line_conf],
+            }
+
+            # Use AdaptiveSegmenter.segment() to segment this line
+            word_output, _ = segmenter.segment(single_line_data, line_image, image_name=image_name)
+
+            if not word_output or not word_output.get("text"):
+                # If segmentation failed, fall back to proportional estimation
+                words = line_text.split()
+                if words:
+                    num_chars = len("".join(words))
+                    num_spaces = len(words) - 1
+                    if num_chars > 0:
+                        char_space_ratio = 2.0
+                        estimated_space_width = line_width / (num_chars * char_space_ratio + num_spaces) if (num_chars * char_space_ratio + num_spaces) > 0 else line_width / num_chars
+                        avg_char_width = estimated_space_width * char_space_ratio
+                        current_left = 0
+                        for word in words:
+                            word_width = len(word) * avg_char_width
+                            clamped_left = max(0, min(current_left, line_width))
+                            clamped_width = max(0, min(word_width, line_width - clamped_left))
+                            output["text"].append(word)
+                            output["left"].append(line_left + clamped_left)  # Add line offset
+                            output["top"].append(line_top)
+                            output["width"].append(clamped_width)
+                            output["height"].append(line_height)
+                            output["conf"].append(line_conf)
+                            current_left += word_width + estimated_space_width
+                continue
+
+            # Adjust coordinates back to full image coordinates
+            for j in range(len(word_output["text"])):
+                output["text"].append(word_output["text"][j])
+                output["left"].append(line_left + word_output["left"][j])
+                output["top"].append(line_top + word_output["top"][j])
+                output["width"].append(word_output["width"][j])
+                output["height"].append(word_output["height"][j])
+                output["conf"].append(word_output["conf"][j])
+        
+        print(f"Output: {output}")
 
         return output
 
@@ -1590,9 +1582,47 @@ class CustomImageAnalyzerEngine:
         # Convert line-level results to word-level if configured and needed
         if CONVERT_LINE_TO_WORD_LEVEL and self._is_line_level_data(ocr_data):
             print("Converting line-level OCR results to word-level...")
-            ocr_data = self._convert_line_to_word_level(
-                ocr_data, image_width, image_height
-            )
+            # Check if coordinates need to be scaled to match the preprocessed image
+            # For PaddleOCR: _convert_paddle_to_tesseract_format converts coordinates to original image space,
+            #   but we need to crop from the preprocessed image, so we need to scale coordinates up
+            # For Tesseract: OCR runs on preprocessed image, so coordinates are already in preprocessed space,
+            #   matching the preprocessed image we're cropping from - no scaling needed
+            needs_scaling = False
+            if PREPROCESS_LOCAL_OCR_IMAGES and original_image_width and original_image_height:
+                if self.ocr_engine == "paddle":
+                    # PaddleOCR coordinates are converted to original space by _convert_paddle_to_tesseract_format
+                    needs_scaling = True
+            
+            if needs_scaling:
+                # Calculate scale factors from original to preprocessed
+                scale_x = image_width / original_image_width
+                scale_y = image_height / original_image_height
+                print(f"Scaling coordinates from original ({original_image_width}x{original_image_height}) to preprocessed ({image_width}x{image_height})")
+                print(f"Scale factors: x={scale_x:.3f}, y={scale_y:.3f}")
+                # Scale coordinates to preprocessed image space for cropping
+                scaled_ocr_data = {
+                    "text": ocr_data["text"],
+                    "left": [x * scale_x for x in ocr_data["left"]],
+                    "top": [y * scale_y for y in ocr_data["top"]],
+                    "width": [w * scale_x for w in ocr_data["width"]],
+                    "height": [h * scale_y for h in ocr_data["height"]],
+                    "conf": ocr_data["conf"],
+                }
+                ocr_data = self._convert_line_to_word_level(
+                    scaled_ocr_data, image_width, image_height, image, image_name=image_name
+                )
+                # Scale word-level results back to original image space
+                scale_factor_x = original_image_width / image_width
+                scale_factor_y = original_image_height / image_height
+                for i in range(len(ocr_data["left"])):
+                    ocr_data["left"][i] = ocr_data["left"][i] * scale_factor_x
+                    ocr_data["top"][i] = ocr_data["top"][i] * scale_factor_y
+                    ocr_data["width"][i] = ocr_data["width"][i] * scale_factor_x
+                    ocr_data["height"][i] = ocr_data["height"][i] * scale_factor_y
+            else:
+                ocr_data = self._convert_line_to_word_level(
+                    ocr_data, image_width, image_height, image, image_name=image_name
+                )
 
         # Always check for scale_factor, even if preprocessing_metadata is empty
         # This ensures rescaling happens correctly when preprocessing was applied
