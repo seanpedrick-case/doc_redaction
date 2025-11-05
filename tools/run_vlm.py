@@ -6,7 +6,49 @@ from threading import Thread
 import spaces
 from PIL import Image
 
-from tools.config import MAX_SPACES_GPU_RUN_TIME, SHOW_VLM_MODEL_OPTIONS
+from tools.config import (
+    LOAD_PADDLE_AT_STARTUP,
+    MAX_SPACES_GPU_RUN_TIME,
+    PADDLE_DET_DB_UNCLIP_RATIO,
+    PADDLE_MODEL_PATH,
+    PADDLE_USE_TEXTLINE_ORIENTATION,
+    SHOW_VLM_MODEL_OPTIONS,
+)
+
+if LOAD_PADDLE_AT_STARTUP is True:
+    try:
+        from paddleocr import PaddleOCR
+
+        paddle_kwargs = None
+
+        # Set PaddleOCR model directory environment variable (only if specified).
+        if PADDLE_MODEL_PATH and PADDLE_MODEL_PATH.strip():
+            os.environ["PADDLEOCR_MODEL_DIR"] = PADDLE_MODEL_PATH
+            print(f"Setting PaddleOCR model path to: {PADDLE_MODEL_PATH}")
+        else:
+            print("Using default PaddleOCR model storage location")
+
+        # Default paddle configuration if none provided
+        if paddle_kwargs is None:
+            paddle_kwargs = {
+                "det_db_unclip_ratio": PADDLE_DET_DB_UNCLIP_RATIO,
+                "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
+                "use_doc_orientation_classify": False,
+                "use_doc_unwarping": False,
+                "lang": "en",
+            }
+        else:
+            # Enforce language if not explicitly provided
+            paddle_kwargs.setdefault("lang", "en")
+
+        PaddleOCR(**paddle_kwargs)
+
+    except ImportError:
+        PaddleOCR = None
+        print(
+            "PaddleOCR not found. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
+        )
+
 
 if SHOW_VLM_MODEL_OPTIONS is True:
     import torch

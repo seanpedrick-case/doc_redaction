@@ -260,6 +260,9 @@ app = FastAPI()
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
+
+spaces.annotations
+
 ###
 # Load in Gradio app components
 ###

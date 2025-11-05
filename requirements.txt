@@ -45,7 +45,8 @@ pytest-cov>=4.0.0
 transformers==4.57.1
 accelerate==1.11.0
 
-# --- PaddleOCR (CUDA 12.6) ---
---extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
-paddlepaddle-gpu>=3.0.0, <=3.3.0
-paddleocr<=3.3.0
+# --- PyTorch (CUDA 12.6) ---
+nvidia-nccl-cu12==2.21.5
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch>=2.5.1, <=2.6.0
+torchvision>=0.20.1, <=0.24.0

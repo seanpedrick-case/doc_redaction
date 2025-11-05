@@ -659,7 +659,7 @@ class CustomImageAnalyzerEngine:
         ):
             if PaddleOCR is None:
                 raise ImportError(
-                    "paddleocr is not installed. Please run 'pip install paddleocr paddlepaddle' in your python environment and retry."
+                    "PaddleOCR is not installed. Please run 'pip install paddleocr paddlepaddle' in your python environment and retry."
                 )
 
             # Set PaddleOCR model directory environment variable (only if specified).

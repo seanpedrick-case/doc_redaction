@@ -520,6 +520,10 @@ CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
     get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "False")
 )  # Whether to convert paddle line-level OCR results to word-level for better precision
 
+LOAD_PADDLE_AT_STARTUP = convert_string_to_boolean(
+    get_or_create_env_var("LOAD_PADDLE_AT_STARTUP", "False")
+)  # Whether to load the PaddleOCR model at startup.
+
 PADDLE_USE_TEXTLINE_ORIENTATION = convert_string_to_boolean(
     get_or_create_env_var("PADDLE_USE_TEXTLINE_ORIENTATION", "False")
 )
