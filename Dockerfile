@@ -29,7 +29,7 @@ RUN if [ "$INSTALL_PADDLEOCR" = "True" ]; then \
 fi
 
 RUN if [ "$INSTALL_VLM" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install torch==2.6.0 torchvision --index-url https://download.pytorch.org/whl/cu126; \
+    pip install --verbose --no-cache-dir --target=/install torch==2.8.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cu126; \
     pip install --verbose --no-cache-dir --target=/install transformers==4.57.1 accelerate==1.11.0 bitsandbytes==0.48.1; \
 fi
 

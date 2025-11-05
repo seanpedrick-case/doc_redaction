@@ -1,4 +1,5 @@
 import os
+import spaces
 from pathlib import Path
 
 import gradio as gr
