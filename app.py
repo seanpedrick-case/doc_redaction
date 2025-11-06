@@ -2475,7 +2475,11 @@ with blocks:
         )
         handwrite_signature_checkbox.input(
             fn=check_for_existing_textract_file,
-            inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
+            inputs=[
+                doc_file_name_no_extension_textbox,
+                output_folder_textbox,
+                handwrite_signature_checkbox,
+            ],
             outputs=[textract_output_found_checkbox],
         ).then(
             calculate_aws_costs,
@@ -2565,7 +2569,11 @@ with blocks:
         )
         handwrite_signature_checkbox.input(
             fn=check_for_existing_textract_file,
-            inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
+            inputs=[
+                doc_file_name_no_extension_textbox,
+                output_folder_textbox,
+                handwrite_signature_checkbox,
+            ],
             outputs=[textract_output_found_checkbox],
         ).then(
             calculate_time_taken,
@@ -2700,7 +2708,11 @@ with blocks:
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
         fn=check_for_existing_textract_file,
-        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            output_folder_textbox,
+            handwrite_signature_checkbox,
+        ],
         outputs=[textract_output_found_checkbox],
     ).success(
         fn=check_for_relevant_ocr_output_with_words,
@@ -2987,7 +2999,11 @@ with blocks:
         show_progress_on=[annotator],
     ).success(
         fn=check_for_existing_textract_file,
-        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            output_folder_textbox,
+            handwrite_signature_checkbox,
+        ],
         outputs=[textract_output_found_checkbox],
     ).success(
         fn=check_for_relevant_ocr_output_with_words,
@@ -3168,7 +3184,11 @@ with blocks:
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
         fn=check_for_existing_textract_file,
-        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            output_folder_textbox,
+            handwrite_signature_checkbox,
+        ],
         outputs=[textract_output_found_checkbox],
     ).success(
         fn=check_for_relevant_ocr_output_with_words,

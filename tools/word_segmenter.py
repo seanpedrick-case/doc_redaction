@@ -16,6 +16,8 @@ MATCH_TOLERANCE = 0  # Default 0
 MIN_AREA_THRESHOLD = 6  # Default 6
 DEFAULT_TRIM_PERCENTAGE = 0.2  # Default 0.2
 SHOW_OUTPUT_IMAGES = False  # Default False
+
+
 class AdaptiveSegmenter:
     """
     Line to word segmentation pipeline. It features:

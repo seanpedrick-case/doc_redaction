@@ -455,7 +455,9 @@ def download_textract_job_files(
     output_filename_base_no_ext = os.path.splitext(output_filename_base)[0]
     # Generate suffix based on checkbox options
     textract_suffix = get_textract_file_suffix(handwrite_signature_checkbox)
-    local_output_filename = f"{output_filename_base_no_ext}{textract_suffix}_textract.json"
+    local_output_filename = (
+        f"{output_filename_base_no_ext}{textract_suffix}_textract.json"
+    )
     local_output_path = secure_join(local_output_dir, local_output_filename)
 
     secure_file_write(
@@ -704,13 +706,17 @@ def poll_whole_document_textract_analysis_progress_and_download(
                         # Handle both string representations like "['Extract signatures']" and actual lists
                         if isinstance(signature_extraction_str, str):
                             try:
-                                handwrite_signature_checkbox = ast.literal_eval(signature_extraction_str)
+                                handwrite_signature_checkbox = ast.literal_eval(
+                                    signature_extraction_str
+                                )
                             except (ValueError, SyntaxError):
                                 # If parsing fails, try to extract from string
-                                handwrite_signature_checkbox = [signature_extraction_str]
+                                handwrite_signature_checkbox = [
+                                    signature_extraction_str
+                                ]
                         elif isinstance(signature_extraction_str, list):
                             handwrite_signature_checkbox = signature_extraction_str
-                
+
                 if "file_name" in job_df.columns:
                     matching_job_id_file_names = job_df.loc[
                         job_df["job_id"] == job_id, "file_name"

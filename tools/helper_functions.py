@@ -352,18 +352,18 @@ def put_columns_in_df(in_file: List[str]):
 def get_textract_file_suffix(handwrite_signature_checkbox: List[str] = list()) -> str:
     """
     Generate a suffix for textract JSON files based on the selected feature types.
-    
+
     Args:
         handwrite_signature_checkbox: List of selected Textract feature types.
             Options: "Extract signatures", "Extract forms", "Extract layout", "Extract tables"
             "Extract handwriting" is the default and doesn't add a suffix.
-    
+
     Returns:
         A suffix string like "_sig", "_form", "_sig_form", etc., or empty string if only handwriting is selected.
     """
     if not handwrite_signature_checkbox:
         return ""
-    
+
     # Map feature types to short suffixes
     feature_map = {
         "Extract signatures": "sig",
@@ -371,16 +371,16 @@ def get_textract_file_suffix(handwrite_signature_checkbox: List[str] = list()) -
         "Extract layout": "layout",
         "Extract tables": "table",
     }
-    
+
     # Collect suffixes for selected features (excluding handwriting which is default)
     suffixes = []
     for feature in handwrite_signature_checkbox:
         if feature in feature_map:
             suffixes.append(feature_map[feature])
-    
+
     # Sort alphabetically for consistent naming
     suffixes.sort()
-    
+
     # Return suffix with underscore prefix if any features selected
     if suffixes:
         return "_" + "_".join(suffixes)
@@ -388,9 +388,9 @@ def get_textract_file_suffix(handwrite_signature_checkbox: List[str] = list()) -
 
 
 def check_for_existing_textract_file(
-    doc_file_name_no_extension_textbox: str, 
+    doc_file_name_no_extension_textbox: str,
     output_folder: str = OUTPUT_FOLDER,
-    handwrite_signature_checkbox: List[str] = list()
+    handwrite_signature_checkbox: List[str] = list(),
 ):
     # Generate suffix based on checkbox options
     suffix = get_textract_file_suffix(handwrite_signature_checkbox)
@@ -399,7 +399,7 @@ def check_for_existing_textract_file(
     )
 
     if os.path.exists(textract_output_path):
-        #print("Existing Textract analysis output file found.")
+        # print("Existing Textract analysis output file found.")
         return True
 
     else:

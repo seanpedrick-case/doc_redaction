@@ -2003,7 +2003,7 @@ class CustomImageAnalyzerEngine:
                             filename = f"{image_name_shortened}_{line_text_shortened}_vlm_input_image.png"
                             filepath = os.path.join(vlm_debug_dir, filename)
                             cropped_image.save(filepath)
-                            #print(f"Saved VLM input image to: {filepath}")
+                            # print(f"Saved VLM input image to: {filepath}")
                         except Exception as save_error:
                             print(
                                 f"Warning: Could not save VLM input image: {save_error}"
@@ -2022,7 +2022,7 @@ class CustomImageAnalyzerEngine:
                         vlm_rec_scores = (
                             vlm_result.get("rec_scores", []) if vlm_result else []
                         )
-                    except Exception as vlm_error:
+                    except Exception:
                         # print(
                         #     f"  VLM OCR failed for line '{line_text[:50]}...' (conf: {line_conf}): {vlm_error}. "
                         #     f"Keeping original PaddleOCR result."
@@ -2118,8 +2118,8 @@ class CustomImageAnalyzerEngine:
         # Debug: Print summary of model labels before returning
         for page_idx, page_result in enumerate(modified_paddle_results):
             rec_models = page_result.get("rec_models", [])
-            vlm_count = sum(1 for m in rec_models if m == "VLM")
-            paddle_count = sum(1 for m in rec_models if m == "Paddle")
+            sum(1 for m in rec_models if m == "VLM")
+            sum(1 for m in rec_models if m == "Paddle")
 
         return modified_paddle_results
 
@@ -2275,7 +2275,7 @@ class CustomImageAnalyzerEngine:
                 if paddle_results:
                     if len(paddle_results) > 0 and isinstance(paddle_results[0], dict):
                         rec_models = paddle_results[0].get("rec_models", [])
-                        vlm_count = sum(1 for m in rec_models if m == "VLM")                        
+                        sum(1 for m in rec_models if m == "VLM")
 
             ocr_data = self._convert_paddle_to_tesseract_format(
                 paddle_results,

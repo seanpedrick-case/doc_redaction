@@ -110,7 +110,7 @@ from tools.load_spacy_model_custom_recognisers import (
 from tools.secure_path_utils import (
     secure_file_write,
     validate_folder_containment,
-    validate_path_containment,    
+    validate_path_containment,
 )
 
 # Extract numbers before 'seconds' using secure regex
@@ -145,8 +145,6 @@ def sum_numbers_before_seconds(string: str):
     Returns:
         The sum of all numbers before 'seconds' in the string.
     """
-
-    
 
     numbers = safe_extract_numbers_with_seconds(string)
 
@@ -1727,7 +1725,9 @@ def choose_and_run_redactor(
             all_request_metadata_str,
         )
 
-        all_textract_request_metadata_file_path = output_folder + textract_metadata_filename
+        all_textract_request_metadata_file_path = (
+            output_folder + textract_metadata_filename
+        )
 
         # Add the request metadata to the log outputs if not there already
         if all_textract_request_metadata_file_path not in log_files_output_paths:
@@ -3219,7 +3219,9 @@ def redact_image_pdf(
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Generate suffix based on checkbox options
         textract_suffix = get_textract_file_suffix(handwrite_signature_checkbox)
-        textract_json_file_path = output_folder + file_name + textract_suffix + "_textract.json"
+        textract_json_file_path = (
+            output_folder + file_name + textract_suffix + "_textract.json"
+        )
         if OVERWRITE_EXISTING_OCR_RESULTS:
             # Skip loading existing results, start fresh
             textract_data = {}
@@ -3233,8 +3235,12 @@ def redact_image_pdf(
         original_textract_data = textract_data.copy()
 
         if textract_client_not_found and is_missing:
-            print("No existing Textract results file found and no Textract client found. Redaction will not continue.")
-            raise Exception("No existing Textract results file found and no Textract client found. Redaction will not continue.")
+            print(
+                "No existing Textract results file found and no Textract client found. Redaction will not continue."
+            )
+            raise Exception(
+                "No existing Textract results file found and no Textract client found. Redaction will not continue."
+            )
 
     # If running local OCR option, check if file already exists. If it does, load in existing data
     if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
@@ -3319,7 +3325,7 @@ def redact_image_pdf(
                 normalized_path = os.path.normpath(os.path.abspath(image_path))
                 if validate_path_containment(normalized_path, input_folder):
                     image = Image.open(normalized_path)
-                    page_width, page_height = image.size                    
+                    page_width, page_height = image.size
                 else:
                     # If validation fails and input file is an image file, try using file_path as fallback
                     if (
