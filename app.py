@@ -1,9 +1,9 @@
 import os
-import spaces
 from pathlib import Path
 
 import gradio as gr
 import pandas as pd
+import spaces
 from fastapi import FastAPI, status
 from gradio_image_annotation import image_annotator
 
@@ -259,9 +259,6 @@ FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 app = FastAPI()
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-
-
-spaces.annotations
 
 ###
 # Load in Gradio app components

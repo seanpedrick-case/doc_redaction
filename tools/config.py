@@ -473,6 +473,14 @@ MAX_INPUT_TOKEN_LENGTH = int(
     get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "4096")
 )  # Maximum number of tokens to input to the VLM
 
+VLM_MAX_IMAGE_SIZE = int(
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "1000000")
+)  # Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. Default is 1000000 (1000x1000).
+
+VLM_MAX_DPI = float(
+    get_or_create_env_var("VLM_MAX_DPI", "300.0")
+)  # Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.
+
 USE_FLASH_ATTENTION = convert_string_to_boolean(
     get_or_create_env_var("USE_FLASH_ATTENTION", "False")
 )  # Whether to use flash attention for the VLM
@@ -506,7 +514,7 @@ MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
-    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "65")
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "80")
 )  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
 HYBRID_OCR_PADDING = int(
     get_or_create_env_var("HYBRID_OCR_PADDING", "1")
@@ -536,17 +544,9 @@ SAVE_EXAMPLE_HYBRID_IMAGES = convert_string_to_boolean(
     get_or_create_env_var("SAVE_EXAMPLE_HYBRID_IMAGES", "False")
 )  # Whether to save example images of Tesseract vs PaddleOCR re-extraction in hybrid OCR mode.
 
-SAVE_PADDLE_VISUALISATIONS = convert_string_to_boolean(
-    get_or_create_env_var("SAVE_PADDLE_VISUALISATIONS", "False")
-)  # Whether to save visualisations of PaddleOCR bounding boxes.
-
-SAVE_TESSERACT_VISUALISATIONS = convert_string_to_boolean(
-    get_or_create_env_var("SAVE_TESSERACT_VISUALISATIONS", "False")
-)  # Whether to save visualisations of Tesseract bounding boxes.
-
-SAVE_TEXTRACT_VISUALISATIONS = convert_string_to_boolean(
-    get_or_create_env_var("SAVE_TEXTRACT_VISUALISATIONS", "False")
-)  # Whether to save visualisations of AWS Textract bounding boxes.
+SAVE_PAGE_OCR_VISUALISATIONS = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_PAGE_OCR_VISUALISATIONS", "False")
+)  # Whether to save visualisations of Tesseract, PaddleOCR, and Textract bounding boxes.
 
 # Model storage paths for Lambda compatibility
 PADDLE_MODEL_PATH = get_or_create_env_var(
@@ -564,6 +564,10 @@ PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
 SAVE_PREPROCESS_IMAGES = convert_string_to_boolean(
     get_or_create_env_var("SAVE_PREPROCESS_IMAGES", "False")
 )  # Whether to save the pre-processed images.
+
+SAVE_VLM_INPUT_IMAGES = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_VLM_INPUT_IMAGES", "False")
+)  # Whether to save input images sent to VLM OCR for debugging.
 
 # Entities for redaction
 CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var(

@@ -61,8 +61,7 @@ from tools.config import (
     RETURN_PDF_FOR_REVIEW,
     RETURN_REDACTED_PDF,
     RUN_AWS_FUNCTIONS,
-    SAVE_TESSERACT_VISUALISATIONS,
-    SAVE_TEXTRACT_VISUALISATIONS,
+    SAVE_PAGE_OCR_VISUALISATIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
@@ -3493,7 +3492,7 @@ def redact_image_pdf(
 
                 if not textract_data:
                     try:
-                        print(f"Image object: {image}")
+                        # print(f"Image object: {image}")
                         # Convert the image_path to bytes using an in-memory buffer
                         image_buffer = io.BytesIO()
                         image.save(
@@ -3658,10 +3657,10 @@ def redact_image_pdf(
             # Save OCR visualization with bounding boxes (works for all OCR methods)
             if (
                 text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                and SAVE_TEXTRACT_VISUALISATIONS is True
+                and SAVE_PAGE_OCR_VISUALISATIONS is True
             ) or (
                 text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
-                and SAVE_TESSERACT_VISUALISATIONS is True
+                and SAVE_PAGE_OCR_VISUALISATIONS is True
             ):
                 if (
                     page_line_level_ocr_results_with_words
@@ -5189,7 +5188,11 @@ def visualise_ocr_words_bounding_boxes(
 
         words = line_data.get("words", [])
 
-        # Process each word in the line
+        # Group words by bounding box (to handle cases where multiple words share the same box)
+        # Use a small tolerance to consider boxes as "the same" if they're very close
+        bbox_tolerance = 5  # pixels
+        bbox_groups = {}  # Maps (x1, y1, x2, y2) to list of word_data
+
         for word_data in words:
             if not isinstance(word_data, dict):
                 continue
@@ -5219,73 +5222,223 @@ def visualise_ocr_words_bounding_boxes(
             if x2 <= x1 or y2 <= y1:
                 continue
 
-            # Check if word was replaced by a different model (for reference, but text color always uses confidence)
-            model = word_data.get("model", None)
-            is_replaced = model and model.lower() != base_model_name.lower()
+            # Round coordinates to nearest tolerance to group similar boxes
+            x1_rounded = (x1 // bbox_tolerance) * bbox_tolerance
+            y1_rounded = (y1 // bbox_tolerance) * bbox_tolerance
+            x2_rounded = (x2 // bbox_tolerance) * bbox_tolerance
+            y2_rounded = (y2 // bbox_tolerance) * bbox_tolerance
 
-            # Text color always based on confidence (not affected by model replacement)
-            text_color = (0, 0, 180)  # Default to dark red
-            for min_conf, max_conf, conf_color, _ in text_confidence_ranges:
-                if min_conf <= conf <= max_conf:
-                    text_color = conf_color
-                    break
+            bbox_key = (x1_rounded, y1_rounded, x2_rounded, y2_rounded)
 
-            # Calculate font size to fit text within bounding box
+            if bbox_key not in bbox_groups:
+                bbox_groups[bbox_key] = []
+            bbox_groups[bbox_key].append(
+                {"word_data": word_data, "original_bbox": (x1, y1, x2, y2)}
+            )
+
+        # Process each group of words
+        for bbox_key, word_group in bbox_groups.items():
+            if not word_group:
+                continue
+
+            # Use the first word's bounding box as the reference (they should all be similar)
+            x1, y1, x2, y2 = word_group[0]["original_bbox"]
             box_width = x2 - x1
             box_height = y2 - y1
 
-            # Start with a reasonable font scale
-            font_scale = 0.5
-            font_thickness = 1
-            font = cv2.FONT_HERSHEY_SIMPLEX
+            # If only one word in the box, process it normally
+            if len(word_group) == 1:
+                word_data = word_group[0]["word_data"]
+                text = word_data.get("text", "")
+                conf = int(word_data.get("conf", word_data.get("confidence", 0)))
 
-            # Get text size and adjust to fit
-            (text_width, text_height), baseline = cv2.getTextSize(
-                text, font, font_scale, font_thickness
-            )
+                # Check if word was replaced by a different model
+                model = word_data.get("model", None)
+                is_replaced = model and model.lower() != base_model_name.lower()
 
-            # Scale font to fit width (with some padding)
-            if text_width > 0:
-                width_scale = (box_width * 0.9) / text_width
+                # Text color always based on confidence
+                text_color = (0, 0, 180)  # Default to dark red
+                for min_conf, max_conf, conf_color, _ in text_confidence_ranges:
+                    if min_conf <= conf <= max_conf:
+                        text_color = conf_color
+                        break
+
+                # Calculate font size to fit text within bounding box
+                font_scale = 0.5
+                font_thickness = 1
+                font = cv2.FONT_HERSHEY_SIMPLEX
+
+                # Get text size and adjust to fit
+                (text_width, text_height), baseline = cv2.getTextSize(
+                    text, font, font_scale, font_thickness
+                )
+
+                # Scale font to fit width (with some padding)
+                if text_width > 0:
+                    width_scale = (box_width * 0.9) / text_width
+                else:
+                    width_scale = 1.0
+
+                # Scale font to fit height (with some padding)
+                if text_height > 0:
+                    height_scale = (box_height * 0.8) / text_height
+                else:
+                    height_scale = 1.0
+
+                # Use the smaller scale to ensure text fits both dimensions
+                font_scale = min(
+                    font_scale * min(width_scale, height_scale), 2.0
+                )  # Cap at 2.0
+
+                # Recalculate text size with adjusted font scale
+                (text_width, text_height), baseline = cv2.getTextSize(
+                    text, font, font_scale, font_thickness
+                )
+
+                # Center text within bounding box
+                text_x = x1 + (box_width - text_width) // 2
+                text_y = y1 + (box_height + text_height) // 2  # Baseline adjustment
+
+                # Draw text
+                cv2.putText(
+                    text_page,
+                    text,
+                    (text_x, text_y),
+                    font,
+                    font_scale,
+                    text_color,
+                    font_thickness,
+                    cv2.LINE_AA,
+                )
+
+                # Draw grey bounding box for replaced words on text page
+                if is_replaced:
+                    box_color = (128, 128, 128)  # Grey for model replacements
+                    cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)
+
             else:
-                width_scale = 1.0
+                # Multiple words in the same box - arrange them side by side
+                # Extract texts and determine colors for each word
+                word_texts = []
+                word_colors = []
+                word_is_replaced = []
 
-            # Scale font to fit height (with some padding)
-            if text_height > 0:
-                height_scale = (box_height * 0.8) / text_height
-            else:
-                height_scale = 1.0
+                for item in word_group:
+                    word_data = item["word_data"]
+                    text = word_data.get("text", "")
+                    conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+                    model = word_data.get("model", None)
+                    is_replaced = model and model.lower() != base_model_name.lower()
 
-            # Use the smaller scale to ensure text fits both dimensions
-            font_scale = min(
-                font_scale * min(width_scale, height_scale), 2.0
-            )  # Cap at 2.0
+                    # Text color based on confidence
+                    text_color = (0, 0, 180)  # Default to dark red
+                    for min_conf, max_conf, conf_color, _ in text_confidence_ranges:
+                        if min_conf <= conf <= max_conf:
+                            text_color = conf_color
+                            break
 
-            # Recalculate text size with adjusted font scale
-            (text_width, text_height), baseline = cv2.getTextSize(
-                text, font, font_scale, font_thickness
-            )
+                    word_texts.append(text)
+                    word_colors.append(text_color)
+                    word_is_replaced.append(is_replaced)
 
-            # Center text within bounding box
-            text_x = x1 + (box_width - text_width) // 2
-            text_y = y1 + (box_height + text_height) // 2  # Baseline adjustment
+                # Calculate font size to fit all words side by side
+                font_scale = 0.5
+                font_thickness = 1
+                font = cv2.FONT_HERSHEY_SIMPLEX
 
-            # Draw text
-            cv2.putText(
-                text_page,
-                text,
-                (text_x, text_y),
-                font,
-                font_scale,
-                text_color,
-                font_thickness,
-                cv2.LINE_AA,
-            )
+                # Start with a reasonable font scale and reduce if needed
+                max_font_scale = 2.0
+                min_font_scale = 0.1
+                font_scale = max_font_scale
 
-            # Draw grey bounding box for replaced words on text page
-            if is_replaced:
-                box_color = (128, 128, 128)  # Grey for model replacements
-                cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)
+                # Binary search or iterative approach to find the right font size
+                for _ in range(20):  # Max iterations
+                    # Calculate total width needed for all words with spaces
+                    total_width = 0
+                    max_text_height = 0
+
+                    for i, text in enumerate(word_texts):
+                        (text_width, text_height), baseline = cv2.getTextSize(
+                            text, font, font_scale, font_thickness
+                        )
+                        total_width += text_width
+                        max_text_height = max(max_text_height, text_height)
+
+                        # Add space width between words (except last word)
+                        if i < len(word_texts) - 1:
+                            (space_width, _), _ = cv2.getTextSize(
+                                " ", font, font_scale, font_thickness
+                            )
+                            total_width += space_width
+
+                    # Check if it fits
+                    width_fits = total_width <= box_width * 0.9
+                    height_fits = max_text_height <= box_height * 0.8
+
+                    if width_fits and height_fits:
+                        break
+
+                    # Reduce font scale
+                    font_scale *= 0.9
+                    if font_scale < min_font_scale:
+                        font_scale = min_font_scale
+                        break
+
+                # Recalculate total width and max height with final font scale
+                total_width = 0
+                max_text_height = 0
+                for i, text in enumerate(word_texts):
+                    (text_width, text_height), baseline = cv2.getTextSize(
+                        text, font, font_scale, font_thickness
+                    )
+                    total_width += text_width
+                    max_text_height = max(max_text_height, text_height)
+
+                    # Add space width between words (except last word)
+                    if i < len(word_texts) - 1:
+                        (space_width, _), _ = cv2.getTextSize(
+                            " ", font, font_scale, font_thickness
+                        )
+                        total_width += space_width
+
+                # Now draw each word side by side
+                current_x = (
+                    x1 + (box_width - total_width) // 2
+                )  # Center the combined text
+                text_y = y1 + (box_height + max_text_height) // 2  # Baseline adjustment
+
+                for i, (text, text_color) in enumerate(zip(word_texts, word_colors)):
+                    # Get text size with final font scale
+                    (text_width, text_height), baseline = cv2.getTextSize(
+                        text, font, font_scale, font_thickness
+                    )
+
+                    # Draw text
+                    cv2.putText(
+                        text_page,
+                        text,
+                        (int(current_x), text_y),
+                        font,
+                        font_scale,
+                        text_color,
+                        font_thickness,
+                        cv2.LINE_AA,
+                    )
+
+                    # Move to next position
+                    current_x += text_width
+
+                    # Add space between words (except last word)
+                    if i < len(word_texts) - 1:
+                        (space_width, _), _ = cv2.getTextSize(
+                            " ", font, font_scale, font_thickness
+                        )
+                        current_x += space_width
+
+                # Draw grey bounding box if any word was replaced
+                if any(word_is_replaced):
+                    box_color = (128, 128, 128)  # Grey for model replacements
+                    cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)
 
     # Add legend to second page
     if add_legend:

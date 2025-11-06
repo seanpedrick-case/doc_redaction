@@ -221,7 +221,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
 
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
-def generate_image(
+def extract_text_from_image_vlm(
     text: str,
     image: Image.Image,
     max_new_tokens: int = None,

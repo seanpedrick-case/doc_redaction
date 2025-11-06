@@ -327,7 +327,7 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Saves comparison images when using "hybrid-paddle" OCR mode.
     * **Default Value:** `"False"`
 
-* **`SAVE_PADDLE_VISUALISATIONS`**
+* **`SAVE_PAGE_OCR_VISUALISATIONS`**
     * **Description:** Saves images with PaddleOCR's detected bounding boxes overlaid.
     * **Default Value:** `"False"`
 

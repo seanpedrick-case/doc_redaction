@@ -82,14 +82,14 @@ class AdaptiveSegmenter:
 
         orientation_angle = 0.0
         if box_height > box_width:
-            print(
-                f"Detected vertical orientation (W:{box_width} < H:{box_height}). Applying 90-degree correction."
-            )
+            # print(
+            #     f"Detected vertical orientation (W:{box_width} < H:{box_height}). Applying 90-degree correction."
+            # )
             orientation_angle = 90.0
         else:
-            print(
-                f"Detected horizontal orientation (W:{box_width} >= H:{box_height}). No orientation correction."
-            )
+            # print(
+            #     f"Detected horizontal orientation (W:{box_width} >= H:{box_height}). No orientation correction."
+            # )
             M_orient = cv2.getRotationMatrix2D(center, 0, 1.0)
             return gray_image, M_orient
 
@@ -251,29 +251,29 @@ class AdaptiveSegmenter:
     ) -> Tuple[Dict[str, List], bool]:
 
         if line_image is None:
-            print(
-                f"Error: line_image is None in segment function (image_name: {image_name})"
-            )
+            # print(
+            #     f"Error: line_image is None in segment function (image_name: {image_name})"
+            # )
             return ({}, False)
 
         # Validate line_image is a valid numpy array
         if not isinstance(line_image, np.ndarray):
-            print(
-                f"Error: line_image is not a numpy array (type: {type(line_image)}, image_name: {image_name})"
-            )
+            # print(
+            #     f"Error: line_image is not a numpy array (type: {type(line_image)}, image_name: {image_name})"
+            # )
             return ({}, False)
 
         # Validate line_image has valid shape and size
         if line_image.size == 0:
-            print(
-                f"Error: line_image is empty (shape: {line_image.shape}, image_name: {image_name})"
-            )
+            # print(
+            #     f"Error: line_image is empty (shape: {line_image.shape}, image_name: {image_name})"
+            # )
             return ({}, False)
 
         if len(line_image.shape) < 2:
-            print(
-                f"Error: line_image has invalid shape {line_image.shape} (image_name: {image_name})"
-            )
+            # print(
+            #     f"Error: line_image has invalid shape {line_image.shape} (image_name: {image_name})"
+            # )
             return ({}, False)
 
         # Early return if 1 or fewer words
@@ -283,20 +283,20 @@ class AdaptiveSegmenter:
             if len(words) <= 1:
                 return ({}, False)
         else:
-            print(
-                f"Error: line_data is empty or does not contain text (image_name: {image_name})"
-            )
+            # print(
+            #     f"Error: line_data is empty or does not contain text (image_name: {image_name})"
+            # )
             return ({}, False)
 
-        print(f"line_text: {line_text}")
+        # print(f"line_text: {line_text}")
         shortened_line_text = line_text.replace(" ", "_")[:10]
 
         if SHOW_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_original.png"
-            os.makedirs(f"{self.output_folder}/paddle_visualisations", exist_ok=True)
+            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_original.png"
+            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
             cv2.imwrite(output_path, line_image)
-            print(f"\nSaved original image to '{output_path}'")
+            # print(f"\nSaved original image to '{output_path}'")
 
         gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
 
@@ -334,11 +334,22 @@ class AdaptiveSegmenter:
             borderMode=cv2.BORDER_REPLICATE,
         )
 
+        # Validate deskewed_line_image before saving
+        if (
+            deskewed_line_image is None
+            or not isinstance(deskewed_line_image, np.ndarray)
+            or deskewed_line_image.size == 0
+        ):
+            # print(
+            #     f"Error: deskewed_line_image is None or empty (image_name: {image_name})"
+            # )
+            return ({}, False)
+
         # Save deskewed image (optional, only if image_name is provided)
         if SHOW_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_deskewed.png"
-            os.makedirs(f"{self.output_folder}/paddle_visualisations", exist_ok=True)
+            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_deskewed.png"
+            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
             cv2.imwrite(output_path, deskewed_line_image)
             # print(f"\nSaved deskewed image to '{output_path}'")
 
@@ -351,6 +362,29 @@ class AdaptiveSegmenter:
         block_size = int(avg_char_width_approx * BLOCK_SIZE_FACTOR)
         if block_size % 2 == 0:
             block_size += 1
+
+        # Validate deskewed_gray and ensure block_size is valid
+        if deskewed_gray is None or not isinstance(deskewed_gray, np.ndarray):
+            # print(
+            #     f"Error: deskewed_gray is None or not a numpy array (image_name: {image_name})"
+            # )
+            return ({}, False)
+
+        if len(deskewed_gray.shape) != 2:
+            # print(
+            #     f"Error: deskewed_gray must be a 2D grayscale image (shape: {deskewed_gray.shape}, image_name: {image_name})"
+            # )
+            return ({}, False)
+
+        if block_size < 3:
+            # print(
+            #     f"Warning: block_size ({block_size}) is too small for adaptiveThreshold. "
+            #     f"Using minimum value of 3. (image_name: {image_name}, "
+            #     f"img_w: {img_w}, approx_char_count: {approx_char_count}, "
+            #     f"avg_char_width_approx: {avg_char_width_approx:.2f})"
+            # )
+            block_size = 3
+
         binary = cv2.adaptiveThreshold(
             deskewed_gray,
             255,
@@ -360,11 +394,18 @@ class AdaptiveSegmenter:
             C_VALUE,
         )
 
+        # Validate binary image before saving
+        if binary is None or not isinstance(binary, np.ndarray) or binary.size == 0:
+            # print(
+            #     f"Error: binary image is None or empty (image_name: {image_name})"
+            # )
+            return ({}, False)
+
         # Save cropped image (optional, only if image_name is provided)
         if SHOW_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_binary.png"
-            os.makedirs(f"{self.output_folder}/paddle_visualisations", exist_ok=True)
+            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_binary.png"
+            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
             cv2.imwrite(output_path, binary)
             # print(f"\nSaved cropped image to '{output_path}'")
 
@@ -380,14 +421,25 @@ class AdaptiveSegmenter:
         # It's a dilation followed by an erosion
         closed_binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
 
+        # Validate closed_binary image before saving
+        if (
+            closed_binary is None
+            or not isinstance(closed_binary, np.ndarray)
+            or closed_binary.size == 0
+        ):
+            # print(
+            #     f"Error: closed_binary image is None or empty (image_name: {image_name})"
+            # )
+            return ({}, False)
+
         # (Optional) You could also use a DILATE to make letters thicker
         # dilated_binary = cv2.dilate(closed_binary, kernel, iterations=1)
         # Use 'closed_binary' (or 'dilated_binary') from now on.
 
         if SHOW_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_closed_binary.png"
-            os.makedirs(f"{self.output_folder}/paddle_visualisations", exist_ok=True)
+            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_closed_binary.png"
+            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
             cv2.imwrite(output_path, closed_binary)
             # print(f"\nSaved dilated binary image to '{output_path}'")
 
@@ -405,7 +457,7 @@ class AdaptiveSegmenter:
             # Handle edge case of empty 'areas' array
             if len(areas) == 0:
                 clean_binary = binary
-                print("Warning: No components found after binarization.")
+                # print("Warning: No components found after binarization.")
                 areas = np.array([0])  # Add a dummy value to prevent crashes
 
             # --- 1. Calculate the DEFAULT CONSERVATIVE threshold ---
@@ -449,18 +501,18 @@ class AdaptiveSegmenter:
 
             # --- 3. ADAPTIVE DECISION: Override if conservative threshold is clearly noise ---
             if has_clear_gap:
-                print(
-                    f"Noise Removal: Gap detected. Noise cluster ends at {area_before_gap}px. Aggressive threshold = {aggressive_threshold:.1f}"
-                )
+                # print(
+                #     f"Noise Removal: Gap detected. Noise cluster ends at {area_before_gap}px. Aggressive threshold = {aggressive_threshold:.1f}"
+                # )
 
                 # Only use a more aggressive threshold IF our "safe" threshold is clearly
                 # stuck *inside* the noise cluster.
                 # e.g., Safe threshold = 1, but noise goes up to 10.
                 # (We use 0.8 as a buffer, so if thresh=7 and gap=8, we don't switch)
                 if area_threshold < (area_before_gap * 0.8):
-                    print(
-                        f"Noise Removal: Conservative threshold ({area_threshold:.1f}) is deep in noise cluster (ends at {area_before_gap}px)."
-                    )
+                    # print(
+                    #     f"Noise Removal: Conservative threshold ({area_threshold:.1f}) is deep in noise cluster (ends at {area_before_gap}px)."
+                    # )
 
                     # Instead of using large percentage increases, use a very small absolute increment
                     # This preserves legitimate small letters/words that might be just above the noise
@@ -498,18 +550,18 @@ class AdaptiveSegmenter:
                     # Cap at 15 pixels as absolute upper bound
                     final_threshold = min(final_threshold, 15)
 
-                    print(
-                        f"Noise Removal: Using MODERATE threshold: {final_threshold:.1f} (noise ends at {area_before_gap}px, increment: {small_increment}px)"
-                    )
+                    # print(
+                    #     f"Noise Removal: Using MODERATE threshold: {final_threshold:.1f} (noise ends at {area_before_gap}px, increment: {small_increment}px)"
+                    # )
                     area_threshold = final_threshold
                 else:
-                    print(
-                        f"Noise Removal: Gap found, but conservative threshold ({area_threshold:.1f}) is sufficient. Sticking with conservative."
-                    )
+                    # print(
+                    #     f"Noise Removal: Gap found, but conservative threshold ({area_threshold:.1f}) is sufficient. Sticking with conservative."
+                    # )
                     pass
 
             # --- 4. Apply the final, determined threshold ---
-            print(f"Noise Removal: Final area threshold: {area_threshold:.1f}")
+            # print(f"Noise Removal: Final area threshold: {area_threshold:.1f}")
             for i in range(1, num_labels):
                 # Use >= to be inclusive of the threshold itself
                 if stats[i, cv2.CC_STAT_AREA] >= area_threshold:
@@ -517,6 +569,17 @@ class AdaptiveSegmenter:
         else:
             # No components found, or only background
             clean_binary = binary
+
+        # Validate clean_binary before proceeding
+        if (
+            clean_binary is None
+            or not isinstance(clean_binary, np.ndarray)
+            or clean_binary.size == 0
+        ):
+            # print(
+            #     f"Error: clean_binary image is None or empty (image_name: {image_name})"
+            # )
+            return ({}, False)
 
         # Calculate the horizontal projection profile on the cleaned image
         horizontal_projection = np.sum(clean_binary, axis=1)
@@ -539,9 +602,9 @@ class AdaptiveSegmenter:
 
             # Ensure the crop is valid
             if y_start < y_end:
-                print(
-                    f"Original text height: {text_height}px. Cropping to middle {100 - (2*trim_percentage*100):.0f}% region."
-                )
+                # print(
+                #     f"Original text height: {text_height}px. Cropping to middle {100 - (2*trim_percentage*100):.0f}% region."
+                # )
                 # Slice the image to get the vertically cropped ROI
                 analysis_image = clean_binary[y_start:y_end, :]
             else:
@@ -551,18 +614,29 @@ class AdaptiveSegmenter:
             # If no text is found, use the original cleaned image
             analysis_image = clean_binary
 
+        # Validate analysis_image before proceeding
+        if (
+            analysis_image is None
+            or not isinstance(analysis_image, np.ndarray)
+            or analysis_image.size == 0
+        ):
+            # print(
+            #     f"Error: analysis_image is None or empty (image_name: {image_name})"
+            # )
+            return ({}, False)
+
         # --- Step 3: Hierarchical Adaptive Search (using the new clean_binary) ---
         # The rest of the pipeline is identical but now operates on a superior image.
         words = line_data["text"][0].split()
         target_word_count = len(words)
 
-        print(f"Target word count: {target_word_count}")
+        # print(f"Target word count: {target_word_count}")
 
         # Save cropped image (optional, only if image_name is provided)
         if SHOW_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_clean_binary.png"
-            os.makedirs(f"{self.output_folder}/paddle_visualisations", exist_ok=True)
+            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_clean_binary.png"
+            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
             cv2.imwrite(output_path, analysis_image)
             # print(f"\nSaved cropped image to '{output_path}'")
 
@@ -574,7 +648,7 @@ class AdaptiveSegmenter:
         target_word_count = len(words)
         stage1_succeeded = False
 
-        print("--- Stage 1: Searching with adaptive valley threshold ---")
+        # print("--- Stage 1: Searching with adaptive valley threshold ---")
         valley_factors_to_try = np.arange(INITIAL_VALLEY_THRESHOLD_FACTOR, 0.45, 0.05)
         for v_factor in valley_factors_to_try:
             # Pass the cropped image to the helper
@@ -589,9 +663,9 @@ class AdaptiveSegmenter:
                 break
 
         if not stage1_succeeded:
-            print(
-                "\n--- Stage 1 failed. Starting Stage 2: Searching with adaptive kernel ---"
-            )
+            # print(
+            #     "\n--- Stage 1 failed. Starting Stage 2: Searching with adaptive kernel ---"
+            # )
             kernel_factors_to_try = np.arange(INITIAL_KERNEL_WIDTH_FACTOR, 0.5, 0.05)
             fixed_valley_factor = MAIN_VALLEY_THRESHOLD_FACTOR
             for k_factor in kernel_factors_to_try:
@@ -601,11 +675,33 @@ class AdaptiveSegmenter:
                 closed_binary = cv2.morphologyEx(
                     clean_binary, cv2.MORPH_CLOSE, closing_kernel
                 )
+                # Validate closed_binary before proceeding
+                if (
+                    closed_binary is None
+                    or not isinstance(closed_binary, np.ndarray)
+                    or closed_binary.size == 0
+                ):
+                    # print(
+                    #     f"Error: closed_binary in Stage 2 is None or empty (image_name: {image_name}, k_factor: {k_factor:.2f})"
+                    # )
+                    continue  # Skip this iteration and try next kernel factor
+
                 # We need to re-apply the same vertical crop to this new image
                 if len(non_zero_rows) > 0 and y_start < y_end:
                     analysis_image = closed_binary[y_start:y_end, :]
                 else:
                     analysis_image = closed_binary
+
+                # Validate analysis_image before using it
+                if (
+                    analysis_image is None
+                    or not isinstance(analysis_image, np.ndarray)
+                    or analysis_image.size == 0
+                ):
+                    # print(
+                    #     f"Error: analysis_image in Stage 2 is None or empty (image_name: {image_name}, k_factor: {k_factor:.2f})"
+                    # )
+                    continue  # Skip this iteration and try next kernel factor
 
                 unlabeled_boxes = self._get_boxes_from_profile(
                     analysis_image,
@@ -614,11 +710,11 @@ class AdaptiveSegmenter:
                     fixed_valley_factor,
                 )
 
-                print(
-                    f"Testing kernel factor {k_factor:.2f} ({kernel_width}px): Found {len(unlabeled_boxes)} boxes."
-                )
+                # print(
+                #     f"Testing kernel factor {k_factor:.2f} ({kernel_width}px): Found {len(unlabeled_boxes)} boxes."
+                # )
                 if abs(target_word_count - len(unlabeled_boxes)) <= match_tolerance:
-                    print("SUCCESS (Stage 2): Found a match.")
+                    # print("SUCCESS (Stage 2): Found a match.")
                     best_boxes = unlabeled_boxes
                     successful_binary_image = (
                         closed_binary  # For Stage 2, the source is the closed_binary
@@ -629,7 +725,7 @@ class AdaptiveSegmenter:
         used_fallback = False
 
         if best_boxes is None:
-            print("\nWarning: All adaptive searches failed. Falling back.")
+            # print("\nWarning: All adaptive searches failed. Falling back.")
             fallback_segmenter = HybridWordSegmenter()
             used_fallback = True
             final_output = fallback_segmenter.refine_words_bidirectional(
@@ -803,22 +899,35 @@ class AdaptiveSegmenter:
 
         # Visualisation
         if SHOW_OUTPUT_IMAGES:
-            output_path = f"{self.output_folder}/paddle_visualisations/{image_name}_{shortened_line_text}_final_boxes.png"
-            os.makedirs(f"{self.output_folder}/paddle_visualisations", exist_ok=True)
+            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_final_boxes.png"
+            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
             output_image_vis = line_image.copy()
-            print(f"\nFinal refined {len(remapped_output['text'])} words:")
-            for i in range(len(remapped_output["text"])):
-                word = remapped_output["text"][i]
-                x, y, w, h = (
-                    int(remapped_output["left"][i]),
-                    int(remapped_output["top"][i]),
-                    int(remapped_output["width"][i]),
-                    int(remapped_output["height"][i]),
-                )
-                print(f"- '{word}' at ({x}, {y}, {w}, {h})")
-                cv2.rectangle(output_image_vis, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.imwrite(output_path, output_image_vis)
-            print(f"\nSaved visualisation to '{output_path}'")
+            # Validate output_image_vis before saving
+            if (
+                output_image_vis is None
+                or not isinstance(output_image_vis, np.ndarray)
+                or output_image_vis.size == 0
+            ):
+                pass
+                # print(
+                #     f"Error: output_image_vis is None or empty (image_name: {image_name})"
+                # )
+            else:
+                # print(f"\nFinal refined {len(remapped_output['text'])} words:")
+                for i in range(len(remapped_output["text"])):
+                    word = remapped_output["text"][i]
+                    x, y, w, h = (
+                        int(remapped_output["left"][i]),
+                        int(remapped_output["top"][i]),
+                        int(remapped_output["width"][i]),
+                        int(remapped_output["height"][i]),
+                    )
+                    # print(f"- '{word}' at ({x}, {y}, {w}, {h})")
+                    cv2.rectangle(
+                        output_image_vis, (x, y), (x + w, y + h), (0, 255, 0), 2
+                    )
+                cv2.imwrite(output_path, output_image_vis)
+                # print(f"\nSaved visualisation to '{output_path}'")
 
         return remapped_output, used_fallback
 
@@ -1076,9 +1185,9 @@ if __name__ == "__main__":
     # image_path = 'input/london_borough_of_lambeth.png'
     image_basename = os.path.basename(image_path)
     image_name = os.path.splitext(image_basename)[0]
-    output_path = f"outputs/{image_name}_refined_morph.png"
-    if not os.path.exists("outputs"):
-        os.makedirs("outputs")
+    output_path = f"output/{image_name}_refined_morph.png"
+    if not os.path.exists("output"):
+        os.makedirs("output")
     line_image_cv = cv2.imread(image_path)
     h, w, _ = line_image_cv.shape
 
@@ -1100,20 +1209,28 @@ if __name__ == "__main__":
 
     # Visualisation
     output_image_vis = line_image_cv.copy()
-    print(f"\nFinal refined {len(final_word_data['text'])} words:")
-    for i in range(len(final_word_data["text"])):
-        word = final_word_data["text"][i]
-        x, y, w, h = (
-            int(final_word_data["left"][i]),
-            int(final_word_data["top"][i]),
-            int(final_word_data["width"][i]),
-            int(final_word_data["height"][i]),
-        )
-        print(f"- '{word}' at ({x}, {y}, {w}, {h})")
-        cv2.rectangle(output_image_vis, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    # Validate output_image_vis before saving
+    if (
+        output_image_vis is None
+        or not isinstance(output_image_vis, np.ndarray)
+        or output_image_vis.size == 0
+    ):
+        print(f"Error: output_image_vis is None or empty (image_name: {image_name})")
+    else:
+        print(f"\nFinal refined {len(final_word_data['text'])} words:")
+        for i in range(len(final_word_data["text"])):
+            word = final_word_data["text"][i]
+            x, y, w, h = (
+                int(final_word_data["left"][i]),
+                int(final_word_data["top"][i]),
+                int(final_word_data["width"][i]),
+                int(final_word_data["height"][i]),
+            )
+            print(f"- '{word}' at ({x}, {y}, {w}, {h})")
+            cv2.rectangle(output_image_vis, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-    cv2.imwrite(output_path, output_image_vis)
-    print(f"\nSaved visualisation to '{output_path}'")
+        cv2.imwrite(output_path, output_image_vis)
+        print(f"\nSaved visualisation to '{output_path}'")
 
     # You can also use matplotlib to display it in a notebook
     import matplotlib.pyplot as plt

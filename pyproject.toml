@@ -55,14 +55,14 @@ test = ["pytest", "pytest-cov"]
 
 # Extra dependencies for PaddleOCR
 paddle = [
-    "paddlepaddle-gpu==3.2.1", # Specific version for compatibility with VLM and torch installation described below -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
-    "paddleocr==3.3.0",
+    "paddlepaddle<=3.2.1", # If you want the GPU-accelerated version, run manually pip install paddlepaddle-gpu<=3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+    "paddleocr<=3.3.0",
 ]
 
 # Extra dependencies for VLM models
 vlm = [
-    "torch==2.8.0", # should use --index-url https://download.pytorch.org/whl/cu126 for cuda support for paddleocr, need to install manually
-    "torchvision==0.24.0",
+    "torch<=2.8.0", # should use --index-url https://download.pytorch.org/whl/cu126 for cuda support for paddleocr, need to install manually
+    "torchvision>=0.20.1",
     "transformers==4.57.1",
     "accelerate==1.11.0",
 ]

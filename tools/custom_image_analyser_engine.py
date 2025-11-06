@@ -29,15 +29,18 @@ from tools.config import (
     PADDLE_USE_TEXTLINE_ORIENTATION,
     PREPROCESS_LOCAL_OCR_IMAGES,
     SAVE_EXAMPLE_HYBRID_IMAGES,
-    SAVE_PADDLE_VISUALISATIONS,
+    SAVE_PAGE_OCR_VISUALISATIONS,
     SAVE_PREPROCESS_IMAGES,
+    SAVE_VLM_INPUT_IMAGES,
     SELECTED_MODEL,
     TESSERACT_SEGMENTATION_LEVEL,
+    VLM_MAX_DPI,
+    VLM_MAX_IMAGE_SIZE,
 )
 from tools.helper_functions import clean_unicode_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
-from tools.run_vlm import generate_image as vlm_generate_image
+from tools.run_vlm import extract_text_from_image_vlm
 from tools.secure_path_utils import validate_folder_containment
 from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
@@ -554,6 +557,84 @@ def _get_tesseract_psm(segmentation_level: str) -> int:
         return 11
 
 
+def _prepare_image_for_vlm(image: Image.Image) -> Image.Image:
+    """
+    Prepare image for VLM by ensuring it doesn't exceed maximum size and DPI limits.
+
+    Args:
+        image: PIL Image to prepare
+
+    Returns:
+        PIL Image that has been resized if necessary to meet size and DPI constraints
+    """
+    if image is None:
+        return image
+
+    width, height = image.size
+
+    # Get DPI information (if available)
+    dpi = image.info.get("dpi", (72, 72))  # Default to 72 DPI if not specified
+    if isinstance(dpi, tuple):
+        dpi_x, dpi_y = dpi
+        # Use the maximum DPI value
+        current_dpi = max(dpi_x, dpi_y)
+    else:
+        current_dpi = float(dpi) if dpi else 72.0
+
+    # Calculate scale factors needed
+    size_scale = 1.0
+    dpi_scale = 1.0
+
+    # Check if total pixels exceed maximum
+    total_pixels = width * height
+    if total_pixels > VLM_MAX_IMAGE_SIZE:
+        # Calculate scale factor to reduce total pixels to maximum
+        # Since area scales with scale^2, we need sqrt of the ratio
+        size_scale = (VLM_MAX_IMAGE_SIZE / total_pixels) ** 0.5
+        print(
+            f"VLM image size check: Image has {total_pixels:,} pixels ({width}x{height}), exceeds maximum {VLM_MAX_IMAGE_SIZE:,} pixels. Will resize by factor {size_scale:.3f}"
+        )
+
+    # Check if DPI exceeds maximum
+    if current_dpi > VLM_MAX_DPI:
+        dpi_scale = VLM_MAX_DPI / current_dpi
+        print(
+            f"VLM DPI check: Image DPI {current_dpi:.1f} exceeds maximum {VLM_MAX_DPI:.1f} DPI. Will resize by factor {dpi_scale:.3f}"
+        )
+
+    # Use the smaller scale factor to ensure both constraints are met
+    final_scale = min(size_scale, dpi_scale)
+
+    # Resize if necessary
+    if final_scale < 1.0:
+        new_width = int(width * final_scale)
+        new_height = int(height * final_scale)
+        print(
+            f"VLM image preparation: Resizing image from {width}x{height} to {new_width}x{new_height} (scale: {final_scale:.3f})"
+        )
+
+        # Use high-quality resampling for downscaling
+        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+        # Update DPI info if it was set
+        if "dpi" in image.info:
+            new_dpi = (current_dpi * final_scale, current_dpi * final_scale)
+            # Create a copy with updated DPI info
+            image_info = image.info.copy()
+            image_info["dpi"] = new_dpi
+            # Note: PIL doesn't allow direct modification of info dict, so we'll just note it
+            print(
+                f"VLM image preparation: Effective DPI after resize: {new_dpi[0]:.1f}"
+            )
+    else:
+        total_pixels = width * height
+        print(
+            f"VLM image preparation: Image size {width}x{height} ({total_pixels:,} pixels) and DPI {current_dpi:.1f} are within limits (max pixels: {VLM_MAX_IMAGE_SIZE:,}, max DPI: {VLM_MAX_DPI})"
+        )
+
+    return image
+
+
 def _vlm_ocr_predict(
     image: Image.Image,
     prompt: str = "Extract the text content from this image.",
@@ -569,10 +650,47 @@ def _vlm_ocr_predict(
         Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
     """
     try:
+        # Validate image exists and is not None
+        if image is None:
+            print("VLM OCR error: Image is None")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"VLM OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+        except Exception as size_error:
+            print(f"VLM OCR error: Could not get image size: {size_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                print(f"VLM OCR: Converting image from {image.mode} to RGB mode")
+                image = image.convert("RGB")
+                # Update width/height after conversion (should be same, but ensure consistency)
+                width, height = image.size
+        except Exception as convert_error:
+            print(f"VLM OCR error: Could not convert image to RGB: {convert_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        try:
+            image = _prepare_image_for_vlm(image)
+            width, height = image.size
+        except Exception as prep_error:
+            print(f"VLM OCR error: Could not prepare image for VLM: {prep_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
         # Use the VLM to extract text
         # Pass None for parameters to prioritize model-specific defaults from run_vlm.py
         # If model defaults are not available, general defaults will be used (matching current values)
-        extracted_text = vlm_generate_image(
+        print(f"Calling extract_text_from_image_vlm with image size: {width}x{height}")
+        extracted_text = extract_text_from_image_vlm(
             text=prompt,
             image=image,
             max_new_tokens=None,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
@@ -582,15 +700,32 @@ def _vlm_ocr_predict(
             repetition_penalty=None,  # Use model default if available, otherwise 1.3
         )
 
-        if extracted_text and extracted_text.strip():
+        # print(f"VLM OCR extracted text type: {type(extracted_text)}, value: {extracted_text}")
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None:
+            # print("VLM OCR warning: extract_text_from_image_vlm returned None")
+            return {"rec_texts": [], "rec_scores": []}
+
+        if not isinstance(extracted_text, str):
+            # print(f"VLM OCR warning: extract_text_from_image_vlm returned unexpected type: {type(extracted_text)}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        if extracted_text.strip():
+
             # Clean the text
-            cleaned_text = extracted_text.strip()
+
+            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
+            cleaned_text = cleaned_text.strip()
 
             # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than 5 words, assume something went wrong and skip it
-            if len(words) > 5:
+            # If text has more than 30 words, assume something went wrong and skip it
+            if len(words) > 30:
+                print(
+                    f"VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                )
                 return {"rec_texts": [], "rec_scores": []}
 
             # Create PaddleOCR-compatible result
@@ -601,10 +736,12 @@ def _vlm_ocr_predict(
 
             return result
         else:
+            # print("VLM OCR warning: Extracted text is empty after stripping")
             return {"rec_texts": [], "rec_scores": []}
 
-    except Exception as e:
-        print(f"VLM OCR error: {e}")
+    except Exception:
+        # print(f"VLM OCR error: {e}")
+        # print(f"VLM OCR error traceback: {traceback.format_exc()}")
         return {"rec_texts": [], "rec_scores": []}
 
 
@@ -814,6 +951,8 @@ class CustomImageAnalyzerEngine:
         paddle_results: List[Any],
         input_image_width: int = None,
         input_image_height: int = None,
+        image_name: str = None,
+        image: Image.Image = None,
     ) -> Dict[str, List]:
         """Converts PaddleOCR result format to Tesseract's dictionary format using relative coordinates.
 
@@ -825,6 +964,8 @@ class CustomImageAnalyzerEngine:
             paddle_results: List of PaddleOCR result dictionaries
             input_image_width: Width of the input image passed to PaddleOCR (target dimensions for scaling)
             input_image_height: Height of the input image passed to PaddleOCR (target dimensions for scaling)
+            image_name: Name of the image
+            image: Image object
         """
 
         output = {
@@ -834,6 +975,7 @@ class CustomImageAnalyzerEngine:
             "width": list(),
             "height": list(),
             "conf": list(),
+            "model": list(),
         }
 
         # paddle_results is now a list of dictionaries with detailed information
@@ -848,18 +990,23 @@ class CustomImageAnalyzerEngine:
             # Fallback: we'll try to detect from coordinates, but this is less reliable
             use_relative_coords = False
         else:
-            use_relative_coords = False
+            use_relative_coords = True
 
         for page_result in paddle_results:
             # Extract text recognition results from the new format
             rec_texts = page_result.get("rec_texts", list())
             rec_scores = page_result.get("rec_scores", list())
             rec_polys = page_result.get("rec_polys", list())
+            rec_models = page_result.get("rec_models", list())
 
             # PaddleOCR may return image dimensions in the result - check for them
             # Some versions of PaddleOCR include this information
             result_image_width = page_result.get("image_width")
             result_image_height = page_result.get("image_height")
+
+            # PaddleOCR typically returns coordinates in the input image space
+            # However, it may internally resize images, so we need to check if coordinates
+            # are in a different space by comparing with explicit metadata or detecting from coordinates
 
             # First pass: determine PaddleOCR's coordinate space by finding max coordinates
             # This tells us what coordinate space PaddleOCR is actually using
@@ -879,22 +1026,45 @@ class CustomImageAnalyzerEngine:
                     max_y_coord = max(max_y_coord, max(y_coords) if y_coords else 0)
 
             # Determine PaddleOCR's coordinate space dimensions
-            # Priority: result metadata > detected from coordinates > input dimensions
-            paddle_coord_width = (
-                result_image_width
-                if result_image_width is not None
-                else max_x_coord if max_x_coord > 0 else input_image_width
-            )
-            paddle_coord_height = (
-                result_image_height
-                if result_image_height is not None
-                else max_y_coord if max_y_coord > 0 else input_image_height
-            )
-
-            # If we couldn't determine PaddleOCR's coordinate space, fall back to input dimensions
-            if paddle_coord_width is None or paddle_coord_height is None:
+            # Priority: explicit result metadata > input dimensions (standard PaddleOCR behavior)
+            # Note: PaddleOCR typically returns coordinates in the input image space.
+            # We only use a different coordinate space if PaddleOCR provides explicit metadata.
+            # Using max coordinates to detect coordinate space is unreliable because:
+            # 1. Text might not extend to image edges
+            # 2. There might be padding
+            # 3. Max coordinates don't necessarily equal image dimensions
+            if result_image_width is not None and result_image_height is not None:
+                # Use explicit metadata from PaddleOCR if available (most reliable)
+                paddle_coord_width = result_image_width
+                paddle_coord_height = result_image_height
+                # Only use relative conversion if coordinate space differs from input
+                if (
+                    paddle_coord_width != input_image_width
+                    or paddle_coord_height != input_image_height
+                ):
+                    print(
+                        f"PaddleOCR metadata indicates coordinate space ({paddle_coord_width}x{paddle_coord_height}) "
+                        f"differs from input ({input_image_width}x{input_image_height}). "
+                        f"Using metadata for coordinate conversion."
+                    )
+            elif input_image_width is not None and input_image_height is not None:
+                # Default: assume coordinates are in input image space (standard PaddleOCR behavior)
+                # This is the most common case and avoids incorrect scaling
                 paddle_coord_width = input_image_width
                 paddle_coord_height = input_image_height
+            else:
+                # Fallback: use max coordinates if we have no other information
+                paddle_coord_width = max_x_coord if max_x_coord > 0 else 1
+                paddle_coord_height = max_y_coord if max_y_coord > 0 else 1
+                use_relative_coords = False
+                print(
+                    f"Warning: No input dimensions provided. Using detected coordinate space ({paddle_coord_width}x{paddle_coord_height}) from max coordinates."
+                )
+
+            # Validate coordinate space dimensions
+            if paddle_coord_width is None or paddle_coord_height is None:
+                paddle_coord_width = input_image_width or 1
+                paddle_coord_height = input_image_height or 1
                 use_relative_coords = False
 
             if paddle_coord_width <= 0 or paddle_coord_height <= 0:
@@ -905,9 +1075,43 @@ class CustomImageAnalyzerEngine:
                 paddle_coord_height = input_image_height or 1
                 use_relative_coords = False
 
+            # If coordinate space matches input dimensions, coordinates are already in the correct space
+            # Only use relative coordinate conversion if coordinate space differs from input
+            if (
+                paddle_coord_width == input_image_width
+                and paddle_coord_height == input_image_height
+                and input_image_width is not None
+                and input_image_height is not None
+            ):
+                # Coordinates are already in input space, no conversion needed
+                use_relative_coords = False
+                print(
+                    f"PaddleOCR coordinates are in input image space ({input_image_width}x{input_image_height}). "
+                    f"Using coordinates directly without conversion."
+                )
+
             # Second pass: convert coordinates using relative coordinate approach
-            for line_text, line_confidence, bounding_box in zip(
-                rec_texts, rec_scores, rec_polys
+            # Use default "Paddle" if rec_models is not available or doesn't match length
+            if len(rec_models) != len(rec_texts):
+                print(
+                    f"Warning: rec_models length ({len(rec_models)}) doesn't match rec_texts length ({len(rec_texts)}). Using default 'Paddle' for all."
+                )
+                rec_models = ["Paddle"] * len(rec_texts)
+                # Update page_result to keep it consistent
+                page_result["rec_models"] = rec_models
+            else:
+                # Ensure we're using the rec_models from page_result (which may have been modified)
+                rec_models = page_result.get("rec_models", rec_models)
+
+            # Debug: Print model distribution
+            vlm_count = sum(1 for m in rec_models if m == "VLM")
+            if vlm_count > 0:
+                print(
+                    f"Found {vlm_count} VLM-labeled lines out of {len(rec_models)} total lines in page_result"
+                )
+
+            for line_text, line_confidence, bounding_box, line_model in zip(
+                rec_texts, rec_scores, rec_polys, rec_models
             ):
                 # bounding_box is now a numpy array with shape (4, 2)
                 # Convert to list of coordinates if it's a numpy array
@@ -974,6 +1178,7 @@ class CustomImageAnalyzerEngine:
                 output["width"].append(round(line_width, 2))
                 output["height"].append(round(line_height, 2))
                 output["conf"].append(int(line_confidence * 100))
+                output["model"].append(line_model if line_model else "Paddle")
 
         return output
 
@@ -1005,6 +1210,7 @@ class CustomImageAnalyzerEngine:
             "width": list(),
             "height": list(),
             "conf": list(),
+            "model": list(),
         }
 
         if not line_data or not line_data.get("text"):
@@ -1043,6 +1249,11 @@ class CustomImageAnalyzerEngine:
         for i in range(len(line_data["text"])):
             line_text = line_data["text"][i]
             line_conf = line_data["conf"][i]
+            # Extract model, defaulting to "Paddle" if not available
+            if "model" in line_data and len(line_data["model"]) > i:
+                line_model = line_data["model"][i]
+            else:
+                line_model = "Paddle"
 
             # Get the float values
             f_left = float(line_data["left"][i])
@@ -1171,6 +1382,7 @@ class CustomImageAnalyzerEngine:
                             output["width"].append(clamped_width)
                             output["height"].append(line_height)
                             output["conf"].append(line_conf)
+                            output["model"].append(line_model)
                             current_left += word_width + estimated_space_width
                 continue
 
@@ -1182,6 +1394,8 @@ class CustomImageAnalyzerEngine:
                 output["width"].append(word_output["width"][j])
                 output["height"].append(word_output["height"][j])
                 output["conf"].append(word_output["conf"][j])
+                # Preserve the model from the line-level data
+                output["model"].append(line_model)
 
         return output
 
@@ -1563,19 +1777,21 @@ class CustomImageAnalyzerEngine:
         self,
         image: Image.Image,
         ocr: Optional[Any] = None,
+        paddle_results: List[Any] = None,
         confidence_threshold: int = HYBRID_OCR_CONFIDENCE_THRESHOLD,
         padding: int = HYBRID_OCR_PADDING,
         image_name: str = "unknown_image_name",
         input_image_width: int = None,
         input_image_height: int = None,
-    ) -> Dict[str, list]:
+    ) -> List[Any]:
         """
         Performs OCR using PaddleOCR at line level, then VLM for low-confidence lines.
-        Returns data in the same dictionary format as pytesseract.image_to_data.
+        Returns modified paddle_results in the same format as PaddleOCR output.
 
         Args:
             image: PIL Image to process
             ocr: PaddleOCR instance (optional, uses self.paddle_ocr if not provided)
+            paddle_results: PaddleOCR results in original format (List of dicts with rec_texts, rec_scores, rec_polys)
             confidence_threshold: Confidence threshold below which VLM is used
             padding: Padding to add around line crops
             image_name: Name of the image for logging/debugging
@@ -1583,7 +1799,7 @@ class CustomImageAnalyzerEngine:
             input_image_height: Original image height (before preprocessing)
 
         Returns:
-            Dictionary with OCR results in Tesseract format
+            Modified paddle_results with VLM replacements for low-confidence lines
         """
         if ocr is None:
             if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
@@ -1592,6 +1808,9 @@ class CustomImageAnalyzerEngine:
                 raise ValueError(
                     "No OCR object provided and 'paddle_ocr' is not initialized."
                 )
+
+        if paddle_results is None or not paddle_results:
+            return paddle_results
 
         print("Starting hybrid PaddleOCR + VLM OCR process...")
 
@@ -1604,154 +1823,312 @@ class CustomImageAnalyzerEngine:
         if input_image_height is None:
             input_image_height = img_height
 
-        # 1. Get initial line-level results from PaddleOCR
-        image_np = np.array(image)
-        if len(image_np.shape) == 2:
-            image_np = np.stack([image_np] * 3, axis=-1)
+        # Create a deep copy of paddle_results to modify
+        modified_paddle_results = copy.deepcopy(paddle_results)
 
-        paddle_results = ocr.predict(image_np)
+        # Process each page result in paddle_results
+        for page_result in modified_paddle_results:
+            # Extract text recognition results from the paddle format
+            rec_texts = page_result.get("rec_texts", list())
+            rec_scores = page_result.get("rec_scores", list())
+            rec_polys = page_result.get("rec_polys", list())
 
-        # Convert PaddleOCR results to line-level format
-        paddle_line_data = self._convert_paddle_to_tesseract_format(
-            paddle_results,
-            input_image_width=input_image_width,
-            input_image_height=input_image_height,
-        )
+            # Initialize rec_models list with "Paddle" as default for all lines
+            num_lines = len(rec_texts)
+            if (
+                "rec_models" not in page_result
+                or len(page_result.get("rec_models", [])) != num_lines
+            ):
+                rec_models = ["Paddle"] * num_lines
+                page_result["rec_models"] = rec_models
+            else:
+                rec_models = page_result["rec_models"]
 
-        # Prepare final output structure
-        final_data = {
-            "text": list(),
-            "left": list(),
-            "top": list(),
-            "width": list(),
-            "height": list(),
-            "conf": list(),
-            "model": list(),  # Track which model was used for each line
-        }
+            # Get image dimensions from result if available
+            result_image_width = page_result.get("image_width")
+            result_image_height = page_result.get("image_height")
 
-        num_lines = len(paddle_line_data["text"])
+            # Determine PaddleOCR's coordinate space dimensions
+            max_x_coord = 0
+            max_y_coord = 0
+            for bounding_box in rec_polys:
+                if hasattr(bounding_box, "tolist"):
+                    box = bounding_box.tolist()
+                else:
+                    box = bounding_box
+                if box and len(box) > 0:
+                    x_coords = [p[0] for p in box]
+                    y_coords = [p[1] for p in box]
+                    max_x_coord = max(max_x_coord, max(x_coords) if x_coords else 0)
+                    max_y_coord = max(max_y_coord, max(y_coords) if y_coords else 0)
 
-        # Process each line
-        for i in range(num_lines):
-            line_text = paddle_line_data["text"][i]
-            line_conf = int(paddle_line_data["conf"][i])
-            line_left = float(paddle_line_data["left"][i])
-            line_top = float(paddle_line_data["top"][i])
-            line_width = float(paddle_line_data["width"][i])
-            line_height = float(paddle_line_data["height"][i])
+            paddle_coord_width = (
+                result_image_width
+                if result_image_width is not None
+                else max_x_coord if max_x_coord > 0 else input_image_width
+            )
+            paddle_coord_height = (
+                result_image_height
+                if result_image_height is not None
+                else max_y_coord if max_y_coord > 0 else input_image_height
+            )
 
-            # Skip empty lines
-            if not line_text.strip():
-                continue
+            if paddle_coord_width is None or paddle_coord_height is None:
+                paddle_coord_width = input_image_width or img_width
+                paddle_coord_height = input_image_height or img_height
 
-            # Initialize model as PaddleOCR (default)
-            model_used = "Paddle"
+            if paddle_coord_width <= 0 or paddle_coord_height <= 0:
+                paddle_coord_width = input_image_width or img_width
+                paddle_coord_height = input_image_height or img_height
 
-            # Count words in PaddleOCR output
-            paddle_words = line_text.split()
-            paddle_word_count = len(paddle_words)
+            # Process each line
+            print(f"Processing {num_lines} lines from PaddleOCR results...")
 
-            # If confidence is low, use VLM for a second opinion
-            if line_conf < confidence_threshold:
-                # Calculate crop coordinates with padding
-                crop_left = max(0, int(line_left - padding))
-                crop_top = max(0, int(line_top - padding))
-                crop_right = min(img_width, int(line_left + line_width + padding))
-                crop_bottom = min(img_height, int(line_top + line_height + padding))
+            for i in range(num_lines):
+                line_text = rec_texts[i]
+                line_conf = float(rec_scores[i]) * 100  # Convert to percentage
+                bounding_box = rec_polys[i]
 
-                # Ensure crop dimensions are valid
-                if crop_right <= crop_left or crop_bottom <= crop_top:
-                    # Invalid crop, keep original PaddleOCR result
-                    final_data["text"].append(clean_unicode_text(line_text))
-                    final_data["left"].append(line_left)
-                    final_data["top"].append(line_top)
-                    final_data["width"].append(line_width)
-                    final_data["height"].append(line_height)
-                    final_data["conf"].append(line_conf)
-                    final_data["model"].append(model_used)
+                # Skip empty lines
+                if not line_text.strip():
                     continue
 
-                # Crop the line image
-                cropped_image = image.crop(
-                    (crop_left, crop_top, crop_right, crop_bottom)
-                )
+                # Extract bounding box coordinates
+                if hasattr(bounding_box, "tolist"):
+                    box = bounding_box.tolist()
+                else:
+                    box = bounding_box
 
-                # Use VLM for OCR on this line
-                vlm_result = _vlm_ocr_predict(cropped_image)
-                vlm_rec_texts = vlm_result.get("rec_texts", [])
-                vlm_rec_scores = vlm_result.get("rec_scores", [])
+                if not box or len(box) == 0:
+                    continue
 
-                if vlm_rec_texts and vlm_rec_scores:
-                    # Combine VLM words into a single text string
-                    vlm_text = " ".join(vlm_rec_texts)
-                    vlm_word_count = len(vlm_rec_texts)
-                    vlm_conf = int(round(np.median(vlm_rec_scores) * 100, 0))
+                # Convert polygon to bounding box
+                x_coords = [p[0] for p in box]
+                y_coords = [p[1] for p in box]
+                line_left_paddle = float(min(x_coords))
+                line_top_paddle = float(min(y_coords))
+                line_right_paddle = float(max(x_coords))
+                line_bottom_paddle = float(max(y_coords))
+                line_width_paddle = line_right_paddle - line_left_paddle
+                line_height_paddle = line_bottom_paddle - line_top_paddle
 
-                    # Only replace if word counts match
-                    if vlm_word_count == paddle_word_count:
+                # Convert to image coordinate space (scale from paddle coordinates to image coordinates)
+                if paddle_coord_width > 0 and paddle_coord_height > 0:
+                    rel_left = line_left_paddle / paddle_coord_width
+                    rel_top = line_top_paddle / paddle_coord_height
+                    rel_width = line_width_paddle / paddle_coord_width
+                    rel_height = line_height_paddle / paddle_coord_height
+
+                    line_left = rel_left * img_width
+                    line_top = rel_top * img_height
+                    line_width = rel_width * img_width
+                    line_height = rel_height * img_height
+                else:
+                    line_left = line_left_paddle
+                    line_top = line_top_paddle
+                    line_width = line_width_paddle
+                    line_height = line_height_paddle
+
+                # Initialize model as PaddleOCR (default)
+
+                # Count words in PaddleOCR output
+                paddle_words = line_text.split()
+                paddle_word_count = len(paddle_words)
+
+                # If confidence is low, use VLM for a second opinion
+                if line_conf < confidence_threshold:
+                    # Debug: Print line dimensions before cropping
+                    # print(
+                    #     f"  Line {i}: '{line_text[:50]}...' "
+                    #     f"conf={line_conf}, "
+                    #     f"bbox=({line_left:.1f}, {line_top:.1f}, {line_width:.1f}, {line_height:.1f})"
+                    # )
+
+                    # Ensure minimum line height for VLM processing
+                    # If line_height is too small, use a minimum height based on typical text line height
+                    min_line_height = max(
+                        line_height, 20
+                    )  # Minimum 20 pixels for text line
+                    if line_height < 20:
                         print(
-                            f"  Re-OCR'd line: '{line_text}' (conf: {line_conf}, words: {paddle_word_count}) "
-                            f"-> '{vlm_text}' (conf: {vlm_conf:.0f}, words: {vlm_word_count}) [VLM]"
+                            f"  Warning: Line height ({line_height:.1f}px) is too small. "
+                            f"Using minimum height of {min_line_height}px for cropping."
                         )
 
-                        # For exporting example image comparisons
-                        safe_filename = self._create_safe_filename_with_confidence(
-                            line_text, vlm_text, line_conf, vlm_conf, "VLM"
+                    # Calculate crop coordinates
+                    crop_left = line_left
+                    crop_top = line_top
+                    crop_right = line_left + line_width
+                    crop_bottom = line_top + min_line_height
+
+                    print(
+                        f"  Crop coordinates: left={crop_left}, top={crop_top}, "
+                        f"right={crop_right}, bottom={crop_bottom}, "
+                        f"size=({crop_right - crop_left}x{crop_bottom - crop_top})"
+                    )
+
+                    # Ensure crop dimensions are valid
+                    if crop_right <= crop_left or crop_bottom <= crop_top:
+                        # Invalid crop, keep original PaddleOCR result
+                        continue
+
+                    # Crop the line image
+                    cropped_image = image.crop(
+                        (crop_left, crop_top, crop_right, crop_bottom)
+                    )
+
+                    # Check if cropped image is too small for VLM processing
+                    crop_width = crop_right - crop_left
+                    crop_height = crop_bottom - crop_top
+                    if crop_width < 10 or crop_height < 10:
+                        print(
+                            f"  Line: '{line_text}' (conf: {line_conf}) -> "
+                            f"Cropped image too small ({crop_width}x{crop_height} pixels). "
+                            f"Skipping VLM, keeping PaddleOCR result."
                         )
+                        # Keep original PaddleOCR result for this line
+                        continue
 
-                        if SAVE_EXAMPLE_HYBRID_IMAGES is True:
-                            # Normalize and validate image_name to prevent path traversal attacks
-                            normalized_image_name = os.path.normpath(
-                                image_name + "_hybrid_paddle_vlm"
-                            )
-                            if (
-                                ".." in normalized_image_name
-                                or "/" in normalized_image_name
-                                or "\\" in normalized_image_name
-                            ):
-                                normalized_image_name = "safe_image"
+                    # Ensure cropped image is in RGB mode before passing to VLM
+                    if cropped_image.mode != "RGB":
+                        cropped_image = cropped_image.convert("RGB")
 
-                            hybrid_ocr_examples_folder = (
-                                self.output_folder
-                                + f"/hybrid_ocr_examples/{normalized_image_name}"
+                    # Save input image for debugging if environment variable is set
+                    if SAVE_VLM_INPUT_IMAGES:
+                        try:
+                            vlm_debug_dir = os.path.join(
+                                OUTPUT_FOLDER,
+                                "hybrid_paddle_vlm_visualisations/vlm_input_images",
                             )
-                            # Validate the constructed path is safe
-                            if not validate_folder_containment(
-                                hybrid_ocr_examples_folder, OUTPUT_FOLDER
-                            ):
-                                raise ValueError(
-                                    f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
+                            os.makedirs(vlm_debug_dir, exist_ok=True)
+                            line_text_safe = safe_sanitize_text(line_text)
+                            line_text_shortened = line_text_safe[:20]
+                            image_name_safe = safe_sanitize_text(image_name)
+                            image_name_shortened = image_name_safe[:20]
+                            filename = f"{image_name_shortened}_{line_text_shortened}_vlm_input_image.png"
+                            filepath = os.path.join(vlm_debug_dir, filename)
+                            cropped_image.save(filepath)
+                            print(f"Saved VLM input image to: {filepath}")
+                        except Exception as save_error:
+                            print(
+                                f"Warning: Could not save VLM input image: {save_error}"
+                            )
+
+                    # Use VLM for OCR on this line with error handling
+                    vlm_result = None
+                    vlm_rec_texts = []
+                    vlm_rec_scores = []
+
+                    try:
+                        vlm_result = _vlm_ocr_predict(cropped_image)
+                        vlm_rec_texts = (
+                            vlm_result.get("rec_texts", []) if vlm_result else []
+                        )
+                        vlm_rec_scores = (
+                            vlm_result.get("rec_scores", []) if vlm_result else []
+                        )
+                    except Exception as vlm_error:
+                        print(
+                            f"  VLM OCR failed for line '{line_text[:50]}...' (conf: {line_conf}): {vlm_error}. "
+                            f"Keeping original PaddleOCR result."
+                        )
+                        # Ensure we keep original PaddleOCR result on error
+                        vlm_rec_texts = []
+                        vlm_rec_scores = []
+
+                    if vlm_rec_texts and vlm_rec_scores:
+                        # Combine VLM words into a single text string
+                        vlm_text = " ".join(vlm_rec_texts)
+                        vlm_word_count = len(vlm_rec_texts)
+                        vlm_conf = float(
+                            np.median(vlm_rec_scores)
+                        )  # Keep as 0-1 range for paddle format
+
+                        # Only replace if word counts match
+                        if (
+                            vlm_word_count - paddle_word_count <= 2
+                            and vlm_word_count - paddle_word_count >= -2
+                        ):
+                            print(
+                                f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
+                                f"-> '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) [VLM]"
+                            )
+
+                            # For exporting example image comparisons
+                            safe_filename = self._create_safe_filename_with_confidence(
+                                line_text,
+                                vlm_text,
+                                int(line_conf),
+                                int(vlm_conf * 100),
+                                "VLM",
+                            )
+
+                            if SAVE_EXAMPLE_HYBRID_IMAGES is True:
+                                # Normalize and validate image_name to prevent path traversal attacks
+                                normalized_image_name = os.path.normpath(
+                                    image_name + "_hybrid_paddle_vlm"
                                 )
+                                if (
+                                    ".." in normalized_image_name
+                                    or "/" in normalized_image_name
+                                    or "\\" in normalized_image_name
+                                ):
+                                    normalized_image_name = "safe_image"
 
-                            if not os.path.exists(hybrid_ocr_examples_folder):
-                                os.makedirs(hybrid_ocr_examples_folder)
-                            output_image_path = (
-                                hybrid_ocr_examples_folder + f"/{safe_filename}.png"
+                                hybrid_ocr_examples_folder = (
+                                    self.output_folder
+                                    + f"/hybrid_ocr_examples/{normalized_image_name}"
+                                )
+                                # Validate the constructed path is safe
+                                if not validate_folder_containment(
+                                    hybrid_ocr_examples_folder, OUTPUT_FOLDER
+                                ):
+                                    raise ValueError(
+                                        f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
+                                    )
+
+                                if not os.path.exists(hybrid_ocr_examples_folder):
+                                    os.makedirs(hybrid_ocr_examples_folder)
+                                output_image_path = (
+                                    hybrid_ocr_examples_folder + f"/{safe_filename}.png"
+                                )
+                                print(f"Saving example image to {output_image_path}")
+                                cropped_image.save(output_image_path)
+
+                            # Replace with VLM result in paddle_results format
+                            # Update rec_texts, rec_scores, and rec_models for this line
+                            rec_texts[i] = vlm_text
+                            rec_scores[i] = vlm_conf
+                            rec_models[i] = "VLM"
+                            # Ensure page_result is updated with the modified rec_models list
+                            page_result["rec_models"] = rec_models
+                            print(
+                                f"  Set rec_models[{i}] = 'VLM' for line '{vlm_text[:50]}...'"
                             )
-                            print(f"Saving example image to {output_image_path}")
-                            cropped_image.save(output_image_path)
-
-                        # Replace with VLM result
-                        line_text = vlm_text
-                        line_conf = vlm_conf
-                        model_used = "VLM"
+                        else:
+                            print(
+                                f"  Line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) -> "
+                                f"VLM result '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) "
+                                f"word count mismatch. Keeping PaddleOCR result."
+                            )
                     else:
-                        print(
-                            f"  Line: '{line_text}' (conf: {line_conf}, words: {paddle_word_count}) -> "
-                            f"VLM result '{vlm_text}' (conf: {vlm_conf:.0f}, words: {vlm_word_count}) "
-                            f"word count mismatch. Keeping PaddleOCR result."
-                        )
+                        # VLM returned empty or no results - keep original PaddleOCR result
+                        if line_conf < confidence_threshold:
+                            print(
+                                f"  Line: '{line_text}' (conf: {line_conf:.1f}) -> "
+                                f"VLM returned no results. Keeping original PaddleOCR result."
+                            )
 
-            # Append the final result (either original PaddleOCR or replaced VLM)
-            final_data["text"].append(clean_unicode_text(line_text))
-            final_data["left"].append(line_left)
-            final_data["top"].append(line_top)
-            final_data["width"].append(line_width)
-            final_data["height"].append(line_height)
-            final_data["conf"].append(int(line_conf))
-            final_data["model"].append(model_used)
+        # Debug: Print summary of model labels before returning
+        for page_idx, page_result in enumerate(modified_paddle_results):
+            rec_models = page_result.get("rec_models", [])
+            vlm_count = sum(1 for m in rec_models if m == "VLM")
+            paddle_count = sum(1 for m in rec_models if m == "Paddle")
+            print(
+                f"Page {page_idx}: {vlm_count} VLM, {paddle_count} Paddle out of {len(rec_models)} total lines"
+            )
 
-        return final_data
+        return modified_paddle_results
 
     def perform_ocr(
         self, image: Union[str, Image.Image, np.ndarray], ocr: Optional[Any] = None
@@ -1772,11 +2149,16 @@ class CustomImageAnalyzerEngine:
         # Store original dimensions BEFORE preprocessing (needed for coordinate conversion)
         original_image_width = None
         original_image_height = None
+        original_image_for_visualization = (
+            None  # Store original image for visualization
+        )
 
         if PREPROCESS_LOCAL_OCR_IMAGES:
             print("Pre-processing image...")
             # Get original dimensions before preprocessing
             original_image_width, original_image_height = image.size
+            # Store original image for visualization (coordinates are in original space)
+            original_image_for_visualization = image.copy()
             image, preprocessing_metadata = self.image_preprocessor.preprocess_image(
                 image
             )
@@ -1794,8 +2176,14 @@ class CustomImageAnalyzerEngine:
         else:
             preprocessing_metadata = dict()
             original_image_width, original_image_height = image.size
+            # When preprocessing is disabled, the current image is the original
+            original_image_for_visualization = image.copy()
 
         image_width, image_height = image.size
+
+        # Store original image for line-to-word conversion when PaddleOCR processes original image
+        original_image_for_cropping = None
+        paddle_processed_original = False
 
         # Note: In testing I haven't seen that this necessarily improves results
         if self.ocr_engine == "hybrid-paddle":
@@ -1806,23 +2194,6 @@ class CustomImageAnalyzerEngine:
             # Try hybrid VLM with original image for cropping:
             ocr_data = self._perform_hybrid_ocr(image, image_name=image_name)
 
-        elif self.ocr_engine == "hybrid-paddle-vlm":
-            # Hybrid PaddleOCR + VLM: use PaddleOCR at line level, then VLM for low-confidence lines
-            if ocr is None:
-                if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
-                    ocr = self.paddle_ocr
-                else:
-                    raise ValueError(
-                        "No OCR object provided and 'paddle_ocr' is not initialized."
-                    )
-            ocr_data = self._perform_hybrid_paddle_vlm_ocr(
-                image,
-                ocr=ocr,
-                image_name=image_name,
-                input_image_width=original_image_width,
-                input_image_height=original_image_height,
-            )
-
         elif self.ocr_engine == "tesseract":
 
             ocr_data = pytesseract.image_to_data(
@@ -1832,7 +2203,7 @@ class CustomImageAnalyzerEngine:
                 lang=self.tesseract_lang,  # Ensure the Tesseract language data (e.g., fra.traineddata) is installed on your system.
             )
 
-        elif self.ocr_engine == "paddle":
+        elif self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle-vlm":
 
             if ocr is None:
                 if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
@@ -1863,6 +2234,8 @@ class CustomImageAnalyzerEngine:
                 paddle_input_height = image_np.shape[0]
 
                 paddle_results = ocr.predict(image_np)
+                # PaddleOCR processed the preprocessed image
+                paddle_processed_original = False
             else:
                 # When using image path, load image to get dimensions
                 temp_image = Image.open(image_path)
@@ -1870,9 +2243,13 @@ class CustomImageAnalyzerEngine:
                 # For file path, use the original dimensions (before preprocessing)
                 # original_image_width and original_image_height are already set above
                 paddle_results = ocr.predict(image_path)
+                # PaddleOCR processed the original image from file path
+                paddle_processed_original = True
+                # Store the original image for cropping
+                original_image_for_cropping = temp_image.copy()
 
             # Save PaddleOCR visualization with bounding boxes
-            if paddle_results and SAVE_PADDLE_VISUALISATIONS is True:
+            if paddle_results and SAVE_PAGE_OCR_VISUALISATIONS is True:
 
                 for res in paddle_results:
                     # self.output_folder is already validated and normalized at construction time
@@ -1890,24 +2267,137 @@ class CustomImageAnalyzerEngine:
                     os.makedirs(paddle_viz_folder, exist_ok=True)
                     res.save_to_img(paddle_viz_folder)
 
+            if self.ocr_engine == "hybrid-paddle-vlm":
+
+                paddle_results = self._perform_hybrid_paddle_vlm_ocr(
+                    image,
+                    ocr=ocr,
+                    paddle_results=paddle_results,
+                    image_name=image_name,
+                    input_image_width=original_image_width,
+                    input_image_height=original_image_height,
+                )
+
+                # Debug: Check structure after hybrid processing
+                if paddle_results:
+                    print(
+                        f"DEBUG: After hybrid, paddle_results length: {len(paddle_results)}"
+                    )
+                    if len(paddle_results) > 0 and isinstance(paddle_results[0], dict):
+                        rec_models = paddle_results[0].get("rec_models", [])
+                        vlm_count = sum(1 for m in rec_models if m == "VLM")
+                        print(
+                            f"DEBUG: After hybrid, first page has {vlm_count} VLM labels out of {len(rec_models)} total"
+                        )
+
             ocr_data = self._convert_paddle_to_tesseract_format(
                 paddle_results,
                 input_image_width=original_image_width,
                 input_image_height=original_image_height,
             )
 
+            if SAVE_PAGE_OCR_VISUALISATIONS is True:
+                # Save output to image with identified bounding boxes
+                # Use original image since coordinates are in original image space
+                # Prefer original_image_for_cropping (when PaddleOCR processed from file path),
+                # otherwise use original_image_for_visualization (stored before preprocessing)
+                viz_image = (
+                    original_image_for_cropping
+                    if original_image_for_cropping is not None
+                    else (
+                        original_image_for_visualization
+                        if original_image_for_visualization is not None
+                        else image
+                    )
+                )
+                if isinstance(viz_image, Image.Image):
+                    # Convert PIL Image to numpy array in BGR format for OpenCV
+                    image_cv = cv2.cvtColor(np.array(viz_image), cv2.COLOR_RGB2BGR)
+                else:
+                    image_cv = np.array(viz_image)
+                    if len(image_cv.shape) == 2:
+                        image_cv = cv2.cvtColor(image_cv, cv2.COLOR_GRAY2BGR)
+                    elif len(image_cv.shape) == 3 and image_cv.shape[2] == 3:
+                        # Assume RGB, convert to BGR
+                        image_cv = cv2.cvtColor(image_cv, cv2.COLOR_RGB2BGR)
+
+                # Draw all bounding boxes on the image
+                for i in range(len(ocr_data["text"])):
+                    left = int(ocr_data["left"][i])
+                    top = int(ocr_data["top"][i])
+                    width = int(ocr_data["width"][i])
+                    height = int(ocr_data["height"][i])
+                    # Ensure coordinates are within image bounds
+                    left = max(0, min(left, image_cv.shape[1] - 1))
+                    top = max(0, min(top, image_cv.shape[0] - 1))
+                    right = max(left + 1, min(left + width, image_cv.shape[1]))
+                    bottom = max(top + 1, min(top + height, image_cv.shape[0]))
+                    cv2.rectangle(
+                        image_cv, (left, top), (right, bottom), (0, 255, 0), 2
+                    )
+
+                # Save the visualization once with all boxes drawn
+                paddle_viz_folder = os.path.join(
+                    self.output_folder, "paddle_visualisations"
+                )
+                # Double-check the constructed path is safe
+                if not validate_folder_containment(paddle_viz_folder, OUTPUT_FOLDER):
+                    raise ValueError(
+                        f"Unsafe paddle visualisations folder path: {paddle_viz_folder}"
+                    )
+
+                os.makedirs(paddle_viz_folder, exist_ok=True)
+
+                # Generate safe filename
+                if image_name:
+                    base_name = os.path.splitext(os.path.basename(image_name))[0]
+                    # Sanitize filename to avoid issues with special characters
+                    base_name = safe_sanitize_text(base_name, max_length=50)
+                    filename = f"{base_name}_ocr_visualisation.jpg"
+                else:
+                    timestamp = int(time.time())
+                    filename = f"ocr_visualisation_{timestamp}.jpg"
+
+                output_path = os.path.join(paddle_viz_folder, filename)
+                cv2.imwrite(output_path, image_cv)
+                print(f"OCR visualization saved to: {output_path}")
+
         else:
             raise RuntimeError(f"Unsupported OCR engine: {self.ocr_engine}")
+
+        # Always check for scale_factor, even if preprocessing_metadata is empty
+        # This ensures rescaling happens correctly when preprocessing was applied
+        scale_factor = (
+            preprocessing_metadata.get("scale_factor", 1.0)
+            if preprocessing_metadata
+            else 1.0
+        )
+        if scale_factor != 1.0:
+            # Skip rescaling for PaddleOCR since _convert_paddle_to_tesseract_format
+            # already scales coordinates directly to original image dimensions
+            # hybrid-paddle-vlm also uses PaddleOCR and converts to original space
+            if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle-vlm":
+                pass
+                # print(f"Skipping rescale_ocr_data for PaddleOCR (already scaled to original dimensions)")
+            else:
+                print("rescaling ocr_data with scale_factor: ", scale_factor)
+                ocr_data = rescale_ocr_data(ocr_data, scale_factor)
 
         # Convert line-level results to word-level if configured and needed
         if CONVERT_LINE_TO_WORD_LEVEL and self._is_line_level_data(ocr_data):
             print("Converting line-level OCR results to word-level...")
-            # Check if coordinates need to be scaled to match the preprocessed image
-            # For PaddleOCR: _convert_paddle_to_tesseract_format converts coordinates to original image space,
-            #   but we need to crop from the preprocessed image, so we need to scale coordinates up
+            # Check if coordinates need to be scaled to match the image we're cropping from
+            # For PaddleOCR: _convert_paddle_to_tesseract_format converts coordinates to original image space
+            #   - If PaddleOCR processed the original image (image_path provided), crop from original image (no scaling)
+            #   - If PaddleOCR processed the preprocessed image (no image_path), scale coordinates to preprocessed space and crop from preprocessed image
             # For Tesseract: OCR runs on preprocessed image, so coordinates are already in preprocessed space,
             #   matching the preprocessed image we're cropping from - no scaling needed
+
             needs_scaling = False
+            crop_image = image  # Default to preprocessed image
+            crop_image_width = image_width
+            crop_image_height = image_height
+
             if (
                 PREPROCESS_LOCAL_OCR_IMAGES
                 and original_image_width
@@ -1919,7 +2409,19 @@ class CustomImageAnalyzerEngine:
                 ):
                     # PaddleOCR coordinates are converted to original space by _convert_paddle_to_tesseract_format
                     # hybrid-paddle-vlm also uses PaddleOCR and converts to original space
-                    needs_scaling = True
+                    if paddle_processed_original:
+                        # PaddleOCR processed the original image, so crop from original image
+                        # No scaling needed - coordinates are already in original space
+                        crop_image = original_image_for_cropping
+                        crop_image_width = original_image_width
+                        crop_image_height = original_image_height
+                        needs_scaling = False
+                        print(
+                            f"PaddleOCR processed original image. Cropping from original ({original_image_width}x{original_image_height}) without scaling."
+                        )
+                    else:
+                        # PaddleOCR processed the preprocessed image, so scale coordinates to preprocessed space
+                        needs_scaling = True
 
             if needs_scaling:
                 # Calculate scale factors from original to preprocessed
@@ -1937,12 +2439,13 @@ class CustomImageAnalyzerEngine:
                     "width": [w * scale_x for w in ocr_data["width"]],
                     "height": [h * scale_y for h in ocr_data["height"]],
                     "conf": ocr_data["conf"],
+                    "model": ocr_data["model"],
                 }
                 ocr_data = self._convert_line_to_word_level(
                     scaled_ocr_data,
-                    image_width,
-                    image_height,
-                    image,
+                    crop_image_width,
+                    crop_image_height,
+                    crop_image,
                     image_name=image_name,
                 )
                 # Scale word-level results back to original image space
@@ -1954,26 +2457,14 @@ class CustomImageAnalyzerEngine:
                     ocr_data["width"][i] = ocr_data["width"][i] * scale_factor_x
                     ocr_data["height"][i] = ocr_data["height"][i] * scale_factor_y
             else:
+                # No scaling needed - coordinates match the crop image space
                 ocr_data = self._convert_line_to_word_level(
-                    ocr_data, image_width, image_height, image, image_name=image_name
+                    ocr_data,
+                    crop_image_width,
+                    crop_image_height,
+                    crop_image,
+                    image_name=image_name,
                 )
-
-        # Always check for scale_factor, even if preprocessing_metadata is empty
-        # This ensures rescaling happens correctly when preprocessing was applied
-        scale_factor = (
-            preprocessing_metadata.get("scale_factor", 1.0)
-            if preprocessing_metadata
-            else 1.0
-        )
-        if scale_factor != 1.0:
-            # Skip rescaling for PaddleOCR since _convert_paddle_to_tesseract_format
-            # already scales coordinates directly to original image dimensions
-            # hybrid-paddle-vlm also uses PaddleOCR and converts to original space
-            if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle-vlm":
-                pass
-                # print(f"Skipping rescale_ocr_data for PaddleOCR (already scaled to original dimensions)")
-            else:
-                ocr_data = rescale_ocr_data(ocr_data, scale_factor)
 
         # The rest of your processing pipeline now works for both engines
         ocr_result = ocr_data
@@ -1986,9 +2477,7 @@ class CustomImageAnalyzerEngine:
         ]
 
         # Determine default model based on OCR engine if model field is not present
-        if "model" in ocr_result and len(ocr_result["model"]) == len(
-            ocr_result["text"]
-        ):
+        if "model" in ocr_result:
             # Model field exists and has correct length - use it
             def get_model(idx):
                 return ocr_result["model"][idx]
@@ -2002,13 +2491,13 @@ class CustomImageAnalyzerEngine:
                     "Paddle"
                     if self.ocr_engine == "paddle"
                     else (
-                        "hybrid-paddle"
+                        "Tesseract"
                         if self.ocr_engine == "hybrid-paddle"
                         else (
-                            "VLM"
+                            "Tesseract"
                             if self.ocr_engine == "hybrid-vlm"
                             else (
-                                "hybrid-paddle-vlm"
+                                "Paddle"
                                 if self.ocr_engine == "hybrid-paddle-vlm"
                                 else None
                             )
