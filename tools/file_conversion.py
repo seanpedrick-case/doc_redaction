@@ -1164,13 +1164,19 @@ def prepare_image_or_pdf(
             ) and "_textract" in file_path_without_ext:  # (prepare_for_review != True):
                 print("Saving Textract output")
                 # Copy it to the output folder so it can be used later.
-                output_textract_json_file_name = file_path_without_ext
-                if not file_path.endswith("_textract.json"):
+                # Check if file already has a textract suffix pattern (e.g., _sig_textract.json, _form_textract.json, etc.)
+                # Pattern matches: _textract.json or _*_textract.json
+                textract_pattern = re.compile(r'_[a-z_]+_textract\.json$|_textract\.json$')
+                if textract_pattern.search(file_path):
+                    # File already has a textract suffix, preserve it
+                    output_textract_json_file_name = file_path_without_ext + ".json"
+                elif file_path.endswith("_textract.json"):
+                    output_textract_json_file_name = file_path_without_ext + ".json"
+                else:
+                    # No textract suffix found, add default one
                     output_textract_json_file_name = (
                         file_path_without_ext + "_textract.json"
                     )
-                else:
-                    output_textract_json_file_name = file_path_without_ext + ".json"
 
                 out_textract_path = secure_join(
                     output_folder, output_textract_json_file_name
