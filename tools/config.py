@@ -492,23 +492,28 @@ OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-)  # Choose between "tesseract", "hybrid-paddle", and "paddle". "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence.
+)  # Choose between "tesseract", "hybrid-paddle", and "paddle". "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence. "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen vision model (default Dots.OCR) on words with low confidence.
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "False")
 )
-if SHOW_LOCAL_OCR_MODEL_OPTIONS:
-    LOCAL_OCR_MODEL_OPTIONS = [
-        "tesseract",
-        "hybrid-paddle",
-        "paddle",
-    ]
-else:
-    LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
 
-vlm_options = ["hybrid-vlm", "hybrid-paddle-vlm"]
+SHOW_PADDLE_MODEL_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_PADDLE_MODEL_OPTIONS", "False")
+)
+
+LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
+
+paddle_options = ["paddle", "hybrid-paddle"]
+if SHOW_PADDLE_MODEL_OPTIONS:
+    LOCAL_OCR_MODEL_OPTIONS.extend(paddle_options)
+
+vlm_options = ["hybrid-vlm"]
 if SHOW_VLM_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(vlm_options)
+
+if SHOW_PADDLE_MODEL_OPTIONS and SHOW_VLM_MODEL_OPTIONS:
+    LOCAL_OCR_MODEL_OPTIONS.append("hybrid-paddle-vlm")
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 

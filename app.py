@@ -260,6 +260,9 @@ app = FastAPI()
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
+# Added to pass lint check, no effect
+spaces.annotations
+
 ###
 # Load in Gradio app components
 ###
@@ -1255,7 +1258,7 @@ with blocks:
                         open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                     ):
                         local_ocr_method_radio = gr.Radio(
-                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence.""",
+                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence. "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen vision model (default Dots.OCR) on words with low confidence.""",
                             value=CHOSEN_LOCAL_OCR_MODEL,
                             choices=LOCAL_OCR_MODEL_OPTIONS,
                             interactive=True,
@@ -2424,9 +2427,9 @@ with blocks:
     # PDF/IMAGE REDACTION
     ###
     # Recalculate estimated costs based on changes to inputs
-    if SHOW_COSTS == "True":
+    if SHOW_COSTS:
         # Calculate costs
-        total_pdf_page_count.input(
+        total_pdf_page_count.change(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2471,6 +2474,10 @@ with blocks:
             outputs=[estimated_aws_costs_number],
         )
         handwrite_signature_checkbox.input(
+            fn=check_for_existing_textract_file,
+            inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
+            outputs=[textract_output_found_checkbox],
+        ).then(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2506,7 +2513,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        textract_output_found_checkbox.input(
+        textract_output_found_checkbox.change(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2520,7 +2527,7 @@ with blocks:
         )
 
         # Calculate time taken
-        total_pdf_page_count.input(
+        total_pdf_page_count.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2557,6 +2564,10 @@ with blocks:
             outputs=[estimated_time_taken_number],
         )
         handwrite_signature_checkbox.input(
+            fn=check_for_existing_textract_file,
+            inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
+            outputs=[textract_output_found_checkbox],
+        ).then(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2568,7 +2579,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        textract_output_found_checkbox.input(
+        textract_output_found_checkbox.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2593,7 +2604,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        textract_output_found_checkbox.input(
+        textract_output_found_checkbox.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2605,7 +2616,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        relevant_ocr_output_with_words_found_checkbox.input(
+        relevant_ocr_output_with_words_found_checkbox.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2689,7 +2700,7 @@ with blocks:
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
         fn=check_for_existing_textract_file,
-        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
+        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
         outputs=[textract_output_found_checkbox],
     ).success(
         fn=check_for_relevant_ocr_output_with_words,
@@ -2976,7 +2987,7 @@ with blocks:
         show_progress_on=[annotator],
     ).success(
         fn=check_for_existing_textract_file,
-        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
+        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
         outputs=[textract_output_found_checkbox],
     ).success(
         fn=check_for_relevant_ocr_output_with_words,
@@ -3157,7 +3168,7 @@ with blocks:
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
         fn=check_for_existing_textract_file,
-        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
+        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox, handwrite_signature_checkbox],
         outputs=[textract_output_found_checkbox],
     ).success(
         fn=check_for_relevant_ocr_output_with_words,

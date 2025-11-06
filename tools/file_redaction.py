@@ -96,6 +96,7 @@ from tools.file_conversion import (
 from tools.helper_functions import (
     clean_unicode_text,
     get_file_name_without_type,
+    get_textract_file_suffix,
 )
 from tools.load_spacy_model_custom_recognisers import (
     CustomWordFuzzyRecognizer,
@@ -109,8 +110,11 @@ from tools.load_spacy_model_custom_recognisers import (
 from tools.secure_path_utils import (
     secure_file_write,
     validate_folder_containment,
-    validate_path_containment,
+    validate_path_containment,    
 )
+
+# Extract numbers before 'seconds' using secure regex
+from tools.secure_regex_utils import safe_extract_numbers_with_seconds
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES
 if not MAX_IMAGE_PIXELS:
@@ -142,8 +146,7 @@ def sum_numbers_before_seconds(string: str):
         The sum of all numbers before 'seconds' in the string.
     """
 
-    # Extract numbers before 'seconds' using secure regex
-    from tools.secure_regex_utils import safe_extract_numbers_with_seconds
+    
 
     numbers = safe_extract_numbers_with_seconds(string)
 
@@ -1706,11 +1709,11 @@ def choose_and_run_redactor(
         all_request_metadata_str = "\n".join(all_textract_request_metadata).strip()
 
         textract_metadata_filename = (
-            output_folder + pdf_file_name_without_ext + "_textract_metadata.txt"
+            pdf_file_name_without_ext + "_textract_metadata.txt"
         )
 
         # Add page range suffix if partial processing
-        all_textract_request_metadata_file_path = add_page_range_suffix_to_file_path(
+        textract_metadata_filename = add_page_range_suffix_to_file_path(
             textract_metadata_filename,
             page_min,
             current_loop_page,
@@ -1720,9 +1723,11 @@ def choose_and_run_redactor(
 
         secure_file_write(
             output_folder,
-            all_textract_request_metadata_file_path,
+            textract_metadata_filename,
             all_request_metadata_str,
         )
+
+        all_textract_request_metadata_file_path = output_folder + textract_metadata_filename
 
         # Add the request metadata to the log outputs if not there already
         if all_textract_request_metadata_file_path not in log_files_output_paths:
@@ -3139,7 +3144,8 @@ def redact_image_pdf(
     comprehend_query_number_new = 0
     selection_element_results_list_df = pd.DataFrame()
     form_key_value_results_list_df = pd.DataFrame()
-
+    textract_json_file_path = ""
+    textract_client_not_found = False
     # Try updating the supported languages for the spacy analyser
     try:
         nlp_analyser = create_nlp_analyser(language, existing_nlp_analyser=nlp_analyser)
@@ -3191,6 +3197,7 @@ def redact_image_pdf(
 
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION and textract_client == "":
         out_message_warning = "Connection to AWS Textract service unsuccessful. Redaction will only continue if local AWS Textract results can be found."
+        textract_client_not_found = True
         print(out_message_warning)
         # raise Exception(out_message)
 
@@ -3210,7 +3217,9 @@ def redact_image_pdf(
 
     # If running Textract, check if file already exists. If it does, load in existing data
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
-        textract_json_file_path = output_folder + file_name + "_textract.json"
+        # Generate suffix based on checkbox options
+        textract_suffix = get_textract_file_suffix(handwrite_signature_checkbox)
+        textract_json_file_path = output_folder + file_name + textract_suffix + "_textract.json"
         if OVERWRITE_EXISTING_OCR_RESULTS:
             # Skip loading existing results, start fresh
             textract_data = {}
@@ -3223,7 +3232,9 @@ def redact_image_pdf(
             )
         original_textract_data = textract_data.copy()
 
-        # print("Successfully loaded in Textract analysis results from file")
+        if textract_client_not_found and is_missing:
+            print("No existing Textract results file found and no Textract client found. Redaction will not continue.")
+            raise Exception("No existing Textract results file found and no Textract client found. Redaction will not continue.")
 
     # If running local OCR option, check if file already exists. If it does, load in existing data
     if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
@@ -3308,8 +3319,7 @@ def redact_image_pdf(
                 normalized_path = os.path.normpath(os.path.abspath(image_path))
                 if validate_path_containment(normalized_path, input_folder):
                     image = Image.open(normalized_path)
-                    page_width, page_height = image.size
-                    print("Successfully opened image from path")
+                    page_width, page_height = image.size                    
                 else:
                     # If validation fails and input file is an image file, try using file_path as fallback
                     if (
@@ -3514,14 +3524,15 @@ def redact_image_pdf(
 
                         textract_data = {"pages": [text_blocks]}
                     except Exception as e:
-                        print(
-                            "Textract extraction for page",
-                            reported_page_number,
-                            "failed due to:",
-                            e,
+                        out_message = (
+                            "Textract extraction for page "
+                            + reported_page_number
+                            + " failed due to:"
+                            + str(e)
                         )
                         textract_data = {"pages": []}
                         new_textract_request_metadata = "Failed Textract API call"
+                        raise Exception(out_message)
 
                     textract_request_metadata.append(new_textract_request_metadata)
 
@@ -3933,7 +3944,7 @@ def redact_image_pdf(
                         # Write the updated existing textract data back to the JSON file
                         secure_file_write(
                             output_folder,
-                            file_name + "_textract.json",
+                            file_name + textract_suffix + "_textract.json",
                             json.dumps(textract_data, separators=(",", ":")),
                         )
 
@@ -4014,7 +4025,7 @@ def redact_image_pdf(
                 if original_textract_data != textract_data:
                     secure_file_write(
                         output_folder,
-                        file_name + "_textract.json",
+                        file_name + textract_suffix + "_textract.json",
                         json.dumps(textract_data, separators=(",", ":")),
                     )
 
@@ -4084,7 +4095,7 @@ def redact_image_pdf(
         if original_textract_data != textract_data:
             secure_file_write(
                 output_folder,
-                file_name + "_textract.json",
+                file_name + textract_suffix + "_textract.json",
                 json.dumps(textract_data, separators=(",", ":")),
             )
 
@@ -4147,8 +4158,6 @@ def redact_image_pdf(
         form_key_value_results_list_df = convert_question_answer_to_dataframe(
             form_key_value_results_list, page_sizes_df
         )
-
-    print("Returning from redact_image_pdf function")
 
     return (
         pymupdf_doc,
@@ -5474,7 +5483,6 @@ def visualise_ocr_words_bounding_boxes(
 
         # Save the combined image
         cv2.imwrite(output_path, combined_image)
-        print(f"OCR visualization saved to: {output_path}")
 
         log_files_output_paths.append(output_path)
 

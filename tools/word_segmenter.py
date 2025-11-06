@@ -15,9 +15,7 @@ MIN_SPACE_FACTOR = 0.3  # Default 0.4
 MATCH_TOLERANCE = 0  # Default 0
 MIN_AREA_THRESHOLD = 6  # Default 6
 DEFAULT_TRIM_PERCENTAGE = 0.2  # Default 0.2
-SHOW_OUTPUT_IMAGES = True  # Default False
-
-
+SHOW_OUTPUT_IMAGES = False  # Default False
 class AdaptiveSegmenter:
     """
     Line to word segmentation pipeline. It features:
@@ -1172,75 +1170,3 @@ class HybridWordSegmenter:
                     final_output[key].append(box[key])
 
         return final_output
-
-
-# --- Example Usage ---
-if __name__ == "__main__":
-    # Make sure you have the previous class available to import for the fallback
-    image_path = "input/example_partnership_p6_1.PNG"
-    # image_path = 'input/example_partnership_p6_2.PNG'
-    # image_path = 'input/example_partnership_p4_1.PNG'
-    # image_path = 'input/line_image_3.png'
-    # image_path = 'input/cora_fuller.png'
-    # image_path = 'input/london_borough_of_lambeth.png'
-    image_basename = os.path.basename(image_path)
-    image_name = os.path.splitext(image_basename)[0]
-    output_path = f"output/{image_name}_refined_morph.png"
-    if not os.path.exists("output"):
-        os.makedirs("output")
-    line_image_cv = cv2.imread(image_path)
-    h, w, _ = line_image_cv.shape
-
-    # Read in related text
-    with open(f"input/{image_name}_text.txt", "r") as file:
-        text = file.read()
-    line_data = {
-        "text": [text],
-        "left": [0],
-        "top": [0],
-        "width": [w],
-        "height": [h],
-        "conf": [95.0],
-    }
-    segmenter = AdaptiveSegmenter()
-    final_word_data, used_fallback = segmenter.segment(
-        line_data, line_image_cv, image_name=image_name
-    )
-
-    # Visualisation
-    output_image_vis = line_image_cv.copy()
-    # Validate output_image_vis before saving
-    if (
-        output_image_vis is None
-        or not isinstance(output_image_vis, np.ndarray)
-        or output_image_vis.size == 0
-    ):
-        print(f"Error: output_image_vis is None or empty (image_name: {image_name})")
-    else:
-        print(f"\nFinal refined {len(final_word_data['text'])} words:")
-        for i in range(len(final_word_data["text"])):
-            word = final_word_data["text"][i]
-            x, y, w, h = (
-                int(final_word_data["left"][i]),
-                int(final_word_data["top"][i]),
-                int(final_word_data["width"][i]),
-                int(final_word_data["height"][i]),
-            )
-            print(f"- '{word}' at ({x}, {y}, {w}, {h})")
-            cv2.rectangle(output_image_vis, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-        cv2.imwrite(output_path, output_image_vis)
-        print(f"\nSaved visualisation to '{output_path}'")
-
-    # You can also use matplotlib to display it in a notebook
-    import matplotlib.pyplot as plt
-
-    plt.figure(figsize=(10, 5))
-    plt.imshow(cv2.cvtColor(output_image_vis, cv2.COLOR_BGR2RGB))
-
-    if used_fallback:
-        plt.title("Refined with Bounded Scan")
-    else:
-        plt.title("Refined with Morphological Closing")
-    plt.axis("off")
-    plt.show()
