@@ -36,6 +36,7 @@ from tools.config import (
     FULL_ENTITY_LIST,
     IMAGES_DPI,
     INPUT_FOLDER,
+    LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
     OUTPUT_FOLDER,
     PADDLE_MODEL_PATH,
@@ -399,7 +400,7 @@ python cli_redact.py --task textract --textract_action list
     )
     pdf_group.add_argument(
         "--chosen_local_ocr_model",
-        choices=["tesseract", "hybrid-paddle", "paddle"],
+        choices=LOCAL_OCR_MODEL_OPTIONS,
         default=CHOSEN_LOCAL_OCR_MODEL,
         help="Local OCR model to use.",
     )
