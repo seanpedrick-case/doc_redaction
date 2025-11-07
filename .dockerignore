@@ -34,3 +34,4 @@ test/output/*
 test/tmp/*
 test/usage/*
 .ruff_cache/*
+model_cache/*

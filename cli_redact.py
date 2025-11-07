@@ -399,7 +399,7 @@ python cli_redact.py --task textract --textract_action list
     )
     pdf_group.add_argument(
         "--chosen_local_ocr_model",
-        choices=["tesseract", "hybrid", "paddle"],
+        choices=["tesseract", "hybrid-paddle", "paddle"],
         default=CHOSEN_LOCAL_OCR_MODEL,
         help="Local OCR model to use.",
     )
