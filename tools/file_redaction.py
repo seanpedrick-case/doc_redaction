@@ -546,12 +546,12 @@ def choose_and_run_redactor(
         estimate_total_processing_time = sum_numbers_before_seconds(
             combined_out_message
         )
-        print(
-            "Estimated total processing time:",
-            str(estimate_total_processing_time),
-            "seconds",
-        )
-
+        # print(
+        #     "Estimated total processing time:",
+        #     str(estimate_total_processing_time),
+        #     "seconds",
+        # )
+        print(combined_out_message)
         gr.Info(combined_out_message)
 
         page_break_return = True
@@ -1059,6 +1059,7 @@ def choose_and_run_redactor(
                 match_fuzzy_whole_phrase_bool,
                 page_sizes_df,
                 text_extraction_only,
+                textract_output_found,
                 all_page_line_level_ocr_results,
                 all_page_line_level_ocr_results_with_words,
                 chosen_local_ocr_model,
@@ -1316,7 +1317,7 @@ def choose_and_run_redactor(
                             number_of_pages,
                             page_max,
                         )
-                        print("Saving redacted PDF file:", out_redacted_pdf_file_path)
+                        #print("Saving redacted PDF file:", out_redacted_pdf_file_path)
 
                         # Use final document if available, otherwise use main document
                         doc_to_save = (
@@ -1351,7 +1352,7 @@ def choose_and_run_redactor(
                     number_of_pages,
                     page_max,
                 )
-                print("Saving PDF file for review:", out_review_pdf_file_path)
+                #print("Saving PDF file for review:", out_review_pdf_file_path)
 
                 if out_review_pdf_file_path:
                     save_pdf_with_or_without_compression(
@@ -3084,6 +3085,7 @@ def redact_image_pdf(
     match_fuzzy_whole_phrase_bool: bool = True,
     page_sizes_df: pd.DataFrame = pd.DataFrame(),
     text_extraction_only: bool = False,
+    textract_output_found: bool = False,
     all_page_line_level_ocr_results=list(),
     all_page_line_level_ocr_results_with_words=list(),
     chosen_local_ocr_model: str = CHOSEN_LOCAL_OCR_MODEL,
@@ -3125,6 +3127,7 @@ def redact_image_pdf(
     - match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
     - page_sizes_df (pd.DataFrame, optional): A pandas dataframe of PDF page sizes in PDF or image format.
     - text_extraction_only (bool, optional): Should the function only extract text, or also do redaction.
+    - textract_output_found (bool, optional): Boolean is true when a textract OCR output for the file has been found.
     - all_page_line_level_ocr_results (optional): List of all page line level OCR results.
     - all_page_line_level_ocr_results_with_words (optional): List of all page line level OCR results with words.
     - chosen_local_ocr_model (str, optional): The local model chosen for OCR. Defaults to CHOSEN_LOCAL_OCR_MODEL, other choices are "paddle" for PaddleOCR, or "hybrid-paddle" for a combination of both.
@@ -3296,15 +3299,16 @@ def redact_image_pdf(
 
     # Go through each page
     for page_no in progress_bar:
-
-        print(f"Current page: {page_no}")
+        
+        reported_page_number = str(page_no + 1)
+        print(f"Current page: {reported_page_number}")
 
         handwriting_or_signature_boxes = list()
         page_signature_recogniser_results = list()
         page_handwriting_recogniser_results = list()
         page_line_level_ocr_results_with_words = list()
         page_break_return = False
-        reported_page_number = str(page_no + 1)
+        
 
         # Try to find image location
         try:
@@ -3415,7 +3419,7 @@ def redact_image_pdf(
             if image is None:
                 # Check if image_path is a placeholder and create the actual image
                 if isinstance(image_path, str) and "placeholder_image" in image_path:
-                    print(f"Detected placeholder image path: {image_path}")
+                    #print(f"Detected placeholder image path: {image_path}")
                     try:
                         # Extract page number from placeholder path
                         page_num_from_placeholder = int(
@@ -3436,11 +3440,11 @@ def redact_image_pdf(
                         # Load the created image
                         if os.path.exists(created_image_path):
                             image = Image.open(created_image_path)
-                            print(
-                                f"Successfully created and loaded image from: {created_image_path}"
-                            )
+                            # print(
+                            #     f"Successfully created and loaded image from: {created_image_path}"
+                            # )
                         else:
-                            print(f"Failed to create image at: {created_image_path}")
+                            # print(f"Failed to create image at: {created_image_path}")
                             page_width = pymupdf_page.mediabox.width
                             page_height = pymupdf_page.mediabox.height
                     except Exception as e:
@@ -3448,9 +3452,10 @@ def redact_image_pdf(
                         page_width = pymupdf_page.mediabox.width
                         page_height = pymupdf_page.mediabox.height
                 else:
-                    print(
-                        "Image is None and not a placeholder - using mediabox coordinates"
-                    )
+                    pass
+                    # print(
+                    #     "Image is None and not a placeholder - using mediabox coordinates"
+                    # )
 
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
             # If using Tesseract
@@ -3623,7 +3628,26 @@ def redact_image_pdf(
                             page["data"]
                             for page in textract_data["pages"]
                             if page["page_no"] == reported_page_number
-                        )
+                        )                
+
+                # Check if this is whole-document Textract output (already converted to mediabox space)
+                # by checking if the JSON structure indicates it came from restructure_textract_output
+                # or if textract_output_found is True (indicating pre-existing whole-document output)
+                use_mediabox_for_textract = (
+                    textract_output_found or 
+                    ("pages" in textract_data and len(textract_data.get("pages", [])) > 0)
+                )
+                
+                if use_mediabox_for_textract:
+                    # Whole-document Textract: use mediabox dimensions
+                    textract_page_width = pymupdf_page.mediabox.width
+                    textract_page_height = pymupdf_page.mediabox.height
+                    #print(f"Using mediabox dimensions for whole-document Textract: {textract_page_width}x{textract_page_height}")
+                else:
+                    # Individual image Textract: use image dimensions (current behavior)
+                    textract_page_width = page_width
+                    textract_page_height = page_height
+                    #print(f"Using image dimensions for individual image Textract: {textract_page_width}x{textract_page_height}")
 
                 (
                     page_line_level_ocr_results,
@@ -3634,7 +3658,7 @@ def redact_image_pdf(
                     selection_element_results,
                     form_key_value_results,
                 ) = json_to_ocrresult(
-                    text_blocks, page_width, page_height, reported_page_number
+                    text_blocks, textract_page_width, textract_page_height, reported_page_number
                 )
 
                 if all_page_line_level_ocr_results_with_words is None:
@@ -4787,20 +4811,23 @@ def redact_text_pdf(
                     )
 
                 if page_text_ocr_outputs_list:
-                    page_text_ocr_outputs = pd.concat(page_text_ocr_outputs_list)
-                else:
-                    page_text_ocr_outputs = pd.DataFrame(
-                        columns=[
-                            "page",
-                            "text",
-                            "left",
-                            "top",
-                            "width",
-                            "height",
-                            "line",
-                            "conf",
-                        ]
-                    )
+                    # Filter out empty DataFrames before concatenation to avoid FutureWarning
+                    non_empty_ocr_outputs = [df for df in page_text_ocr_outputs_list if not df.empty]
+                    if non_empty_ocr_outputs:
+                        page_text_ocr_outputs = pd.concat(non_empty_ocr_outputs, ignore_index=True)
+                    else:
+                        page_text_ocr_outputs = pd.DataFrame(
+                            columns=[
+                                "page",
+                                "text",
+                                "left",
+                                "top",
+                                "width",
+                                "height",
+                                "line",
+                                "conf",
+                            ]
+                        )
 
                 ### REDACTION
                 if pii_identification_method != NO_REDACTION_PII_OPTION:
@@ -4932,12 +4959,18 @@ def redact_text_pdf(
                         annotations_all_pages.append(page_image_annotations)
 
                     # Write logs
-                    all_pages_decision_process_table = pd.concat(
-                        all_pages_decision_process_list
-                    )
-                    all_line_level_ocr_results_df = pd.concat(
-                        all_line_level_ocr_results_list
-                    )
+                    # Filter out empty DataFrames before concatenation to avoid FutureWarning
+                    non_empty_decision_process = [df for df in all_pages_decision_process_list if not df.empty]
+                    if non_empty_decision_process:
+                        all_pages_decision_process_table = pd.concat(non_empty_decision_process, ignore_index=True)
+                    else:
+                        all_pages_decision_process_table = pd.DataFrame()
+                    
+                    non_empty_ocr_results = [df for df in all_line_level_ocr_results_list if not df.empty]
+                    if non_empty_ocr_results:
+                        all_line_level_ocr_results_df = pd.concat(non_empty_ocr_results, ignore_index=True)
+                    else:
+                        all_line_level_ocr_results_df = pd.DataFrame()
 
                     current_loop_page += 1
 
@@ -4976,9 +5009,12 @@ def redact_text_pdf(
             progress.close(_tqdm=progress_bar)
 
             # Write logs
-            all_pages_decision_process_table = pd.concat(
-                all_pages_decision_process_list
-            )
+            # Filter out empty DataFrames before concatenation to avoid FutureWarning
+            non_empty_decision_process = [df for df in all_pages_decision_process_list if not df.empty]
+            if non_empty_decision_process:
+                all_pages_decision_process_table = pd.concat(non_empty_decision_process, ignore_index=True)
+            else:
+                all_pages_decision_process_table = pd.DataFrame()
 
             return (
                 pymupdf_doc,
@@ -4992,8 +5028,18 @@ def redact_text_pdf(
             )
 
     # Write all page outputs
-    all_pages_decision_process_table = pd.concat(all_pages_decision_process_list)
-    all_line_level_ocr_results_df = pd.concat(all_line_level_ocr_results_list)
+    # Filter out empty DataFrames before concatenation to avoid FutureWarning
+    non_empty_decision_process = [df for df in all_pages_decision_process_list if not df.empty]
+    if non_empty_decision_process:
+        all_pages_decision_process_table = pd.concat(non_empty_decision_process, ignore_index=True)
+    else:
+        all_pages_decision_process_table = pd.DataFrame()
+    
+    non_empty_ocr_results = [df for df in all_line_level_ocr_results_list if not df.empty]
+    if non_empty_ocr_results:
+        all_line_level_ocr_results_df = pd.concat(non_empty_ocr_results, ignore_index=True)
+    else:
+        all_line_level_ocr_results_df = pd.DataFrame()
 
     # Convert decision table to relative coordinates
     all_pages_decision_process_table = divide_coordinates_by_page_sizes(

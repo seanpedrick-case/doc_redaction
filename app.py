@@ -1125,7 +1125,7 @@ with blocks:
                 )
 
             if os.path.exists(example_files[3]):
-                if SHOW_AWS_EXAMPLES == "True":
+                if SHOW_AWS_EXAMPLES:
                     available_examples.append(
                         [
                             [example_files[3]],
@@ -3218,6 +3218,8 @@ with blocks:
             redaction_output_summary_textbox,
             is_a_textract_api_call,
             textract_query_number,
+            all_page_line_level_ocr_results_with_words,
+            input_review_files,
         ],
     ).success(
         fn=choose_and_run_redactor,
@@ -5813,7 +5815,7 @@ with blocks:
 
     # Get connection details on app load
 
-    if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
+    if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
         blocks.load(
             get_connection_params,
             inputs=[

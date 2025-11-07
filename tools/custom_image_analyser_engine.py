@@ -598,9 +598,9 @@ def _prepare_image_for_vlm(image: Image.Image) -> Image.Image:
     # Check if DPI exceeds maximum
     if current_dpi > VLM_MAX_DPI:
         dpi_scale = VLM_MAX_DPI / current_dpi
-        print(
-            f"VLM DPI check: Image DPI {current_dpi:.1f} exceeds maximum {VLM_MAX_DPI:.1f} DPI. Will resize by factor {dpi_scale:.3f}"
-        )
+        # print(
+        #     f"VLM DPI check: Image DPI {current_dpi:.1f} exceeds maximum {VLM_MAX_DPI:.1f} DPI. Will resize by factor {dpi_scale:.3f}"
+        # )
 
     # Use the smaller scale factor to ensure both constraints are met
     final_scale = min(size_scale, dpi_scale)
@@ -609,9 +609,9 @@ def _prepare_image_for_vlm(image: Image.Image) -> Image.Image:
     if final_scale < 1.0:
         new_width = int(width * final_scale)
         new_height = int(height * final_scale)
-        print(
-            f"VLM image preparation: Resizing image from {width}x{height} to {new_width}x{new_height} (scale: {final_scale:.3f})"
-        )
+        # print(
+        #     f"VLM image preparation: Resizing image from {width}x{height} to {new_width}x{new_height} (scale: {final_scale:.3f})"
+        # )
 
         # Use high-quality resampling for downscaling
         image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
@@ -623,14 +623,14 @@ def _prepare_image_for_vlm(image: Image.Image) -> Image.Image:
             image_info = image.info.copy()
             image_info["dpi"] = new_dpi
             # Note: PIL doesn't allow direct modification of info dict, so we'll just note it
-            print(
-                f"VLM image preparation: Effective DPI after resize: {new_dpi[0]:.1f}"
-            )
+            # print(
+            #     f"VLM image preparation: Effective DPI after resize: {new_dpi[0]:.1f}"
+            # )
     else:
         total_pixels = width * height
-        print(
-            f"VLM image preparation: Image size {width}x{height} ({total_pixels:,} pixels) and DPI {current_dpi:.1f} are within limits (max pixels: {VLM_MAX_IMAGE_SIZE:,}, max DPI: {VLM_MAX_DPI})"
-        )
+        # print(
+        #     f"VLM image preparation: Image size {width}x{height} ({total_pixels:,} pixels) and DPI {current_dpi:.1f} are within limits (max pixels: {VLM_MAX_IMAGE_SIZE:,}, max DPI: {VLM_MAX_DPI})"
+        # )
 
     return image
 
@@ -670,7 +670,7 @@ def _vlm_ocr_predict(
         # Ensure image is in RGB mode (convert if needed)
         try:
             if image.mode != "RGB":
-                print(f"VLM OCR: Converting image from {image.mode} to RGB mode")
+                # print(f"VLM OCR: Converting image from {image.mode} to RGB mode")
                 image = image.convert("RGB")
                 # Update width/height after conversion (should be same, but ensure consistency)
                 width, height = image.size
@@ -689,7 +689,7 @@ def _vlm_ocr_predict(
         # Use the VLM to extract text
         # Pass None for parameters to prioritize model-specific defaults from run_vlm.py
         # If model defaults are not available, general defaults will be used (matching current values)
-        print(f"Calling extract_text_from_image_vlm with image size: {width}x{height}")
+        # print(f"Calling extract_text_from_image_vlm with image size: {width}x{height}")
         extracted_text = extract_text_from_image_vlm(
             text=prompt,
             image=image,

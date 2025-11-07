@@ -726,7 +726,7 @@ def _merge_horizontally_adjacent_boxes(
 
     merged_df = df_sorted.groupby("merge_group").agg(agg_funcs).reset_index(drop=True)
 
-    print(f"Merged {len(df)} annotations into {len(merged_df)}.")
+    # print(f"Merged {len(df)} annotations into {len(merged_df)}.")
 
     return merged_df
 
@@ -754,13 +754,20 @@ def get_and_merge_current_page_annotations(
     )
 
     # Concatenate and clean, ensuring no duplicates and sorted order
-    updated_df = (
-        pd.concat(
-            [existing_annotations_df, current_page_annotations_df], ignore_index=True
+    # Filter out empty DataFrames before concatenation to avoid FutureWarning
+    dfs_to_concat = [
+        df
+        for df in [existing_annotations_df, current_page_annotations_df]
+        if not df.empty
+    ]
+    if dfs_to_concat:
+        updated_df = (
+            pd.concat(dfs_to_concat, ignore_index=True)
+            .sort_values(by=["page", "xmin", "ymin"])
+            .drop_duplicates(subset=["id"], keep="first")
         )
-        .sort_values(by=["page", "xmin", "ymin"])
-        .drop_duplicates(subset=["id"], keep="first")
-    )
+    else:
+        updated_df = pd.DataFrame()
 
     return updated_df
 
@@ -867,11 +874,11 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             )
 
             progress(0.3, desc="Checking for adjacent annotations to merge...")
-            print("Checking for adjacent annotations to merge...")
+            # print("Checking for adjacent annotations to merge...")
             new_annotations_df = _merge_horizontally_adjacent_boxes(new_annotations_df)
 
             progress(0.4, desc="Creating new redaction IDs...")
-            print("Creating new redaction IDs...")
+            # print("Creating new redaction IDs...")
             existing_ids = (
                 set(existing_annotations_df["id"].dropna())
                 if "id" in existing_annotations_df.columns
@@ -918,9 +925,14 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
 
             print(f"Found {len(unique_new_df)} new unique annotations to add.")
             gr.Info(f"Found {len(unique_new_df)} new unique annotations to add.")
-            updated_annotations_df = pd.concat(
-                [existing_annotations_df, unique_new_df], ignore_index=True
-            )
+            # Filter out empty DataFrames before concatenation to avoid FutureWarning
+            dfs_to_concat = [
+                df for df in [existing_annotations_df, unique_new_df] if not df.empty
+            ]
+            if dfs_to_concat:
+                updated_annotations_df = pd.concat(dfs_to_concat, ignore_index=True)
+            else:
+                updated_annotations_df = pd.DataFrame()
 
     # --- Part 4: Convert final DataFrame to list-of-dicts ---
     updated_recogniser_entity_df = pd.DataFrame()

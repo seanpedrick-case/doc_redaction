@@ -254,9 +254,6 @@ def json_to_ocrresult(
 
     # text_line_number = 1
 
-    # is_signature = False
-    # is_handwriting = False
-
     for block in text_blocks:
         block_type = block.get("BlockType")
 

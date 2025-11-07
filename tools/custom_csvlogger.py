@@ -45,7 +45,7 @@ class CSVLogger_custom(FlaggingCallback):
     def __init__(
         self,
         simplify_file_data: bool = True,
-        verbose: bool = True,
+        verbose: bool = False,
         dataset_file_name: str | None = None,
     ):
         """

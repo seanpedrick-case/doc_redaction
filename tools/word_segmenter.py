@@ -68,9 +68,9 @@ class AdaptiveSegmenter:
         # --- Extract text pixel coordinates ---
         coords = np.column_stack(np.where(binary > 0))
         if len(coords) < 50:
-            print(
-                "Warning: Not enough text pixels for orientation. Assuming horizontal."
-            )
+            # print(
+            #     "Warning: Not enough text pixels for orientation. Assuming horizontal."
+            # )
             M_orient = cv2.getRotationMatrix2D(center, 0, 1.0)
             return gray_image, M_orient
 
