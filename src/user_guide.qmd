@@ -366,8 +366,8 @@ The workflow is designed to be simple: **Search → Select → Redact**.
 #### **Step 1: Search for Text**
 
 1.  Navigate to the **"Search text to make new redactions"** tab.
-2.  The main table will initially be populated with all the text extracted from the document, broken down by word.
-3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find.
+2.  The main table will initially be populated with all the text extracted from the document for a page, broken down by word.
+3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below (Note this will only be able to search for patterns in text within each cell).
 4.  Click the **"Search"** button or press Enter.
 5.  The table below will update to show only the rows containing text that matches your search query.
 

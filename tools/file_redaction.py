@@ -441,7 +441,6 @@ def choose_and_run_redactor(
         current_loop_page = 0
         out_file_paths = list()
         log_files_output_paths = list()
-        estimate_total_processing_time = 0
         estimated_time_taken_state = 0
         comprehend_query_number = 0
         total_textract_query_number = 0
@@ -543,9 +542,7 @@ def choose_and_run_redactor(
             if total_textract_query_number > number_of_pages:
                 total_textract_query_number = number_of_pages
 
-        estimate_total_processing_time = sum_numbers_before_seconds(
-            combined_out_message
-        )
+        sum_numbers_before_seconds(combined_out_message)
         # print(
         #     "Estimated total processing time:",
         #     str(estimate_total_processing_time),
@@ -1317,7 +1314,7 @@ def choose_and_run_redactor(
                             number_of_pages,
                             page_max,
                         )
-                        #print("Saving redacted PDF file:", out_redacted_pdf_file_path)
+                        # print("Saving redacted PDF file:", out_redacted_pdf_file_path)
 
                         # Use final document if available, otherwise use main document
                         doc_to_save = (
@@ -1352,7 +1349,7 @@ def choose_and_run_redactor(
                     number_of_pages,
                     page_max,
                 )
-                #print("Saving PDF file for review:", out_review_pdf_file_path)
+                # print("Saving PDF file for review:", out_review_pdf_file_path)
 
                 if out_review_pdf_file_path:
                     save_pdf_with_or_without_compression(
@@ -1692,9 +1689,7 @@ def choose_and_run_redactor(
             combined_out_message + " " + out_time_message
         )  # Ensure this is a single string
 
-        estimate_total_processing_time = sum_numbers_before_seconds(
-            combined_out_message
-        )
+        sum_numbers_before_seconds(combined_out_message)
 
         # else:
         #     toc = time.perf_counter()
@@ -3299,7 +3294,7 @@ def redact_image_pdf(
 
     # Go through each page
     for page_no in progress_bar:
-        
+
         reported_page_number = str(page_no + 1)
         print(f"Current page: {reported_page_number}")
 
@@ -3308,7 +3303,6 @@ def redact_image_pdf(
         page_handwriting_recogniser_results = list()
         page_line_level_ocr_results_with_words = list()
         page_break_return = False
-        
 
         # Try to find image location
         try:
@@ -3419,7 +3413,7 @@ def redact_image_pdf(
             if image is None:
                 # Check if image_path is a placeholder and create the actual image
                 if isinstance(image_path, str) and "placeholder_image" in image_path:
-                    #print(f"Detected placeholder image path: {image_path}")
+                    # print(f"Detected placeholder image path: {image_path}")
                     try:
                         # Extract page number from placeholder path
                         page_num_from_placeholder = int(
@@ -3628,26 +3622,25 @@ def redact_image_pdf(
                             page["data"]
                             for page in textract_data["pages"]
                             if page["page_no"] == reported_page_number
-                        )                
+                        )
 
                 # Check if this is whole-document Textract output (already converted to mediabox space)
                 # by checking if the JSON structure indicates it came from restructure_textract_output
                 # or if textract_output_found is True (indicating pre-existing whole-document output)
-                use_mediabox_for_textract = (
-                    textract_output_found or 
-                    ("pages" in textract_data and len(textract_data.get("pages", [])) > 0)
+                use_mediabox_for_textract = textract_output_found or (
+                    "pages" in textract_data and len(textract_data.get("pages", [])) > 0
                 )
-                
+
                 if use_mediabox_for_textract:
                     # Whole-document Textract: use mediabox dimensions
                     textract_page_width = pymupdf_page.mediabox.width
                     textract_page_height = pymupdf_page.mediabox.height
-                    #print(f"Using mediabox dimensions for whole-document Textract: {textract_page_width}x{textract_page_height}")
+                    # print(f"Using mediabox dimensions for whole-document Textract: {textract_page_width}x{textract_page_height}")
                 else:
                     # Individual image Textract: use image dimensions (current behavior)
                     textract_page_width = page_width
                     textract_page_height = page_height
-                    #print(f"Using image dimensions for individual image Textract: {textract_page_width}x{textract_page_height}")
+                    # print(f"Using image dimensions for individual image Textract: {textract_page_width}x{textract_page_height}")
 
                 (
                     page_line_level_ocr_results,
@@ -3658,7 +3651,10 @@ def redact_image_pdf(
                     selection_element_results,
                     form_key_value_results,
                 ) = json_to_ocrresult(
-                    text_blocks, textract_page_width, textract_page_height, reported_page_number
+                    text_blocks,
+                    textract_page_width,
+                    textract_page_height,
+                    reported_page_number,
                 )
 
                 if all_page_line_level_ocr_results_with_words is None:
@@ -4812,9 +4808,13 @@ def redact_text_pdf(
 
                 if page_text_ocr_outputs_list:
                     # Filter out empty DataFrames before concatenation to avoid FutureWarning
-                    non_empty_ocr_outputs = [df for df in page_text_ocr_outputs_list if not df.empty]
+                    non_empty_ocr_outputs = [
+                        df for df in page_text_ocr_outputs_list if not df.empty
+                    ]
                     if non_empty_ocr_outputs:
-                        page_text_ocr_outputs = pd.concat(non_empty_ocr_outputs, ignore_index=True)
+                        page_text_ocr_outputs = pd.concat(
+                            non_empty_ocr_outputs, ignore_index=True
+                        )
                     else:
                         page_text_ocr_outputs = pd.DataFrame(
                             columns=[
@@ -4960,17 +4960,50 @@ def redact_text_pdf(
 
                     # Write logs
                     # Filter out empty DataFrames before concatenation to avoid FutureWarning
-                    non_empty_decision_process = [df for df in all_pages_decision_process_list if not df.empty]
+                    non_empty_decision_process = [
+                        df for df in all_pages_decision_process_list if not df.empty
+                    ]
                     if non_empty_decision_process:
-                        all_pages_decision_process_table = pd.concat(non_empty_decision_process, ignore_index=True)
+                        all_pages_decision_process_table = pd.concat(
+                            non_empty_decision_process, ignore_index=True
+                        )
                     else:
-                        all_pages_decision_process_table = pd.DataFrame()
-                    
-                    non_empty_ocr_results = [df for df in all_line_level_ocr_results_list if not df.empty]
+                        all_pages_decision_process_table = pd.DataFrame(
+                            columns=[
+                                "text",
+                                "xmin",
+                                "ymin",
+                                "xmax",
+                                "ymax",
+                                "label",
+                                "start",
+                                "end",
+                                "score",
+                                "page",
+                                "id",
+                            ]
+                        )
+
+                    non_empty_ocr_results = [
+                        df for df in all_line_level_ocr_results_list if not df.empty
+                    ]
                     if non_empty_ocr_results:
-                        all_line_level_ocr_results_df = pd.concat(non_empty_ocr_results, ignore_index=True)
+                        all_line_level_ocr_results_df = pd.concat(
+                            non_empty_ocr_results, ignore_index=True
+                        )
                     else:
-                        all_line_level_ocr_results_df = pd.DataFrame()
+                        all_line_level_ocr_results_df = pd.DataFrame(
+                            columns=[
+                                "page",
+                                "text",
+                                "left",
+                                "top",
+                                "width",
+                                "height",
+                                "line",
+                                "conf",
+                            ]
+                        )
 
                     current_loop_page += 1
 
@@ -5010,11 +5043,29 @@ def redact_text_pdf(
 
             # Write logs
             # Filter out empty DataFrames before concatenation to avoid FutureWarning
-            non_empty_decision_process = [df for df in all_pages_decision_process_list if not df.empty]
+            non_empty_decision_process = [
+                df for df in all_pages_decision_process_list if not df.empty
+            ]
             if non_empty_decision_process:
-                all_pages_decision_process_table = pd.concat(non_empty_decision_process, ignore_index=True)
+                all_pages_decision_process_table = pd.concat(
+                    non_empty_decision_process, ignore_index=True
+                )
             else:
-                all_pages_decision_process_table = pd.DataFrame()
+                all_pages_decision_process_table = pd.DataFrame(
+                    columns=[
+                        "text",
+                        "xmin",
+                        "ymin",
+                        "xmax",
+                        "ymax",
+                        "label",
+                        "start",
+                        "end",
+                        "score",
+                        "page",
+                        "id",
+                    ]
+                )
 
             return (
                 pymupdf_doc,
@@ -5029,51 +5080,80 @@ def redact_text_pdf(
 
     # Write all page outputs
     # Filter out empty DataFrames before concatenation to avoid FutureWarning
-    non_empty_decision_process = [df for df in all_pages_decision_process_list if not df.empty]
+    non_empty_decision_process = [
+        df for df in all_pages_decision_process_list if not df.empty
+    ]
     if non_empty_decision_process:
-        all_pages_decision_process_table = pd.concat(non_empty_decision_process, ignore_index=True)
-    else:
-        all_pages_decision_process_table = pd.DataFrame()
-    
-    non_empty_ocr_results = [df for df in all_line_level_ocr_results_list if not df.empty]
-    if non_empty_ocr_results:
-        all_line_level_ocr_results_df = pd.concat(non_empty_ocr_results, ignore_index=True)
-    else:
-        all_line_level_ocr_results_df = pd.DataFrame()
-
-    # Convert decision table to relative coordinates
-    all_pages_decision_process_table = divide_coordinates_by_page_sizes(
-        all_pages_decision_process_table,
-        page_sizes_df,
-        xmin="xmin",
-        xmax="xmax",
-        ymin="ymin",
-        ymax="ymax",
-    )
-
-    # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
-    all_pages_decision_process_table["ymin"] = reverse_y_coords(
-        all_pages_decision_process_table, "ymin"
-    )
-    all_pages_decision_process_table["ymax"] = reverse_y_coords(
-        all_pages_decision_process_table, "ymax"
-    )
-
-    # Convert decision table to relative coordinates
-    all_line_level_ocr_results_df = divide_coordinates_by_page_sizes(
-        all_line_level_ocr_results_df,
-        page_sizes_df,
-        xmin="left",
-        xmax="width",
-        ymin="top",
-        ymax="height",
-    )
-
-    # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
-    if not all_line_level_ocr_results_df.empty:
-        all_line_level_ocr_results_df["top"] = reverse_y_coords(
-            all_line_level_ocr_results_df, "top"
+        all_pages_decision_process_table = pd.concat(
+            non_empty_decision_process, ignore_index=True
         )
+    else:
+        all_pages_decision_process_table = pd.DataFrame(
+            columns=[
+                "text",
+                "xmin",
+                "ymin",
+                "xmax",
+                "ymax",
+                "label",
+                "start",
+                "end",
+                "score",
+                "page",
+                "id",
+            ]
+        )
+
+    non_empty_ocr_results = [
+        df for df in all_line_level_ocr_results_list if not df.empty
+    ]
+    if non_empty_ocr_results:
+        all_line_level_ocr_results_df = pd.concat(
+            non_empty_ocr_results, ignore_index=True
+        )
+    else:
+        all_line_level_ocr_results_df = pd.DataFrame(
+            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+        )
+
+    if not all_pages_decision_process_table.empty:
+
+        # Convert decision table to relative coordinates
+        all_pages_decision_process_table = divide_coordinates_by_page_sizes(
+            all_pages_decision_process_table,
+            page_sizes_df,
+            xmin="xmin",
+            xmax="xmax",
+            ymin="ymin",
+            ymax="ymax",
+        )
+
+        # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
+
+        all_pages_decision_process_table["ymin"] = reverse_y_coords(
+            all_pages_decision_process_table, "ymin"
+        )
+        all_pages_decision_process_table["ymax"] = reverse_y_coords(
+            all_pages_decision_process_table, "ymax"
+        )
+
+    # Convert decision table to relative coordinates
+    if not all_line_level_ocr_results_df.empty:
+
+        all_line_level_ocr_results_df = divide_coordinates_by_page_sizes(
+            all_line_level_ocr_results_df,
+            page_sizes_df,
+            xmin="left",
+            xmax="width",
+            ymin="top",
+            ymax="height",
+        )
+
+        # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
+        if not all_line_level_ocr_results_df.empty:
+            all_line_level_ocr_results_df["top"] = reverse_y_coords(
+                all_line_level_ocr_results_df, "top"
+            )
 
     # Remove empty dictionary items from ocr results with words
     all_page_line_level_ocr_results_with_words = [
