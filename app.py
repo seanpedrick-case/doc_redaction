@@ -119,6 +119,7 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     RUN_DIRECT_MODE,
     RUN_FASTAPI,
+    RUN_MCP_SERVER,
     S3_ACCESS_LOGS_FOLDER,
     S3_ALLOW_LIST_PATH,
     S3_COST_CODES_PATH,
@@ -1258,7 +1259,7 @@ with blocks:
                         open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                     ):
                         local_ocr_method_radio = gr.Radio(
-                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence. "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen vision model (default Dots.OCR) on words with low confidence.""",
+                            label="""Choose a local OCR model. "tesseract" is the default and will work for documents with clear typed text. "paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. The hybrid models will do a first pass with one model, and a second pass on words/phrases with low confidence with a more powerful model. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.""",
                             value=CHOSEN_LOCAL_OCR_MODEL,
                             choices=LOCAL_OCR_MODEL_OPTIONS,
                             interactive=True,
@@ -4755,7 +4756,7 @@ with blocks:
             duplicate_files_out,
             full_duplicate_data_by_file,
         ],
-    )
+    api_name="word_level_ocr_text_search")
 
     # Clicking on a cell in the redact items table will take you to that page
     all_page_line_level_ocr_results_with_words_df.select(
@@ -6549,6 +6550,7 @@ with blocks:
                 max_file_size=MAX_FILE_SIZE,
                 path=FASTAPI_ROOT_PATH,
                 favicon_path=Path(FAVICON_PATH),
+                mcp_server=RUN_MCP_SERVER,
             )
 
             # Example command to run in uvicorn (in python): uvicorn.run("app:app", host=GRADIO_SERVER_NAME, port=GRADIO_SERVER_PORT)
@@ -6566,6 +6568,7 @@ with blocks:
                         server_port=GRADIO_SERVER_PORT,
                         root_path=ROOT_PATH,
                         favicon_path=Path(FAVICON_PATH),
+                        mcp_server=RUN_MCP_SERVER,
                     )
                 else:
                     blocks.launch(
@@ -6576,6 +6579,7 @@ with blocks:
                         server_port=GRADIO_SERVER_PORT,
                         root_path=ROOT_PATH,
                         favicon_path=Path(FAVICON_PATH),
+                        mcp_server=RUN_MCP_SERVER,
                     )
 
     else:

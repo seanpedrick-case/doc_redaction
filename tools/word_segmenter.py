@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 import cv2
 import numpy as np
 
-from tools.config import OUTPUT_FOLDER
+from tools.config import OUTPUT_FOLDER, SAVE_WORD_SEGMENTER_OUTPUT_IMAGES
 
 INITIAL_KERNEL_WIDTH_FACTOR = 0.05  # Default 0.05
 INITIAL_VALLEY_THRESHOLD_FACTOR = 0.05  # Default 0.05
@@ -15,7 +15,6 @@ MIN_SPACE_FACTOR = 0.3  # Default 0.4
 MATCH_TOLERANCE = 0  # Default 0
 MIN_AREA_THRESHOLD = 6  # Default 6
 DEFAULT_TRIM_PERCENTAGE = 0.2  # Default 0.2
-SHOW_OUTPUT_IMAGES = False  # Default False
 
 
 class AdaptiveSegmenter:
@@ -291,7 +290,7 @@ class AdaptiveSegmenter:
         # print(f"line_text: {line_text}")
         shortened_line_text = line_text.replace(" ", "_")[:10]
 
-        if SHOW_OUTPUT_IMAGES:
+        if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
             output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_original.png"
             os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
@@ -346,7 +345,7 @@ class AdaptiveSegmenter:
             return ({}, False)
 
         # Save deskewed image (optional, only if image_name is provided)
-        if SHOW_OUTPUT_IMAGES:
+        if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
             output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_deskewed.png"
             os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
@@ -402,7 +401,7 @@ class AdaptiveSegmenter:
             return ({}, False)
 
         # Save cropped image (optional, only if image_name is provided)
-        if SHOW_OUTPUT_IMAGES:
+        if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
             output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_binary.png"
             os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
@@ -436,7 +435,7 @@ class AdaptiveSegmenter:
         # dilated_binary = cv2.dilate(closed_binary, kernel, iterations=1)
         # Use 'closed_binary' (or 'dilated_binary') from now on.
 
-        if SHOW_OUTPUT_IMAGES:
+        if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
             output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_closed_binary.png"
             os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
@@ -633,7 +632,7 @@ class AdaptiveSegmenter:
         # print(f"Target word count: {target_word_count}")
 
         # Save cropped image (optional, only if image_name is provided)
-        if SHOW_OUTPUT_IMAGES:
+        if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
             output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_clean_binary.png"
             os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
@@ -898,7 +897,7 @@ class AdaptiveSegmenter:
                 remapped_output[key].append(box[key])
 
         # Visualisation
-        if SHOW_OUTPUT_IMAGES:
+        if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
             output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_final_boxes.png"
             os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
             output_image_vis = line_image.copy()
