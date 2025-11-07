@@ -767,7 +767,21 @@ def get_and_merge_current_page_annotations(
             .drop_duplicates(subset=["id"], keep="first")
         )
     else:
-        updated_df = pd.DataFrame()
+        # Return empty DataFrame with expected columns from convert_annotation_data_to_dataframe
+        updated_df = pd.DataFrame(
+            columns=[
+                "image",
+                "page",
+                "label",
+                "color",
+                "xmin",
+                "xmax",
+                "ymin",
+                "ymax",
+                "text",
+                "id",
+            ]
+        )
 
     return updated_df
 
@@ -932,7 +946,21 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             if dfs_to_concat:
                 updated_annotations_df = pd.concat(dfs_to_concat, ignore_index=True)
             else:
-                updated_annotations_df = pd.DataFrame()
+                # Return empty DataFrame with expected columns matching existing_annotations_df structure
+                updated_annotations_df = pd.DataFrame(
+                    columns=[
+                        "image",
+                        "page",
+                        "label",
+                        "color",
+                        "xmin",
+                        "xmax",
+                        "ymin",
+                        "ymax",
+                        "text",
+                        "id",
+                    ]
+                )
 
     # --- Part 4: Convert final DataFrame to list-of-dicts ---
     updated_recogniser_entity_df = pd.DataFrame()
