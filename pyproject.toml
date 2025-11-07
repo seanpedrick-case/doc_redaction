@@ -2,17 +2,16 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[project]
-name = "doc_redaction"
-version = "1.5.1"
-description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
-readme = "README.md"
-requires-python = ">=3.10"
-
 [project.urls]
 Homepage = "https://seanpedrick-case.github.io/doc_redaction/"
 Repository = "https://github.com/seanpedrick-case/doc_redaction"
 
+[project]
+name = "doc_redaction"
+version = "1.5.2"
+description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
+readme = "README.md"
+requires-python = ">=3.10"
 dependencies = [
     "pdfminer.six==20250506",
     "pdf2image==1.17.0",
@@ -61,7 +60,7 @@ paddle = [
 # Extra dependencies for VLM models
 # For torch you should use --index-url https://download.pytorch.org/whl/cu126 for cuda support for paddleocr, need to install manually
 vlm = [
-    "torch<=2.5.1,<=2.8.0", 
+    "torch>=2.5.1,<=2.8.0", 
     "torchvision>=0.20.1",
     "transformers==4.57.1",
     "accelerate==1.11.0",
