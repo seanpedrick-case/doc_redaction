@@ -10,7 +10,7 @@ license: agpl-3.0
 ---
 # Document redaction
 
-version: 1.4.1
+version: 1.5.0
 
 Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
@@ -105,15 +105,40 @@ source venv/bin/activate
 
 #### Step 3: Install Python Dependencies
 
+##### Lightweight version (without PaddleOCR and VLM support)
+
 This project uses `pyproject.toml` to manage dependencies. You can install everything with a single pip command. This process will also download the required Spacy models and other packages directly from their URLs.
 
 ```bash
-pip install .
+pip install .[paddle,vlm]
 ```
 
-Alternatively, you can use the `requirements.txt` file:
+Alternatively, you can install from the `requirements_lightweight.txt` file:
+```bash
+pip install -r requirements_lightweight.txt
+```
+
+##### Full version (with Paddle and VLM support)
+
+Run the following command to install the additional dependencies:
+
+```bash
+pip install .[paddle,vlm]
+```
+
+Alternatively, you can use the full `requirements.txt` file, that contains references to the PaddleOCR and related Torch/transformers dependencies (for cuda 12.6):
 ```bash
 pip install -r requirements.txt
+```
+
+Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the equivalent GPU versions, you will need to run the following commands:
+```bash
+pip install paddlepaddle-gpu==3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+```
+
+```bash
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu126
+pip install torchvision --index-url https://download.pytorch.org/whl/cu126
 ```
 
 ### 3. Run the Application
@@ -162,7 +187,7 @@ These settings are useful for all users, regardless of whether you are using AWS
     *   Set to `True` to display a language selection dropdown in the UI for OCR processing.
 
 *   `CHOSEN_LOCAL_OCR_MODEL=tesseract`"
-    *   Choose the backend for local OCR. Options are `tesseract`, `paddle`, or `hybrid`. "Tesseract" is the default, and is recommended. "hybrid" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence. "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. 
+    *   Choose the backend for local OCR. Options are `tesseract`, `paddle`, or `hybrid`. "Tesseract" is the default, and is recommended. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence. "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. 
 
 *   `SESSION_OUTPUT_FOLDER=False`
     *   If `True`, redacted files will be saved in unique subfolders within the `output/` directory for each session.
@@ -922,8 +947,8 @@ The hybrid OCR mode uses several configurable parameters:
 
 - **HYBRID_OCR_CONFIDENCE_THRESHOLD** (default: 65): Tesseract confidence score below which PaddleOCR will be used for re-extraction
 - **HYBRID_OCR_PADDING** (default: 1): Padding added to word bounding boxes before re-extraction
-- **SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES** (default: False): Save comparison images when using hybrid mode
-- **SAVE_PADDLE_VISUALISATIONS** (default: False): Save images with PaddleOCR bounding boxes overlaid
+- **SAVE_EXAMPLE_HYBRID_IMAGES** (default: False): Save comparison images when using hybrid mode
+- **SAVE_PAGE_OCR_VISUALISATIONS** (default: False): Save images with PaddleOCR bounding boxes overlaid
 
 ### When to use different OCR models
 

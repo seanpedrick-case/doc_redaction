@@ -267,14 +267,14 @@ def safe_extract_latest_number_from_filename(filename: str) -> Optional[int]:
         return None
 
 
-def safe_sanitize_text(text: str, replacement: str = "_") -> str:
+def safe_sanitize_text(text: str, replacement: str = "_", max_length: int = 255) -> str:
     """
     Safely sanitize text by removing dangerous characters without ReDoS vulnerability.
 
     Args:
         text: The text to sanitize
         replacement: Character to replace dangerous characters with
-
+        max_length: Maximum length of the text
     Returns:
         Sanitized text
     """
@@ -290,5 +290,8 @@ def safe_sanitize_text(text: str, replacement: str = "_") -> str:
 
     # Remove leading/trailing replacements
     sanitized = sanitized.strip(replacement)
+
+    # Truncate to maximum length
+    sanitized = sanitized[:max_length]
 
     return sanitized

@@ -1,3 +1,4 @@
+import ast
 import datetime
 import json
 import logging
@@ -31,7 +32,7 @@ from tools.config import (
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
 )
 from tools.file_conversion import get_input_file_names
-from tools.helper_functions import get_file_name_without_type
+from tools.helper_functions import get_file_name_without_type, get_textract_file_suffix
 from tools.secure_path_utils import (
     secure_basename,
     secure_file_write,
@@ -376,6 +377,7 @@ def download_textract_job_files(
     pdf_filename: str,
     job_id: str,
     local_output_dir: str,
+    handwrite_signature_checkbox: List[str] = list(),
 ):
     """
     Download and combine selected job files from the AWS Textract service.
@@ -451,7 +453,11 @@ def download_textract_job_files(
 
     output_filename_base = os.path.basename(pdf_filename)
     output_filename_base_no_ext = os.path.splitext(output_filename_base)[0]
-    local_output_filename = f"{output_filename_base_no_ext}_textract.json"
+    # Generate suffix based on checkbox options
+    textract_suffix = get_textract_file_suffix(handwrite_signature_checkbox)
+    local_output_filename = (
+        f"{output_filename_base_no_ext}{textract_suffix}_textract.json"
+    )
     local_output_path = secure_join(local_output_dir, local_output_filename)
 
     secure_file_write(
@@ -687,7 +693,30 @@ def poll_whole_document_textract_analysis_progress_and_download(
             # if not job_df.empty:
             #     job_df = job_df.loc[job_df["job_date_time"] > (datetime.datetime.now() - datetime.timedelta(days=DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS)),:]
 
+            # Extract signature_extraction from job_df for file naming
+            handwrite_signature_checkbox = list()
             if not job_df.empty:
+                if "signature_extraction" in job_df.columns:
+                    matching_signature_extraction = job_df.loc[
+                        job_df["job_id"] == job_id, "signature_extraction"
+                    ]
+                    if not matching_signature_extraction.empty:
+                        signature_extraction_str = matching_signature_extraction.iloc[0]
+                        # Convert string representation to list
+                        # Handle both string representations like "['Extract signatures']" and actual lists
+                        if isinstance(signature_extraction_str, str):
+                            try:
+                                handwrite_signature_checkbox = ast.literal_eval(
+                                    signature_extraction_str
+                                )
+                            except (ValueError, SyntaxError):
+                                # If parsing fails, try to extract from string
+                                handwrite_signature_checkbox = [
+                                    signature_extraction_str
+                                ]
+                        elif isinstance(signature_extraction_str, list):
+                            handwrite_signature_checkbox = signature_extraction_str
+
                 if "file_name" in job_df.columns:
                     matching_job_id_file_names = job_df.loc[
                         job_df["job_id"] == job_id, "file_name"
@@ -725,6 +754,7 @@ def poll_whole_document_textract_analysis_progress_and_download(
                     pdf_filename,
                     job_id,
                     local_output_dir,
+                    handwrite_signature_checkbox,
                 )
 
             except Exception as e:

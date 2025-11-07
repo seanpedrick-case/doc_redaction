@@ -1,0 +1,43 @@
+# --- Core and data packages ---
+numpy==2.2.6
+pandas==2.3.3
+polars==1.33.1
+pyarrow==21.0.0
+openpyxl==3.1.5
+boto3==1.40.57
+python-dotenv==1.0.1
+defusedxml==0.7.1
+Faker==37.8.0
+python-levenshtein==0.27.1
+rapidfuzz==3.14.1
+
+# --- Machine learning / NLP ---
+scikit-learn==1.7.2
+spacy==3.8.7
+spaczz==0.6.1
+en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
+
+# --- PDF / OCR / Redaction tools ---
+pdfminer.six==20250506
+pdf2image==1.17.0
+pymupdf==1.26.4
+pikepdf==9.11.0
+opencv-python==4.12.0.88
+presidio_analyzer==2.2.360
+presidio_anonymizer==2.2.360
+presidio-image-redactor==0.0.57
+
+# --- Gradio and apps ---
+gradio==5.49.1
+https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.3/gradio_image_annotation-0.3.3-py3-none-any.whl  # Custom annotator version with rotation, zoom, labels, and box IDs
+spaces==0.42.1
+
+# --- AWS Lambda runtime ---
+awslambdaric==3.1.1
+
+# --- Document generation ---
+python-docx==1.2.0
+
+# --- Testing ---
+pytest>=7.0.0
+pytest-cov>=4.0.0
