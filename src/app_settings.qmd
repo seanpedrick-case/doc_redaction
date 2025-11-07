@@ -173,6 +173,10 @@ Configurations for the Gradio UI, server behavior, and application limits.
     * **Description:** If set to `"True"`, the application will be served via FastAPI, allowing for API endpoint integration.
     * **Default Value:** `"False"`
 
+* **`RUN_MCP_SERVER`**
+    * **Description:** If set to `"True"`, the application will run as an MCP (Model Context Protocol) server.
+    * **Default Value:** `"False"`
+
 * **`GRADIO_SERVER_NAME`**
     * **Description:** The IP address the Gradio server will bind to. Use `"0.0.0.0"` to allow external access.
     * **Default Value:** `"0.0.0.0"`
@@ -347,6 +351,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Saves images with PaddleOCR's detected bounding boxes overlaid.
     * **Default Value:** `"False"`
 
+* **`SAVE_WORD_SEGMENTER_OUTPUT_IMAGES`**
+    * **Description:** If set to `"True"`, saves output images from the word segmenter for debugging purposes.
+    * **Default Value:** `"False"`
+
 * **`PREPROCESS_LOCAL_OCR_IMAGES`**
     * **Description:** If set to `"True"`, images will be preprocessed before local OCR. Can slow down processing.
     * **Default Value:** `"True"`
@@ -366,6 +374,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
 * **`TESSERACT_SEGMENTATION_LEVEL`**
     * **Description:** Tesseract PSM (Page Segmentation Mode) level to use for OCR. Valid values are 0-13.
     * **Default Value:** `11`
+
+* **`TESSERACT_WORD_LEVEL_OCR`**
+    * **Description:** If set to `"True"`, uses Tesseract word-level OCR instead of line-level.
+    * **Default Value:** `"True"`
 
 * **`CONVERT_LINE_TO_WORD_LEVEL`**
     * **Description:** If set to `"True"`, converts PaddleOCR line-level OCR results to word-level for better precision.

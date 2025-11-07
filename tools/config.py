@@ -281,7 +281,9 @@ FAVICON_PATH = get_or_create_env_var("FAVICON_PATH", "favicon.png")
 
 RUN_FASTAPI = convert_string_to_boolean(get_or_create_env_var("RUN_FASTAPI", "False"))
 
-RUN_MCP_SERVER = convert_string_to_boolean(get_or_create_env_var("RUN_MCP_SERVER", "False"))
+RUN_MCP_SERVER = convert_string_to_boolean(
+    get_or_create_env_var("RUN_MCP_SERVER", "False")
+)
 
 MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
 

@@ -1240,7 +1240,7 @@ class CustomImageAnalyzerEngine:
             print(
                 f"Warning: Image dimension mismatch! Expected {image_width}x{image_height}, but got {actual_width}x{actual_height}"
             )
-            #print(f"Using actual dimensions: {actual_width}x{actual_height}")
+            # print(f"Using actual dimensions: {actual_width}x{actual_height}")
             # Update to use actual dimensions
             image_width = actual_width
             image_height = actual_height
@@ -1598,26 +1598,28 @@ class CustomImageAnalyzerEngine:
     # Calculate line-level bounding boxes and average confidence
     def _calculate_line_bbox(self, group):
         # Get the leftmost and rightmost positions
-        left = group['left'].min()
-        top = group['top'].min()
-        right = (group['left'] + group['width']).max()
-        bottom = (group['top'] + group['height']).max()
-        
+        left = group["left"].min()
+        top = group["top"].min()
+        right = (group["left"] + group["width"]).max()
+        bottom = (group["top"] + group["height"]).max()
+
         # Calculate width and height
         width = right - left
         height = bottom - top
-        
+
         # Calculate average confidence
-        avg_conf = round(group['conf'].mean(), 0)
-        
-        return pd.Series({
-            'text': ' '.join(group['text'].astype(str).tolist()),
-            'left': left,
-            'top': top,
-            'width': width,
-            'height': height,
-            'conf': avg_conf
-        })
+        avg_conf = round(group["conf"].mean(), 0)
+
+        return pd.Series(
+            {
+                "text": " ".join(group["text"].astype(str).tolist()),
+                "left": left,
+                "top": top,
+                "width": width,
+                "height": height,
+                "conf": avg_conf,
+            }
+        )
 
     def _perform_hybrid_ocr(
         self,
@@ -1628,7 +1630,7 @@ class CustomImageAnalyzerEngine:
         image_name: str = "unknown_image_name",
     ) -> Dict[str, list]:
         """
-        Performs hybrid OCR on an image using Tesseract for initial OCR and PaddleOCR/VLM to enhance 
+        Performs hybrid OCR on an image using Tesseract for initial OCR and PaddleOCR/VLM to enhance
         results for low-confidence or uncertain words.
 
         Args:
@@ -1637,12 +1639,12 @@ class CustomImageAnalyzerEngine:
                 re-analyzed with secondary OCR (PaddleOCR/VLM). Defaults to HYBRID_OCR_CONFIDENCE_THRESHOLD.
             padding (int, optional): Pixel padding (in all directions) to add around each word box when
                 cropping for secondary OCR. Defaults to HYBRID_OCR_PADDING.
-            ocr (Optional[Any], optional): An instance of the PaddleOCR or VLM engine. If None, will use the 
+            ocr (Optional[Any], optional): An instance of the PaddleOCR or VLM engine. If None, will use the
                 instance's `paddle_ocr` attribute if available. Only necessary for PaddleOCR-based pipelines.
             image_name (str, optional): Optional name of the image, useful for debugging and visualization.
 
         Returns:
-            Dict[str, list]: OCR results in the dictionary format of pytesseract.image_to_data (keys: 
+            Dict[str, list]: OCR results in the dictionary format of pytesseract.image_to_data (keys:
                 'text', 'left', 'top', 'width', 'height', 'conf', 'model', ...).
         """
         # Determine if we're using VLM or PaddleOCR
@@ -1657,36 +1659,36 @@ class CustomImageAnalyzerEngine:
                         "No OCR object provided and 'paddle_ocr' is not initialized."
                     )
 
-        #print("Starting hybrid OCR process...")
+        # print("Starting hybrid OCR process...")
 
-        # 1. Get initial word-level results from Tesseract        
+        # 1. Get initial word-level results from Tesseract
         tesseract_data = pytesseract.image_to_data(
             image,
             output_type=pytesseract.Output.DICT,
             config=self.tesseract_config,
             lang=self.tesseract_lang,
         )
-        
+
         if TESSERACT_WORD_LEVEL_OCR is False:
             ocr_df = pd.DataFrame(tesseract_data)
-            
+
             # Filter out invalid entries (confidence == -1)
             ocr_df = ocr_df[ocr_df.conf != -1]
-            
+
             # Group by line and aggregate text
-            line_groups = ocr_df.groupby(['block_num', 'par_num', 'line_num'])              
-            
+            line_groups = ocr_df.groupby(["block_num", "par_num", "line_num"])
+
             ocr_data = line_groups.apply(self._calculate_line_bbox).reset_index()
 
             # Overwrite tesseract_data with the aggregated data
             tesseract_data = {
-                'text': ocr_data['text'].tolist(),
-                'left': ocr_data['left'].astype(int).tolist(),
-                'top': ocr_data['top'].astype(int).tolist(),
-                'width': ocr_data['width'].astype(int).tolist(),
-                'height': ocr_data['height'].astype(int).tolist(),
-                'conf': ocr_data['conf'].tolist(),
-                'model': ['Tesseract'] * len(ocr_data)  # Add model field
+                "text": ocr_data["text"].tolist(),
+                "left": ocr_data["left"].astype(int).tolist(),
+                "top": ocr_data["top"].astype(int).tolist(),
+                "width": ocr_data["width"].astype(int).tolist(),
+                "height": ocr_data["height"].astype(int).tolist(),
+                "conf": ocr_data["conf"].tolist(),
+                "model": ["Tesseract"] * len(ocr_data),  # Add model field
             }
 
         final_data = {
@@ -2262,24 +2264,24 @@ class CustomImageAnalyzerEngine:
 
             if TESSERACT_WORD_LEVEL_OCR is False:
                 ocr_df = pd.DataFrame(ocr_data)
-                
+
                 # Filter out invalid entries (confidence == -1)
                 ocr_df = ocr_df[ocr_df.conf != -1]
-                
+
                 # Group by line and aggregate text
-                line_groups = ocr_df.groupby(['block_num', 'par_num', 'line_num'])              
-                
-                ocr_data = line_groups.apply(self._calculate_line_bbox).reset_index()                
+                line_groups = ocr_df.groupby(["block_num", "par_num", "line_num"])
+
+                ocr_data = line_groups.apply(self._calculate_line_bbox).reset_index()
 
                 # Convert DataFrame to dictionary of lists format expected by downstream code
                 ocr_data = {
-                    'text': ocr_data['text'].tolist(),
-                    'left': ocr_data['left'].astype(int).tolist(),
-                    'top': ocr_data['top'].astype(int).tolist(),
-                    'width': ocr_data['width'].astype(int).tolist(),
-                    'height': ocr_data['height'].astype(int).tolist(),
-                    'conf': ocr_data['conf'].tolist(),
-                    'model': ['Tesseract'] * len(ocr_data)  # Add model field
+                    "text": ocr_data["text"].tolist(),
+                    "left": ocr_data["left"].astype(int).tolist(),
+                    "top": ocr_data["top"].astype(int).tolist(),
+                    "width": ocr_data["width"].astype(int).tolist(),
+                    "height": ocr_data["height"].astype(int).tolist(),
+                    "conf": ocr_data["conf"].tolist(),
+                    "model": ["Tesseract"] * len(ocr_data),  # Add model field
                 }
 
         elif self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle-vlm":
@@ -2457,8 +2459,8 @@ class CustomImageAnalyzerEngine:
 
         # Convert line-level results to word-level if configured and needed
         if CONVERT_LINE_TO_WORD_LEVEL and self._is_line_level_data(ocr_data):
-            #print("Converting line-level OCR results to word-level...")
-            
+            # print("Converting line-level OCR results to word-level...")
+
             # Check if coordinates need to be scaled to match the image we're cropping from
             # For PaddleOCR: _convert_paddle_to_tesseract_format converts coordinates to original image space
             #   - If PaddleOCR processed the original image (image_path provided), crop from original image (no scaling)
@@ -2496,7 +2498,10 @@ class CustomImageAnalyzerEngine:
                 elif self.ocr_engine == "tesseract":
                     # For Tesseract: if scale_factor != 1.0, rescale_ocr_data converted coordinates to original space
                     # So we need to crop from the original image, not the preprocessed image
-                    if scale_factor != 1.0 and original_image_for_visualization is not None:
+                    if (
+                        scale_factor != 1.0
+                        and original_image_for_visualization is not None
+                    ):
                         # Coordinates are in original space, so crop from original image
                         crop_image = original_image_for_visualization
                         crop_image_width = original_image_width
@@ -2588,7 +2593,6 @@ class CustomImageAnalyzerEngine:
 
             def get_model(idx):
                 return default_model
-
 
         output = [
             OCRResult(

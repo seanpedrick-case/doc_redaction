@@ -1034,7 +1034,7 @@ with blocks:
 
     Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide]({USER_GUIDE_URL}) for a full walkthrough of all the features in the app.
     
-    To identify text in documents, the 'Local' text extraction uses PikePDF, and OCR image analysis uses Tesseract, and works well only for documents with typed text or scanned PDFs with clear text. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
+    To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
 
     Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
 
@@ -1688,7 +1688,9 @@ with blocks:
 
                         with gr.Row(equal_height=True):
                             multi_word_search_text = gr.Textbox(
-                                label="Multi-word text search", value="", scale=4
+                                label="Multi-word text search (regex enabled below)",
+                                value="",
+                                scale=4,
                             )
                             multi_word_search_text_btn = gr.Button(
                                 value="Search", scale=1
@@ -4756,7 +4758,8 @@ with blocks:
             duplicate_files_out,
             full_duplicate_data_by_file,
         ],
-    api_name="word_level_ocr_text_search")
+        api_name="word_level_ocr_text_search",
+    )
 
     # Clicking on a cell in the redact items table will take you to that page
     all_page_line_level_ocr_results_with_words_df.select(

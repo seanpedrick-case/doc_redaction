@@ -854,21 +854,83 @@ def find_consecutive_sequence_matches(
             reference_tokens = reference_df["text_clean"].tolist()
         reference_indices = reference_df.index.tolist()
 
-        # Join tokens with spaces to reconstruct the text
-        # Note: If tokens were split at special characters like @, this may not perfectly reconstruct
-        # the original text, but it's the best we can do with tokenized data
-        reference_text = " ".join(reference_tokens)
+        # Concatenate ALL tokens into a single continuous string with smart spacing
+        # Rules:
+        # - Words are joined with single spaces
+        # - Punctuation (periods, commas, etc.) touches adjacent tokens directly (no spaces)
+        # Example: ["Hi", ".", "How", "are", "you", "?", "Great"] -> "Hi.How are you?Great"
+        # This allows regex patterns to span multiple tokens naturally while preserving word boundaries
 
-        # Build a mapping from character positions to token indices
-        # This helps us map regex match positions back to token indices
+        def is_punctuation_only(token):
+            """Check if token contains only punctuation characters"""
+            if not token:
+                return False
+            # Check if all characters are punctuation (using string.punctuation or our set)
+            import string
+
+            return all(c in string.punctuation for c in token)
+
+        def starts_with_punctuation(token):
+            """Check if token starts with punctuation"""
+            if not token:
+                return False
+            import string
+
+            return token[0] in string.punctuation
+
+        def ends_with_punctuation(token):
+            """Check if token ends with punctuation"""
+            if not token:
+                return False
+            import string
+
+            return token[-1] in string.punctuation
+
+        # Build the concatenated string and position mapping
+        reference_text_parts = []
         char_to_token_map = []
         current_pos = 0
+
         for idx, token in enumerate(reference_tokens):
-            token_start = current_pos
-            token_end = current_pos + len(token)
-            char_to_token_map.append((token_start, token_end, reference_indices[idx]))
-            # Add 1 for the space separator (except after last token)
-            current_pos = token_end + (1 if idx < len(reference_tokens) - 1 else 0)
+            # Determine if we need a space before this token
+            needs_space_before = False
+            if idx > 0:  # Not the first token
+                prev_token = reference_tokens[idx - 1]
+                # Add space if:
+                # - Current token is not punctuation-only AND
+                # - Previous token is not punctuation-only AND
+                # - Previous token didn't end with punctuation AND
+                # - Current token doesn't start with punctuation
+                if (
+                    not is_punctuation_only(token)
+                    and not is_punctuation_only(prev_token)
+                    and not ends_with_punctuation(prev_token)
+                    and not starts_with_punctuation(token)
+                ):
+                    needs_space_before = True
+
+            # Add space if needed
+            if needs_space_before:
+                current_pos += 1  # Account for the space
+
+            # Record token position in the concatenated string
+            token_start_in_text = current_pos
+            token_end_in_text = current_pos + len(token)
+            char_to_token_map.append(
+                (token_start_in_text, token_end_in_text, reference_indices[idx])
+            )
+
+            # Add token to the concatenated string
+            if needs_space_before:
+                reference_text_parts.append(" " + token)
+            else:
+                reference_text_parts.append(token)
+
+            # Move position forward by token length (and space if added)
+            current_pos = token_end_in_text
+
+        # Join all parts to create the final concatenated string
+        reference_text = "".join(reference_text_parts)
 
         # Find all regex matches
         try:
@@ -891,21 +953,49 @@ def find_consecutive_sequence_matches(
         all_found_matches = []
         query_index = search_df.index[0]  # Use the first (and only) query index
 
-        # For each regex match, find which tokens it spans
+        # Optimize overlap detection for large documents
+        # Instead of checking every token for every match (O(m*n)), we can use the fact that
+        # char_to_token_map is sorted by position. For each match, we only need to check
+        # tokens that could possibly overlap.
+
+        # For each regex match found in the concatenated string:
+        # 1. Get the match's start and end character positions
+        # 2. Find all tokens whose character ranges overlap with the match
+        # 3. Include all overlapping tokens in the results
+        # This ensures patterns spanning multiple tokens are captured correctly
+
+        # Optimization: Use a set to track which tokens we've already found
+        # This prevents duplicates if multiple matches overlap the same tokens
+        found_token_indices = set()
+
         for match in matches:
             match_start = match.start()
             match_end = match.end()
 
             # Find all tokens that overlap with this match
+            # A token overlaps if: token_start < match_end AND token_end > match_start
+            # Optimization: Since char_to_token_map is sorted by start position,
+            # we can stop early once we pass match_end, but we still need to check
+            # tokens that start before match_end (they might extend into the match)
             matching_token_indices = []
             for token_start, token_end, token_idx in char_to_token_map:
-                # Check if token overlaps with match
-                if not (token_end < match_start or token_start > match_end):
+                # Early exit optimization: if token starts after match ends, no more overlaps possible
+                # (This works because tokens are processed in order)
+                if token_start >= match_end:
+                    break
+
+                # Check if token overlaps with match (not disjoint)
+                if (
+                    token_end > match_start
+                ):  # token_start < match_end already checked by break above
                     matching_token_indices.append(token_idx)
 
-            # Create matches for all tokens in the span
+            # Create matches for all tokens that overlap with the regex match
+            # This ensures patterns spanning multiple tokens are captured
             for token_idx in matching_token_indices:
-                all_found_matches.append((query_index, token_idx, 1))
+                if token_idx not in found_token_indices:
+                    all_found_matches.append((query_index, token_idx, 1))
+                    found_token_indices.add(token_idx)
 
         print(
             f"Found {len(matches)} regex match(es) spanning {len(set(idx for _, idx, _ in all_found_matches))} token(s)"

@@ -14,7 +14,7 @@ version: 1.5.2
 
 Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
-To identify text in documents, the 'Local' text extraction uses PikePDF, and OCR image analysis uses Tesseract, and works well only for documents with typed text or scanned PDFs with clear text. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
+To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
 
 For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
 

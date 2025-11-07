@@ -194,6 +194,8 @@ To import this to use with your redaction tasks, go to the 'Redaction settings' 
 
 Say you wanted to remove specific terms from a document. In this app you can do this by providing a custom deny list as a csv. Like for the allow list described above, this should be a one-column csv without a column header. The app will suggest each individual term in the list with exact spelling as whole words. So it won't select text from within words. To enable this feature, the 'CUSTOM' tag needs to be chosen as a redaction entity [(the process for adding/removing entity types to redact is described below)](#redacting-additional-types-of-personal-information).
 
+**NOTE:** As of version 1.5.2, you can now provide deny list terms as regex patterns.
+
 Here is an example using the [Partnership Agreement Toolkit file](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf). This is an [example of a custom deny list file](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_custom_deny_list.csv). 'Sister', 'Sister City'
 'Sister Cities', 'Friendship City' have been listed as specific terms to redact. You can see the outputs of this redaction process on the review page:
 
@@ -367,7 +369,7 @@ The workflow is designed to be simple: **Search → Select → Redact**.
 
 1.  Navigate to the **"Search text to make new redactions"** tab.
 2.  The main table will initially be populated with all the text extracted from the document for a page, broken down by word.
-3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below (Note this will only be able to search for patterns in text within each cell).
+3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below.
 4.  Click the **"Search"** button or press Enter.
 5.  The table below will update to show only the rows containing text that matches your search query.
 
