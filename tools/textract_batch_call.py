@@ -39,8 +39,6 @@ from tools.secure_path_utils import (
     secure_join,
 )
 
-DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS)
-
 
 def analyse_document_with_textract_api(
     local_pdf_path: str,
@@ -143,6 +141,8 @@ def analyse_document_with_textract_api(
         raise
 
     # Filter job_df to include rows only where the analysis date is after the current date - DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS
+    job_df["job_date_time"] = pd.to_datetime(job_df["job_date_time"], errors="coerce")
+
     if not job_df.empty:
         job_df = job_df.loc[
             job_df["job_date_time"]
@@ -200,7 +200,7 @@ def analyse_document_with_textract_api(
                 and len(matching_handwrite_signature) > 0
             ):
                 out_message = f"Existing Textract outputs found for file {pdf_filename} from date {matching_job_id_file_names_dates.iloc[0]}. No need to re-analyse. Please download existing results from the list with job ID {matching_job_id.iloc[0]}"
-                gr.Warning(out_message)
+                print(out_message)
                 raise Exception(out_message)
 
     # --- 2. Start Textract Document Analysis ---
@@ -380,34 +380,39 @@ def download_textract_job_files(
     handwrite_signature_checkbox: List[str] = list(),
 ):
     """
-    Download and combine selected job files from the AWS Textract service.
+    Download and combine output job files from AWS Textract for a given job.
+
+    Args:
+        s3_client (boto3.client): The Boto3 S3 client to interact with AWS S3.
+        s3_bucket_name (str): Name of the S3 bucket where Textract job outputs are stored.
+        s3_output_key_prefix (str): S3 prefix (folder path) under which job output files are located (usually ends with job_id/).
+        pdf_filename (str): The name of the PDF file related to this Textract job (used for local naming or logging, not S3 lookup).
+        job_id (str): The AWS Textract job ID whose outputs are being fetched.
+        local_output_dir (str): The local directory in which to save downloaded and combined results.
+        handwrite_signature_checkbox (List[str], optional): List indicating user options regarding post-processing for handwriting/signature (used for filtering or downstream handling).
+
+    Returns:
+        str: The local file path to the combined output JSON file.
+
+    Raises:
+        Exception: If no output files are found, or if an error occurs during download or processing.
     """
-
-    # print("s3_output_key_prefix at download:", s3_output_key_prefix)
-
     list_response = s3_client.list_objects_v2(
         Bucket=s3_bucket_name, Prefix=s3_output_key_prefix
     )
 
     output_files = list_response.get("Contents", [])
     if not output_files:
-        # Sometimes Textract might take a moment longer to write the output after SUCCEEDED status
-        # logging.warning("No output files found immediately after job success. Waiting briefly and retrying list...")
-        # time.sleep(5)
         list_response = s3_client.list_objects_v2(
             Bucket=s3_bucket_name, Prefix=s3_output_key_prefix
         )
-        output_files = list_response.get("Contents", [])
 
     if not output_files:
-        logging.error(
+        out_message = (
             f"No output files found in s3://{s3_bucket_name}/{s3_output_key_prefix}"
         )
-        # You could alternatively try getting results via get_document_analysis pagination here
-        # but sticking to the request to download from S3 output path.
-        raise FileNotFoundError(
-            f"Textract output files not found in S3 path: s3://{s3_bucket_name}/{s3_output_key_prefix}"
-        )
+        print(out_message)
+        raise Exception(out_message)
 
     # Usually, we only need the first/main JSON output file(s)
     # For simplicity, download the first one found. A more complex scenario might merge multiple files.
@@ -466,14 +471,7 @@ def download_textract_job_files(
 
     print(f"Combined Textract output written to {local_output_path}")
 
-    # logging.info(f"Downloading Textract output from 's3://{s3_bucket_name}/{s3_output_key}' to '{local_output_path}'...")
-    # s3_client.download_file(s3_bucket_name, s3_output_key, local_output_path)
-    # logging.info("Download successful.")
     downloaded_file_path = local_output_path
-
-    # Log if multiple files were found, as user might need to handle them
-    # if len(json_files_to_download) > 1:
-    #    logging.warning(f"Multiple output files found in S3 output location. Downloaded the first: '{s3_output_key}'. Other files exist.")
 
     return downloaded_file_path
 
@@ -485,12 +483,25 @@ def check_for_provided_job_id(job_id: str):
 
 
 def load_pdf_job_file_from_s3(
-    load_s3_jobs_input_loc,
-    pdf_filename,
-    local_output_dir,
-    s3_bucket_name,
-    RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
-):
+    load_s3_jobs_input_loc: str,
+    pdf_filename: str,
+    local_output_dir: str,
+    s3_bucket_name: str,
+    RUN_AWS_FUNCTIONS: bool = RUN_AWS_FUNCTIONS,
+) -> tuple:
+    """
+    Downloads a PDF job file from S3 and saves it locally.
+
+    Args:
+        load_s3_jobs_input_loc (str): S3 prefix/location where the PDF job file is stored.
+        pdf_filename (str): The name of the PDF file (without .pdf extension).
+        local_output_dir (str): Directory to which the file should be saved locally.
+        s3_bucket_name (str): The S3 bucket name.
+        RUN_AWS_FUNCTIONS (bool, optional): Whether to run AWS functions (download from S3). Defaults to RUN_AWS_FUNCTIONS.
+
+    Returns:
+        tuple: (pdf_file_location (list of str), doc_file_name_no_extension_textbox (str))
+    """
 
     try:
         pdf_file_location = ""
@@ -529,6 +540,22 @@ def replace_existing_pdf_input_for_whole_document_outputs(
     RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
     progress=gr.Progress(track_tqdm=True),
 ):
+    """
+    Ensures the PDF input for whole document outputs is loaded from S3 unless an identical PDF is already supplied.
+
+    Args:
+        load_s3_jobs_input_loc (str): The S3 input prefix/location for the PDF job file.
+        pdf_filename (str): The PDF file name (without extension).
+        local_output_dir (str): The local directory for saving the file.
+        s3_bucket_name (str): The S3 bucket name.
+        in_doc_files (FileData, optional): List of Gradio FileData objects or paths that may already contain the PDF file. Defaults to [].
+        input_folder (str, optional): Input folder path on disk. Defaults to INPUT_FOLDER.
+        RUN_AWS_FUNCTIONS (bool, optional): Whether to run AWS-related operations. Defaults to RUN_AWS_FUNCTIONS global.
+        progress (gr.Progress, optional): Gradio Progress object for reporting progress. Defaults to a tqdm-enabled progress tracker.
+
+    Returns:
+        Returns the downloaded file location and associated file name information for downstream use.
+    """
 
     progress(0.1, "Loading PDF from s3")
 
@@ -605,12 +632,35 @@ def poll_whole_document_textract_analysis_progress_and_download(
     aws_region: str = AWS_REGION,  # Optional: specify region if not default
     load_jobs_from_s3: str = LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     poll_interval_seconds: int = 1,
-    max_polling_attempts: int = 1,  # ~10 minutes total wait time):
+    max_polling_attempts: int = 1,  # ~10 minutes total wait time
     DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS: int = DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS,
     progress=gr.Progress(track_tqdm=True),
 ):
     """
-    Poll AWS for the status of a Textract API job. Return status, and if finished, combine and download results into a locally-stored json file for further processing by the app.
+    Polls AWS Textract for the status of a document analysis job and, once finished, downloads and combines the output into a local JSON file for further processing.
+
+    Args:
+        job_id (str): The AWS Textract job ID to check for completion.
+        job_type_dropdown (str): The Textract operation type to use ('document_analysis' or 'document_text_detection').
+        s3_output_prefix (str): The S3 prefix (folder path) where the job's output files are located.
+        pdf_filename (str): The name of the PDF document associated with this job.
+        job_df (pd.DataFrame): DataFrame containing information from previous Textract API calls.
+        s3_bucket_name (str, optional): S3 bucket containing the job outputs. Defaults to TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET.
+        local_output_dir (str, optional): Local directory to which output JSON results will be saved. Defaults to OUTPUT_FOLDER.
+        load_s3_jobs_loc (str, optional): S3 location for previously saved Textract jobs metadata. Defaults to TEXTRACT_JOBS_S3_LOC.
+        load_local_jobs_loc (str, optional): Local location for previously saved Textract jobs metadata. Defaults to TEXTRACT_JOBS_LOCAL_LOC.
+        aws_region (str, optional): AWS region for API calls. Defaults to AWS_REGION.
+        load_jobs_from_s3 (str, optional): Whether to load previous jobs from S3 or local. Defaults to LOAD_PREVIOUS_TEXTRACT_JOBS_S3.
+        poll_interval_seconds (int, optional): Seconds between polling attempts. Defaults to 1.
+        max_polling_attempts (int, optional): How many times to check the job's status before timing out. Defaults to 1.
+        DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS (int, optional): How many days back to display finished jobs. Defaults to DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS.
+        progress (gr.Progress, optional): Gradio Progress object for tracking progress in a UI.
+
+    Returns:
+        [function output not explicitly documented here; see function logic for details]
+
+    Raises:
+        Exception: If job fails, polling times out, or download fails.
     """
 
     progress(0.1, "Querying AWS Textract for status of document analysis job")
@@ -629,6 +679,14 @@ def poll_whole_document_textract_analysis_progress_and_download(
         print(message)
         # logging.info("Polling Textract for job completion status...")
 
+        print(f"job_id: {job_id}")
+        print(f"job_type_dropdown: {job_type_dropdown}")
+        print(f"s3_output_prefix: {s3_output_prefix}")
+        print(f"pdf_filename: {pdf_filename}")
+        print(f"job_df: {job_df}")
+        print(f"s3_bucket_name: {s3_bucket_name}")
+        print(f"local_output_dir: {local_output_dir}")
+        print(f"load_s3_jobs_loc: {load_s3_jobs_loc}")
         # Update Textract document history df
         try:
             job_df = load_in_textract_job_details(
@@ -637,9 +695,7 @@ def poll_whole_document_textract_analysis_progress_and_download(
                 load_local_jobs_loc=load_local_jobs_loc,
             )
         except Exception as e:
-            # logging.error(f"Failed to update job details dataframe: {e}")
             print(f"Failed to update job details dataframe: {e}")
-            # raise
 
         while job_status == "IN_PROGRESS" and attempts <= max_polling_attempts:
             attempts += 1
@@ -758,9 +814,11 @@ def poll_whole_document_textract_analysis_progress_and_download(
                 )
 
             except Exception as e:
-                # logging.error(f"Failed to download or process Textract output from S3: {e}")
-                print(f"Failed to download or process Textract output from S3: {e}")
-                raise
+                out_message = (
+                    f"Failed to download or process Textract output from S3. Error: {e}"
+                )
+                print(out_message)
+                raise Exception(out_message)
 
     else:
         raise Exception("No Job ID provided.")
@@ -818,7 +876,7 @@ def load_in_textract_job_details(
 
     # If the log path exists, load it in
     if os.path.exists(local_output_path):
-        print("Found log file in local path")
+        print("Found Textract job list log file in local path")
         job_df = pd.read_csv(local_output_path)
 
         if "job_date_time" in job_df.columns:
@@ -843,8 +901,8 @@ def load_in_textract_job_details(
             ]
         except Exception as e:
             print(
-                "Could not find one or more columns in Textract whole document list dataframe:",
-                e,
+                "Could not find one or more columns in Textract job list log file.",
+                f"Error: {e}",
             )
 
     return job_df

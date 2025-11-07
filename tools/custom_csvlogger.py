@@ -45,7 +45,7 @@ class CSVLogger_custom(FlaggingCallback):
     def __init__(
         self,
         simplify_file_data: bool = True,
-        verbose: bool = True,
+        verbose: bool = False,
         dataset_file_name: str | None = None,
     ):
         """
@@ -228,7 +228,7 @@ class CSVLogger_custom(FlaggingCallback):
 
             if RUN_AWS_FUNCTIONS:
                 try:
-                    print("Connecting to DynamoDB via existing SSO connection")
+                    # print("Connecting to DynamoDB via existing SSO connection")
                     dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 
                     dynamodb.meta.client.list_tables()
@@ -236,9 +236,9 @@ class CSVLogger_custom(FlaggingCallback):
                 except Exception as e:
                     print("No SSO credentials found:", e)
                     if AWS_ACCESS_KEY and AWS_SECRET_KEY:
-                        print(
-                            "Trying to get DynamoDB credentials from environment variables"
-                        )
+                        # print(
+                        #     "Trying to get DynamoDB credentials from environment variables"
+                        # )
                         dynamodb = boto3.resource(
                             "dynamodb",
                             aws_access_key_id=AWS_ACCESS_KEY,
@@ -328,7 +328,7 @@ class CSVLogger_custom(FlaggingCallback):
 
                 table.put_item(Item=item)
 
-                print("Successfully uploaded log to DynamoDB")
+                # print("Successfully uploaded log to DynamoDB")
             except Exception as e:
                 print("Could not upload log to DynamobDB due to", e)
 

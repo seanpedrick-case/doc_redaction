@@ -270,13 +270,12 @@ def upload_log_file_to_s3(
                             file_name = os.path.basename(file)
 
                             s3_key_full = s3_key + file_name
-                            print("S3 key: ", s3_key_full)
 
                             s3_client.upload_file(file, s3_bucket, s3_key_full)
                             out_message = (
                                 "File " + file_name + " uploaded successfully!"
                             )
-                            print(out_message)
+                            # print(out_message)
 
                         except Exception as e:
                             out_message = f"Error uploading file(s): {e}"

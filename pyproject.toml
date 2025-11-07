@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "1.5.0"
+version = "1.5.1"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 requires-python = ">=3.10"
 
 [project.urls]
 Homepage = "https://seanpedrick-case.github.io/doc_redaction/"
-repository = "https://github.com/seanpedrick-case/doc_redaction"
+Repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 dependencies = [
     "pdfminer.six==20250506",
@@ -25,7 +25,6 @@ dependencies = [
     "pandas==2.3.3",
     "scikit-learn==1.7.2",
     "spacy==3.8.7",
-    # Direct URL dependency for spacy model
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
     "gradio==5.49.1",
     "boto3==1.40.57",
@@ -34,7 +33,6 @@ dependencies = [
     "Faker==37.8.0",
     "python-levenshtein==0.27.1",
     "spaczz==0.6.1",
-    # Direct URL dependency for gradio_image_annotator wheel
     "gradio_image_annotation @ https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.3/gradio_image_annotation-0.3.3-py3-none-any.whl",
     "rapidfuzz==3.14.1",
     "python-dotenv==1.0.1",
@@ -42,7 +40,7 @@ dependencies = [
     "python-docx==1.2.0",
     "polars==1.33.1",
     "defusedxml==0.7.1",
-    "numpy==2.2.6"
+    "numpy==2.2.6",
 ]
 
 [project.optional-dependencies]
@@ -54,14 +52,16 @@ test = ["pytest", "pytest-cov"]
 # To install the app with paddle and vlm support with pip, example command (in base folder and correct python environment): pip install .[paddle,vlm], or uv pip install .[ocr,vlm] if using uv. Note need to GPU version of Torch below
 
 # Extra dependencies for PaddleOCR
+# If you want the GPU-accelerated version, run manually pip install paddlepaddle-gpu<=3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
 paddle = [
-    "paddlepaddle<=3.2.1", # If you want the GPU-accelerated version, run manually pip install paddlepaddle-gpu<=3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
-    "paddleocr<=3.3.0",
+    "paddlepaddle>=3.0.0,<=3.2.1", 
+    "paddleocr==3.3.0",
 ]
 
 # Extra dependencies for VLM models
+# For torch you should use --index-url https://download.pytorch.org/whl/cu126 for cuda support for paddleocr, need to install manually
 vlm = [
-    "torch<=2.8.0", # should use --index-url https://download.pytorch.org/whl/cu126 for cuda support for paddleocr, need to install manually
+    "torch<=2.5.1,<=2.8.0", 
     "torchvision>=0.20.1",
     "transformers==4.57.1",
     "accelerate==1.11.0",

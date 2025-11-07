@@ -1125,7 +1125,7 @@ with blocks:
                 )
 
             if os.path.exists(example_files[3]):
-                if SHOW_AWS_EXAMPLES == "True":
+                if SHOW_AWS_EXAMPLES:
                     available_examples.append(
                         [
                             [example_files[3]],
@@ -1701,13 +1701,23 @@ with blocks:
                                 label="Minimum similarity score for match (max=1)",
                                 visible=False,
                             )  # Not used anymore for this exact search
-                            new_redaction_text_label = gr.Textbox(
-                                label="Label for new redactions", value="Redaction"
-                            )
-                            colour_label = gr.Textbox(
-                                label="Colour for labels (three number RGB format, max 255 with brackets)",
-                                value=CUSTOM_BOX_COLOUR,
-                            )
+
+                            with gr.Row():
+                                with gr.Column():
+                                    new_redaction_text_label = gr.Textbox(
+                                        label="Label for new redactions",
+                                        value="Redaction",
+                                    )
+                                    colour_label = gr.Textbox(
+                                        label="Colour for labels (three number RGB format, max 255 with brackets)",
+                                        value=CUSTOM_BOX_COLOUR,
+                                    )
+                                with gr.Column():
+                                    use_regex_search = gr.Checkbox(
+                                        label="Enable regex pattern matching",
+                                        value=False,
+                                        info="When enabled, the search text will be treated as a regular expression pattern instead of literal text",
+                                    )
 
                         all_page_line_level_ocr_results_with_words_df = gr.Dataframe(
                             pd.DataFrame(
@@ -3218,6 +3228,8 @@ with blocks:
             redaction_output_summary_textbox,
             is_a_textract_api_call,
             textract_query_number,
+            all_page_line_level_ocr_results_with_words,
+            input_review_files,
         ],
     ).success(
         fn=choose_and_run_redactor,
@@ -4699,12 +4711,29 @@ with blocks:
         outputs=[all_page_line_level_ocr_results_with_words_df],
     )
 
+    def run_search_with_regex_option(
+        search_text, word_df, similarity_threshold, use_regex_flag
+    ):
+        """Wrapper function to call run_full_search_and_analysis with regex option"""
+        return run_full_search_and_analysis(
+            search_query_text=search_text,
+            word_level_df_orig=word_df,
+            similarity_threshold=similarity_threshold,
+            combine_pages=False,
+            min_word_count=1,
+            min_consecutive_pages=1,
+            greedy_match=True,
+            remake_index=False,
+            use_regex=use_regex_flag,
+        )
+
     multi_word_search_text.submit(
-        fn=run_full_search_and_analysis,
+        fn=run_search_with_regex_option,
         inputs=[
             multi_word_search_text,
             all_page_line_level_ocr_results_with_words_df_base,
             similarity_search_score_minimum,
+            use_regex_search,
         ],
         outputs=[
             all_page_line_level_ocr_results_with_words_df,
@@ -4714,11 +4743,12 @@ with blocks:
     )
 
     multi_word_search_text_btn.click(
-        fn=run_full_search_and_analysis,
+        fn=run_search_with_regex_option,
         inputs=[
             multi_word_search_text,
             all_page_line_level_ocr_results_with_words_df_base,
             similarity_search_score_minimum,
+            use_regex_search,
         ],
         outputs=[
             all_page_line_level_ocr_results_with_words_df,
@@ -5813,7 +5843,7 @@ with blocks:
 
     # Get connection details on app load
 
-    if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
+    if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
         blocks.load(
             get_connection_params,
             inputs=[

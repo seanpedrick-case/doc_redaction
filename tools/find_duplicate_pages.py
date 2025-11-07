@@ -122,6 +122,7 @@ def run_full_search_and_analysis(
     min_consecutive_pages: int = 1,
     greedy_match: bool = True,
     remake_index: bool = False,
+    use_regex: bool = False,
     progress=gr.Progress(track_tqdm=True),
 ):
     """
@@ -133,7 +134,7 @@ def run_full_search_and_analysis(
     4. Executes the similarity analysis on the combined data using the specified parameters such as similarity threshold, minimum word count, minimum consecutive pages, and greedy match strategy.
 
     Parameters:
-    - search_query_text (str): The text entered by the user to search for in the OCR data.
+    - search_query_text (str): The text entered by the user to search for in the OCR data. If use_regex=True, this is treated as a regex pattern.
     - word_level_df_orig (pd.DataFrame): The original DataFrame containing word-level OCR data.
     - similarity_threshold (float, optional): The minimum similarity score required for two pages to be considered duplicates. Defaults to 1.
     - combine_pages (bool, optional): A flag indicating whether to combine text from the same page number within a file. Defaults to False.
@@ -141,6 +142,7 @@ def run_full_search_and_analysis(
     - min_consecutive_pages (int, optional): The minimum number of consecutive pages required to be considered a match. Defaults to 1.
     - greedy_match (bool, optional): A flag indicating whether to use a greedy strategy for matching consecutive pages. Defaults to True.
     - remake_index (bool, optional): A flag indicating whether to remake the index of the DataFrame during processing. Defaults to False.
+    - use_regex (bool, optional): If True, treats search_query_text as a regex pattern instead of literal text. Defaults to False.
     - progress (gr.Progress, optional): A Progress object to track the progress of the operation. Defaults to a Progress object with track_tqdm set to True.
     """
 
@@ -149,30 +151,56 @@ def run_full_search_and_analysis(
     if len(search_query_text) > 100:
         raise Warning("Please use a search query with at less than 100 characters.")
 
-    if punctuation_at_word_text_end(word_level_df_orig) is True:
-        do_punctuation_split = False
+    # For regex mode, we handle the query differently
+    if use_regex:
+        # Validate regex pattern
+        try:
+            re.compile(search_query_text)
+        except re.error as e:
+            raise Warning(f"Invalid regex pattern: {e}")
+
+        # For regex, we don't split into words - treat as single pattern
+        # Create a minimal DataFrame structure for the regex pattern
+        search_query_data = [
+            (
+                "user_search_query",
+                pd.DataFrame({"page": [1], "text": [search_query_text], "line": [1]}),
+            )
+        ]
+        query_word_length = 1  # For regex, we'll handle matching differently
+        min_consecutive_pages = 1  # Regex matches can be variable length
     else:
-        do_punctuation_split = True
+        # Original literal text matching logic
+        if punctuation_at_word_text_end(word_level_df_orig) is True:
+            do_punctuation_split = False
+        else:
+            do_punctuation_split = True
 
-    # Step 1: Process the user's search query string
-    search_query_data, query_word_length = create_dataframe_from_string(
-        search_query_text,
-        file_name="user_search_query",
-        split_words=True,
-        split_punctuation=do_punctuation_split,
-    )
-    if not search_query_data:
-        # Handle case where user submits an empty search string
-        raise Warning("Could not convert search string to required format")
+        # Step 1: Process the user's search query string
+        search_query_data, query_word_length = create_dataframe_from_string(
+            search_query_text,
+            file_name="user_search_query",
+            split_words=True,
+            split_punctuation=do_punctuation_split,
+        )
+        if not search_query_data:
+            # Handle case where user submits an empty search string
+            raise Warning("Could not convert search string to required format")
 
-    if query_word_length > 25:
-        # Handle case where user submits an empty search string
-        raise Warning("Please use a query with less than 25 words")
+        if query_word_length > 25:
+            # Handle case where user submits an empty search string
+            raise Warning("Please use a query with less than 25 words")
 
-    # Overwrite min_consecutive_pages with the search string length
-    min_consecutive_pages = query_word_length
+        # Overwrite min_consecutive_pages with the search string length
+        min_consecutive_pages = query_word_length
 
     # Create word index from reference table
+
+    if word_level_df_orig.empty:
+        raise gr.Error(
+            "No word-level data to process. Please check that you have loaded in OCR data."
+        )
+
     word_level_df_orig["index"] = word_level_df_orig.index
     word_level_df = word_level_df_orig.copy()
 
@@ -204,6 +232,7 @@ def run_full_search_and_analysis(
         do_text_clean=False,
         file1_name="user_search_query",
         file2_name="source_document",
+        use_regex=use_regex,
         progress=progress,
     )
 
@@ -777,7 +806,10 @@ def _sequences_match(query_seq: List[str], ref_seq: List[str]) -> bool:
 
 
 def find_consecutive_sequence_matches(
-    df_filtered: pd.DataFrame, search_file_name: str, reference_file_name: str
+    df_filtered: pd.DataFrame,
+    search_file_name: str,
+    reference_file_name: str,
+    use_regex: bool = False,
 ) -> pd.DataFrame:
     """
     Finds all occurrences of a consecutive sequence of tokens from a search file
@@ -789,6 +821,7 @@ def find_consecutive_sequence_matches(
         df_filtered: The DataFrame containing all tokens, with 'file' and 'text_clean' columns.
         search_file_name: The name of the file containing the search query sequence.
         reference_file_name: The name of the file to search within.
+        use_regex: If True, treats the search query as a regex pattern instead of literal tokens.
 
     Returns:
         A DataFrame with two columns ('Page1_Index', 'Page2_Index') mapping the
@@ -803,38 +836,115 @@ def find_consecutive_sequence_matches(
         print("Error: One or both files not found or are empty.")
         return pd.DataFrame(columns=["Page1_Index", "Page2_Index"])
 
-    # Step 2: Convert the token data into lists for easy comparison.
-    # We need both the text tokens and their original global indices.
-    query_tokens = search_df["text_clean"].tolist()
-    query_indices = search_df.index.tolist()
+    if use_regex:
+        # Regex mode: Extract pattern and search in combined text
+        # Get the regex pattern from the search query (should be in 'text' column, not 'text_clean')
+        # We need to get it from the original 'text' column if available, otherwise use 'text_clean'
+        if "text" in search_df.columns:
+            regex_pattern = search_df["text"].iloc[0]
+        else:
+            regex_pattern = search_df["text_clean"].iloc[0]
 
-    reference_tokens = reference_df["text_clean"].tolist()
-    reference_indices = reference_df.index.tolist()
+        # Join reference tokens back into text for regex searching
+        # Use original 'text' column if available to preserve original formatting (important for emails, etc.)
+        # Otherwise fall back to 'text_clean'
+        if "text" in reference_df.columns:
+            reference_tokens = reference_df["text"].tolist()
+        else:
+            reference_tokens = reference_df["text_clean"].tolist()
+        reference_indices = reference_df.index.tolist()
 
-    query_len = len(query_tokens)
-    all_found_matches = list()
+        # Join tokens with spaces to reconstruct the text
+        # Note: If tokens were split at special characters like @, this may not perfectly reconstruct
+        # the original text, but it's the best we can do with tokenized data
+        reference_text = " ".join(reference_tokens)
 
-    print(f"Searching for a sequence of {query_len} tokens...")
+        # Build a mapping from character positions to token indices
+        # This helps us map regex match positions back to token indices
+        char_to_token_map = []
+        current_pos = 0
+        for idx, token in enumerate(reference_tokens):
+            token_start = current_pos
+            token_end = current_pos + len(token)
+            char_to_token_map.append((token_start, token_end, reference_indices[idx]))
+            # Add 1 for the space separator (except after last token)
+            current_pos = token_end + (1 if idx < len(reference_tokens) - 1 else 0)
 
-    # Step 3: Use a "sliding window" to search for the query sequence in the reference list.
-    for i in range(len(reference_tokens) - query_len + 1):
-        # The "window" is a slice of the reference list that is the same size as the query
-        window = reference_tokens[i : i + query_len]
+        # Find all regex matches
+        try:
+            pattern = re.compile(regex_pattern, re.IGNORECASE)
+            matches = list(pattern.finditer(reference_text))
+        except re.error as e:
+            print(f"Error compiling regex pattern: {e}")
+            gr.Warning(f"Invalid regex pattern: {e}")
+            return pd.DataFrame(
+                columns=["Page1_Index", "Page2_Index", "Similarity_Score"]
+            )
 
-        # Step 4: If the window matches the query with or without punctuation on end
-        if _sequences_match(query_tokens, window):
+        if not matches:
+            print("No regex matches found")
+            gr.Info("No regex matches found")
+            return pd.DataFrame(
+                columns=["Page1_Index", "Page2_Index", "Similarity_Score"]
+            )
 
-            # Get the global indices for this entire matching block
-            matching_reference_indices = reference_indices[i : i + query_len]
+        all_found_matches = []
+        query_index = search_df.index[0]  # Use the first (and only) query index
 
-            # Create the mapping between query indices and the found reference indices
-            for j in range(query_len):
-                all_found_matches.append(
-                    (query_indices[j], matching_reference_indices[j], 1)
-                )
+        # For each regex match, find which tokens it spans
+        for match in matches:
+            match_start = match.start()
+            match_end = match.end()
 
-            # If you only want the *first* match, you can uncomment the next line:
-            # break
+            # Find all tokens that overlap with this match
+            matching_token_indices = []
+            for token_start, token_end, token_idx in char_to_token_map:
+                # Check if token overlaps with match
+                if not (token_end < match_start or token_start > match_end):
+                    matching_token_indices.append(token_idx)
+
+            # Create matches for all tokens in the span
+            for token_idx in matching_token_indices:
+                all_found_matches.append((query_index, token_idx, 1))
+
+        print(
+            f"Found {len(matches)} regex match(es) spanning {len(set(idx for _, idx, _ in all_found_matches))} token(s)"
+        )
+
+    else:
+        # Original literal token matching logic
+        # Step 2: Convert the token data into lists for easy comparison.
+        # We need both the text tokens and their original global indices.
+        query_tokens = search_df["text_clean"].tolist()
+        query_indices = search_df.index.tolist()
+
+        reference_tokens = reference_df["text_clean"].tolist()
+        reference_indices = reference_df.index.tolist()
+
+        query_len = len(query_tokens)
+        all_found_matches = list()
+
+        print(f"Searching for a sequence of {query_len} tokens...")
+
+        # Step 3: Use a "sliding window" to search for the query sequence in the reference list.
+        for i in range(len(reference_tokens) - query_len + 1):
+            # The "window" is a slice of the reference list that is the same size as the query
+            window = reference_tokens[i : i + query_len]
+
+            # Step 4: If the window matches the query with or without punctuation on end
+            if _sequences_match(query_tokens, window):
+
+                # Get the global indices for this entire matching block
+                matching_reference_indices = reference_indices[i : i + query_len]
+
+                # Create the mapping between query indices and the found reference indices
+                for j in range(query_len):
+                    all_found_matches.append(
+                        (query_indices[j], matching_reference_indices[j], 1)
+                    )
+
+                # If you only want the *first* match, you can uncomment the next line:
+                # break
 
     if not all_found_matches:
         print("No matches found")
@@ -860,6 +970,7 @@ def identify_similar_text_sequences(
     file1_name: str = "",
     file2_name: str = "",
     output_folder: str = OUTPUT_FOLDER,
+    use_regex: bool = False,
     progress=Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, List[str], pd.DataFrame]:
     """
@@ -903,7 +1014,7 @@ def identify_similar_text_sequences(
 
         # base_similarity_df = _debug_similarity_between_two_files(df_filtered, vectorizer, similarity_threshold, file1_name, file2_name)
         base_similarity_df = find_consecutive_sequence_matches(
-            df_filtered, file1_name, file2_name
+            df_filtered, file1_name, file2_name, use_regex=use_regex
         )
         if base_similarity_df.empty:
             return pd.DataFrame(), [], df_combined
