@@ -776,6 +776,10 @@ except Exception as e:
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "False"))
 
+SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_FEEDBACK_BUTTONS", "False")
+)
+
 
 # Link to user guide - ensure it is a valid URL
 def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:

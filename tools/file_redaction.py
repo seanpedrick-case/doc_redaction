@@ -1131,7 +1131,7 @@ def choose_and_run_redactor(
 
         print(
             "Current page number",
-            (page_min + current_loop_page) - 1,
+            (page_min + current_loop_page),
             "is the last page processed.",
         )
         latest_file_completed += 1
@@ -2896,11 +2896,11 @@ def merge_img_bboxes(
     if page_signature_recogniser_results or page_handwriting_recogniser_results:
 
         if "Extract handwriting" in handwrite_signature_checkbox:
-            print("Extracting handwriting in merge_img_bboxes function")
+            # print("Extracting handwriting in merge_img_bboxes function")
             merged_bboxes.extend(copy.deepcopy(page_handwriting_recogniser_results))
 
         if "Extract signatures" in handwrite_signature_checkbox:
-            print("Extracting signatures in merge_img_bboxes function")
+            # print("Extracting signatures in merge_img_bboxes function")
             merged_bboxes.extend(copy.deepcopy(page_signature_recogniser_results))
 
     # Reconstruct bounding boxes for substrings of interest
@@ -3230,6 +3230,8 @@ def redact_image_pdf(
                     textract_json_file_path, log_files_output_paths, page_sizes_df
                 )
             )
+            if textract_data:
+                textract_output_found = True
         original_textract_data = textract_data.copy()
 
         if textract_client_not_found and is_missing:
@@ -3504,6 +3506,7 @@ def redact_image_pdf(
             # Check if page exists in existing textract data. If not, send to service to analyse
             if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
                 text_blocks = list()
+                page_exists = False
 
                 if not textract_data:
                     try:
@@ -3624,23 +3627,30 @@ def redact_image_pdf(
                             if page["page_no"] == reported_page_number
                         )
 
-                # Check if this is whole-document Textract output (already converted to mediabox space)
-                # by checking if the JSON structure indicates it came from restructure_textract_output
-                # or if textract_output_found is True (indicating pre-existing whole-document output)
-                use_mediabox_for_textract = textract_output_found or (
-                    "pages" in textract_data and len(textract_data.get("pages", [])) > 0
-                )
+                # Check if existing Textract output for this page
+
+                if textract_output_found and page_exists:
+                    use_mediabox_for_textract = True
+                else:
+                    use_mediabox_for_textract = False
 
                 if use_mediabox_for_textract:
                     # Whole-document Textract: use mediabox dimensions
                     textract_page_width = pymupdf_page.mediabox.width
                     textract_page_height = pymupdf_page.mediabox.height
-                    # print(f"Using mediabox dimensions for whole-document Textract: {textract_page_width}x{textract_page_height}")
+                    print(
+                        f"Using mediabox dimensions for Textract: {textract_page_width}x{textract_page_height}"
+                    )
                 else:
                     # Individual image Textract: use image dimensions (current behavior)
                     textract_page_width = page_width
                     textract_page_height = page_height
-                    # print(f"Using image dimensions for individual image Textract: {textract_page_width}x{textract_page_height}")
+                    print(
+                        f"Using image dimensions for Textract: {textract_page_width}x{textract_page_height}"
+                    )
+
+                # textract_page_width = page_width
+                # textract_page_height = page_height
 
                 (
                     page_line_level_ocr_results,

@@ -4,7 +4,7 @@ pandas==2.3.3
 polars==1.33.1
 pyarrow==21.0.0
 openpyxl==3.1.5
-boto3==1.40.57
+boto3==1.40.69
 python-dotenv==1.0.1
 defusedxml==0.7.1
 Faker==37.8.0
@@ -18,9 +18,9 @@ spaczz==0.6.1
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
 
 # --- PDF / OCR / Redaction tools ---
-pdfminer.six==20250506
+pdfminer.six==20251107
 pdf2image==1.17.0
-pymupdf==1.26.4
+pymupdf==1.26.6
 pikepdf==9.11.0
 opencv-python==4.12.0.88
 presidio_analyzer==2.2.360

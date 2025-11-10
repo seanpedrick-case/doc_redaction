@@ -1,4 +1,4 @@
 # --- PaddleOCR (CUDA 12.6) ---
 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
-paddlepaddle-gpu<=3.2.1
+paddlepaddle-gpu>=3.0.0,<=3.2.1
 paddleocr<=3.3.0

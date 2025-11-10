@@ -277,6 +277,13 @@ in_doc_files = gr.File(
     height=FILE_INPUT_HEIGHT,
 )
 
+total_pdf_page_count = gr.Number(
+    label="Total page count",
+    value=0,
+    visible=True,
+    interactive=False,
+)
+
 text_extract_method_radio = gr.Radio(
     label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
     value=DEFAULT_TEXT_EXTRACTION_MODEL,
@@ -910,7 +917,7 @@ with blocks:
         interactive=False,
         visible=False,
     )
-    total_pdf_page_count = gr.Number(label="Total page count", value=0, visible=False)
+
     estimated_aws_costs_number = gr.Number(
         label="Approximate AWS Textract and/or Comprehend cost ($)",
         value=0,
@@ -1081,6 +1088,7 @@ with blocks:
                         pd.DataFrame(),
                         [],
                         pd.DataFrame(),
+                        2,
                     ]
                 )
                 example_labels.append("PDF with selectable text redaction")
@@ -1100,6 +1108,7 @@ with blocks:
                         pd.DataFrame(),
                         [],
                         pd.DataFrame(),
+                        1,
                     ]
                 )
                 example_labels.append("Image redaction with local OCR")
@@ -1119,6 +1128,7 @@ with blocks:
                         pd.DataFrame(),
                         [],
                         pd.DataFrame(),
+                        1,
                     ]
                 )
                 example_labels.append(
@@ -1141,6 +1151,7 @@ with blocks:
                             pd.DataFrame(),
                             [],
                             pd.DataFrame(),
+                            7,
                         ]
                     )
                     example_labels.append(
@@ -1178,7 +1189,8 @@ with blocks:
                         ),
                         [example_files[5]],
                         pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
-                    ]
+                        7,
+                    ],
                 )
                 example_labels.append(
                     "PDF redaction with custom deny list and whole page redaction"
@@ -1200,6 +1212,7 @@ with blocks:
                     in_deny_list_state,
                     in_fully_redacted_list,
                     in_fully_redacted_list_state,
+                    total_pdf_page_count,
                 ):
                     gr.Info(
                         "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
@@ -1220,6 +1233,7 @@ with blocks:
                         in_deny_list_state,
                         in_fully_redacted_list,
                         in_fully_redacted_list_state,
+                        total_pdf_page_count,
                     ],
                     example_labels=example_labels,
                     fn=show_info_box_on_click,
@@ -1286,7 +1300,7 @@ with blocks:
                 with gr.Row(equal_height=True):
                     pii_identification_method_drop.render()
 
-            if SHOW_COSTS is True:
+            if SHOW_COSTS:
                 with gr.Accordion(
                     "Estimated costs and time taken. Note that costs shown only include direct usage of AWS services and do not include other running costs (e.g. storage, run-time costs)",
                     open=True,
@@ -1308,12 +1322,7 @@ with blocks:
                             )
                         with gr.Column(scale=4):
                             with gr.Row(equal_height=True):
-                                total_pdf_page_count = gr.Number(
-                                    label="Total page count",
-                                    value=0,
-                                    visible=True,
-                                    interactive=False,
-                                )
+                                total_pdf_page_count.render()
                                 estimated_aws_costs_number = gr.Number(
                                     label="Approximate AWS Textract and/or Comprehend cost (£)",
                                     value=0.00,
@@ -1329,7 +1338,7 @@ with blocks:
                                     interactive=False,
                                 )
 
-            if GET_COST_CODES is True or ENFORCE_COST_CODES is True:
+            if GET_COST_CODES or ENFORCE_COST_CODES:
                 with gr.Accordion("Assign task to cost code", open=True, visible=True):
                     gr.Markdown(
                         "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
