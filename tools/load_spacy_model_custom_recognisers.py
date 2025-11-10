@@ -352,19 +352,139 @@ def download_tesseract_lang_pack(
 
 
 #### Custom recognisers
+def _is_regex_pattern(term: str) -> bool:
+    """
+    Detect if a term is intended to be a regex pattern or a literal string.
+
+    Args:
+        term: The term to check
+
+    Returns:
+        True if the term appears to be a regex pattern, False if it's a literal string
+    """
+    term = term.strip()
+    if not term:
+        return False
+
+    # First, try to compile as regex to validate it
+    # This catches patterns like \d\d\d-\d\d\d that use regex escape sequences
+    try:
+        re.compile(term)
+        is_valid_regex = True
+    except re.error:
+        # If it doesn't compile as regex, treat as literal
+        return False
+
+    # If it compiles, check if it contains regex-like features
+    # Regex metacharacters that suggest a pattern (excluding escaped literals)
+    regex_metacharacters = [
+        "+",
+        "*",
+        "?",
+        "{",
+        "}",
+        "[",
+        "]",
+        "(",
+        ")",
+        "|",
+        "^",
+        "$",
+        ".",
+    ]
+
+    # Common regex escape sequences that indicate regex intent
+    regex_escape_sequences = [
+        "\\d",
+        "\\w",
+        "\\s",
+        "\\D",
+        "\\W",
+        "\\S",
+        "\\b",
+        "\\B",
+        "\\n",
+        "\\t",
+        "\\r",
+    ]
+
+    # Check if term contains regex metacharacters or escape sequences
+    has_metacharacters = False
+    has_escape_sequences = False
+
+    i = 0
+    while i < len(term):
+        if term[i] == "\\" and i + 1 < len(term):
+            # Check if it's a regex escape sequence
+            escape_seq = term[i : i + 2]
+            if escape_seq in regex_escape_sequences:
+                has_escape_sequences = True
+            # Skip the escape sequence (backslash + next char)
+            i += 2
+            continue
+        if term[i] in regex_metacharacters:
+            has_metacharacters = True
+        i += 1
+
+    # If it's a valid regex and contains regex features, treat as regex pattern
+    if is_valid_regex and (has_metacharacters or has_escape_sequences):
+        return True
+
+    # If it compiles but has no regex features, it might be a literal that happens to compile
+    # (e.g., "test" compiles as regex but is just literal text)
+    # In this case, if it has escape sequences, it's definitely regex
+    if has_escape_sequences:
+        return True
+
+    # Otherwise, treat as literal
+    return False
+
+
 def custom_word_list_recogniser(custom_list: List[str] = list()):
     # Create regex pattern, handling quotes carefully
+    # Supports both literal strings and regex patterns
 
     quote_str = '"'
     replace_str = '(?:"|"|")'
 
-    custom_regex = "|".join(
-        rf"(?<!\w){re.escape(term.strip()).replace(quote_str, replace_str)}(?!\w)"
-        for term in custom_list
-    )
-    # print(custom_regex)
+    regex_patterns = []
+    literal_patterns = []
 
-    custom_pattern = Pattern(name="custom_pattern", regex=custom_regex, score=1)
+    # Separate regex patterns from literal strings
+    for term in custom_list:
+        term = term.strip()
+        if not term:
+            continue
+
+        if _is_regex_pattern(term):
+            # Use regex pattern as-is (but wrap with word boundaries if appropriate)
+            # Note: Word boundaries might not be appropriate for all regex patterns
+            # (e.g., email patterns), so we'll add them conditionally
+            regex_patterns.append(term)
+        else:
+            # Escape literal strings and add word boundaries
+            escaped_term = re.escape(term).replace(quote_str, replace_str)
+            literal_patterns.append(rf"(?<!\w){escaped_term}(?!\w)")
+
+    # Combine patterns: regex patterns first, then literal patterns
+    all_patterns = []
+
+    # Add regex patterns (without word boundaries, as they may have their own)
+    for pattern in regex_patterns:
+        all_patterns.append(f"({pattern})")
+
+    # Add literal patterns (with word boundaries)
+    all_patterns.extend(literal_patterns)
+
+    if not all_patterns:
+        # Return empty recognizer if no patterns
+        custom_pattern = Pattern(
+            name="custom_pattern", regex="(?!)", score=1
+        )  # Never matches
+    else:
+        custom_regex = "|".join(all_patterns)
+        # print(custom_regex)
+        custom_pattern = Pattern(name="custom_pattern", regex=custom_regex, score=1)
 
     custom_recogniser = PatternRecognizer(
         supported_entity="CUSTOM",

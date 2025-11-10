@@ -10,11 +10,13 @@ license: agpl-3.0
 ---
 # Document redaction
 
-version: 1.5.0
+version: 1.5.2
 
 Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
-To identify text in documents, the 'Local' text extraction uses PikePDF, and OCR image analysis uses Tesseract, and works well only for documents with typed text or scanned PDFs with clear text. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
+To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
+
+For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
 
 Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
 
@@ -249,7 +251,6 @@ Now you have the app installed, what follows is a guide on how to use it for bas
 - [Identifying and redacting duplicate pages](#identifying-and-redacting-duplicate-pages)
 
 ### Advanced user guide
-- [Advanced user guide](#advanced-user-guide)
 - [Fuzzy search and redaction](#fuzzy-search-and-redaction)
 - [Export redactions to and import from Adobe Acrobat](#export-to-and-import-from-adobe)
     - [Using _for_review.pdf files with Adobe Acrobat](#using-_for_reviewpdf-files-with-adobe-acrobat)
@@ -261,7 +262,6 @@ Now you have the app installed, what follows is a guide on how to use it for bas
 - [Merging redaction review files](#merging-redaction-review-files)
 
 ### Features for expert users/system administrators
-- [Features for expert users/system administrators](#features-for-expert-userssystem-administrators)
 - [Advanced OCR options (Hybrid OCR)](#advanced-ocr-options-hybrid-ocr)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
 
@@ -376,7 +376,17 @@ If you have used the AWS Textract option for extracting text, you may also see a
 
 ![Document upload alongside Textract](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/document_upload_with_textract.PNG)
 
-Similarly, if you have used the 'Local OCR method' to extract text, you may see a '..._ocr_results_with_words.json' file. This file works in the same way as the AWS Textract .json results described above, and can be uploaded alongside an input document to save time on text extraction in future in the same way.
+#### Additional outputs in the log file outputs
+
+On the Redaction settings tab, near the bottom of the pagethere is a section called 'Log file outputs'. This section contains the following files:
+
+You may see a '..._ocr_results_with_words... .json' file. This file works in the same way as the AWS Textract .json results described above, and can be uploaded alongside an input document to save time on text extraction in future in the same way.
+
+Also you will see a 'decision_process_table.csv' file. This file contains a table of the decisions made by the app for each page of the document. This can be useful for debugging and understanding the decisions made by the app.
+
+Additionally, if the option is enabled by your system administrator, on this tab you may see an image of the output from the OCR model used to extract the text from the document, an image ending with page number and '_visualisations.jpg'. A separate image will be created for each page of the document like the one below. This can be useful for seeing at a glance whether the text extraction process for a page was successful, and whether word-level bounding boxes are correctly positioned.
+
+![Text analysis output](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/example_complaint_letter_1_textract_visualisations.jpg)
 
 ### Downloading output files from previous redaction tasks
 
@@ -582,8 +592,8 @@ The workflow is designed to be simple: **Search → Select → Redact**.
 #### **Step 1: Search for Text**
 
 1.  Navigate to the **"Search text to make new redactions"** tab.
-2.  The main table will initially be populated with all the text extracted from the document, broken down by word.
-3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find.
+2.  The main table will initially be populated with all the text extracted from the document for a page, broken down by word.
+3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below (Note this will only be able to search for patterns in text within each cell).
 4.  Click the **"Search"** button or press Enter.
 5.  The table below will update to show only the rows containing text that matches your search query.
 
@@ -685,6 +695,7 @@ You can also write open text into an input box and redact that using the same me
 
 ### Redaction log outputs
 A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the Redaction settings page under 'Log file outputs'.
+
 
 ## Identifying and redacting duplicate pages
 
@@ -916,45 +927,91 @@ AWS_SECRET_KEY= your-secret-key
 
 The app should then pick up these keys when trying to access the AWS Textract and Comprehend services during redaction.
 
-Again, a lot can potentially go wrong with AWS solutions that are insecure, so before trying the above please consult with your AWS and data security teams.
+## Advanced OCR options
 
-## Advanced OCR options (Hybrid OCR)
-
-The app supports advanced OCR options that combine multiple OCR engines for improved accuracy. These options are not enabled by default but can be configured by your system administrator.
+The app supports advanced OCR options that combine multiple OCR engines for improved accuracy. These options are not enabled by default but can be configured by changing the app_config.env file in your '/config' folder, or system environment variables in your system.
 
 ### Available OCR models
 
-- **Tesseract** (default): The standard OCR engine that works well for most documents
-- **PaddleOCR**: More accurate for whole line text extraction, but word-level bounding boxes may be less precise
-- **Hybrid**: Combines Tesseract and PaddleOCR - uses Tesseract for initial extraction, then PaddleOCR for re-extraction of low-confidence text
+- **Tesseract** (default): The standard OCR engine that works well for most documents. Provides good word-level bounding box accuracy.
+- **PaddleOCR**: More accurate for whole line text extraction, but word-level bounding boxes may be less precise. Best for documents with clear, well-formatted text.
+- **Hybrid-paddle**: Combines Tesseract and PaddleOCR - uses Tesseract for initial extraction, then PaddleOCR for re-extraction of low-confidence text regions.
+- **Hybrid-vlm**: Combines Tesseract with Vision Language Models (VLM) - uses Tesseract for initial extraction, then a VLM model (default: Dots.OCR) for re-extraction of low-confidence text.
+- **Hybrid-paddle-vlm**: Combines PaddleOCR with Vision Language Models - uses PaddleOCR first, then a VLM model for low-confidence regions.
 
 ### Enabling advanced OCR options
 
-To enable these options, your system administrator needs to modify the configuration file (`config.py`) and set:
+To enable these options, you need to modify the app_config.env file in your '/config' folder and set the following environment variables:
 
+**Basic OCR model selection:**
 ```
 SHOW_LOCAL_OCR_MODEL_OPTIONS = "True"
 ```
 
-Once enabled, users will see a "Change default local OCR model" section in the redaction settings where they can choose between:
-- tesseract
-- hybrid  
-- paddle
+**To enable PaddleOCR options (paddle, hybrid-paddle):**
+```
+SHOW_PADDLE_MODEL_OPTIONS = "True"
+```
 
-### Hybrid OCR configuration
+**To enable Vision Language Model options (hybrid-vlm, hybrid-paddle-vlm):**
+```
+SHOW_VLM_MODEL_OPTIONS = "True"
+```
 
-The hybrid OCR mode uses several configurable parameters:
+Once enabled, users will see a "Change default local OCR model" section in the redaction settings where they can choose between the available models based on what has been enabled.
 
-- **HYBRID_OCR_CONFIDENCE_THRESHOLD** (default: 65): Tesseract confidence score below which PaddleOCR will be used for re-extraction
-- **HYBRID_OCR_PADDING** (default: 1): Padding added to word bounding boxes before re-extraction
-- **SAVE_EXAMPLE_HYBRID_IMAGES** (default: False): Save comparison images when using hybrid mode
-- **SAVE_PAGE_OCR_VISUALISATIONS** (default: False): Save images with PaddleOCR bounding boxes overlaid
+### OCR configuration parameters
+
+The following parameters can be configured by your system administrator to fine-tune OCR behavior:
+
+#### Hybrid OCR settings
+
+- **HYBRID_OCR_CONFIDENCE_THRESHOLD** (default: 80): Tesseract confidence score below which the secondary OCR engine (PaddleOCR or VLM) will be used for re-extraction. Lower values mean more text will be re-extracted.
+- **HYBRID_OCR_PADDING** (default: 1): Padding (in pixels) added to word bounding boxes before re-extraction with the secondary engine.
+- **SAVE_EXAMPLE_HYBRID_IMAGES** (default: False): If enabled, saves comparison images showing Tesseract vs. secondary engine results when using hybrid modes.
+- **SAVE_PAGE_OCR_VISUALISATIONS** (default: False): If enabled, saves images with detected bounding boxes overlaid for debugging purposes.
+
+#### Tesseract settings
+
+- **TESSERACT_SEGMENTATION_LEVEL** (default: 11): Tesseract PSM (Page Segmentation Mode) level. Valid values are 0-13. Higher values provide more detailed segmentation but may be slower.
+
+#### PaddleOCR settings
+
+- **PADDLE_USE_TEXTLINE_ORIENTATION** (default: False): If enabled, PaddleOCR will detect and correct text line orientation.
+- **PADDLE_DET_DB_UNCLIP_RATIO** (default: 1.2): Controls the expansion ratio of detected text regions. Higher values expand the detection area more.
+- **CONVERT_LINE_TO_WORD_LEVEL** (default: False): If enabled, converts PaddleOCR line-level results to word-level for better precision in bounding boxes (not perfect, but pretty good).
+- **LOAD_PADDLE_AT_STARTUP** (default: False): If enabled, loads the PaddleOCR model when the application starts, reducing latency for first use but increasing startup time.
+
+#### Image preprocessing
+
+- **PREPROCESS_LOCAL_OCR_IMAGES** (default: True): If enabled, images are preprocessed before OCR. This can improve accuracy but may slow down processing.
+- **SAVE_PREPROCESS_IMAGES** (default: False): If enabled, saves the preprocessed images for debugging purposes.
+
+#### Vision Language Model (VLM) settings
+
+When VLM options are enabled, the following settings are available:
+
+- **SELECTED_MODEL** (default: "Dots.OCR"): The VLM model to use. Options include: "Nanonets-OCR2-3B", "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "PaddleOCR-VL".
+- **MAX_SPACES_GPU_RUN_TIME** (default: 60): Maximum seconds to run GPU operations on Hugging Face Spaces.
+- **MAX_NEW_TOKENS** (default: 30): Maximum number of tokens to generate for VLM responses.
+- **MAX_INPUT_TOKEN_LENGTH** (default: 4096): Maximum number of tokens that can be input to the VLM.
+- **VLM_MAX_IMAGE_SIZE** (default: 1000000): Maximum total pixels (width × height) for images. Larger images are resized while maintaining aspect ratio.
+- **VLM_MAX_DPI** (default: 300.0): Maximum DPI for images. Higher DPI images are resized accordingly.
+- **USE_FLASH_ATTENTION** (default: False): If enabled, uses flash attention for improved VLM performance.
+- **SAVE_VLM_INPUT_IMAGES** (default: False): If enabled, saves input images sent to VLM for debugging.
+
+#### General settings
+
+- **MODEL_CACHE_PATH** (default: "./model_cache"): Directory where OCR models are cached.
+- **OVERWRITE_EXISTING_OCR_RESULTS** (default: False): If enabled, always creates new OCR results instead of loading from existing JSON files.
 
 ### When to use different OCR models
 
-- **Tesseract**: Best for general use, good balance of speed and accuracy
-- **PaddleOCR**: Best for documents with clear, well-formatted text where line-level accuracy is more important than word-level precision
-- **Hybrid**: Best for challenging documents where some text has low confidence scores, providing the benefits of both engines
+- **Tesseract**: Best for general use, providing a good balance of speed and accuracy with precise word-level bounding boxes.
+- **PaddleOCR**: Best for documents with clear, well-formatted text where line-level accuracy is more important than word-level precision.
+- **Hybrid-paddle**: Best for challenging documents where some text has low confidence scores, combining Tesseract's word-level precision with PaddleOCR's improved text recognition.
+- **Hybrid-vlm**: Best for very challenging documents with poor image quality or unusual text layouts, leveraging advanced vision models for difficult text.
+- **Hybrid-paddle-vlm**: Most comprehensive option, combining PaddleOCR's line-level detection with a VLM's advanced recognition capabilities.
 
 
 
@@ -1069,18 +1126,65 @@ python cli_redact.py --task textract --textract_action list
 
 ### Common CLI options
 
+#### General options
+
 - `--task`: Choose between "redact", "deduplicate", or "textract"
-- `--input_file`: Path to input file(s)
+- `--input_file`: Path to input file(s) - can specify multiple files separated by spaces
 - `--output_dir`: Directory for output files (default: output/)
-- `--page_min` / `--page_max`: Process only specific page range
-- `--ocr_method`: Choose text extraction method
-- `--pii_detector`: Choose PII detection method
-- `--local_redact_entities`: Specify local entities to redact
-- `--allow_list_file` / `--deny_list_file`: Custom lists
-- `--redact_whole_page_file`: List of pages to redact completely
-- `--fuzzy_mistakes`: Number of spelling mistakes allowed in fuzzy matching
-- `--similarity_threshold`: Threshold for duplicate detection
-- `--anon_strategy`: Anonymization strategy for tabular data
+- `--input_dir`: Directory for input files (default: input/)
+- `--language`: Language of document content (e.g., "en", "es", "fr")
+- `--username`: Username for session tracking
+- `--pii_detector`: Choose PII detection method ("Local", "AWS Comprehend", or "None")
+- `--local_redact_entities`: Specify local entities to redact (space-separated list)
+- `--aws_redact_entities`: Specify AWS Comprehend entities to redact (space-separated list)
+- `--aws_access_key` / `--aws_secret_key`: AWS credentials for cloud services
+- `--aws_region`: AWS region for cloud services
+- `--s3_bucket`: S3 bucket name for cloud operations
+- `--cost_code`: Cost code for tracking usage
+
+#### PDF/Image redaction options
+
+- `--ocr_method`: Choose text extraction method ("AWS Textract", "Local OCR", or "Local text")
+- `--chosen_local_ocr_model`: Local OCR model to use (e.g., "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm")
+- `--page_min` / `--page_max`: Process only specific page range (0 for max means all pages)
+- `--images_dpi`: DPI for image processing (default: 300.0)
+- `--preprocess_local_ocr_images`: Preprocess images before OCR (True/False)
+- `--compress_redacted_pdf`: Compress the final redacted PDF (True/False)
+- `--return_pdf_end_of_redaction`: Return PDF at end of redaction process (True/False)
+- `--allow_list_file` / `--deny_list_file`: Paths to custom allow/deny list CSV files
+- `--redact_whole_page_file`: Path to CSV file listing pages to redact completely
+- `--handwrite_signature_extraction`: Handwriting and signature extraction options for Textract ("Extract handwriting", "Extract signatures")
+- `--extract_forms`: Extract forms during Textract analysis (flag)
+- `--extract_tables`: Extract tables during Textract analysis (flag)
+- `--extract_layout`: Extract layout during Textract analysis (flag)
+
+#### Tabular/Word anonymization options
+
+- `--anon_strategy`: Anonymization strategy (e.g., "redact", "redact completely", "replace_redacted", "encrypt", "hash")
+- `--text_columns`: List of column names to anonymize (space-separated)
+- `--excel_sheets`: Specific Excel sheet names to process (space-separated)
+- `--fuzzy_mistakes`: Number of spelling mistakes allowed in fuzzy matching (default: 1)
+- `--match_fuzzy_whole_phrase_bool`: Match fuzzy whole phrase (True/False)
+- `--do_initial_clean`: Perform initial text cleaning for tabular data (True/False)
+
+#### Duplicate detection options
+
+- `--duplicate_type`: Type of duplicate detection ("pages" for OCR files or "tabular" for CSV/Excel)
+- `--similarity_threshold`: Similarity threshold (0-1) to consider content as duplicates (default: 0.95)
+- `--min_word_count`: Minimum word count for text to be considered (default: 10)
+- `--min_consecutive_pages`: Minimum number of consecutive pages to consider as a match (default: 1)
+- `--greedy_match`: Use greedy matching strategy for consecutive pages (True/False)
+- `--combine_pages`: Combine text from same page number within a file (True/False)
+- `--remove_duplicate_rows`: Remove duplicate rows from output (True/False)
+
+#### Textract batch operations options
+
+- `--textract_action`: Action to perform ("submit", "retrieve", or "list")
+- `--job_id`: Textract job ID for retrieve action
+- `--extract_signatures`: Extract signatures during Textract analysis (flag)
+- `--textract_bucket`: S3 bucket name for Textract operations
+- `--poll_interval`: Polling interval in seconds for job status (default: 30)
+- `--max_poll_attempts`: Maximum polling attempts before timeout (default: 120)
 
 ### Output files
 

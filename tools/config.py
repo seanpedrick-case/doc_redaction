@@ -281,6 +281,10 @@ FAVICON_PATH = get_or_create_env_var("FAVICON_PATH", "favicon.png")
 
 RUN_FASTAPI = convert_string_to_boolean(get_or_create_env_var("RUN_FASTAPI", "False"))
 
+RUN_MCP_SERVER = convert_string_to_boolean(
+    get_or_create_env_var("RUN_MCP_SERVER", "False")
+)
+
 MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
 
 MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb").lower()
@@ -492,7 +496,7 @@ OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-)  # Choose between "tesseract", "hybrid-paddle", and "paddle". "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence. "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen vision model (default Dots.OCR) on words with low confidence.
+)  # "tesseract" is the default and will work for documents with clear typed text. "paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. The hybrid models will do a first pass with one model, and a second pass on words/phrases with low confidence with a more powerful model. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "False")
@@ -525,6 +529,10 @@ HYBRID_OCR_PADDING = int(
     get_or_create_env_var("HYBRID_OCR_PADDING", "1")
 )  # The padding to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
 
+TESSERACT_WORD_LEVEL_OCR = convert_string_to_boolean(
+    get_or_create_env_var("TESSERACT_WORD_LEVEL_OCR", "True")
+)  # Whether to use Tesseract word-level OCR.
+
 TESSERACT_SEGMENTATION_LEVEL = int(
     get_or_create_env_var("TESSERACT_SEGMENTATION_LEVEL", "11")
 )  # Tesseract segmentation level: PSM level to use for Tesseract OCR
@@ -552,6 +560,10 @@ SAVE_EXAMPLE_HYBRID_IMAGES = convert_string_to_boolean(
 SAVE_PAGE_OCR_VISUALISATIONS = convert_string_to_boolean(
     get_or_create_env_var("SAVE_PAGE_OCR_VISUALISATIONS", "False")
 )  # Whether to save visualisations of Tesseract, PaddleOCR, and Textract bounding boxes.
+
+SAVE_WORD_SEGMENTER_OUTPUT_IMAGES = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_WORD_SEGMENTER_OUTPUT_IMAGES", "False")
+)  # Whether to save output images from the word segmenter.
 
 # Model storage paths for Lambda compatibility
 PADDLE_MODEL_PATH = get_or_create_env_var(
@@ -763,6 +775,10 @@ except Exception as e:
 
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "False"))
+
+SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_FEEDBACK_BUTTONS", "False")
+)
 
 
 # Link to user guide - ensure it is a valid URL

@@ -119,6 +119,7 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     RUN_DIRECT_MODE,
     RUN_FASTAPI,
+    RUN_MCP_SERVER,
     S3_ACCESS_LOGS_FOLDER,
     S3_ALLOW_LIST_PATH,
     S3_COST_CODES_PATH,
@@ -274,6 +275,13 @@ in_doc_files = gr.File(
     file_count="multiple",
     file_types=[".pdf", ".jpg", ".png", ".json", ".zip"],
     height=FILE_INPUT_HEIGHT,
+)
+
+total_pdf_page_count = gr.Number(
+    label="Total page count",
+    value=0,
+    visible=True,
+    interactive=False,
 )
 
 text_extract_method_radio = gr.Radio(
@@ -909,7 +917,7 @@ with blocks:
         interactive=False,
         visible=False,
     )
-    total_pdf_page_count = gr.Number(label="Total page count", value=0, visible=False)
+
     estimated_aws_costs_number = gr.Number(
         label="Approximate AWS Textract and/or Comprehend cost ($)",
         value=0,
@@ -1033,7 +1041,7 @@ with blocks:
 
     Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide]({USER_GUIDE_URL}) for a full walkthrough of all the features in the app.
     
-    To identify text in documents, the 'Local' text extraction uses PikePDF, and OCR image analysis uses Tesseract, and works well only for documents with typed text or scanned PDFs with clear text. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
+    To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
 
     Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
 
@@ -1080,6 +1088,7 @@ with blocks:
                         pd.DataFrame(),
                         [],
                         pd.DataFrame(),
+                        2,
                     ]
                 )
                 example_labels.append("PDF with selectable text redaction")
@@ -1099,6 +1108,7 @@ with blocks:
                         pd.DataFrame(),
                         [],
                         pd.DataFrame(),
+                        1,
                     ]
                 )
                 example_labels.append("Image redaction with local OCR")
@@ -1118,6 +1128,7 @@ with blocks:
                         pd.DataFrame(),
                         [],
                         pd.DataFrame(),
+                        1,
                     ]
                 )
                 example_labels.append(
@@ -1125,7 +1136,7 @@ with blocks:
                 )
 
             if os.path.exists(example_files[3]):
-                if SHOW_AWS_EXAMPLES == "True":
+                if SHOW_AWS_EXAMPLES:
                     available_examples.append(
                         [
                             [example_files[3]],
@@ -1140,6 +1151,7 @@ with blocks:
                             pd.DataFrame(),
                             [],
                             pd.DataFrame(),
+                            7,
                         ]
                     )
                     example_labels.append(
@@ -1177,7 +1189,8 @@ with blocks:
                         ),
                         [example_files[5]],
                         pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
-                    ]
+                        7,
+                    ],
                 )
                 example_labels.append(
                     "PDF redaction with custom deny list and whole page redaction"
@@ -1199,6 +1212,7 @@ with blocks:
                     in_deny_list_state,
                     in_fully_redacted_list,
                     in_fully_redacted_list_state,
+                    total_pdf_page_count,
                 ):
                     gr.Info(
                         "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
@@ -1219,6 +1233,7 @@ with blocks:
                         in_deny_list_state,
                         in_fully_redacted_list,
                         in_fully_redacted_list_state,
+                        total_pdf_page_count,
                     ],
                     example_labels=example_labels,
                     fn=show_info_box_on_click,
@@ -1258,7 +1273,7 @@ with blocks:
                         open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                     ):
                         local_ocr_method_radio = gr.Radio(
-                            label="""Choose local OCR model. "tesseract" is the default and will work for most documents. "paddle" is accurate for whole line text extraction, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen hybrid model (default PaddleOCR) on words with low confidence. "hybrid-vlm" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with the chosen vision model (default Dots.OCR) on words with low confidence. "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen vision model (default Dots.OCR) on words with low confidence.""",
+                            label="""Choose a local OCR model. "tesseract" is the default and will work for documents with clear typed text. "paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. The hybrid models will do a first pass with one model, and a second pass on words/phrases with low confidence with a more powerful model. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.""",
                             value=CHOSEN_LOCAL_OCR_MODEL,
                             choices=LOCAL_OCR_MODEL_OPTIONS,
                             interactive=True,
@@ -1285,7 +1300,7 @@ with blocks:
                 with gr.Row(equal_height=True):
                     pii_identification_method_drop.render()
 
-            if SHOW_COSTS is True:
+            if SHOW_COSTS:
                 with gr.Accordion(
                     "Estimated costs and time taken. Note that costs shown only include direct usage of AWS services and do not include other running costs (e.g. storage, run-time costs)",
                     open=True,
@@ -1307,12 +1322,7 @@ with blocks:
                             )
                         with gr.Column(scale=4):
                             with gr.Row(equal_height=True):
-                                total_pdf_page_count = gr.Number(
-                                    label="Total page count",
-                                    value=0,
-                                    visible=True,
-                                    interactive=False,
-                                )
+                                total_pdf_page_count.render()
                                 estimated_aws_costs_number = gr.Number(
                                     label="Approximate AWS Textract and/or Comprehend cost (£)",
                                     value=0.00,
@@ -1328,7 +1338,7 @@ with blocks:
                                     interactive=False,
                                 )
 
-            if GET_COST_CODES is True or ENFORCE_COST_CODES is True:
+            if GET_COST_CODES or ENFORCE_COST_CODES:
                 with gr.Accordion("Assign task to cost code", open=True, visible=True):
                     gr.Markdown(
                         "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
@@ -1687,7 +1697,9 @@ with blocks:
 
                         with gr.Row(equal_height=True):
                             multi_word_search_text = gr.Textbox(
-                                label="Multi-word text search", value="", scale=4
+                                label="Multi-word text search (regex enabled below)",
+                                value="",
+                                scale=4,
                             )
                             multi_word_search_text_btn = gr.Button(
                                 value="Search", scale=1
@@ -1701,13 +1713,23 @@ with blocks:
                                 label="Minimum similarity score for match (max=1)",
                                 visible=False,
                             )  # Not used anymore for this exact search
-                            new_redaction_text_label = gr.Textbox(
-                                label="Label for new redactions", value="Redaction"
-                            )
-                            colour_label = gr.Textbox(
-                                label="Colour for labels (three number RGB format, max 255 with brackets)",
-                                value=CUSTOM_BOX_COLOUR,
-                            )
+
+                            with gr.Row():
+                                with gr.Column():
+                                    new_redaction_text_label = gr.Textbox(
+                                        label="Label for new redactions",
+                                        value="Redaction",
+                                    )
+                                    colour_label = gr.Textbox(
+                                        label="Colour for labels (three number RGB format, max 255 with brackets)",
+                                        value=CUSTOM_BOX_COLOUR,
+                                    )
+                                with gr.Column():
+                                    use_regex_search = gr.Checkbox(
+                                        label="Enable regex pattern matching",
+                                        value=False,
+                                        info="When enabled, the search text will be treated as a regular expression pattern instead of literal text",
+                                    )
 
                         all_page_line_level_ocr_results_with_words_df = gr.Dataframe(
                             pd.DataFrame(
@@ -3218,6 +3240,8 @@ with blocks:
             redaction_output_summary_textbox,
             is_a_textract_api_call,
             textract_query_number,
+            all_page_line_level_ocr_results_with_words,
+            input_review_files,
         ],
     ).success(
         fn=choose_and_run_redactor,
@@ -4699,12 +4723,29 @@ with blocks:
         outputs=[all_page_line_level_ocr_results_with_words_df],
     )
 
+    def run_search_with_regex_option(
+        search_text, word_df, similarity_threshold, use_regex_flag
+    ):
+        """Wrapper function to call run_full_search_and_analysis with regex option"""
+        return run_full_search_and_analysis(
+            search_query_text=search_text,
+            word_level_df_orig=word_df,
+            similarity_threshold=similarity_threshold,
+            combine_pages=False,
+            min_word_count=1,
+            min_consecutive_pages=1,
+            greedy_match=True,
+            remake_index=False,
+            use_regex=use_regex_flag,
+        )
+
     multi_word_search_text.submit(
-        fn=run_full_search_and_analysis,
+        fn=run_search_with_regex_option,
         inputs=[
             multi_word_search_text,
             all_page_line_level_ocr_results_with_words_df_base,
             similarity_search_score_minimum,
+            use_regex_search,
         ],
         outputs=[
             all_page_line_level_ocr_results_with_words_df,
@@ -4714,17 +4755,19 @@ with blocks:
     )
 
     multi_word_search_text_btn.click(
-        fn=run_full_search_and_analysis,
+        fn=run_search_with_regex_option,
         inputs=[
             multi_word_search_text,
             all_page_line_level_ocr_results_with_words_df_base,
             similarity_search_score_minimum,
+            use_regex_search,
         ],
         outputs=[
             all_page_line_level_ocr_results_with_words_df,
             duplicate_files_out,
             full_duplicate_data_by_file,
         ],
+        api_name="word_level_ocr_text_search",
     )
 
     # Clicking on a cell in the redact items table will take you to that page
@@ -5813,7 +5856,7 @@ with blocks:
 
     # Get connection details on app load
 
-    if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS == "True":
+    if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
         blocks.load(
             get_connection_params,
             inputs=[
@@ -6519,6 +6562,7 @@ with blocks:
                 max_file_size=MAX_FILE_SIZE,
                 path=FASTAPI_ROOT_PATH,
                 favicon_path=Path(FAVICON_PATH),
+                mcp_server=RUN_MCP_SERVER,
             )
 
             # Example command to run in uvicorn (in python): uvicorn.run("app:app", host=GRADIO_SERVER_NAME, port=GRADIO_SERVER_PORT)
@@ -6536,6 +6580,7 @@ with blocks:
                         server_port=GRADIO_SERVER_PORT,
                         root_path=ROOT_PATH,
                         favicon_path=Path(FAVICON_PATH),
+                        mcp_server=RUN_MCP_SERVER,
                     )
                 else:
                     blocks.launch(
@@ -6546,6 +6591,7 @@ with blocks:
                         server_port=GRADIO_SERVER_PORT,
                         root_path=ROOT_PATH,
                         favicon_path=Path(FAVICON_PATH),
+                        mcp_server=RUN_MCP_SERVER,
                     )
 
     else:
