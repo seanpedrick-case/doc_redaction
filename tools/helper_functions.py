@@ -26,6 +26,7 @@ from tools.config import (
     OUTPUT_FOLDER,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     SESSION_OUTPUT_FOLDER,
+    SHOW_FEEDBACK_BUTTONS,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_JOBS_LOCAL_LOC,
     TEXTRACT_JOBS_S3_LOC,
@@ -456,14 +457,18 @@ def add_folder_to_path(folder_path: str):
 
 # Upon running a process, the feedback buttons are revealed
 def reveal_feedback_buttons():
+    if SHOW_FEEDBACK_BUTTONS:
+        is_visible = True
+    else:
+        is_visible = False
     return (
         gr.Radio(
-            visible=True,
+            visible=is_visible,
             label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 80% of personally identifiable information in a given (typed) document.",
         ),
-        gr.Textbox(visible=True),
-        gr.Button(visible=True),
-        gr.Markdown(visible=True),
+        gr.Textbox(visible=is_visible),
+        gr.Button(visible=is_visible),
+        gr.Markdown(visible=is_visible),
     )
 
 
