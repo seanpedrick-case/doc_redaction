@@ -245,6 +245,10 @@ Configurations for the Gradio UI, server behavior, and application limits.
     * **Description:** Enables or disables AWS Cognito authentication. Set to `'True'` to enable.
     * **Default Value:** `'False'`
 
+* **`SHOW_FEEDBACK_BUTTONS`**
+    * **Description:** If set to `"True"`, displays feedback buttons in the Gradio interface.
+    * **Default Value:** `"False"`
+
 * **`USER_GUIDE_URL`**
     * **Description:** A safe URL pointing to the user guide. The URL is validated against a list of allowed domains.
     * **Default Value:** `"https://seanpedrick-case.github.io/doc_redaction"`
