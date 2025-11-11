@@ -243,11 +243,11 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#direct-access-by-passing-aws-access-keys-through-app" id="toc-direct-access-by-passing-aws-access-keys-through-app" class="nav-link" data-scroll-target="#direct-access-by-passing-aws-access-keys-through-app">Direct access by passing AWS access keys through app</a></li>
   <li><a href="#picking-up-aws-access-keys-through-an-.env-file" id="toc-picking-up-aws-access-keys-through-an-.env-file" class="nav-link" data-scroll-target="#picking-up-aws-access-keys-through-an-.env-file">Picking up AWS access keys through an .env file</a></li>
   </ul></li>
-  <li><a href="#advanced-ocr-options-hybrid-ocr" id="toc-advanced-ocr-options-hybrid-ocr" class="nav-link" data-scroll-target="#advanced-ocr-options-hybrid-ocr">Advanced OCR options (Hybrid OCR)</a>
+  <li><a href="#advanced-ocr-options" id="toc-advanced-ocr-options" class="nav-link" data-scroll-target="#advanced-ocr-options">Advanced OCR options</a>
   <ul class="collapse">
   <li><a href="#available-ocr-models" id="toc-available-ocr-models" class="nav-link" data-scroll-target="#available-ocr-models">Available OCR models</a></li>
   <li><a href="#enabling-advanced-ocr-options" id="toc-enabling-advanced-ocr-options" class="nav-link" data-scroll-target="#enabling-advanced-ocr-options">Enabling advanced OCR options</a></li>
-  <li><a href="#hybrid-ocr-configuration" id="toc-hybrid-ocr-configuration" class="nav-link" data-scroll-target="#hybrid-ocr-configuration">Hybrid OCR configuration</a></li>
+  <li><a href="#ocr-configuration-parameters" id="toc-ocr-configuration-parameters" class="nav-link" data-scroll-target="#ocr-configuration-parameters">OCR configuration parameters</a></li>
   <li><a href="#when-to-use-different-ocr-models" id="toc-when-to-use-different-ocr-models" class="nav-link" data-scroll-target="#when-to-use-different-ocr-models">When to use different OCR models</a></li>
   </ul></li>
   <li><a href="#command-line-interface-cli" id="toc-command-line-interface-cli" class="nav-link" data-scroll-target="#command-line-interface-cli">Command Line Interface (CLI)</a>
@@ -467,7 +467,19 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <figcaption>Document upload alongside Textract</figcaption>
 </figure>
 </div>
-<p>Similarly, if you have used the ‘Local OCR method’ to extract text, you may see a ’…_ocr_results_with_words.json’ file. This file works in the same way as the AWS Textract .json results described above, and can be uploaded alongside an input document to save time on text extraction in future in the same way.</p>
+<section id="additional-outputs-in-the-log-file-outputs" class="level4">
+<h4 class="anchored" data-anchor-id="additional-outputs-in-the-log-file-outputs">Additional outputs in the log file outputs</h4>
+<p>On the Redaction settings tab, near the bottom of the pagethere is a section called ‘Log file outputs’. This section contains the following files:</p>
+<p>You may see a ’…_ocr_results_with_words… .json’ file. This file works in the same way as the AWS Textract .json results described above, and can be uploaded alongside an input document to save time on text extraction in future in the same way.</p>
+<p>Also you will see a ‘decision_process_table.csv’ file. This file contains a table of the decisions made by the app for each page of the document. This can be useful for debugging and understanding the decisions made by the app.</p>
+<p>Additionally, if the option is enabled by your system administrator, on this tab you may see an image of the output from the OCR model used to extract the text from the document, an image ending with page number and ’_visualisations.jpg’. A separate image will be created for each page of the document like the one below. This can be useful for seeing at a glance whether the text extraction process for a page was successful, and whether word-level bounding boxes are correctly positioned.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/example_complaint_letter_1_textract_visualisations.jpg" class="img-fluid figure-img"></p>
+<figcaption>Text analysis output</figcaption>
+</figure>
+</div>
+</section>
 </section>
 <section id="downloading-output-files-from-previous-redaction-tasks" class="level3">
 <h3 class="anchored" data-anchor-id="downloading-output-files-from-previous-redaction-tasks">Downloading output files from previous redaction tasks</h3>
@@ -505,6 +517,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <section id="deny-list-example" class="level4">
 <h4 class="anchored" data-anchor-id="deny-list-example">Deny list example</h4>
 <p>Say you wanted to remove specific terms from a document. In this app you can do this by providing a custom deny list as a csv. Like for the allow list described above, this should be a one-column csv without a column header. The app will suggest each individual term in the list with exact spelling as whole words. So it won’t select text from within words. To enable this feature, the ‘CUSTOM’ tag needs to be chosen as a redaction entity <a href="#redacting-additional-types-of-personal-information">(the process for adding/removing entity types to redact is described below)</a>.</p>
+<p><strong>NOTE:</strong> As of version 1.5.2, you can now provide deny list terms as regex patterns.</p>
 <p>Here is an example using the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership Agreement Toolkit file</a>. This is an <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_custom_deny_list.csv">example of a custom deny list file</a>. ‘Sister’, ‘Sister City’ ‘Sister Cities’, ‘Friendship City’ have been listed as specific terms to redact. You can see the outputs of this redaction process on the review page:</p>
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/deny_list_partnership_example.PNG" class="img-fluid" alt="Deny list redaction Partnership file">.</p>
 <p>You can see that the app has highlighted all instances of these terms on the page shown. You can then consider each of these terms for modification or removal on the review page <a href="#reviewing-and-modifying-suggested-redactions">explained here</a>.</p>
@@ -718,8 +731,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <h4 class="anchored" data-anchor-id="step-1-search-for-text"><strong>Step 1: Search for Text</strong></h4>
 <ol type="1">
 <li>Navigate to the <strong>“Search text to make new redactions”</strong> tab.</li>
-<li>The main table will initially be populated with all the text extracted from the document, broken down by word.</li>
-<li>To narrow this down, use the <strong>“Multi-word text search”</strong> box to type the word or phrase you want to find.</li>
+<li>The main table will initially be populated with all the text extracted from the document for a page, broken down by word.</li>
+<li>To narrow this down, use the <strong>“Multi-word text search”</strong> box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the ‘Enable regex pattern matching’ box under ‘Search options’ below.</li>
 <li>Click the <strong>“Search”</strong> button or press Enter.</li>
 <li>The table below will update to show only the rows containing text that matches your search query.</li>
 </ol>
@@ -1096,43 +1109,96 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <p>The app also has the capability of picking up AWS access key details through a .env file located in a ‘/config/aws_config.env’ file (default), or alternative .env file location specified by the environment variable AWS_CONFIG_PATH. The env file should look like the following with just two lines:</p>
 <p>AWS_ACCESS_KEY= your-access-key AWS_SECRET_KEY= your-secret-key</p>
 <p>The app should then pick up these keys when trying to access the AWS Textract and Comprehend services during redaction.</p>
-<p>Again, a lot can potentially go wrong with AWS solutions that are insecure, so before trying the above please consult with your AWS and data security teams.</p>
 </section>
 </section>
-<section id="advanced-ocr-options-hybrid-ocr" class="level2">
-<h2 class="anchored" data-anchor-id="advanced-ocr-options-hybrid-ocr">Advanced OCR options (Hybrid OCR)</h2>
-<p>The app supports advanced OCR options that combine multiple OCR engines for improved accuracy. These options are not enabled by default but can be configured by your system administrator.</p>
+<section id="advanced-ocr-options" class="level2">
+<h2 class="anchored" data-anchor-id="advanced-ocr-options">Advanced OCR options</h2>
+<p>The app supports advanced OCR options that combine multiple OCR engines for improved accuracy. These options are not enabled by default but can be configured by changing the app_config.env file in your ‘/config’ folder, or system environment variables in your system.</p>
 <section id="available-ocr-models" class="level3">
 <h3 class="anchored" data-anchor-id="available-ocr-models">Available OCR models</h3>
 <ul>
-<li><strong>Tesseract</strong> (default): The standard OCR engine that works well for most documents</li>
-<li><strong>PaddleOCR</strong>: More accurate for whole line text extraction, but word-level bounding boxes may be less precise</li>
-<li><strong>Hybrid</strong>: Combines Tesseract and PaddleOCR - uses Tesseract for initial extraction, then PaddleOCR for re-extraction of low-confidence text</li>
+<li><strong>Tesseract</strong> (default): The standard OCR engine that works well for most documents. Provides good word-level bounding box accuracy.</li>
+<li><strong>PaddleOCR</strong>: More accurate for whole line text extraction, but word-level bounding boxes may be less precise. Best for documents with clear, well-formatted text.</li>
+<li><strong>Hybrid-paddle</strong>: Combines Tesseract and PaddleOCR - uses Tesseract for initial extraction, then PaddleOCR for re-extraction of low-confidence text regions.</li>
+<li><strong>Hybrid-vlm</strong>: Combines Tesseract with Vision Language Models (VLM) - uses Tesseract for initial extraction, then a VLM model (default: Dots.OCR) for re-extraction of low-confidence text.</li>
+<li><strong>Hybrid-paddle-vlm</strong>: Combines PaddleOCR with Vision Language Models - uses PaddleOCR first, then a VLM model for low-confidence regions.</li>
 </ul>
 </section>
 <section id="enabling-advanced-ocr-options" class="level3">
 <h3 class="anchored" data-anchor-id="enabling-advanced-ocr-options">Enabling advanced OCR options</h3>
-<p>To enable these options, your system administrator needs to modify the configuration file (<code>config.py</code>) and set:</p>
+<p>To enable these options, you need to modify the app_config.env file in your ‘/config’ folder and set the following environment variables:</p>
+<p><strong>Basic OCR model selection:</strong></p>
 <pre><code>SHOW_LOCAL_OCR_MODEL_OPTIONS = "True"</code></pre>
-<p>Once enabled, users will see a “Change default local OCR model” section in the redaction settings where they can choose between: - tesseract - hybrid<br>
-- paddle</p>
+<p><strong>To enable PaddleOCR options (paddle, hybrid-paddle):</strong></p>
+<pre><code>SHOW_PADDLE_MODEL_OPTIONS = "True"</code></pre>
+<p><strong>To enable Vision Language Model options (hybrid-vlm, hybrid-paddle-vlm):</strong></p>
+<pre><code>SHOW_VLM_MODEL_OPTIONS = "True"</code></pre>
+<p>Once enabled, users will see a “Change default local OCR model” section in the redaction settings where they can choose between the available models based on what has been enabled.</p>
 </section>
-<section id="hybrid-ocr-configuration" class="level3">
-<h3 class="anchored" data-anchor-id="hybrid-ocr-configuration">Hybrid OCR configuration</h3>
-<p>The hybrid OCR mode uses several configurable parameters:</p>
+<section id="ocr-configuration-parameters" class="level3">
+<h3 class="anchored" data-anchor-id="ocr-configuration-parameters">OCR configuration parameters</h3>
+<p>The following parameters can be configured by your system administrator to fine-tune OCR behavior:</p>
+<section id="hybrid-ocr-settings" class="level4">
+<h4 class="anchored" data-anchor-id="hybrid-ocr-settings">Hybrid OCR settings</h4>
 <ul>
-<li><strong>HYBRID_OCR_CONFIDENCE_THRESHOLD</strong> (default: 65): Tesseract confidence score below which PaddleOCR will be used for re-extraction</li>
-<li><strong>HYBRID_OCR_PADDING</strong> (default: 1): Padding added to word bounding boxes before re-extraction</li>
-<li><strong>SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES</strong> (default: False): Save comparison images when using hybrid mode</li>
-<li><strong>SAVE_PADDLE_VISUALISATIONS</strong> (default: False): Save images with PaddleOCR bounding boxes overlaid</li>
+<li><strong>HYBRID_OCR_CONFIDENCE_THRESHOLD</strong> (default: 80): Tesseract confidence score below which the secondary OCR engine (PaddleOCR or VLM) will be used for re-extraction. Lower values mean more text will be re-extracted.</li>
+<li><strong>HYBRID_OCR_PADDING</strong> (default: 1): Padding (in pixels) added to word bounding boxes before re-extraction with the secondary engine.</li>
+<li><strong>SAVE_EXAMPLE_HYBRID_IMAGES</strong> (default: False): If enabled, saves comparison images showing Tesseract vs.&nbsp;secondary engine results when using hybrid modes.</li>
+<li><strong>SAVE_PAGE_OCR_VISUALISATIONS</strong> (default: False): If enabled, saves images with detected bounding boxes overlaid for debugging purposes.</li>
 </ul>
+</section>
+<section id="tesseract-settings" class="level4">
+<h4 class="anchored" data-anchor-id="tesseract-settings">Tesseract settings</h4>
+<ul>
+<li><strong>TESSERACT_SEGMENTATION_LEVEL</strong> (default: 11): Tesseract PSM (Page Segmentation Mode) level. Valid values are 0-13. Higher values provide more detailed segmentation but may be slower.</li>
+</ul>
+</section>
+<section id="paddleocr-settings" class="level4">
+<h4 class="anchored" data-anchor-id="paddleocr-settings">PaddleOCR settings</h4>
+<ul>
+<li><strong>PADDLE_USE_TEXTLINE_ORIENTATION</strong> (default: False): If enabled, PaddleOCR will detect and correct text line orientation.</li>
+<li><strong>PADDLE_DET_DB_UNCLIP_RATIO</strong> (default: 1.2): Controls the expansion ratio of detected text regions. Higher values expand the detection area more.</li>
+<li><strong>CONVERT_LINE_TO_WORD_LEVEL</strong> (default: False): If enabled, converts PaddleOCR line-level results to word-level for better precision in bounding boxes (not perfect, but pretty good).</li>
+<li><strong>LOAD_PADDLE_AT_STARTUP</strong> (default: False): If enabled, loads the PaddleOCR model when the application starts, reducing latency for first use but increasing startup time.</li>
+</ul>
+</section>
+<section id="image-preprocessing" class="level4">
+<h4 class="anchored" data-anchor-id="image-preprocessing">Image preprocessing</h4>
+<ul>
+<li><strong>PREPROCESS_LOCAL_OCR_IMAGES</strong> (default: True): If enabled, images are preprocessed before OCR. This can improve accuracy but may slow down processing.</li>
+<li><strong>SAVE_PREPROCESS_IMAGES</strong> (default: False): If enabled, saves the preprocessed images for debugging purposes.</li>
+</ul>
+</section>
+<section id="vision-language-model-vlm-settings" class="level4">
+<h4 class="anchored" data-anchor-id="vision-language-model-vlm-settings">Vision Language Model (VLM) settings</h4>
+<p>When VLM options are enabled, the following settings are available:</p>
+<ul>
+<li><strong>SELECTED_MODEL</strong> (default: “Dots.OCR”): The VLM model to use. Options include: “Nanonets-OCR2-3B”, “Dots.OCR”, “Qwen3-VL-2B-Instruct”, “Qwen3-VL-4B-Instruct”, “PaddleOCR-VL”.</li>
+<li><strong>MAX_SPACES_GPU_RUN_TIME</strong> (default: 60): Maximum seconds to run GPU operations on Hugging Face Spaces.</li>
+<li><strong>MAX_NEW_TOKENS</strong> (default: 30): Maximum number of tokens to generate for VLM responses.</li>
+<li><strong>MAX_INPUT_TOKEN_LENGTH</strong> (default: 4096): Maximum number of tokens that can be input to the VLM.</li>
+<li><strong>VLM_MAX_IMAGE_SIZE</strong> (default: 1000000): Maximum total pixels (width × height) for images. Larger images are resized while maintaining aspect ratio.</li>
+<li><strong>VLM_MAX_DPI</strong> (default: 300.0): Maximum DPI for images. Higher DPI images are resized accordingly.</li>
+<li><strong>USE_FLASH_ATTENTION</strong> (default: False): If enabled, uses flash attention for improved VLM performance.</li>
+<li><strong>SAVE_VLM_INPUT_IMAGES</strong> (default: False): If enabled, saves input images sent to VLM for debugging.</li>
+</ul>
+</section>
+<section id="general-settings" class="level4">
+<h4 class="anchored" data-anchor-id="general-settings">General settings</h4>
+<ul>
+<li><strong>MODEL_CACHE_PATH</strong> (default: “./model_cache”): Directory where OCR models are cached.</li>
+<li><strong>OVERWRITE_EXISTING_OCR_RESULTS</strong> (default: False): If enabled, always creates new OCR results instead of loading from existing JSON files.</li>
+</ul>
+</section>
 </section>
 <section id="when-to-use-different-ocr-models" class="level3">
 <h3 class="anchored" data-anchor-id="when-to-use-different-ocr-models">When to use different OCR models</h3>
 <ul>
-<li><strong>Tesseract</strong>: Best for general use, good balance of speed and accuracy</li>
-<li><strong>PaddleOCR</strong>: Best for documents with clear, well-formatted text where line-level accuracy is more important than word-level precision</li>
-<li><strong>Hybrid</strong>: Best for challenging documents where some text has low confidence scores, providing the benefits of both engines</li>
+<li><strong>Tesseract</strong>: Best for general use, providing a good balance of speed and accuracy with precise word-level bounding boxes.</li>
+<li><strong>PaddleOCR</strong>: Best for documents with clear, well-formatted text where line-level accuracy is more important than word-level precision.</li>
+<li><strong>Hybrid-paddle</strong>: Best for challenging documents where some text has low confidence scores, combining Tesseract’s word-level precision with PaddleOCR’s improved text recognition.</li>
+<li><strong>Hybrid-vlm</strong>: Best for very challenging documents with poor image quality or unusual text layouts, leveraging advanced vision models for difficult text.</li>
+<li><strong>Hybrid-paddle-vlm</strong>: Most comprehensive option, combining PaddleOCR’s line-level detection with a VLM’s advanced recognition capabilities.</li>
 </ul>
 </section>
 </section>
@@ -1151,74 +1217,130 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="basic-cli-syntax" class="level3">
 <h3 class="anchored" data-anchor-id="basic-cli-syntax">Basic CLI syntax</h3>
-<div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> [redact<span class="kw">|</span><span class="ex">deduplicate</span><span class="kw">|</span><span class="ex">textract]</span> <span class="at">--input_file</span> <span class="pp">[</span><span class="ss">file_path</span><span class="pp">]</span> <span class="pp">[</span><span class="ss">additional_options</span><span class="pp">]</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> [redact<span class="kw">|</span><span class="ex">deduplicate</span><span class="kw">|</span><span class="ex">textract]</span> <span class="at">--input_file</span> <span class="pp">[</span><span class="ss">file_path</span><span class="pp">]</span> <span class="pp">[</span><span class="ss">additional_options</span><span class="pp">]</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </section>
 <section id="redaction-examples" class="level3">
 <h3 class="anchored" data-anchor-id="redaction-examples">Redaction examples</h3>
 <p><strong>Basic PDF redaction with default settings:</strong></p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Extract text only (no redaction) with whole page redaction:</strong></p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--redact_whole_page_file</span> example_data/partnership_toolkit_redact_some_pages.csv <span class="at">--pii_detector</span> None</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--redact_whole_page_file</span> example_data/partnership_toolkit_redact_some_pages.csv <span class="at">--pii_detector</span> None</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Redact with custom entities and allow list:</strong></p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/graduate-job-example-cover-letter.pdf <span class="at">--allow_list_file</span> example_data/test_allow_list_graduate.csv <span class="at">--local_redact_entities</span> TITLES PERSON DATE_TIME</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/graduate-job-example-cover-letter.pdf <span class="at">--allow_list_file</span> example_data/test_allow_list_graduate.csv <span class="at">--local_redact_entities</span> TITLES PERSON DATE_TIME</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Redact with fuzzy matching and custom deny list:</strong></p>
-<div class="sourceCode" id="cb6"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--deny_list_file</span> example_data/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv <span class="at">--local_redact_entities</span> CUSTOM_FUZZY <span class="at">--page_min</span> 1 <span class="at">--page_max</span> 3 <span class="at">--fuzzy_mistakes</span> 3</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--deny_list_file</span> example_data/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv <span class="at">--local_redact_entities</span> CUSTOM_FUZZY <span class="at">--page_min</span> 1 <span class="at">--page_max</span> 3 <span class="at">--fuzzy_mistakes</span> 3</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Redact with AWS services:</strong></p>
-<div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--pii_detector</span> <span class="st">"AWS Comprehend"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb9"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--pii_detector</span> <span class="st">"AWS Comprehend"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Redact specific pages with signature extraction:</strong></p>
-<div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--page_min</span> 6 <span class="at">--page_max</span> 7 <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--handwrite_signature_extraction</span> <span class="st">"Extract handwriting"</span> <span class="st">"Extract signatures"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb10"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--page_min</span> 6 <span class="at">--page_max</span> 7 <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--handwrite_signature_extraction</span> <span class="st">"Extract handwriting"</span> <span class="st">"Extract signatures"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </section>
 <section id="tabular-data-redaction" class="level3">
 <h3 class="anchored" data-anchor-id="tabular-data-redaction">Tabular data redaction</h3>
 <p><strong>Anonymize CSV file with specific columns:</strong></p>
-<div class="sourceCode" id="cb9"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.csv <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.csv <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Anonymize Excel file:</strong></p>
-<div class="sourceCode" id="cb10"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.xlsx <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--excel_sheets</span> combined_case_notes <span class="at">--anon_strategy</span> redact</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.xlsx <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--excel_sheets</span> combined_case_notes <span class="at">--anon_strategy</span> redact</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Anonymize Word document:</strong></p>
-<div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> <span class="st">"example_data/Bold minimalist professional cover letter.docx"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb13"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> <span class="st">"example_data/Bold minimalist professional cover letter.docx"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </section>
 <section id="duplicate-detection" class="level3">
 <h3 class="anchored" data-anchor-id="duplicate-detection">Duplicate detection</h3>
 <p><strong>Find duplicate pages in OCR files:</strong></p>
-<div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb14"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Find duplicates at line level:</strong></p>
-<div class="sourceCode" id="cb13"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95 <span class="at">--combine_pages</span> False <span class="at">--min_word_count</span> 3</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95 <span class="at">--combine_pages</span> False <span class="at">--min_word_count</span> 3</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Find duplicate rows in tabular data:</strong></p>
-<div class="sourceCode" id="cb14"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv <span class="at">--duplicate_type</span> tabular <span class="at">--text_columns</span> <span class="st">"text"</span> <span class="at">--similarity_threshold</span> 0.95</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv <span class="at">--duplicate_type</span> tabular <span class="at">--text_columns</span> <span class="st">"text"</span> <span class="at">--similarity_threshold</span> 0.95</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </section>
 <section id="aws-textract-operations" class="level3">
 <h3 class="anchored" data-anchor-id="aws-textract-operations">AWS Textract operations</h3>
 <p><strong>Submit document for analysis:</strong></p>
-<div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb17"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Submit with signature extraction:</strong></p>
-<div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--extract_signatures</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb18"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--extract_signatures</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>Retrieve results by job ID:</strong></p>
-<div class="sourceCode" id="cb17"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> retrieve <span class="at">--job_id</span> 12345678-1234-1234-1234-123456789012</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb19"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> retrieve <span class="at">--job_id</span> 12345678-1234-1234-1234-123456789012</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p><strong>List recent jobs:</strong></p>
-<div class="sourceCode" id="cb18"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> list</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb20"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> list</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </section>
 <section id="common-cli-options" class="level3">
 <h3 class="anchored" data-anchor-id="common-cli-options">Common CLI options</h3>
+<section id="general-options" class="level4">
+<h4 class="anchored" data-anchor-id="general-options">General options</h4>
 <ul>
 <li><code>--task</code>: Choose between “redact”, “deduplicate”, or “textract”</li>
-<li><code>--input_file</code>: Path to input file(s)</li>
+<li><code>--input_file</code>: Path to input file(s) - can specify multiple files separated by spaces</li>
 <li><code>--output_dir</code>: Directory for output files (default: output/)</li>
-<li><code>--page_min</code> / <code>--page_max</code>: Process only specific page range</li>
-<li><code>--ocr_method</code>: Choose text extraction method</li>
-<li><code>--pii_detector</code>: Choose PII detection method</li>
-<li><code>--local_redact_entities</code>: Specify local entities to redact</li>
-<li><code>--allow_list_file</code> / <code>--deny_list_file</code>: Custom lists</li>
-<li><code>--redact_whole_page_file</code>: List of pages to redact completely</li>
-<li><code>--fuzzy_mistakes</code>: Number of spelling mistakes allowed in fuzzy matching</li>
-<li><code>--similarity_threshold</code>: Threshold for duplicate detection</li>
-<li><code>--anon_strategy</code>: Anonymization strategy for tabular data</li>
+<li><code>--input_dir</code>: Directory for input files (default: input/)</li>
+<li><code>--language</code>: Language of document content (e.g., “en”, “es”, “fr”)</li>
+<li><code>--username</code>: Username for session tracking</li>
+<li><code>--pii_detector</code>: Choose PII detection method (“Local”, “AWS Comprehend”, or “None”)</li>
+<li><code>--local_redact_entities</code>: Specify local entities to redact (space-separated list)</li>
+<li><code>--aws_redact_entities</code>: Specify AWS Comprehend entities to redact (space-separated list)</li>
+<li><code>--aws_access_key</code> / <code>--aws_secret_key</code>: AWS credentials for cloud services</li>
+<li><code>--aws_region</code>: AWS region for cloud services</li>
+<li><code>--s3_bucket</code>: S3 bucket name for cloud operations</li>
+<li><code>--cost_code</code>: Cost code for tracking usage</li>
 </ul>
+</section>
+<section id="pdfimage-redaction-options" class="level4">
+<h4 class="anchored" data-anchor-id="pdfimage-redaction-options">PDF/Image redaction options</h4>
+<ul>
+<li><code>--ocr_method</code>: Choose text extraction method (“AWS Textract”, “Local OCR”, or “Local text”)</li>
+<li><code>--chosen_local_ocr_model</code>: Local OCR model to use (e.g., “tesseract”, “paddle”, “hybrid-paddle”, “hybrid-vlm”)</li>
+<li><code>--page_min</code> / <code>--page_max</code>: Process only specific page range (0 for max means all pages)</li>
+<li><code>--images_dpi</code>: DPI for image processing (default: 300.0)</li>
+<li><code>--preprocess_local_ocr_images</code>: Preprocess images before OCR (True/False)</li>
+<li><code>--compress_redacted_pdf</code>: Compress the final redacted PDF (True/False)</li>
+<li><code>--return_pdf_end_of_redaction</code>: Return PDF at end of redaction process (True/False)</li>
+<li><code>--allow_list_file</code> / <code>--deny_list_file</code>: Paths to custom allow/deny list CSV files</li>
+<li><code>--redact_whole_page_file</code>: Path to CSV file listing pages to redact completely</li>
+<li><code>--handwrite_signature_extraction</code>: Handwriting and signature extraction options for Textract (“Extract handwriting”, “Extract signatures”)</li>
+<li><code>--extract_forms</code>: Extract forms during Textract analysis (flag)</li>
+<li><code>--extract_tables</code>: Extract tables during Textract analysis (flag)</li>
+<li><code>--extract_layout</code>: Extract layout during Textract analysis (flag)</li>
+</ul>
+</section>
+<section id="tabularword-anonymization-options" class="level4">
+<h4 class="anchored" data-anchor-id="tabularword-anonymization-options">Tabular/Word anonymization options</h4>
+<ul>
+<li><code>--anon_strategy</code>: Anonymization strategy (e.g., “redact”, “redact completely”, “replace_redacted”, “encrypt”, “hash”)</li>
+<li><code>--text_columns</code>: List of column names to anonymize (space-separated)</li>
+<li><code>--excel_sheets</code>: Specific Excel sheet names to process (space-separated)</li>
+<li><code>--fuzzy_mistakes</code>: Number of spelling mistakes allowed in fuzzy matching (default: 1)</li>
+<li><code>--match_fuzzy_whole_phrase_bool</code>: Match fuzzy whole phrase (True/False)</li>
+<li><code>--do_initial_clean</code>: Perform initial text cleaning for tabular data (True/False)</li>
+</ul>
+</section>
+<section id="duplicate-detection-options" class="level4">
+<h4 class="anchored" data-anchor-id="duplicate-detection-options">Duplicate detection options</h4>
+<ul>
+<li><code>--duplicate_type</code>: Type of duplicate detection (“pages” for OCR files or “tabular” for CSV/Excel)</li>
+<li><code>--similarity_threshold</code>: Similarity threshold (0-1) to consider content as duplicates (default: 0.95)</li>
+<li><code>--min_word_count</code>: Minimum word count for text to be considered (default: 10)</li>
+<li><code>--min_consecutive_pages</code>: Minimum number of consecutive pages to consider as a match (default: 1)</li>
+<li><code>--greedy_match</code>: Use greedy matching strategy for consecutive pages (True/False)</li>
+<li><code>--combine_pages</code>: Combine text from same page number within a file (True/False)</li>
+<li><code>--remove_duplicate_rows</code>: Remove duplicate rows from output (True/False)</li>
+</ul>
+</section>
+<section id="textract-batch-operations-options" class="level4">
+<h4 class="anchored" data-anchor-id="textract-batch-operations-options">Textract batch operations options</h4>
+<ul>
+<li><code>--textract_action</code>: Action to perform (“submit”, “retrieve”, or “list”)</li>
+<li><code>--job_id</code>: Textract job ID for retrieve action</li>
+<li><code>--extract_signatures</code>: Extract signatures during Textract analysis (flag)</li>
+<li><code>--textract_bucket</code>: S3 bucket name for Textract operations</li>
+<li><code>--poll_interval</code>: Polling interval in seconds for job status (default: 30)</li>
+<li><code>--max_poll_attempts</code>: Maximum polling attempts before timeout (default: 120)</li>
+</ul>
+</section>
 </section>
 <section id="output-files" class="level3">
 <h3 class="anchored" data-anchor-id="output-files">Output files</h3>
 <p>The CLI generates the same output files as the GUI: - <code>...redacted.pdf</code>: Final redacted document - <code>...redactions_for_review.pdf</code>: Document with redaction boxes for review - <code>...review_file.csv</code>: Detailed redaction information - <code>...ocr_results.csv</code>: Extracted text results - <code>..._textract.json</code>: AWS Textract results (if applicable)</p>
 <p>For more advanced options and configuration, refer to the help text by running:</p>
-<div class="sourceCode" id="cb19"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb21"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 
 
 </section>

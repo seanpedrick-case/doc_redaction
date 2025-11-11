@@ -136,6 +136,7 @@ ul.task-list li input[type="checkbox"] {
   <li><a href="#ui-and-model-selection" id="toc-ui-and-model-selection" class="nav-link" data-scroll-target="#ui-and-model-selection">UI and Model Selection</a></li>
   <li><a href="#external-tool-paths" id="toc-external-tool-paths" class="nav-link" data-scroll-target="#external-tool-paths">External Tool Paths</a></li>
   <li><a href="#local-ocr-tesseract-paddleocr" id="toc-local-ocr-tesseract-paddleocr" class="nav-link" data-scroll-target="#local-ocr-tesseract-paddleocr">Local OCR (Tesseract &amp; PaddleOCR)</a></li>
+  <li><a href="#vision-language-model-vlm-options" id="toc-vision-language-model-vlm-options" class="nav-link" data-scroll-target="#vision-language-model-vlm-options">Vision Language Model (VLM) Options</a></li>
   <li><a href="#entity-and-search-options" id="toc-entity-and-search-options" class="nav-link" data-scroll-target="#entity-and-search-options">Entity and Search Options</a></li>
   <li><a href="#textract-feature-selection" id="toc-textract-feature-selection" class="nav-link" data-scroll-target="#textract-feature-selection">Textract Feature Selection</a></li>
   <li><a href="#tabular-data-options" id="toc-tabular-data-options" class="nav-link" data-scroll-target="#tabular-data-options">Tabular Data Options</a></li>
@@ -289,12 +290,12 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> If set to <code>'True'</code>, the application will save output and input files into session-specific subfolders.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
 </ul></li>
-<li><strong><code>OUTPUT_FOLDER</code></strong>
+<li><strong><code>OUTPUT_FOLDER</code></strong> (environment variable: <code>GRADIO_OUTPUT_FOLDER</code>)
 <ul>
 <li><strong>Description:</strong> Specifies the default output folder for generated files. Can be set to <code>"TEMP"</code> to use a temporary directory.</li>
 <li><strong>Default Value:</strong> <code>'output/'</code></li>
 </ul></li>
-<li><strong><code>INPUT_FOLDER</code></strong>
+<li><strong><code>INPUT_FOLDER</code></strong> (environment variable: <code>GRADIO_INPUT_FOLDER</code>)
 <ul>
 <li><strong>Description:</strong> Specifies the default input folder for files. Can be set to <code>"TEMP"</code> to use a temporary directory.</li>
 <li><strong>Default Value:</strong> <code>'input/'</code></li>
@@ -386,6 +387,11 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> If set to <code>"True"</code>, the application will be served via FastAPI, allowing for API endpoint integration.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
+<li><strong><code>RUN_MCP_SERVER</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the application will run as an MCP (Model Context Protocol) server.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
 <li><strong><code>GRADIO_SERVER_NAME</code></strong>
 <ul>
 <li><strong>Description:</strong> The IP address the Gradio server will bind to. Use <code>"0.0.0.0"</code> to allow external access.</li>
@@ -451,6 +457,16 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> Maximum number of characters for open text input.</li>
 <li><strong>Default Value:</strong> <code>50000</code></li>
 </ul></li>
+<li><strong><code>PAGE_BREAK_VALUE</code></strong>
+<ul>
+<li><strong>Description:</strong> Number of pages to process before breaking and restarting from the last finished page (not currently activated).</li>
+<li><strong>Default Value:</strong> <code>99999</code></li>
+</ul></li>
+<li><strong><code>MAX_TIME_VALUE</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum time value for processing operations.</li>
+<li><strong>Default Value:</strong> <code>999999</code></li>
+</ul></li>
 <li><strong><code>TLDEXTRACT_CACHE</code></strong>
 <ul>
 <li><strong>Description:</strong> Path to the cache directory used by the <code>tldextract</code> library.</li>
@@ -460,6 +476,11 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Enables or disables AWS Cognito authentication. Set to <code>'True'</code> to enable.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>SHOW_FEEDBACK_BUTTONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, displays feedback buttons in the Gradio interface.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>USER_GUIDE_URL</code></strong>
 <ul>
@@ -498,6 +519,16 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Controls whether local (Tesseract) or AWS (Textract) text extraction options are shown in the UI.</li>
 <li><strong>Default Value:</strong> <code>"True"</code> for both.</li>
+</ul></li>
+<li><strong><code>SELECTABLE_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>TESSERACT_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>TEXTRACT_TEXT_EXTRACT_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Labels for text extraction model options displayed in the UI. Customize the display names for “Local model - selectable text”, “Local OCR model - PDFs without selectable text”, and “AWS Textract service - all PDF types” respectively.</li>
+<li><strong>Default Values:</strong> <code>"Local model - selectable text"</code>, <code>"Local OCR model - PDFs without selectable text"</code>, <code>"AWS Textract service - all PDF types"</code></li>
+</ul></li>
+<li><strong><code>NO_REDACTION_PII_OPTION</code></strong>, <strong><code>LOCAL_PII_OPTION</code></strong>, <strong><code>AWS_PII_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Labels for PII detection model options displayed in the UI. Customize the display names for “Only extract text (no redaction)”, “Local”, and “AWS Comprehend” respectively.</li>
+<li><strong>Default Values:</strong> <code>"Only extract text (no redaction)"</code>, <code>"Local"</code>, <code>"AWS Comprehend"</code></li>
 </ul></li>
 <li><strong><code>SHOW_LOCAL_PII_DETECTION_OPTIONS</code></strong> / <strong><code>SHOW_AWS_PII_DETECTION_OPTIONS</code></strong>
 <ul>
@@ -551,7 +582,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong><code>CHOSEN_LOCAL_OCR_MODEL</code></strong>
 <ul>
-<li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, or <code>"hybrid"</code>.</li>
+<li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, or <code>"hybrid-paddle"</code>.</li>
 <li><strong>Default Value:</strong> <code>"tesseract"</code></li>
 </ul></li>
 <li><strong><code>SHOW_LOCAL_OCR_MODEL_OPTIONS</code></strong>
@@ -561,12 +592,12 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>HYBRID_OCR_CONFIDENCE_THRESHOLD</code></strong>
 <ul>
-<li><strong>Description:</strong> In “hybrid” mode, this is the Tesseract confidence score below which PaddleOCR will be used for re-extraction.</li>
-<li><strong>Default Value:</strong> <code>65</code></li>
+<li><strong>Description:</strong> In “hybrid-paddle” mode, this is the Tesseract confidence score below which PaddleOCR will be used for re-extraction.</li>
+<li><strong>Default Value:</strong> <code>80</code></li>
 </ul></li>
 <li><strong><code>HYBRID_OCR_PADDING</code></strong>
 <ul>
-<li><strong>Description:</strong> In “hybrid” mode, padding added to the word’s bounding box before re-extraction.</li>
+<li><strong>Description:</strong> In “hybrid-paddle” mode, padding added to the word’s bounding box before re-extraction.</li>
 <li><strong>Default Value:</strong> <code>1</code></li>
 </ul></li>
 <li><strong><code>PADDLE_USE_TEXTLINE_ORIENTATION</code></strong>
@@ -579,19 +610,119 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> Controls the expansion ratio of the detected text region in PaddleOCR.</li>
 <li><strong>Default Value:</strong> <code>1.2</code></li>
 </ul></li>
-<li><strong><code>SAVE_EXAMPLE_TESSERACT_VS_PADDLE_IMAGES</code></strong>
+<li><strong><code>SAVE_EXAMPLE_HYBRID_IMAGES</code></strong>
 <ul>
-<li><strong>Description:</strong> Saves comparison images when using “hybrid” OCR mode.</li>
+<li><strong>Description:</strong> Saves comparison images when using “hybrid-paddle” OCR mode.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>SAVE_PADDLE_VISUALISATIONS</code></strong>
+<li><strong><code>SAVE_PAGE_OCR_VISUALISATIONS</code></strong>
 <ul>
 <li><strong>Description:</strong> Saves images with PaddleOCR’s detected bounding boxes overlaid.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SAVE_WORD_SEGMENTER_OUTPUT_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves output images from the word segmenter for debugging purposes.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>PREPROCESS_LOCAL_OCR_IMAGES</code></strong>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, images will be preprocessed before local OCR. Can slow down processing.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>SAVE_PREPROCESS_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves the preprocessed images for debugging purposes.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SHOW_PADDLE_MODEL_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select PaddleOCR-related options (paddle, hybrid-paddle) from the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>MODEL_CACHE_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the directory where models are cached.</li>
+<li><strong>Default Value:</strong> <code>"./model_cache"</code></li>
+</ul></li>
+<li><strong><code>TESSERACT_SEGMENTATION_LEVEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Tesseract PSM (Page Segmentation Mode) level to use for OCR. Valid values are 0-13.</li>
+<li><strong>Default Value:</strong> <code>11</code></li>
+</ul></li>
+<li><strong><code>TESSERACT_WORD_LEVEL_OCR</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses Tesseract word-level OCR instead of line-level.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>CONVERT_LINE_TO_WORD_LEVEL</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, converts PaddleOCR line-level OCR results to word-level for better precision.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>LOAD_PADDLE_AT_STARTUP</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, loads the PaddleOCR model at application startup.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="vision-language-model-vlm-options" class="level3">
+<h3 class="anchored" data-anchor-id="vision-language-model-vlm-options">Vision Language Model (VLM) Options</h3>
+<ul>
+<li><strong><code>SHOW_VLM_MODEL_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, VLM (Vision Language Model) options will be shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SELECTED_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Selected vision model for OCR. Choose from: <code>"Nanonets-OCR2-3B"</code>, <code>"Dots.OCR"</code>, <code>"Qwen3-VL-2B-Instruct"</code>, <code>"Qwen3-VL-4B-Instruct"</code>, <code>"PaddleOCR-VL"</code>.</li>
+<li><strong>Default Value:</strong> <code>"Dots.OCR"</code></li>
+</ul></li>
+<li><strong><code>MAX_SPACES_GPU_RUN_TIME</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of seconds to run the GPU on Spaces (Hugging Face Spaces).</li>
+<li><strong>Default Value:</strong> <code>60</code></li>
+</ul></li>
+<li><strong><code>MAX_NEW_TOKENS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of tokens to generate for VLM responses.</li>
+<li><strong>Default Value:</strong> <code>30</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_MAX_NEW_TOKENS</code></strong>
+<ul>
+<li><strong>Description:</strong> Default maximum number of tokens to generate for VLM responses.</li>
+<li><strong>Default Value:</strong> <code>30</code></li>
+</ul></li>
+<li><strong><code>MAX_INPUT_TOKEN_LENGTH</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of tokens that can be input to the VLM.</li>
+<li><strong>Default Value:</strong> <code>4096</code></li>
+</ul></li>
+<li><strong><code>VLM_MAX_IMAGE_SIZE</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio.</li>
+<li><strong>Default Value:</strong> <code>1000000</code> (1000x1000)</li>
+</ul></li>
+<li><strong><code>VLM_MAX_DPI</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.</li>
+<li><strong>Default Value:</strong> <code>300.0</code></li>
+</ul></li>
+<li><strong><code>USE_FLASH_ATTENTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses flash attention for the VLM, which can improve performance.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>OVERWRITE_EXISTING_OCR_RESULTS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, always creates new OCR results instead of loading from existing JSON files.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SAVE_VLM_INPUT_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves input images sent to VLM OCR for debugging purposes.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 </ul>
@@ -638,6 +769,11 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> The default options selected for Textract’s handwriting and signature detection.</li>
 <li><strong>Default Value:</strong> <code>['Extract handwriting']</code></li>
+</ul></li>
+<li><strong><code>HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Full list of available options for Textract’s handwriting and signature detection. Can include <code>'Extract handwriting'</code>, <code>'Extract signatures'</code>, and optionally <code>'Extract forms'</code>, <code>'Extract layout'</code>, <code>'Extract tables'</code> if the corresponding include options are enabled.</li>
+<li><strong>Default Value:</strong> <code>['Extract handwriting', 'Extract signatures']</code></li>
 </ul></li>
 <li><strong><code>INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION</code></strong></li>
 <li><strong><code>INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION</code></strong></li>
@@ -791,10 +927,130 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> Path to the input file and output directory for the task.</li>
 <li><strong>Default Values:</strong> <code>''</code>, <code>output/</code></li>
 </ul></li>
-<li><strong>Other <code>DIRECT_MODE_*</code> variables:</strong>
+<li><strong><code>DIRECT_MODE_DUPLICATE_TYPE</code></strong>
 <ul>
-<li><strong>Description:</strong> These variables allow for setting nearly all application options (e.g., <code>DIRECT_MODE_PII_DETECTOR</code>, <code>DIRECT_MODE_SIMILARITY_THRESHOLD</code>) directly for a single CLI run, overriding other configurations.</li>
-<li><strong>Default Value:</strong> Defaults are inherited from the main application settings (e.g., <code>LOCAL_PII_OPTION</code>, <code>DEFAULT_DUPLICATE_DETECTION_THRESHOLD</code>).</li>
+<li><strong>Description:</strong> Type of duplicate detection for direct mode: <code>'pages'</code> or <code>'tabular'</code>.</li>
+<li><strong>Default Value:</strong> <code>'pages'</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_LANGUAGE</code></strong>
+<ul>
+<li><strong>Description:</strong> Language for document processing in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_LANGUAGE</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_PII_DETECTOR</code></strong>
+<ul>
+<li><strong>Description:</strong> PII detection method for direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>LOCAL_PII_OPTION</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_OCR_METHOD</code></strong>
+<ul>
+<li><strong>Description:</strong> OCR method for PDF/image processing in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"Local OCR"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_PAGE_MIN</code></strong> / <strong><code>DIRECT_MODE_PAGE_MAX</code></strong>
+<ul>
+<li><strong>Description:</strong> First and last page to process in direct mode. <code>0</code> for max means process all pages.</li>
+<li><strong>Default Values:</strong> Inherit from <code>DEFAULT_PAGE_MIN</code> / <code>DEFAULT_PAGE_MAX</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_IMAGES_DPI</code></strong>
+<ul>
+<li><strong>Description:</strong> DPI for image processing in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>IMAGES_DPI</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Local OCR model choice for direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>CHOSEN_LOCAL_OCR_MODEL</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, preprocesses images before OCR in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>PREPROCESS_LOCAL_OCR_IMAGES</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_COMPRESS_REDACTED_PDF</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, compresses the redacted PDF output in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>COMPRESS_REDACTED_PDF</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_RETURN_PDF_END_OF_REDACTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, returns a PDF at the end of redaction in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>RETURN_REDACTED_PDF</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_EXTRACT_FORMS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, extracts forms during Textract analysis in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_EXTRACT_TABLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, extracts tables during Textract analysis in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_EXTRACT_LAYOUT</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, extracts layout during Textract analysis in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_EXTRACT_SIGNATURES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, extracts signatures during Textract analysis in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, matches fuzzy whole phrases in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_ANON_STRATEGY</code></strong>
+<ul>
+<li><strong>Description:</strong> Anonymisation strategy for tabular data in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_TABULAR_ANONYMISATION_STRATEGY</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_FUZZY_MISTAKES</code></strong>
+<ul>
+<li><strong>Description:</strong> Number of fuzzy spelling mistakes allowed in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_FUZZY_SPELLING_MISTAKES_NUM</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_SIMILARITY_THRESHOLD</code></strong>
+<ul>
+<li><strong>Description:</strong> Similarity threshold for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_DUPLICATE_DETECTION_THRESHOLD</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_MIN_WORD_COUNT</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum word count for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_MIN_WORD_COUNT</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_MIN_CONSECUTIVE_PAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum consecutive pages for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_MIN_CONSECUTIVE_PAGES</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_GREEDY_MATCH</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses greedy matching for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>USE_GREEDY_DUPLICATE_DETECTION</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_COMBINE_PAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, combines pages for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_COMBINE_PAGES</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_REMOVE_DUPLICATE_ROWS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, removes duplicate rows in tabular data in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>REMOVE_DUPLICATE_ROWS</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_TEXTRACT_ACTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Textract action for batch operations in direct mode.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_JOB_ID</code></strong>
+<ul>
+<li><strong>Description:</strong> Job ID for Textract operations in direct mode.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 </ul>
 </section>
