@@ -1237,7 +1237,9 @@ def choose_and_run_redactor(
                                         )
                                     except IndexError:
                                         # Retry without link processing if it fails
-                                        print("IndexError: Retrying without link processing")
+                                        print(
+                                            "IndexError: Retrying without link processing"
+                                        )
                                         applied_redaction_pymupdf_doc.insert_pdf(
                                             applied_redaction_page.parent,
                                             from_page=applied_redaction_page.number,
@@ -1303,7 +1305,9 @@ def choose_and_run_redactor(
                                         )
                                     except IndexError:
                                         # Retry without link processing if it fails
-                                        print("IndexError: Retrying without link processing")
+                                        print(
+                                            "IndexError: Retrying without link processing"
+                                        )
                                         applied_redaction_pymupdf_doc.insert_pdf(
                                             applied_redaction_page.parent,
                                             from_page=applied_redaction_page.number,
@@ -5285,12 +5289,12 @@ def visualise_ocr_words_bounding_boxes(
     needs_coordinate_conversion = False
     source_width = width
     source_height = height
-    
+
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Collect all bounding box coordinates to detect coordinate system
         all_x_coords = []
         all_y_coords = []
-        
+
         for line_key, line_data in ocr_results.items():
             if not isinstance(line_data, dict) or "words" not in line_data:
                 continue
@@ -5303,7 +5307,7 @@ def visualise_ocr_words_bounding_boxes(
                     x1, y1, x2, y2 = bbox
                     all_x_coords.extend([x1, x2])
                     all_y_coords.extend([y1, y2])
-        
+
         # Check if coordinates appear to be in PyMuPDF range (typically 0-1200 points)
         # and image is much larger (indicating coordinate system mismatch)
         if all_x_coords and all_y_coords:
@@ -5311,11 +5315,20 @@ def visualise_ocr_words_bounding_boxes(
             max_y = max(all_y_coords)
             # PyMuPDF coordinates are typically in points (0-1200 range)
             # If max coordinates are much smaller than image dimensions, likely need conversion
-            if max_x < width * 0.6 and max_y < height * 0.6 and max_x < 1500 and max_y < 1500:
+            if (
+                max_x < width * 0.6
+                and max_y < height * 0.6
+                and max_x < 1500
+                and max_y < 1500
+            ):
                 # Estimate source dimensions from actual coordinate range
                 # Add some padding to account for coordinates not reaching edges
-                source_width = max(max_x * 1.1, 612)  # Default to US Letter width if too small
-                source_height = max(max_y * 1.1, 792)  # Default to US Letter height if too small
+                source_width = max(
+                    max_x * 1.1, 612
+                )  # Default to US Letter width if too small
+                source_height = max(
+                    max_y * 1.1, 792
+                )  # Default to US Letter height if too small
                 needs_coordinate_conversion = True
 
     # Calculate scaling factors if conversion is needed

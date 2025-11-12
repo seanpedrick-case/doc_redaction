@@ -1,6 +1,6 @@
+import logging
 import os
 from pathlib import Path
-import logging
 
 import gradio as gr
 import pandas as pd
@@ -153,7 +153,6 @@ from tools.config import (
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
     USE_GREEDY_DUPLICATE_DETECTION,
-    USER_GUIDE_URL,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
 from tools.custom_csvlogger import CSVLogger_custom
@@ -263,6 +262,7 @@ FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 ###
 app = FastAPI()
 
+
 def register_log_filter() -> None:
     """
     Removes logs from healthiness/readiness endpoints so they don't spam
@@ -278,6 +278,7 @@ def register_log_filter() -> None:
             )
 
     logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+
 
 register_log_filter()
 

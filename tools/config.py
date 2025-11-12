@@ -10,7 +10,7 @@ from typing import List
 from dotenv import load_dotenv
 from tldextract import TLDExtract
 
-from tools.secure_path_utils import validate_path_safety, secure_file_read
+from tools.secure_path_utils import secure_file_read, validate_path_safety
 
 today_rev = datetime.now().strftime("%Y%m%d")
 HOST_NAME = socket.gethostname()
@@ -80,6 +80,7 @@ def add_folder_to_path(folder_path: str):
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
 
+
 def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
     """
     Validate and return a safe URL with enhanced security checks.
@@ -124,6 +125,7 @@ def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
         print(f"URL validation failed: {e}")
         return "https://seanpedrick-case.github.io/doc_redaction"  # Safe fallback
 
+
 def sanitize_markdown_text(text: str) -> str:
     """
     Sanitize markdown text by removing dangerous HTML/scripts while preserving
@@ -131,24 +133,39 @@ def sanitize_markdown_text(text: str) -> str:
     """
     if not text or not isinstance(text, str):
         return ""
-    
+
     # Remove script tags and their content
-    text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.IGNORECASE | re.DOTALL)
-    
+    text = re.sub(
+        r"<script[^>]*>.*?</script>", "", text, flags=re.IGNORECASE | re.DOTALL
+    )
+
     # Remove iframe, object, embed tags
-    text = re.sub(r'<(iframe|object|embed)[^>]*>.*?</\1>', '', text, flags=re.IGNORECASE | re.DOTALL)
-    
+    text = re.sub(
+        r"<(iframe|object|embed)[^>]*>.*?</\1>",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
     # Remove event handlers (onclick, onerror, etc.)
-    text = re.sub(r'\s*on\w+\s*=\s*["\'][^"\']*["\']', '', text, flags=re.IGNORECASE)
-    
+    text = re.sub(r'\s*on\w+\s*=\s*["\'][^"\']*["\']', "", text, flags=re.IGNORECASE)
+
     # Remove javascript: and data: URLs from markdown links
-    text = re.sub(r'\[([^\]]+)\]\(javascript:[^\)]+\)', r'[\1]', text, flags=re.IGNORECASE)
-    text = re.sub(r'\[([^\]]+)\]\(data:[^\)]+\)', r'[\1]', text, flags=re.IGNORECASE)
-    
+    text = re.sub(
+        r"\[([^\]]+)\]\(javascript:[^\)]+\)", r"[\1]", text, flags=re.IGNORECASE
+    )
+    text = re.sub(r"\[([^\]]+)\]\(data:[^\)]+\)", r"[\1]", text, flags=re.IGNORECASE)
+
     # Remove dangerous HTML attributes
-    text = re.sub(r'\s*(style|onerror|onload|onclick)\s*=\s*["\'][^"\']*["\']', '', text, flags=re.IGNORECASE)
-    
+    text = re.sub(
+        r'\s*(style|onerror|onload|onclick)\s*=\s*["\'][^"\']*["\']',
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
     return text.strip()
+
 
 ###
 # LOAD CONFIG FROM ENV FILE
@@ -895,10 +912,6 @@ COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "
 SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_FEEDBACK_BUTTONS", "False")
 )
-
-
-
-
 
 
 SHOW_EXAMPLES = convert_string_to_boolean(
