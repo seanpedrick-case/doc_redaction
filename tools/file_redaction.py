@@ -1228,12 +1228,23 @@ def choose_and_run_redactor(
                                     applied_redaction_pymupdf_doc.delete_page(
                                         original_page_number
                                     )
-                                    applied_redaction_pymupdf_doc.insert_pdf(
-                                        applied_redaction_page.parent,
-                                        from_page=applied_redaction_page.number,
-                                        to_page=applied_redaction_page.number,
-                                        start_at=original_page_number,
-                                    )
+                                    try:
+                                        applied_redaction_pymupdf_doc.insert_pdf(
+                                            applied_redaction_page.parent,
+                                            from_page=applied_redaction_page.number,
+                                            to_page=applied_redaction_page.number,
+                                            start_at=original_page_number,
+                                        )
+                                    except IndexError:
+                                        # Retry without link processing if it fails
+                                        print("IndexError: Retrying without link processing")
+                                        applied_redaction_pymupdf_doc.insert_pdf(
+                                            applied_redaction_page.parent,
+                                            from_page=applied_redaction_page.number,
+                                            to_page=applied_redaction_page.number,
+                                            start_at=original_page_number,
+                                            links=False,
+                                        )
 
                                     applied_redaction_pymupdf_doc[
                                         original_page_number
@@ -1283,12 +1294,23 @@ def choose_and_run_redactor(
                                     applied_redaction_pymupdf_doc.delete_page(
                                         original_page_number
                                     )
-                                    applied_redaction_pymupdf_doc.insert_pdf(
-                                        applied_redaction_page.parent,
-                                        from_page=applied_redaction_page.number,
-                                        to_page=applied_redaction_page.number,
-                                        start_at=original_page_number,
-                                    )
+                                    try:
+                                        applied_redaction_pymupdf_doc.insert_pdf(
+                                            applied_redaction_page.parent,
+                                            from_page=applied_redaction_page.number,
+                                            to_page=applied_redaction_page.number,
+                                            start_at=original_page_number,
+                                        )
+                                    except IndexError:
+                                        # Retry without link processing if it fails
+                                        print("IndexError: Retrying without link processing")
+                                        applied_redaction_pymupdf_doc.insert_pdf(
+                                            applied_redaction_page.parent,
+                                            from_page=applied_redaction_page.number,
+                                            to_page=applied_redaction_page.number,
+                                            start_at=original_page_number,
+                                            links=False,
+                                        )
 
                                     applied_redaction_pymupdf_doc[
                                         original_page_number
@@ -3638,16 +3660,16 @@ def redact_image_pdf(
                     # Whole-document Textract: use mediabox dimensions
                     textract_page_width = pymupdf_page.mediabox.width
                     textract_page_height = pymupdf_page.mediabox.height
-                    print(
-                        f"Using mediabox dimensions for Textract: {textract_page_width}x{textract_page_height}"
-                    )
+                    # print(
+                    #     f"Using mediabox dimensions for Textract: {textract_page_width}x{textract_page_height}"
+                    # )
                 else:
                     # Individual image Textract: use image dimensions (current behavior)
                     textract_page_width = page_width
                     textract_page_height = page_height
-                    print(
-                        f"Using image dimensions for Textract: {textract_page_width}x{textract_page_height}"
-                    )
+                    # print(
+                    #     f"Using image dimensions for Textract: {textract_page_width}x{textract_page_height}"
+                    # )
 
                 # textract_page_width = page_width
                 # textract_page_height = page_height
