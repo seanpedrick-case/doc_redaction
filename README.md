@@ -155,6 +155,14 @@ After running the command, the application will start, and you will see a local 
 
 Open this URL in your web browser to use the document redaction tool
 
+#### Command line interface
+
+If instead you want to run redactions or other app functions in CLI mode, run the following for instructions:
+
+```bash
+python cli_redact.py --help
+```
+
 ---
 
 

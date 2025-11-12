@@ -399,7 +399,9 @@ MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
 
 MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb").lower()
 
-GRADIO_SERVER_NAME = get_or_create_env_var("GRADIO_SERVER_NAME", "0.0.0.0")
+GRADIO_SERVER_NAME = get_or_create_env_var(
+    "GRADIO_SERVER_NAME", "127.0.0.1"
+)  # Use "0.0.0.0" for external access
 
 GRADIO_SERVER_PORT = int(get_or_create_env_var("GRADIO_SERVER_PORT", "7860"))
 
