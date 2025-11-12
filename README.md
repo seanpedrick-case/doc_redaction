@@ -112,7 +112,7 @@ source venv/bin/activate
 This project uses `pyproject.toml` to manage dependencies. You can install everything with a single pip command. This process will also download the required Spacy models and other packages directly from their URLs.
 
 ```bash
-pip install .[paddle,vlm]
+pip install .
 ```
 
 Alternatively, you can install from the `requirements_lightweight.txt` file:
