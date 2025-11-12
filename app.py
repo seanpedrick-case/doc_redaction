@@ -1349,7 +1349,7 @@ with blocks:
                                     interactive=False,
                                 )
             else:
-                total_pdf_page_count.render() # Need to render in both cases, as included in examples
+                total_pdf_page_count.render()  # Need to render in both cases, as included in examples
 
             if GET_COST_CODES or ENFORCE_COST_CODES:
                 with gr.Accordion("Assign task to cost code", open=True, visible=True):
