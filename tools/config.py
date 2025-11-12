@@ -7,6 +7,7 @@ import urllib.parse
 from datetime import datetime
 from typing import List
 
+import bleach
 from dotenv import load_dotenv
 from tldextract import TLDExtract
 
@@ -134,12 +135,32 @@ def sanitize_markdown_text(text: str) -> str:
     if not text or not isinstance(text, str):
         return ""
 
-    # Remove script tags and their content
-    text = re.sub(
-        r"<script[^>]*>.*?</script>", "", text, flags=re.IGNORECASE | re.DOTALL
+    # Remove dangerous HTML tags and scripts using bleach
+    # Define allowed tags for markdown (customize as needed)
+    allowed_tags = [
+        "a",
+        "b",
+        "strong",
+        "em",
+        "i",
+        "u",
+        "code",
+        "pre",
+        "blockquote",
+        "ul",
+        "ol",
+        "li",
+        "p",
+        "br",
+        "hr",
+    ]
+    allowed_attributes = {"a": ["href", "title", "rel"]}
+    # Clean the text to strip (remove) any tags not in allowed_tags, and remove all script/iframe/etc.
+    text = bleach.clean(
+        text, tags=allowed_tags, attributes=allowed_attributes, strip=True
     )
 
-    # Remove iframe, object, embed tags
+    # Remove iframe, object, embed tags (should already be stripped, but keep for redundancy)
     text = re.sub(
         r"<(iframe|object|embed)[^>]*>.*?</\1>",
         "",

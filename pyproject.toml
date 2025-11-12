@@ -16,6 +16,7 @@ dependencies = [
     "pdfminer.six==20251107",
     "pdf2image==1.17.0",
     "pymupdf==1.26.6",
+    "bleach==6.3.0",
     "opencv-python==4.12.0.88",
     "presidio_analyzer==2.2.360",
     "presidio_anonymizer==2.2.360",
