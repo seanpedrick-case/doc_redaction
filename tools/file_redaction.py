@@ -5279,6 +5279,53 @@ def visualise_ocr_words_bounding_boxes(
     # Get image dimensions
     height, width = image_cv.shape[:2]
 
+    # Detect if coordinates need conversion from PyMuPDF to image space
+    # This happens when Textract uses mediabox dimensions (PyMuPDF coordinates)
+    # instead of image pixel dimensions
+    needs_coordinate_conversion = False
+    source_width = width
+    source_height = height
+    
+    if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+        # Collect all bounding box coordinates to detect coordinate system
+        all_x_coords = []
+        all_y_coords = []
+        
+        for line_key, line_data in ocr_results.items():
+            if not isinstance(line_data, dict) or "words" not in line_data:
+                continue
+            words = line_data.get("words", [])
+            for word_data in words:
+                if not isinstance(word_data, dict):
+                    continue
+                bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+                if len(bbox) == 4:
+                    x1, y1, x2, y2 = bbox
+                    all_x_coords.extend([x1, x2])
+                    all_y_coords.extend([y1, y2])
+        
+        # Check if coordinates appear to be in PyMuPDF range (typically 0-1200 points)
+        # and image is much larger (indicating coordinate system mismatch)
+        if all_x_coords and all_y_coords:
+            max_x = max(all_x_coords)
+            max_y = max(all_y_coords)
+            # PyMuPDF coordinates are typically in points (0-1200 range)
+            # If max coordinates are much smaller than image dimensions, likely need conversion
+            if max_x < width * 0.6 and max_y < height * 0.6 and max_x < 1500 and max_y < 1500:
+                # Estimate source dimensions from actual coordinate range
+                # Add some padding to account for coordinates not reaching edges
+                source_width = max(max_x * 1.1, 612)  # Default to US Letter width if too small
+                source_height = max(max_y * 1.1, 792)  # Default to US Letter height if too small
+                needs_coordinate_conversion = True
+
+    # Calculate scaling factors if conversion is needed
+    if needs_coordinate_conversion:
+        scale_x = width / source_width
+        scale_y = height / source_height
+    else:
+        scale_x = 1.0
+        scale_y = 1.0
+
     # Define confidence ranges and colors for bounding boxes (bright colors)
     confidence_ranges = [
         (80, 100, (0, 255, 0), "High (80-100%)"),  # Green
@@ -5319,6 +5366,13 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             x1, y1, x2, y2 = bbox
+
+            # Convert coordinates if needed (from PyMuPDF to image space)
+            if needs_coordinate_conversion:
+                x1 = x1 * scale_x
+                y1 = y1 * scale_y
+                x2 = x2 * scale_x
+                y2 = y2 * scale_y
 
             # Ensure coordinates are within image bounds
             x1 = max(0, min(int(x1), width))
@@ -5384,6 +5438,13 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             x1, y1, x2, y2 = bbox
+
+            # Convert coordinates if needed (from PyMuPDF to image space)
+            if needs_coordinate_conversion:
+                x1 = x1 * scale_x
+                y1 = y1 * scale_y
+                x2 = x2 * scale_x
+                y2 = y2 * scale_y
 
             # Ensure coordinates are within image bounds
             x1 = max(0, min(int(x1), width))
