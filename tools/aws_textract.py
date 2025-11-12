@@ -1040,8 +1040,6 @@ def convert_page_question_answer_to_custom_image_recognizer_results(
         )
         results.append(question_result)
 
-        print("question_result:", question_result)
-
         # --- Process Answer Bounding Box ---
         answer_bbox = {
             "left": qa_result.get("Answer_left", 0) * image_width,

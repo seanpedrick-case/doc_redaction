@@ -10,7 +10,7 @@ license: agpl-3.0
 ---
 # Document redaction
 
-version: 1.5.2
+version: 1.5.3
 
 Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
@@ -112,7 +112,7 @@ source venv/bin/activate
 This project uses `pyproject.toml` to manage dependencies. You can install everything with a single pip command. This process will also download the required Spacy models and other packages directly from their URLs.
 
 ```bash
-pip install .[paddle,vlm]
+pip install .
 ```
 
 Alternatively, you can install from the `requirements_lightweight.txt` file:
@@ -154,6 +154,14 @@ python app.py
 After running the command, the application will start, and you will see a local URL in your terminal (usually `http://127.0.0.1:7860`).
 
 Open this URL in your web browser to use the document redaction tool
+
+#### Command line interface
+
+If instead you want to run redactions or other app functions in CLI mode, run the following for instructions:
+
+```bash
+python cli_redact.py --help
+```
 
 ---
 
