@@ -1,10 +1,13 @@
 import os
 from pathlib import Path
+import logging
 
 import gradio as gr
 import pandas as pd
 import spaces
 from fastapi import FastAPI, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from gradio_image_annotation import image_annotator
 
 from tools.auth import authenticate_user
@@ -259,8 +262,24 @@ FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 # Load in FastAPI app
 ###
 app = FastAPI()
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
+def register_log_filter() -> None:
+    """
+    Removes logs from healthiness/readiness endpoints so they don't spam
+    and pollute application log flow
+    """
+
+    class EndpointFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            return (
+                record.args  # type: ignore
+                and len(record.args) >= 3
+                and record.args[2] not in ["/_/health", "/_/ready"]  # type: ignore
+            )
+
+    logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+
+register_log_filter()
 
 # Added to pass lint check, no effect
 spaces.annotations
