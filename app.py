@@ -301,7 +301,7 @@ in_doc_files = gr.File(
 total_pdf_page_count = gr.Number(
     label="Total page count",
     value=0,
-    visible=True,
+    visible=SHOW_COSTS,
     interactive=False,
 )
 
@@ -1349,7 +1349,7 @@ with blocks:
                                     interactive=False,
                                 )
             else:
-                total_pdf_page_count.render(visible=False)
+                total_pdf_page_count.render() # Need to render in both cases, as included in examples
 
             if GET_COST_CODES or ENFORCE_COST_CODES:
                 with gr.Accordion("Assign task to cost code", open=True, visible=True):
