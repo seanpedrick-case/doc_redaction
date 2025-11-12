@@ -253,6 +253,10 @@ Configurations for the Gradio UI, server behavior, and application limits.
     * **Description:** A safe URL pointing to the user guide. The URL is validated against a list of allowed domains.
     * **Default Value:** `"https://seanpedrick-case.github.io/doc_redaction"`
 
+* **`INTRO_TEXT`**
+    * **Description:** Custom introduction text for the app. Should be in Markdown format, html is stripped out.
+    * **Default Value:** `"Too long to display here, see tools/config.py"`
+
 * **`SHOW_EXAMPLES`**
     * **Description:** If set to `"True"`, displays example files in the Gradio interface.
     * **Default Value:** `"True"`

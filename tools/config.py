@@ -1,13 +1,17 @@
 import logging
 import os
+import re
 import socket
 import tempfile
 import urllib.parse
 from datetime import datetime
 from typing import List
 
+import bleach
 from dotenv import load_dotenv
 from tldextract import TLDExtract
+
+from tools.secure_path_utils import secure_file_read, validate_path_safety
 
 today_rev = datetime.now().strftime("%Y%m%d")
 HOST_NAME = socket.gethostname()
@@ -76,6 +80,112 @@ def add_folder_to_path(folder_path: str):
             # print(f"Directory {folder_path} already exists in PATH.")
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
+
+
+def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
+    """
+    Validate and return a safe URL with enhanced security checks.
+    """
+    if allowed_domains is None:
+        allowed_domains = [
+            "seanpedrick-case.github.io",
+            "github.io",
+            "github.com",
+            "sharepoint.com",
+        ]
+
+    try:
+        parsed = urllib.parse.urlparse(url_candidate)
+
+        # Basic structure validation
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("Invalid URL structure")
+
+        # Security checks
+        if parsed.scheme not in ["https"]:  # Only allow HTTPS
+            raise ValueError("Only HTTPS URLs are allowed for security")
+
+        # Domain validation
+        domain = parsed.netloc.lower()
+        if not any(domain.endswith(allowed) for allowed in allowed_domains):
+            raise ValueError(f"Domain not in allowed list: {domain}")
+
+        # Additional security checks
+        if any(
+            suspicious in domain for suspicious in ["..", "//", "javascript:", "data:"]
+        ):
+            raise ValueError("Suspicious URL patterns detected")
+
+        # Path validation (prevent path traversal)
+        if ".." in parsed.path or "//" in parsed.path:
+            raise ValueError("Path traversal attempts detected")
+
+        return url_candidate
+
+    except Exception as e:
+        print(f"URL validation failed: {e}")
+        return "https://seanpedrick-case.github.io/doc_redaction"  # Safe fallback
+
+
+def sanitize_markdown_text(text: str) -> str:
+    """
+    Sanitize markdown text by removing dangerous HTML/scripts while preserving
+    safe markdown syntax.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+
+    # Remove dangerous HTML tags and scripts using bleach
+    # Define allowed tags for markdown (customize as needed)
+    allowed_tags = [
+        "a",
+        "b",
+        "strong",
+        "em",
+        "i",
+        "u",
+        "code",
+        "pre",
+        "blockquote",
+        "ul",
+        "ol",
+        "li",
+        "p",
+        "br",
+        "hr",
+    ]
+    allowed_attributes = {"a": ["href", "title", "rel"]}
+    # Clean the text to strip (remove) any tags not in allowed_tags, and remove all script/iframe/etc.
+    text = bleach.clean(
+        text, tags=allowed_tags, attributes=allowed_attributes, strip=True
+    )
+
+    # Remove iframe, object, embed tags (should already be stripped, but keep for redundancy)
+    text = re.sub(
+        r"<(iframe|object|embed)[^>]*>.*?</\1>",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    # Remove event handlers (onclick, onerror, etc.)
+    text = re.sub(r'\s*on\w+\s*=\s*["\'][^"\']*["\']', "", text, flags=re.IGNORECASE)
+
+    # Remove javascript: and data: URLs from markdown links
+    text = re.sub(
+        r"\[([^\]]+)\]\(javascript:[^\)]+\)", r"[\1]", text, flags=re.IGNORECASE
+    )
+    text = re.sub(r"\[([^\]]+)\]\(data:[^\)]+\)", r"[\1]", text, flags=re.IGNORECASE)
+
+    # Remove dangerous HTML attributes
+    text = re.sub(
+        r'\s*(style|onerror|onload|onclick)\s*=\s*["\'][^"\']*["\']',
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    return text.strip()
 
 
 ###
@@ -289,7 +399,9 @@ MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
 
 MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb").lower()
 
-GRADIO_SERVER_NAME = get_or_create_env_var("GRADIO_SERVER_NAME", "0.0.0.0")
+GRADIO_SERVER_NAME = get_or_create_env_var(
+    "GRADIO_SERVER_NAME", "127.0.0.1"
+)  # Use "0.0.0.0" for external access
 
 GRADIO_SERVER_PORT = int(get_or_create_env_var("GRADIO_SERVER_PORT", "7860"))
 
@@ -765,6 +877,50 @@ COMPRESS_REDACTED_PDF = convert_string_to_boolean(
 ###
 # APP RUN / GUI OPTIONS
 ###
+# Link to user guide - ensure it is a valid URL
+USER_GUIDE_URL = validate_safe_url(
+    get_or_create_env_var(
+        "USER_GUIDE_URL", "https://seanpedrick-case.github.io/doc_redaction"
+    )
+)
+
+DEFAULT_INTRO_TEXT = f"""# Document redaction
+
+    Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide]({USER_GUIDE_URL}) for a full walkthrough of all the features in the app.
+    
+    To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
+
+    Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
+
+    NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs."""
+
+INTRO_TEXT = get_or_create_env_var("INTRO_TEXT", DEFAULT_INTRO_TEXT)
+
+# Read in intro text from a text file if it is a path to a text file
+if INTRO_TEXT.endswith(".txt"):
+    # Validate the path is safe (with base path for relative paths)
+    if validate_path_safety(INTRO_TEXT, base_path="."):
+        try:
+            # Use secure file read with explicit encoding
+            INTRO_TEXT = secure_file_read(".", INTRO_TEXT, encoding="utf-8")
+        except FileNotFoundError:
+            print(f"Warning: Intro text file not found: {INTRO_TEXT}")
+            INTRO_TEXT = DEFAULT_INTRO_TEXT
+        except Exception as e:
+            print(f"Error reading intro text file: {e}")
+            # Fallback to default
+            INTRO_TEXT = DEFAULT_INTRO_TEXT
+    else:
+        print(f"Warning: Unsafe file path detected for INTRO_TEXT: {INTRO_TEXT}")
+        INTRO_TEXT = DEFAULT_INTRO_TEXT
+
+# Sanitize the text
+INTRO_TEXT = sanitize_markdown_text(INTRO_TEXT.strip('"').strip("'"))
+
+# Ensure we have valid content after sanitization
+if not INTRO_TEXT or not INTRO_TEXT.strip():
+    print("Warning: Intro text is empty after sanitization, using default intro text")
+    INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
 
 TLDEXTRACT_CACHE = get_or_create_env_var("TLDEXTRACT_CACHE", "tmp/tld/")
 try:
@@ -780,58 +936,6 @@ SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_FEEDBACK_BUTTONS", "False")
 )
 
-
-# Link to user guide - ensure it is a valid URL
-def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
-    """
-    Validate and return a safe URL with enhanced security checks.
-    """
-    if allowed_domains is None:
-        allowed_domains = [
-            "seanpedrick-case.github.io",
-            "github.io",
-            "github.com",
-            "sharepoint.com",
-        ]
-
-    try:
-        parsed = urllib.parse.urlparse(url_candidate)
-
-        # Basic structure validation
-        if not parsed.scheme or not parsed.netloc:
-            raise ValueError("Invalid URL structure")
-
-        # Security checks
-        if parsed.scheme not in ["https"]:  # Only allow HTTPS
-            raise ValueError("Only HTTPS URLs are allowed for security")
-
-        # Domain validation
-        domain = parsed.netloc.lower()
-        if not any(domain.endswith(allowed) for allowed in allowed_domains):
-            raise ValueError(f"Domain not in allowed list: {domain}")
-
-        # Additional security checks
-        if any(
-            suspicious in domain for suspicious in ["..", "//", "javascript:", "data:"]
-        ):
-            raise ValueError("Suspicious URL patterns detected")
-
-        # Path validation (prevent path traversal)
-        if ".." in parsed.path or "//" in parsed.path:
-            raise ValueError("Path traversal attempts detected")
-
-        return url_candidate
-
-    except Exception as e:
-        print(f"URL validation failed: {e}")
-        return "https://seanpedrick-case.github.io/doc_redaction"  # Safe fallback
-
-
-USER_GUIDE_URL = validate_safe_url(
-    get_or_create_env_var(
-        "USER_GUIDE_URL", "https://seanpedrick-case.github.io/doc_redaction"
-    )
-)
 
 SHOW_EXAMPLES = convert_string_to_boolean(
     get_or_create_env_var("SHOW_EXAMPLES", "True")

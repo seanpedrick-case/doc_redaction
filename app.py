@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -5,6 +6,8 @@ import gradio as gr
 import pandas as pd
 import spaces
 from fastapi import FastAPI, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from gradio_image_annotation import image_annotator
 
 from tools.auth import authenticate_user
@@ -102,6 +105,7 @@ from tools.config import (
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
     HOST_NAME,
     INPUT_FOLDER,
+    INTRO_TEXT,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     LOCAL_OCR_MODEL_OPTIONS,
     LOG_FILE_NAME,
@@ -149,7 +153,6 @@ from tools.config import (
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
     USE_GREEDY_DUPLICATE_DETECTION,
-    USER_GUIDE_URL,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
 from tools.custom_csvlogger import CSVLogger_custom
@@ -258,8 +261,26 @@ FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 # Load in FastAPI app
 ###
 app = FastAPI()
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
+
+def register_log_filter() -> None:
+    """
+    Removes logs from healthiness/readiness endpoints so they don't spam
+    and pollute application log flow
+    """
+
+    class EndpointFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            return (
+                record.args  # type: ignore
+                and len(record.args) >= 3
+                and record.args[2] not in ["/_/health", "/_/ready"]  # type: ignore
+            )
+
+    logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+
+
+register_log_filter()
 
 # Added to pass lint check, no effect
 spaces.annotations
@@ -280,7 +301,7 @@ in_doc_files = gr.File(
 total_pdf_page_count = gr.Number(
     label="Total page count",
     value=0,
-    visible=True,
+    visible=SHOW_COSTS,
     interactive=False,
 )
 
@@ -1036,17 +1057,7 @@ with blocks:
     # UI DESIGN
     ###
 
-    gr.Markdown(
-        f"""# Document redaction
-
-    Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide]({USER_GUIDE_URL}) for a full walkthrough of all the features in the app.
-    
-    To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
-
-    Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
-
-    NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs."""
-    )
+    gr.Markdown(INTRO_TEXT)
 
     ###
     # REDACTION PDF/IMAGES TABLE
@@ -1337,6 +1348,8 @@ with blocks:
                                     precision=2,
                                     interactive=False,
                                 )
+            else:
+                total_pdf_page_count.render()  # Need to render in both cases, as included in examples
 
             if GET_COST_CODES or ENFORCE_COST_CODES:
                 with gr.Accordion("Assign task to cost code", open=True, visible=True):
