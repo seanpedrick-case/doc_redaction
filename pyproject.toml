@@ -8,7 +8,7 @@ Repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 [project]
 name = "doc_redaction"
-version = "1.5.2"
+version = "1.5.3"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 requires-python = ">=3.10"
