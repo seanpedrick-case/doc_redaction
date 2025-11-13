@@ -1,4 +1,6 @@
+import base64
 import copy
+import io
 import json
 import os
 import re
@@ -13,6 +15,7 @@ import gradio as gr
 import numpy as np
 import pandas as pd
 import pytesseract
+import requests
 from pdfminer.layout import LTChar
 from PIL import Image
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
@@ -25,8 +28,12 @@ from tools.config import (
     HYBRID_OCR_MAX_NEW_TOKENS, 
     HYBRID_OCR_PADDING,
     LOAD_PADDLE_AT_STARTUP,
+    LLAMA_SERVER_API_URL,
+    LLAMA_SERVER_MODEL_NAME,
+    LLAMA_SERVER_TIMEOUT,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
+    MAX_NEW_TOKENS,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
     PADDLE_MODEL_PATH,
@@ -45,7 +52,7 @@ from tools.config import (
 from tools.helper_functions import clean_unicode_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
-from tools.run_vlm import extract_text_from_image_vlm
+from tools.run_vlm import extract_text_from_image_vlm, full_page_ocr_vlm_prompt
 from tools.secure_path_utils import validate_folder_containment
 from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
@@ -644,6 +651,221 @@ def _prepare_image_for_vlm(image: Image.Image) -> Image.Image:
     return image
 
 
+def _call_llama_server_vlm_api(
+    image: Image.Image,
+    prompt: str,
+    api_url: str = None,
+    model_name: str = None,
+    max_new_tokens: int = None,
+    temperature: float = None,
+    top_p: float = None,
+    top_k: int = None,
+    repetition_penalty: float = None,
+    timeout: int = None,
+    stream: bool = True,
+) -> str:
+    """
+    Calls a llama-server API endpoint with an image and text prompt.
+    
+    This function converts a PIL Image to base64 and sends it to the llama-server
+    API endpoint using the OpenAI-compatible chat completions format.
+    
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        api_url: Base URL of the llama-server API (defaults to LLAMA_SERVER_API_URL from config)
+        model_name: Optional model name to use (defaults to LLAMA_SERVER_MODEL_NAME from config)
+        max_new_tokens: Maximum number of tokens to generate
+        temperature: Sampling temperature
+        top_p: Nucleus sampling parameter
+        top_k: Top-k sampling parameter
+        repetition_penalty: Penalty for token repetition
+        timeout: Request timeout in seconds (defaults to LLAMA_SERVER_TIMEOUT from config)
+        stream: Whether to stream the response
+    
+    Returns:
+        str: The generated text response from the model
+        
+    Raises:
+        ConnectionError: If the API request fails
+        ValueError: If the response format is invalid
+    """
+    if api_url is None:
+        api_url = LLAMA_SERVER_API_URL
+    if model_name is None:
+        model_name = LLAMA_SERVER_MODEL_NAME if LLAMA_SERVER_MODEL_NAME else None
+    if timeout is None:
+        timeout = LLAMA_SERVER_TIMEOUT
+    
+    # Convert PIL Image to base64
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    image_bytes = buffer.getvalue()
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+    
+    # Prepare the request payload in OpenAI-compatible format
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{image_base64}"
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": prompt
+                }
+            ]
+        }
+    ]
+    
+    payload = {
+        "messages": messages,
+        "stream": stream,
+    }
+    
+    # Add optional parameters if provided
+    if model_name:
+        payload["model"] = model_name
+    if max_new_tokens is not None:
+        payload["max_tokens"] = max_new_tokens
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if top_k is not None:
+        payload["top_k"] = top_k
+    if repetition_penalty is not None:
+        payload["repeat_penalty"] = repetition_penalty
+    
+    endpoint = f"{api_url}/v1/chat/completions"
+    
+    # try:
+    #     response = requests.post(
+    #         endpoint,
+    #         json=payload,
+    #         headers={"Content-Type": "application/json"},
+    #         timeout=timeout
+    #     )
+    #     response.raise_for_status()
+        
+    #     result = response.json()
+        
+    #     # Extract the response text from OpenAI-compatible format
+    #     if "choices" not in result or len(result["choices"]) == 0:
+    #         raise ValueError("Invalid response format from llama-server: no choices found")
+        
+    #     message = result["choices"][0].get("message", {})
+    #     content = message.get("content", "")
+        
+    #     if not content:
+    #         raise ValueError("Invalid response format from llama-server: no content in message")
+        
+    #     return content
+        
+    # except requests.exceptions.RequestException as e:
+    #     raise ConnectionError(f"Failed to connect to llama-server at {api_url}: {str(e)}")
+    # except json.JSONDecodeError as e:
+    #     raise ValueError(f"Invalid JSON response from llama-server: {str(e)}")
+    # except Exception as e:
+    #     raise RuntimeError(f"Error calling llama-server API: {str(e)}")
+
+    
+
+    try:
+        if stream:
+            # Handle streaming response
+            response = requests.post(
+                endpoint,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                stream=True,
+                timeout=timeout
+            )
+            response.raise_for_status()
+            
+            final_tokens = []
+            output_tokens = 0
+            
+            for line in response.iter_lines():
+                if not line:  # Skip empty lines
+                    continue
+
+                line = line.decode('utf-8')
+                if line.startswith('data: '):
+                    data = line[6:]  # Remove 'data: ' prefix
+                    if data.strip() == '[DONE]':
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        if 'choices' in chunk and len(chunk['choices']) > 0:
+                            delta = chunk['choices'][0].get('delta', {})
+                            token = delta.get('content', '')
+                            if token:
+                                print(token, end="", flush=True)
+                                final_tokens.append(token)
+                                # output_tokens += 1
+                    except json.JSONDecodeError:
+                        continue
+            
+            print()  # newline after stream finishes
+            
+            text = "".join(final_tokens)
+            
+            # Estimate input tokens (rough approximation)
+            # input_tokens = len(prompt.split())
+            
+            # return {
+            #     "choices": [
+            #         {
+            #             "index": 0,
+            #             "finish_reason": "stop",
+            #             "message": {"role": "assistant", "content": text},
+            #         }
+            #     ],
+            #     "usage": {
+            #         "prompt_tokens": input_tokens,
+            #         "completion_tokens": output_tokens,
+            #         "total_tokens": input_tokens + output_tokens,
+            #     },
+            # }
+            return text
+
+        else:
+            # Handle non-streaming response
+            response = requests.post(
+                endpoint,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=timeout
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # Ensure the response has the expected format
+            if 'choices' not in result or len(result['choices']) == 0:
+                raise ValueError("Invalid response format from llama-server: no choices found")
+
+            message = result["choices"][0].get("message", {})
+            content = message.get("content", "")
+            
+            if not content:
+                raise ValueError("Invalid response format from llama-server: no content in message")
+            
+            return content
+            
+    except requests.exceptions.RequestException as e:
+        raise ConnectionError(f"Failed to connect to llama-server at {api_url}: {str(e)}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON response from llama-server: {str(e)}")
+    except Exception as e:
+        raise RuntimeError(f"Error calling llama-server API: {str(e)}")
+
+
 def _vlm_ocr_predict(
     image: Image.Image,
     prompt: str = "Extract the text content from this image.",
@@ -755,15 +977,116 @@ def _vlm_ocr_predict(
         return {"rec_texts": [], "rec_scores": []}
 
 
+def _llama_server_ocr_predict(
+    image: Image.Image,
+    prompt: str = "Extract the text content from this image.",
+) -> Dict[str, Any]:
+    """
+    Llama-server OCR prediction function that mimics PaddleOCR's interface.
+    Calls an external llama-server API instead of a local model.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+
+    Returns:
+        Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
+    """
+    try:
+        # Validate image exists and is not None
+        if image is None:
+            print("Llama-server OCR error: Image is None")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Llama-server OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+        except Exception as size_error:
+            print(f"Llama-server OCR error: Could not get image size: {size_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+                width, height = image.size
+        except Exception as convert_error:
+            print(f"Llama-server OCR error: Could not convert image to RGB: {convert_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        try:
+            image = _prepare_image_for_vlm(image)
+            width, height = image.size
+        except Exception as prep_error:
+            print(f"Llama-server OCR error: Could not prepare image for VLM: {prep_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Use the llama-server API to extract text
+        extracted_text = _call_llama_server_vlm_api(
+            image=image,
+            prompt=prompt,
+            max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+            temperature=None,
+            top_p=None,
+            top_k=None,
+            repetition_penalty=None,
+        )
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None:
+            return {"rec_texts": [], "rec_scores": []}
+
+        if not isinstance(extracted_text, str):
+            return {"rec_texts": [], "rec_scores": []}
+
+        if extracted_text.strip():
+            # Clean the text
+            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
+            cleaned_text = cleaned_text.strip()
+
+            # Split into words for compatibility with PaddleOCR format
+            words = cleaned_text.split()
+
+            # If text has more than 30 words, assume something went wrong and skip it
+            if len(words) > 30:
+                print(
+                    f"Llama-server OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+
+            # Create PaddleOCR-compatible result
+            result = {
+                "rec_texts": words,
+                "rec_scores": [0.95] * len(words),  # High confidence for llama-server results
+            }
+
+            return result
+        else:
+            return {"rec_texts": [], "rec_scores": []}
+
+    except Exception as e:
+        print(f"Llama-server OCR error: {e}")
+        import traceback
+        print(f"Llama-server OCR error traceback: {traceback.format_exc()}")
+        return {"rec_texts": [], "rec_scores": []}
+
+
 def _vlm_page_ocr_predict(
     image: Image.Image,
+    image_name: str = "vlm_page_ocr_input_image.png",
 ) -> Dict[str, List]:
     """
     VLM page-level OCR prediction that returns structured line-level results with bounding boxes.
     
     Args:
         image: PIL Image to process (full page)
-    
+        image_name: Name of the image for debugging
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
         matching the format expected by perform_ocr
@@ -849,39 +1172,27 @@ def _vlm_page_ocr_predict(
                 "model": [],
             }
 
+        # Save input image for debugging if environment variable is set
+        if SAVE_VLM_INPUT_IMAGES:
+            try:
+                vlm_debug_dir = os.path.join(
+                    OUTPUT_FOLDER,
+                    "vlm_whole_page_visualisations/vlm_input_images",
+                )
+                os.makedirs(vlm_debug_dir, exist_ok=True)
+                image_name_safe = safe_sanitize_text(image_name)
+                image_name_shortened = image_name_safe[:20]
+                filename = f"{image_name_shortened}_vlm_page_input_image.png"
+                filepath = os.path.join(vlm_debug_dir, filename)
+                image.save(filepath)
+                # print(f"Saved VLM input image to: {filepath}")
+            except Exception as save_error:
+                print(
+                    f"Warning: Could not save VLM input image: {save_error}"
+                )
+
         # Create prompt that requests structured JSON output with bounding boxes
-        prompt = """Extract ALL individual text lines from this document image. 
-
-IMPORTANT: Extract each horizontal line of text separately. Do NOT combine multiple lines into paragraphs. Each line that appears on a separate horizontal row in the image should be a separate entry.
-
-For each individual line of text, provide:
-1. The text content (only the text on that single horizontal line)
-2. The bounding box coordinates as [x1, y1, x2, y2] where (x1,y1) is top-left and (x2,y2) is bottom-right of that specific line
-3. A confidence score between 0-100
-
-Rules:
-- Each line must be on a separate horizontal row in the image
-- If text spans multiple horizontal lines, split it into separate entries (one per line)
-- Do NOT combine lines that appear on different horizontal rows
-- Each bounding box should tightly fit around a single horizontal line of text
-- Empty lines should be skipped
-
-Return the results as a JSON array of objects with this exact format:
-[
-  {
-    "text": "first line text here",
-    "bbox": [x1, y1, x2, y2],
-    "confidence": 95
-  },
-  {
-    "text": "second line text here",
-    "bbox": [x1, y1, x2, y2],
-    "confidence": 95
-  },
-  ...
-]
-
-Only return valid JSON, no additional text or explanation."""
+        prompt = full_page_ocr_vlm_prompt
 
         # Use the VLM to extract structured text
         extracted_text = extract_text_from_image_vlm(
@@ -1063,6 +1374,313 @@ Only return valid JSON, no additional text or explanation."""
         print(f"VLM page OCR error: {e}")
         import traceback
         print(f"VLM page OCR error traceback: {traceback.format_exc()}")
+        return {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+
+def _llama_server_page_ocr_predict(
+    image: Image.Image,
+    image_name: str = "llama_server_page_ocr_input_image.png",
+) -> Dict[str, List]:
+    """
+    Llama-server page-level OCR prediction that returns structured line-level results with bounding boxes.
+    Calls an external llama-server API instead of a local model.
+    
+    Args:
+        image: PIL Image to process (full page)
+        image_name: Name of the image for debugging
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+        matching the format expected by perform_ocr
+    """
+    try:
+        # Validate image exists and is not None
+        if image is None:
+            print("Llama-server page OCR error: Image is None")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Llama-server page OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                }
+        except Exception as size_error:
+            print(f"Llama-server page OCR error: Could not get image size: {size_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+                width, height = image.size
+        except Exception as convert_error:
+            print(f"Llama-server page OCR error: Could not convert image to RGB: {convert_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        scale_x = 1.0
+        scale_y = 1.0
+        try:
+            original_width, original_height = image.size
+            image = _prepare_image_for_vlm(image)
+            processed_width, processed_height = image.size
+            # Calculate scale factors if image was resized
+            scale_x = original_width / processed_width if processed_width > 0 else 1.0
+            scale_y = original_height / processed_height if processed_height > 0 else 1.0
+        except Exception as prep_error:
+            print(f"Llama-server page OCR error: Could not prepare image for VLM: {prep_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Save input image for debugging if environment variable is set
+        if SAVE_VLM_INPUT_IMAGES:
+            try:
+                vlm_debug_dir = os.path.join(
+                    OUTPUT_FOLDER,
+                    "llama_server_visualisations/vlm_input_images",
+                )
+                os.makedirs(vlm_debug_dir, exist_ok=True)
+                image_name_safe = safe_sanitize_text(image_name)
+                image_name_shortened = image_name_safe[:20]
+                filename = f"{image_name_shortened}_llama_server_page_input_image.png"
+                filepath = os.path.join(vlm_debug_dir, filename)
+                image.save(filepath)
+                # print(f"Saved VLM input image to: {filepath}")
+            except Exception as save_error:
+                print(
+                    f"Warning: Could not save VLM input image: {save_error}"
+                )
+
+        # Create prompt that requests structured JSON output with bounding boxes
+        prompt = full_page_ocr_vlm_prompt
+
+        # Use the llama-server API to extract structured text
+        extracted_text = _call_llama_server_vlm_api(
+            image=image,
+            prompt=prompt,
+            max_new_tokens=None,
+            temperature=None,
+            top_p=None,
+            top_k=None,
+            repetition_penalty=None,
+        )
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None or not isinstance(extracted_text, str):
+            print("Llama-server page OCR warning: API returned None or invalid type")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Try to parse JSON from the response
+        # The API might return JSON wrapped in markdown code blocks or with extra text
+        extracted_text = extracted_text.strip()
+        
+        lines_data = None
+        
+        # First, try to parse the entire response as JSON
+        try:
+            lines_data = json.loads(extracted_text)
+        except json.JSONDecodeError:
+            pass
+        
+        # If that fails, try to extract JSON from markdown code blocks
+        if lines_data is None:
+            json_match = re.search(r'```(?:json)?\s*(\[.*?\])', extracted_text, re.DOTALL)
+            if json_match:
+                try:
+                    lines_data = json.loads(json_match.group(1))
+                except json.JSONDecodeError:
+                    pass
+        
+        # If that fails, try to find JSON array in the text (more lenient)
+        if lines_data is None:
+            # Try to find array starting with [ and ending with ]
+            start_idx = extracted_text.find('[')
+            if start_idx >= 0:
+                bracket_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(extracted_text)):
+                    if extracted_text[i] == '[':
+                        bracket_count += 1
+                    elif extracted_text[i] == ']':
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i
+                            break
+                if end_idx > start_idx:
+                    try:
+                        lines_data = json.loads(extracted_text[start_idx:end_idx + 1])
+                    except json.JSONDecodeError:
+                        pass
+
+        # Final attempt: try to parse as-is
+        if lines_data is None:
+            try:
+                lines_data = json.loads(extracted_text)
+            except json.JSONDecodeError:
+                pass
+
+        # If we still couldn't parse JSON, return empty results
+        if lines_data is None:
+            print(f"Llama-server page OCR error: Could not parse JSON response")
+            print(f"Response text: {extracted_text[:500]}")  # Print first 500 chars for debugging
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Validate that lines_data is a list
+        if not isinstance(lines_data, list):
+            print(f"Llama-server page OCR error: Expected list, got {type(lines_data)}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Convert API results to expected format
+        result = {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+        for line_item in lines_data:
+            if not isinstance(line_item, dict):
+                continue
+
+            text = line_item.get("text", "").strip()
+            if not text:
+                continue
+
+            bbox = line_item.get("bbox", [])
+            confidence = line_item.get("confidence", 50)  # Default to 50 if not provided
+
+            # Validate bounding box format
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                print(f"Llama-server page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}")
+                continue
+
+            x1, y1, x2, y2 = bbox
+
+            # Ensure coordinates are valid numbers
+            try:
+                x1 = float(x1)
+                y1 = float(y1)
+                x2 = float(x2)
+                y2 = float(y2)
+            except (ValueError, TypeError):
+                print(f"Llama-server page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}")
+                continue
+
+            # Ensure x2 > x1 and y2 > y1
+            if x2 <= x1 or y2 <= y1:
+                print(f"Llama-server page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}")
+                continue
+
+            # Scale coordinates back to original image space if image was resized
+            if scale_x != 1.0 or scale_y != 1.0:
+                x1 = x1 * scale_x
+                y1 = y1 * scale_y
+                x2 = x2 * scale_x
+                y2 = y2 * scale_y
+
+            # Convert from (x1, y1, x2, y2) to (left, top, width, height)
+            left = int(round(x1))
+            top = int(round(y1))
+            width = int(round(x2 - x1))
+            height = int(round(y2 - y1))
+
+            # Ensure confidence is in valid range (0-100)
+            try:
+                confidence = float(confidence)
+                confidence = max(0, min(100, confidence))  # Clamp to 0-100
+            except (ValueError, TypeError):
+                confidence = 50  # Default if invalid
+
+            result["text"].append(clean_unicode_text(text))
+            result["left"].append(left)
+            result["top"].append(top)
+            result["width"].append(width)
+            result["height"].append(height)
+            result["conf"].append(int(round(confidence)))
+            result["model"].append("Llama erver")
+
+        return result
+
+    except Exception as e:
+        print(f"Llama-server page OCR error: {e}")
+        import traceback
+        print(f"Llama-server page OCR error traceback: {traceback.format_exc()}")
         return {
             "text": [],
             "left": [],
@@ -2600,8 +3218,19 @@ class CustomImageAnalyzerEngine:
                 if original_image_for_visualization is not None
                 else image
             )
-            ocr_data = _vlm_page_ocr_predict(vlm_image)
+            ocr_data = _vlm_page_ocr_predict(vlm_image, image_name=image_name)
             # VLM returns data already in the expected format, so no conversion needed
+
+        elif self.ocr_engine == "llama-server":
+            # Llama-server page-level OCR - sends whole page to llama-server API and gets structured line-level results
+            # Use original image (before preprocessing) for llama-server since coordinates should be in original space
+            llama_server_image = (
+                original_image_for_visualization
+                if original_image_for_visualization is not None
+                else image
+            )
+            ocr_data = _llama_server_page_ocr_predict(llama_server_image, image_name=image_name)
+            # Llama-server returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "tesseract":
 

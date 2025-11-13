@@ -92,6 +92,12 @@ vlm = [
     "transformers==4.57.1",
     "accelerate==1.11.0",
     "bitsandbytes==0.48.2",
+    "sentencepiece==0.2.1", # Needed for PaddleOCRVL
+]
+
+# Run Gradio as an mcp server
+mcp = [
+    "gradio==5.49.1[mcp]"
 ]
 
 [project.urls]

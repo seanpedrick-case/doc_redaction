@@ -616,7 +616,7 @@ OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-) # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "vlm"
+) # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "vlm", "llama-server"
 
 
 
@@ -626,6 +626,10 @@ SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
 
 SHOW_PADDLE_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_PADDLE_MODEL_OPTIONS", "False")
+)
+
+SHOW_LLAMA_SERVER_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LLAMA_SERVER_OPTIONS", "False")
 )
 
 LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
@@ -638,6 +642,10 @@ PADDLE_OCR_INTRO_TEXT = get_or_create_env_var(
 
 VLM_OCR_INTRO_TEXT = get_or_create_env_var(
     "VLM_OCR_INTRO_TEXT", """"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM. """
+)
+
+LLAMA_SERVER_OCR_INTRO_TEXT = get_or_create_env_var(
+    "LLAMA_SERVER_OCR_INTRO_TEXT", """"llama-server" will call an external llama-server API to perform OCR using a vision model hosted remotely. """
 )
 
 HYBRID_PADDLE_VLM_INTRO_TEXT = get_or_create_env_var(
@@ -658,6 +666,24 @@ if SHOW_VLM_MODEL_OPTIONS:
 if SHOW_PADDLE_MODEL_OPTIONS and SHOW_VLM_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.append("hybrid-paddle-vlm")
     CHOSEN_LOCAL_MODEL_INTRO_TEXT += HYBRID_PADDLE_VLM_INTRO_TEXT
+
+llama_server_options = ["llama-server"]
+if SHOW_LLAMA_SERVER_OPTIONS:
+    LOCAL_OCR_MODEL_OPTIONS.extend(llama_server_options)
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += LLAMA_SERVER_OCR_INTRO_TEXT
+
+# Llama-server API configuration
+LLAMA_SERVER_API_URL = get_or_create_env_var(
+    "LLAMA_SERVER_API_URL", "http://localhost:8080"
+)  # Base URL of the llama-server API
+
+LLAMA_SERVER_MODEL_NAME = get_or_create_env_var(
+    "LLAMA_SERVER_MODEL_NAME", ""
+)  # Optional model name to use. If empty, uses the default model on the server
+
+LLAMA_SERVER_TIMEOUT = int(
+    get_or_create_env_var("LLAMA_SERVER_TIMEOUT", "300")
+)  # Timeout in seconds for API requests
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 

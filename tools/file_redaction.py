@@ -5272,6 +5272,18 @@ def visualise_ocr_words_bounding_boxes(
         ):
             base_model_name = "Paddle"
             visualisation_folder = "hybrid_paddle_vlm_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "vlm"
+        ):
+            base_model_name = "VLM"
+            visualisation_folder = "vlm_whole_page_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "llama-server"
+        ):
+            base_model_name = "Llama server"
+            visualisation_folder = "llama_server_visualisations"
         else:
             base_model_name = "OCR"
             visualisation_folder = "ocr_visualisations"
