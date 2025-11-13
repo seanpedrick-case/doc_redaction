@@ -23,6 +23,7 @@ from tools.config import (
     AWS_REGION,
     AWS_SECRET_KEY,
     CHOSEN_COMPREHEND_ENTITIES,
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT,
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
     COGNITO_AUTH,
@@ -1284,7 +1285,7 @@ with blocks:
                         open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                     ):
                         local_ocr_method_radio = gr.Radio(
-                            label="""Choose a local OCR model. "tesseract" is the default and will work for documents with clear typed text. "paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. The hybrid models will do a first pass with one model, and a second pass on words/phrases with low confidence with a more powerful model. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.""",
+                            label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
                             value=CHOSEN_LOCAL_OCR_MODEL,
                             choices=LOCAL_OCR_MODEL_OPTIONS,
                             interactive=True,

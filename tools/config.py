@@ -578,15 +578,19 @@ MAX_SPACES_GPU_RUN_TIME = int(
 )  # Maximum number of seconds to run the GPU on Spaces
 
 MAX_NEW_TOKENS = int(
-    get_or_create_env_var("MAX_NEW_TOKENS", "30")
+    get_or_create_env_var("MAX_NEW_TOKENS", "4192")
 )  # Maximum number of tokens to generate
 
 DEFAULT_MAX_NEW_TOKENS = int(
-    get_or_create_env_var("DEFAULT_MAX_NEW_TOKENS", "30")
+    get_or_create_env_var("DEFAULT_MAX_NEW_TOKENS", "4192")
 )  # Default maximum number of tokens to generate
 
+HYBRID_OCR_MAX_NEW_TOKENS = int(
+    get_or_create_env_var("HYBRID_OCR_MAX_NEW_TOKENS", "30")
+)  # Maximum number of tokens to generate for hybrid OCR
+
 MAX_INPUT_TOKEN_LENGTH = int(
-    get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "4096")
+    get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "8192")
 )  # Maximum number of tokens to input to the VLM
 
 VLM_MAX_IMAGE_SIZE = int(
@@ -601,6 +605,10 @@ USE_FLASH_ATTENTION = convert_string_to_boolean(
     get_or_create_env_var("USE_FLASH_ATTENTION", "False")
 )  # Whether to use flash attention for the VLM
 
+QUANTISE_VLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("QUANTISE_VLM_MODELS", "False")
+)  # Whether to use 4-bit quantisation (bitsandbytes) for VLM models. Only applies when SHOW_VLM_MODEL_OPTIONS is True.
+
 OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
     get_or_create_env_var("OVERWRITE_EXISTING_OCR_RESULTS", "False")
 )  # If True, always create new OCR results instead of loading from existing JSON files
@@ -608,7 +616,9 @@ OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-)  # "tesseract" is the default and will work for documents with clear typed text. "paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. The hybrid models will do a first pass with one model, and a second pass on words/phrases with low confidence with a more powerful model. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.
+) # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "vlm"
+
+
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "False")
@@ -620,16 +630,34 @@ SHOW_PADDLE_MODEL_OPTIONS = convert_string_to_boolean(
 
 LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
 
+CHOSEN_LOCAL_MODEL_INTRO_TEXT = get_or_create_env_var("CHOSEN_LOCAL_MODEL_INTRO_TEXT", """Choose a local OCR model. "tesseract" is the default and will work for documents with clear typed text. """)
+
+PADDLE_OCR_INTRO_TEXT = get_or_create_env_var(
+    "PADDLE_OCR_INTRO_TEXT", """"paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. """
+)
+
+VLM_OCR_INTRO_TEXT = get_or_create_env_var(
+    "VLM_OCR_INTRO_TEXT", """"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM. """
+)
+
+HYBRID_PADDLE_VLM_INTRO_TEXT = get_or_create_env_var(
+    "HYBRID_PADDLE_VLM_INTRO_TEXT", """"hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM."""
+)
+
+
 paddle_options = ["paddle", "hybrid-paddle"]
 if SHOW_PADDLE_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(paddle_options)
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += PADDLE_OCR_INTRO_TEXT
 
-vlm_options = ["hybrid-vlm"]
+vlm_options = ["hybrid-vlm", "vlm"]
 if SHOW_VLM_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(vlm_options)
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += VLM_OCR_INTRO_TEXT
 
 if SHOW_PADDLE_MODEL_OPTIONS and SHOW_VLM_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.append("hybrid-paddle-vlm")
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += HYBRID_PADDLE_VLM_INTRO_TEXT
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 

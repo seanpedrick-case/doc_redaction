@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import re
 import time
@@ -21,7 +22,9 @@ from tools.config import (
     CONVERT_LINE_TO_WORD_LEVEL,
     DEFAULT_LANGUAGE,
     HYBRID_OCR_CONFIDENCE_THRESHOLD,
+    HYBRID_OCR_MAX_NEW_TOKENS, 
     HYBRID_OCR_PADDING,
+    LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
     OUTPUT_FOLDER,
@@ -52,9 +55,13 @@ if PREPROCESS_LOCAL_OCR_IMAGES == "True":
 else:
     PREPROCESS_LOCAL_OCR_IMAGES = False
 
-try:
-    from paddleocr import PaddleOCR
-except ImportError:
+if LOAD_PADDLE_AT_STARTUP:
+    try:
+        from paddleocr import PaddleOCR
+    except Exception as e:
+        print(f"Error importing PaddleOCR: {e}")
+        PaddleOCR = None
+else:
     PaddleOCR = None
 
 
@@ -695,11 +702,12 @@ def _vlm_ocr_predict(
         extracted_text = extract_text_from_image_vlm(
             text=prompt,
             image=image,
-            max_new_tokens=None,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
+            max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
             temperature=None,  # Use model default if available, otherwise 0.7
             top_p=None,  # Use model default if available, otherwise 0.9
             top_k=None,  # Use model default if available, otherwise 50
             repetition_penalty=None,  # Use model default if available, otherwise 1.3
+            presence_penalty=None,  # Use model default if available, otherwise None (only supported by Qwen3-VL models)
         )
 
         # print(f"VLM OCR extracted text type: {type(extracted_text)}, value: {extracted_text}")
@@ -747,6 +755,325 @@ def _vlm_ocr_predict(
         return {"rec_texts": [], "rec_scores": []}
 
 
+def _vlm_page_ocr_predict(
+    image: Image.Image,
+) -> Dict[str, List]:
+    """
+    VLM page-level OCR prediction that returns structured line-level results with bounding boxes.
+    
+    Args:
+        image: PIL Image to process (full page)
+    
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+        matching the format expected by perform_ocr
+    """
+    try:
+        # Validate image exists and is not None
+        if image is None:
+            print("VLM page OCR error: Image is None")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"VLM page OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                }
+        except Exception as size_error:
+            print(f"VLM page OCR error: Could not get image size: {size_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+                width, height = image.size
+        except Exception as convert_error:
+            print(f"VLM page OCR error: Could not convert image to RGB: {convert_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        scale_x = 1.0
+        scale_y = 1.0
+        try:
+            original_width, original_height = image.size
+            image = _prepare_image_for_vlm(image)
+            processed_width, processed_height = image.size
+            # Calculate scale factors if image was resized
+            scale_x = original_width / processed_width if processed_width > 0 else 1.0
+            scale_y = original_height / processed_height if processed_height > 0 else 1.0
+        except Exception as prep_error:
+            print(f"VLM page OCR error: Could not prepare image for VLM: {prep_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Create prompt that requests structured JSON output with bounding boxes
+        prompt = """Extract ALL individual text lines from this document image. 
+
+IMPORTANT: Extract each horizontal line of text separately. Do NOT combine multiple lines into paragraphs. Each line that appears on a separate horizontal row in the image should be a separate entry.
+
+For each individual line of text, provide:
+1. The text content (only the text on that single horizontal line)
+2. The bounding box coordinates as [x1, y1, x2, y2] where (x1,y1) is top-left and (x2,y2) is bottom-right of that specific line
+3. A confidence score between 0-100
+
+Rules:
+- Each line must be on a separate horizontal row in the image
+- If text spans multiple horizontal lines, split it into separate entries (one per line)
+- Do NOT combine lines that appear on different horizontal rows
+- Each bounding box should tightly fit around a single horizontal line of text
+- Empty lines should be skipped
+
+Return the results as a JSON array of objects with this exact format:
+[
+  {
+    "text": "first line text here",
+    "bbox": [x1, y1, x2, y2],
+    "confidence": 95
+  },
+  {
+    "text": "second line text here",
+    "bbox": [x1, y1, x2, y2],
+    "confidence": 95
+  },
+  ...
+]
+
+Only return valid JSON, no additional text or explanation."""
+
+        # Use the VLM to extract structured text
+        extracted_text = extract_text_from_image_vlm(
+            text=prompt,
+            image=image,
+            max_new_tokens=None,
+            temperature=None,
+            top_p=None,
+            top_k=None,
+            repetition_penalty=None,
+            presence_penalty=None,
+        )
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None or not isinstance(extracted_text, str):
+            print("VLM page OCR warning: extract_text_from_image_vlm returned None or invalid type")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Try to parse JSON from the response
+        # The VLM might return JSON wrapped in markdown code blocks or with extra text
+        extracted_text = extracted_text.strip()
+        
+        lines_data = None
+        
+        # First, try to parse the entire response as JSON
+        try:
+            lines_data = json.loads(extracted_text)
+        except json.JSONDecodeError:
+            pass
+        
+        # If that fails, try to extract JSON from markdown code blocks
+        if lines_data is None:
+            json_match = re.search(r'```(?:json)?\s*(\[.*?\])', extracted_text, re.DOTALL)
+            if json_match:
+                try:
+                    lines_data = json.loads(json_match.group(1))
+                except json.JSONDecodeError:
+                    pass
+        
+        # If that fails, try to find JSON array in the text (more lenient)
+        if lines_data is None:
+            # Try to find array starting with [ and ending with ]
+            # This is a simple approach - look for balanced brackets
+            start_idx = extracted_text.find('[')
+            if start_idx >= 0:
+                bracket_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(extracted_text)):
+                    if extracted_text[i] == '[':
+                        bracket_count += 1
+                    elif extracted_text[i] == ']':
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i
+                            break
+                if end_idx > start_idx:
+                    try:
+                        lines_data = json.loads(extracted_text[start_idx:end_idx + 1])
+                    except json.JSONDecodeError:
+                        pass
+
+        # Final attempt: try to parse as-is
+        if lines_data is None:
+            try:
+                lines_data = json.loads(extracted_text)
+            except json.JSONDecodeError:
+                pass
+
+        # If we still couldn't parse JSON, return empty results
+        if lines_data is None:
+            print(f"VLM page OCR error: Could not parse JSON response")
+            print(f"Response text: {extracted_text[:500]}")  # Print first 500 chars for debugging
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Validate that lines_data is a list
+        if not isinstance(lines_data, list):
+            print(f"VLM page OCR error: Expected list, got {type(lines_data)}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Convert VLM results to expected format
+        result = {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+        for line_item in lines_data:
+            if not isinstance(line_item, dict):
+                continue
+
+            text = line_item.get("text", "").strip()
+            if not text:
+                continue
+
+            bbox = line_item.get("bbox", [])
+            confidence = line_item.get("confidence", 50)  # Default to 50 if not provided
+
+            # Validate bounding box format
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                print(f"VLM page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}")
+                continue
+
+            x1, y1, x2, y2 = bbox
+
+            # Ensure coordinates are valid numbers
+            try:
+                x1 = float(x1)
+                y1 = float(y1)
+                x2 = float(x2)
+                y2 = float(y2)
+            except (ValueError, TypeError):
+                print(f"VLM page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}")
+                continue
+
+            # Ensure x2 > x1 and y2 > y1
+            if x2 <= x1 or y2 <= y1:
+                print(f"VLM page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}")
+                continue
+
+            # Scale coordinates back to original image space if image was resized
+            if scale_x != 1.0 or scale_y != 1.0:
+                x1 = x1 * scale_x
+                y1 = y1 * scale_y
+                x2 = x2 * scale_x
+                y2 = y2 * scale_y
+
+            # Convert from (x1, y1, x2, y2) to (left, top, width, height)
+            left = int(round(x1))
+            top = int(round(y1))
+            width = int(round(x2 - x1))
+            height = int(round(y2 - y1))
+
+            # Ensure confidence is in valid range (0-100)
+            try:
+                confidence = float(confidence)
+                confidence = max(0, min(100, confidence))  # Clamp to 0-100
+            except (ValueError, TypeError):
+                confidence = 50  # Default if invalid
+
+            result["text"].append(clean_unicode_text(text))
+            result["left"].append(left)
+            result["top"].append(top)
+            result["width"].append(width)
+            result["height"].append(height)
+            result["conf"].append(int(round(confidence)))
+            result["model"].append("VLM")
+
+        return result
+
+    except Exception as e:
+        print(f"VLM page OCR error: {e}")
+        import traceback
+        print(f"VLM page OCR error traceback: {traceback.format_exc()}")
+        return {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+
 class CustomImageAnalyzerEngine:
     def __init__(
         self,
@@ -761,7 +1088,7 @@ class CustomImageAnalyzerEngine:
         """
         Initializes the CustomImageAnalyzerEngine.
 
-        :param ocr_engine: The OCR engine to use ("tesseract", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", or "paddle").
+        :param ocr_engine: The OCR engine to use ("tesseract", "paddle", "vlm", "hybrid-paddle", "hybrid-vlm", or "hybrid-paddle-vlm").
         :param analyzer_engine: The Presidio AnalyzerEngine instance.
         :param tesseract_config: Configuration string for Tesseract. If None, uses TESSERACT_SEGMENTATION_LEVEL config.
         :param paddle_kwargs: Dictionary of keyword arguments for PaddleOCR constructor.
@@ -826,6 +1153,12 @@ class CustomImageAnalyzerEngine:
             # VLM-based hybrid OCR - no additional initialization needed
             # The VLM model is loaded when run_vlm.py is imported
             print(f"Initializing hybrid VLM OCR with model: {SELECTED_MODEL}")
+            self.paddle_ocr = None  # Not using PaddleOCR
+
+        elif self.ocr_engine == "vlm":
+            # VLM page-level OCR - no additional initialization needed
+            # The VLM model is loaded when run_vlm.py is imported
+            print(f"Initializing VLM OCR with model: {SELECTED_MODEL}")
             self.paddle_ocr = None  # Not using PaddleOCR
 
         if self.ocr_engine == "hybrid-paddle-vlm":
@@ -2246,12 +2579,29 @@ class CustomImageAnalyzerEngine:
 
         # Note: In testing I haven't seen that this necessarily improves results
         if self.ocr_engine == "hybrid-paddle":
+            if PaddleOCR is None:
+                try:
+                    from paddleocr import PaddleOCR
+                except Exception as e:
+                    raise ImportError(f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry.")
+                    
             # Try hybrid with original image for cropping:
             ocr_data = self._perform_hybrid_ocr(image, image_name=image_name)
 
         elif self.ocr_engine == "hybrid-vlm":
             # Try hybrid VLM with original image for cropping:
             ocr_data = self._perform_hybrid_ocr(image, image_name=image_name)
+
+        elif self.ocr_engine == "vlm":
+            # VLM page-level OCR - sends whole page to VLM and gets structured line-level results
+            # Use original image (before preprocessing) for VLM since coordinates should be in original space
+            vlm_image = (
+                original_image_for_visualization
+                if original_image_for_visualization is not None
+                else image
+            )
+            ocr_data = _vlm_page_ocr_predict(vlm_image)
+            # VLM returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "tesseract":
 
@@ -2293,6 +2643,12 @@ class CustomImageAnalyzerEngine:
                     raise ValueError(
                         "No OCR object provided and 'paddle_ocr' is not initialised."
                     )
+            
+            if PaddleOCR is None:
+                try:
+                    from paddleocr import PaddleOCR
+                except Exception as e:
+                    raise ImportError(f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry.")
 
             if not image_path:
                 image_np = np.array(image)  # image_processed
@@ -2450,9 +2806,14 @@ class CustomImageAnalyzerEngine:
             # Skip rescaling for PaddleOCR since _convert_paddle_to_tesseract_format
             # already scales coordinates directly to original image dimensions
             # hybrid-paddle-vlm also uses PaddleOCR and converts to original space
-            if self.ocr_engine == "paddle" or self.ocr_engine == "hybrid-paddle-vlm":
+            # Skip rescaling for VLM since it returns coordinates in original image space
+            if (
+                self.ocr_engine == "paddle"
+                or self.ocr_engine == "hybrid-paddle-vlm"
+                or self.ocr_engine == "vlm"
+            ):
                 pass
-                # print(f"Skipping rescale_ocr_data for PaddleOCR (already scaled to original dimensions)")
+                # print(f"Skipping rescale_ocr_data for PaddleOCR/VLM (already scaled to original dimensions)")
             else:
                 # print("rescaling ocr_data with scale_factor: ", scale_factor)
                 ocr_data = rescale_ocr_data(ocr_data, scale_factor)
@@ -2495,6 +2856,18 @@ class CustomImageAnalyzerEngine:
                     else:
                         # PaddleOCR processed the preprocessed image, so scale coordinates to preprocessed space
                         needs_scaling = True
+                elif self.ocr_engine == "vlm":
+                    # VLM returns coordinates in original image space (since we pass original image to VLM)
+                    # So we need to crop from the original image, not the preprocessed image
+                    if original_image_for_visualization is not None:
+                        # Coordinates are in original space, so crop from original image
+                        crop_image = original_image_for_visualization
+                        crop_image_width = original_image_width
+                        crop_image_height = original_image_height
+                        needs_scaling = False
+                    else:
+                        # Fallback to preprocessed image if original not available
+                        needs_scaling = False
                 elif self.ocr_engine == "tesseract":
                     # For Tesseract: if scale_factor != 1.0, rescale_ocr_data converted coordinates to original space
                     # So we need to crop from the original image, not the preprocessed image
@@ -2584,7 +2957,11 @@ class CustomImageAnalyzerEngine:
                             else (
                                 "Paddle"
                                 if self.ocr_engine == "hybrid-paddle-vlm"
-                                else None
+                                else (
+                                    "VLM"
+                                    if self.ocr_engine == "vlm"
+                                    else None
+                                )
                             )
                         )
                     )
