@@ -1,3 +1,4 @@
+import ast
 import base64
 import copy
 import io
@@ -17,7 +18,7 @@ import pandas as pd
 import pytesseract
 import requests
 from pdfminer.layout import LTChar
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
 
 from tools.config import (
@@ -25,15 +26,14 @@ from tools.config import (
     CONVERT_LINE_TO_WORD_LEVEL,
     DEFAULT_LANGUAGE,
     HYBRID_OCR_CONFIDENCE_THRESHOLD,
-    HYBRID_OCR_MAX_NEW_TOKENS, 
+    HYBRID_OCR_MAX_NEW_TOKENS,
     HYBRID_OCR_PADDING,
-    LOAD_PADDLE_AT_STARTUP,
     LLAMA_SERVER_API_URL,
     LLAMA_SERVER_MODEL_NAME,
     LLAMA_SERVER_TIMEOUT,
+    LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
-    MAX_NEW_TOKENS,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
     PADDLE_MODEL_PATH,
@@ -666,10 +666,10 @@ def _call_llama_server_vlm_api(
 ) -> str:
     """
     Calls a llama-server API endpoint with an image and text prompt.
-    
+
     This function converts a PIL Image to base64 and sends it to the llama-server
     API endpoint using the OpenAI-compatible chat completions format.
-    
+
     Args:
         image: PIL Image to process
         prompt: Text prompt for the VLM
@@ -682,10 +682,10 @@ def _call_llama_server_vlm_api(
         repetition_penalty: Penalty for token repetition
         timeout: Request timeout in seconds (defaults to LLAMA_SERVER_TIMEOUT from config)
         stream: Whether to stream the response
-    
+
     Returns:
         str: The generated text response from the model
-        
+
     Raises:
         ConnectionError: If the API request fails
         ValueError: If the response format is invalid
@@ -696,13 +696,13 @@ def _call_llama_server_vlm_api(
         model_name = LLAMA_SERVER_MODEL_NAME if LLAMA_SERVER_MODEL_NAME else None
     if timeout is None:
         timeout = LLAMA_SERVER_TIMEOUT
-    
+
     # Convert PIL Image to base64
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     image_bytes = buffer.getvalue()
     image_base64 = base64.b64encode(image_bytes).decode("utf-8")
-    
+
     # Prepare the request payload in OpenAI-compatible format
     messages = [
         {
@@ -710,23 +710,18 @@ def _call_llama_server_vlm_api(
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{image_base64}"
-                    }
+                    "image_url": {"url": f"data:image/png;base64,{image_base64}"},
                 },
-                {
-                    "type": "text",
-                    "text": prompt
-                }
-            ]
+                {"type": "text", "text": prompt},
+            ],
         }
     ]
-    
+
     payload = {
         "messages": messages,
         "stream": stream,
     }
-    
+
     # Add optional parameters if provided
     if model_name:
         payload["model"] = model_name
@@ -740,40 +735,8 @@ def _call_llama_server_vlm_api(
         payload["top_k"] = top_k
     if repetition_penalty is not None:
         payload["repeat_penalty"] = repetition_penalty
-    
-    endpoint = f"{api_url}/v1/chat/completions"
-    
-    # try:
-    #     response = requests.post(
-    #         endpoint,
-    #         json=payload,
-    #         headers={"Content-Type": "application/json"},
-    #         timeout=timeout
-    #     )
-    #     response.raise_for_status()
-        
-    #     result = response.json()
-        
-    #     # Extract the response text from OpenAI-compatible format
-    #     if "choices" not in result or len(result["choices"]) == 0:
-    #         raise ValueError("Invalid response format from llama-server: no choices found")
-        
-    #     message = result["choices"][0].get("message", {})
-    #     content = message.get("content", "")
-        
-    #     if not content:
-    #         raise ValueError("Invalid response format from llama-server: no content in message")
-        
-    #     return content
-        
-    # except requests.exceptions.RequestException as e:
-    #     raise ConnectionError(f"Failed to connect to llama-server at {api_url}: {str(e)}")
-    # except json.JSONDecodeError as e:
-    #     raise ValueError(f"Invalid JSON response from llama-server: {str(e)}")
-    # except Exception as e:
-    #     raise RuntimeError(f"Error calling llama-server API: {str(e)}")
 
-    
+    endpoint = f"{api_url}/v1/chat/completions"
 
     try:
         if stream:
@@ -783,41 +746,40 @@ def _call_llama_server_vlm_api(
                 json=payload,
                 headers={"Content-Type": "application/json"},
                 stream=True,
-                timeout=timeout
+                timeout=timeout,
             )
             response.raise_for_status()
-            
+
             final_tokens = []
-            output_tokens = 0
-            
+
             for line in response.iter_lines():
                 if not line:  # Skip empty lines
                     continue
 
-                line = line.decode('utf-8')
-                if line.startswith('data: '):
+                line = line.decode("utf-8")
+                if line.startswith("data: "):
                     data = line[6:]  # Remove 'data: ' prefix
-                    if data.strip() == '[DONE]':
+                    if data.strip() == "[DONE]":
                         break
                     try:
                         chunk = json.loads(data)
-                        if 'choices' in chunk and len(chunk['choices']) > 0:
-                            delta = chunk['choices'][0].get('delta', {})
-                            token = delta.get('content', '')
+                        if "choices" in chunk and len(chunk["choices"]) > 0:
+                            delta = chunk["choices"][0].get("delta", {})
+                            token = delta.get("content", "")
                             if token:
                                 print(token, end="", flush=True)
                                 final_tokens.append(token)
                                 # output_tokens += 1
                     except json.JSONDecodeError:
                         continue
-            
+
             print()  # newline after stream finishes
-            
+
             text = "".join(final_tokens)
-            
+
             # Estimate input tokens (rough approximation)
             # input_tokens = len(prompt.split())
-            
+
             # return {
             #     "choices": [
             #         {
@@ -840,26 +802,32 @@ def _call_llama_server_vlm_api(
                 endpoint,
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=timeout
+                timeout=timeout,
             )
             response.raise_for_status()
-            
+
             result = response.json()
-            
+
             # Ensure the response has the expected format
-            if 'choices' not in result or len(result['choices']) == 0:
-                raise ValueError("Invalid response format from llama-server: no choices found")
+            if "choices" not in result or len(result["choices"]) == 0:
+                raise ValueError(
+                    "Invalid response format from llama-server: no choices found"
+                )
 
             message = result["choices"][0].get("message", {})
             content = message.get("content", "")
-            
+
             if not content:
-                raise ValueError("Invalid response format from llama-server: no content in message")
-            
+                raise ValueError(
+                    "Invalid response format from llama-server: no content in message"
+                )
+
             return content
-            
+
     except requests.exceptions.RequestException as e:
-        raise ConnectionError(f"Failed to connect to llama-server at {api_url}: {str(e)}")
+        raise ConnectionError(
+            f"Failed to connect to llama-server at {api_url}: {str(e)}"
+        )
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON response from llama-server: {str(e)}")
     except Exception as e:
@@ -1016,7 +984,9 @@ def _llama_server_ocr_predict(
                 image = image.convert("RGB")
                 width, height = image.size
         except Exception as convert_error:
-            print(f"Llama-server OCR error: Could not convert image to RGB: {convert_error}")
+            print(
+                f"Llama-server OCR error: Could not convert image to RGB: {convert_error}"
+            )
             return {"rec_texts": [], "rec_scores": []}
 
         # Check and resize image if it exceeds maximum size or DPI limits
@@ -1024,7 +994,9 @@ def _llama_server_ocr_predict(
             image = _prepare_image_for_vlm(image)
             width, height = image.size
         except Exception as prep_error:
-            print(f"Llama-server OCR error: Could not prepare image for VLM: {prep_error}")
+            print(
+                f"Llama-server OCR error: Could not prepare image for VLM: {prep_error}"
+            )
             return {"rec_texts": [], "rec_scores": []}
 
         # Use the llama-server API to extract text
@@ -1063,7 +1035,8 @@ def _llama_server_ocr_predict(
             # Create PaddleOCR-compatible result
             result = {
                 "rec_texts": words,
-                "rec_scores": [0.95] * len(words),  # High confidence for llama-server results
+                "rec_scores": [0.95]
+                * len(words),  # High confidence for llama-server results
             }
 
             return result
@@ -1073,20 +1046,117 @@ def _llama_server_ocr_predict(
     except Exception as e:
         print(f"Llama-server OCR error: {e}")
         import traceback
+
         print(f"Llama-server OCR error traceback: {traceback.format_exc()}")
         return {"rec_texts": [], "rec_scores": []}
+
+
+def plot_text_bounding_boxes(
+    image: Image.Image,
+    bounding_boxes: List[Dict],
+    image_name: str = "output_image_with_bounding_boxes.png",
+    image_folder: str = "llama_server_visualisations",
+):
+    """
+    Plots bounding boxes on an image with markers for each a name, using PIL, normalised coordinates, and different colors.
+
+    Args:
+        image: The PIL Image object.
+        bounding_boxes: A list of bounding boxes containing the name of the object
+         and their positions in normalized [y1 x1 y2 x2] format.
+        image_name: The name of the image for debugging.
+        image_folder: The folder name (relative to OUTPUT_FOLDER) where the image will be saved.
+    """
+
+    # Load the image
+    img = image
+    width, height = img.size
+    print(img.size)
+    # Create a drawing object
+    draw = ImageDraw.Draw(img)
+
+    # Parsing out the markdown fencing
+    bounding_boxes = parse_json(bounding_boxes)
+
+    font = ImageFont.load_default()
+
+    # Iterate over the bounding boxes
+    for i, bounding_box in enumerate(ast.literal_eval(bounding_boxes)):
+        color = "green"
+
+        # Convert normalized coordinates to absolute coordinates
+        abs_y1 = int(bounding_box["bbox_2d"][1] / 999 * height)
+        abs_x1 = int(bounding_box["bbox_2d"][0] / 999 * width)
+        abs_y2 = int(bounding_box["bbox_2d"][3] / 999 * height)
+        abs_x2 = int(bounding_box["bbox_2d"][2] / 999 * width)
+
+        if abs_x1 > abs_x2:
+            abs_x1, abs_x2 = abs_x2, abs_x1
+
+        if abs_y1 > abs_y2:
+            abs_y1, abs_y2 = abs_y2, abs_y1
+
+        # Draw the bounding box
+        draw.rectangle(((abs_x1, abs_y1), (abs_x2, abs_y2)), outline=color, width=1)
+
+        # Draw the text
+        if "text_content" in bounding_box:
+            draw.text(
+                (abs_x1, abs_y2), bounding_box["text_content"], fill=color, font=font
+            )
+
+    try:
+        debug_dir = os.path.join(
+            OUTPUT_FOLDER,
+            image_folder,
+        )
+        # Security: Validate that the constructed path is safe
+        normalized_debug_dir = os.path.normpath(os.path.abspath(debug_dir))
+        if not validate_folder_containment(normalized_debug_dir, OUTPUT_FOLDER):
+            raise ValueError(
+                f"Unsafe image folder path: {debug_dir}. Must be contained within {OUTPUT_FOLDER}"
+            )
+        os.makedirs(normalized_debug_dir, exist_ok=True)
+        image_name_safe = safe_sanitize_text(image_name)
+        image_name_shortened = image_name_safe[:20]
+        filename = f"{image_name_shortened}_output_image_with_bounding_boxes.png"
+        filepath = os.path.join(normalized_debug_dir, filename)
+        img.save(filepath)
+    except Exception as e:
+        print(f"Error saving image with bounding boxes: {e}")
+
+    # Display the image
+    # img.show()
+
+
+def parse_json(json_output):
+    # Parsing out the markdown fencing
+    lines = json_output.splitlines()
+    for i, line in enumerate(lines):
+        if line == "```json":
+            json_output = "\n".join(
+                lines[i + 1 :]
+            )  # Remove everything before "```json"
+            json_output = json_output.split("```")[
+                0
+            ]  # Remove everything after the closing "```"
+            break  # Exit the loop once "```json" is found
+    return json_output
 
 
 def _vlm_page_ocr_predict(
     image: Image.Image,
     image_name: str = "vlm_page_ocr_input_image.png",
+    normalised_coords_range: Optional[int] = 999,
 ) -> Dict[str, List]:
     """
     VLM page-level OCR prediction that returns structured line-level results with bounding boxes.
-    
+
     Args:
         image: PIL Image to process (full page)
         image_name: Name of the image for debugging
+        normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
+            from 0 to this value (e.g., 999, default for Qwen3-VL). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
         matching the format expected by perform_ocr
@@ -1139,7 +1209,9 @@ def _vlm_page_ocr_predict(
                 image = image.convert("RGB")
                 width, height = image.size
         except Exception as convert_error:
-            print(f"VLM page OCR error: Could not convert image to RGB: {convert_error}")
+            print(
+                f"VLM page OCR error: Could not convert image to RGB: {convert_error}"
+            )
             return {
                 "text": [],
                 "left": [],
@@ -1155,11 +1227,27 @@ def _vlm_page_ocr_predict(
         scale_y = 1.0
         try:
             original_width, original_height = image.size
-            image = _prepare_image_for_vlm(image)
-            processed_width, processed_height = image.size
-            # Calculate scale factors if image was resized
-            scale_x = original_width / processed_width if processed_width > 0 else 1.0
-            scale_y = original_height / processed_height if processed_height > 0 else 1.0
+            processed_image = _prepare_image_for_vlm(image)
+            processed_width, processed_height = processed_image.size
+
+            # Use float division to avoid rounding errors
+            scale_x = (
+                float(original_width) / float(processed_width)
+                if processed_width > 0
+                else 1.0
+            )
+            scale_y = (
+                float(original_height) / float(processed_height)
+                if processed_height > 0
+                else 1.0
+            )
+
+            # Debug: print scale factors to verify
+            if scale_x != 1.0 or scale_y != 1.0:
+                print(f"Scale factors: x={scale_x:.6f}, y={scale_y:.6f}")
+                print(
+                    f"Original: {original_width}x{original_height}, Processed: {processed_width}x{processed_height}"
+                )
         except Exception as prep_error:
             print(f"VLM page OCR error: Could not prepare image for VLM: {prep_error}")
             return {
@@ -1184,12 +1272,10 @@ def _vlm_page_ocr_predict(
                 image_name_shortened = image_name_safe[:20]
                 filename = f"{image_name_shortened}_vlm_page_input_image.png"
                 filepath = os.path.join(vlm_debug_dir, filename)
-                image.save(filepath)
+                processed_image.save(filepath)
                 # print(f"Saved VLM input image to: {filepath}")
             except Exception as save_error:
-                print(
-                    f"Warning: Could not save VLM input image: {save_error}"
-                )
+                print(f"Warning: Could not save VLM input image: {save_error}")
 
         # Create prompt that requests structured JSON output with bounding boxes
         prompt = full_page_ocr_vlm_prompt
@@ -1197,7 +1283,7 @@ def _vlm_page_ocr_predict(
         # Use the VLM to extract structured text
         extracted_text = extract_text_from_image_vlm(
             text=prompt,
-            image=image,
+            image=processed_image,
             max_new_tokens=None,
             temperature=None,
             top_p=None,
@@ -1208,7 +1294,9 @@ def _vlm_page_ocr_predict(
 
         # Check if extracted_text is None or empty
         if extracted_text is None or not isinstance(extracted_text, str):
-            print("VLM page OCR warning: extract_text_from_image_vlm returned None or invalid type")
+            print(
+                "VLM page OCR warning: extract_text_from_image_vlm returned None or invalid type"
+            )
             return {
                 "text": [],
                 "left": [],
@@ -1222,45 +1310,90 @@ def _vlm_page_ocr_predict(
         # Try to parse JSON from the response
         # The VLM might return JSON wrapped in markdown code blocks or with extra text
         extracted_text = extracted_text.strip()
-        
+
         lines_data = None
-        
+
         # First, try to parse the entire response as JSON
         try:
             lines_data = json.loads(extracted_text)
         except json.JSONDecodeError:
             pass
-        
+
         # If that fails, try to extract JSON from markdown code blocks
         if lines_data is None:
-            json_match = re.search(r'```(?:json)?\s*(\[.*?\])', extracted_text, re.DOTALL)
+            json_match = re.search(
+                r"```(?:json)?\s*(\[.*?\])", extracted_text, re.DOTALL
+            )
             if json_match:
                 try:
                     lines_data = json.loads(json_match.group(1))
                 except json.JSONDecodeError:
                     pass
-        
+
         # If that fails, try to find JSON array in the text (more lenient)
         if lines_data is None:
             # Try to find array starting with [ and ending with ]
             # This is a simple approach - look for balanced brackets
-            start_idx = extracted_text.find('[')
+            start_idx = extracted_text.find("[")
             if start_idx >= 0:
                 bracket_count = 0
                 end_idx = start_idx
                 for i in range(start_idx, len(extracted_text)):
-                    if extracted_text[i] == '[':
+                    if extracted_text[i] == "[":
                         bracket_count += 1
-                    elif extracted_text[i] == ']':
+                    elif extracted_text[i] == "]":
                         bracket_count -= 1
                         if bracket_count == 0:
                             end_idx = i
                             break
                 if end_idx > start_idx:
                     try:
-                        lines_data = json.loads(extracted_text[start_idx:end_idx + 1])
+                        lines_data = json.loads(extracted_text[start_idx : end_idx + 1])
                     except json.JSONDecodeError:
                         pass
+
+        # If that fails, try parsing multiple JSON arrays (may span multiple lines)
+        # This handles cases where the response has multiple JSON arrays separated by newlines
+        # Each array might be on a single line or span multiple lines
+        if lines_data is None:
+            try:
+                combined_data = []
+                # Find all JSON arrays in the text (they may span multiple lines)
+                # This approach handles both single-line and multi-line arrays
+                text = extracted_text
+                while True:
+                    start_idx = text.find("[")
+                    if start_idx < 0:
+                        break
+
+                    # Find the matching closing bracket
+                    bracket_count = 0
+                    end_idx = start_idx
+                    for i in range(start_idx, len(text)):
+                        if text[i] == "[":
+                            bracket_count += 1
+                        elif text[i] == "]":
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                end_idx = i
+                                break
+
+                    if end_idx > start_idx:
+                        try:
+                            array_str = text[start_idx : end_idx + 1]
+                            array_data = json.loads(array_str)
+                            if isinstance(array_data, list):
+                                combined_data.extend(array_data)
+                        except json.JSONDecodeError:
+                            pass
+
+                    # Move past this array to find the next one
+                    text = text[end_idx + 1 :]
+
+                if combined_data:
+                    lines_data = combined_data
+            except Exception:
+                pass
 
         # Final attempt: try to parse as-is
         if lines_data is None:
@@ -1271,8 +1404,10 @@ def _vlm_page_ocr_predict(
 
         # If we still couldn't parse JSON, return empty results
         if lines_data is None:
-            print(f"VLM page OCR error: Could not parse JSON response")
-            print(f"Response text: {extracted_text[:500]}")  # Print first 500 chars for debugging
+            print("VLM page OCR error: Could not parse JSON response")
+            print(
+                f"Response text: {extracted_text[:500]}"
+            )  # Print first 500 chars for debugging
             return {
                 "text": [],
                 "left": [],
@@ -1296,6 +1431,23 @@ def _vlm_page_ocr_predict(
                 "model": [],
             }
 
+        if SAVE_VLM_INPUT_IMAGES:
+            plot_text_bounding_boxes(
+                processed_image,
+                extracted_text,
+                image_name=image_name,
+                image_folder="vlm_whole_page_visualisations",
+            )
+
+        # Store a copy of the processed image for debug visualization (before rescaling)
+        # IMPORTANT: This must be the EXACT same image that was sent to the API
+        processed_image_for_debug = (
+            processed_image.copy() if SAVE_VLM_INPUT_IMAGES else None
+        )
+
+        # Collect all valid bounding boxes before rescaling for debug visualization
+        pre_scaled_boxes = []
+
         # Convert VLM results to expected format
         result = {
             "text": [],
@@ -1311,18 +1463,27 @@ def _vlm_page_ocr_predict(
             if not isinstance(line_item, dict):
                 continue
 
-            text = line_item.get("text", "").strip()
+            # Check for text_content (matching ocr.ipynb) or text field
+            text = line_item.get("text_content") or line_item.get("text", "").strip()
             if not text:
                 continue
 
-            bbox = line_item.get("bbox", [])
-            confidence = line_item.get("confidence", 50)  # Default to 50 if not provided
+            # Check for bbox_2d format (matching ocr.ipynb) or bbox format
+            bbox = line_item.get("bbox_2d") or line_item.get("bbox", [])
+            confidence = line_item.get(
+                "confidence", 95
+            )  # Default to 95 if not provided
 
             # Validate bounding box format
             if not isinstance(bbox, list) or len(bbox) != 4:
-                print(f"VLM page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}")
+                print(
+                    f"VLM page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}"
+                )
                 continue
 
+            # Handle bbox_2d format [x1, y1, x2, y2] (matching ocr.ipynb) or bbox format [x1, y1, x2, y2]
+            # ocr.ipynb uses bbox_2d with format [x1, y1, x2, y2] - same as standard bbox format
+            # Both formats use [x1, y1, x2, y2] order
             x1, y1, x2, y2 = bbox
 
             # Ensure coordinates are valid numbers
@@ -1332,15 +1493,36 @@ def _vlm_page_ocr_predict(
                 x2 = float(x2)
                 y2 = float(y2)
             except (ValueError, TypeError):
-                print(f"VLM page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}")
+                print(
+                    f"VLM page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}"
+                )
                 continue
 
             # Ensure x2 > x1 and y2 > y1
             if x2 <= x1 or y2 <= y1:
-                print(f"VLM page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}")
+                print(
+                    f"VLM page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}"
+                )
                 continue
 
-            # Scale coordinates back to original image space if image was resized
+            # If coordinates are normalized (0 to normalised_coords_range), rescale directly to processed image dimensions
+            # This matches the ocr.ipynb approach: direct normalization to image size using /999 * dimension
+            # ocr.ipynb uses: abs_x1 = int(bounding_box["bbox_2d"][0]/999 * width)
+            #                  abs_y1 = int(bounding_box["bbox_2d"][1]/999 * height)
+            if normalised_coords_range is not None and normalised_coords_range > 0:
+                # Direct normalization: match ocr.ipynb approach exactly
+                # Formula: (coord / normalised_coords_range) * image_dimension
+                # Note: ocr.ipynb uses 999, but we allow configurable range
+                x1 = (x1 / float(normalised_coords_range)) * processed_width
+                y1 = (y1 / float(normalised_coords_range)) * processed_height
+                x2 = (x2 / float(normalised_coords_range)) * processed_width
+                y2 = (y2 / float(normalised_coords_range)) * processed_height
+
+            # Store bounding box after normalization (if applied) but before rescaling to original image space
+            if processed_image_for_debug is not None:
+                pre_scaled_boxes.append({"bbox": (x1, y1, x2, y2), "text": text})
+
+            # Step 3: Scale coordinates back to original image space if image was resized
             if scale_x != 1.0 or scale_y != 1.0:
                 x1 = x1 * scale_x
                 y1 = y1 * scale_y
@@ -1358,7 +1540,7 @@ def _vlm_page_ocr_predict(
                 confidence = float(confidence)
                 confidence = max(0, min(100, confidence))  # Clamp to 0-100
             except (ValueError, TypeError):
-                confidence = 50  # Default if invalid
+                confidence = 95  # Default if invalid
 
             result["text"].append(clean_unicode_text(text))
             result["left"].append(left)
@@ -1373,6 +1555,7 @@ def _vlm_page_ocr_predict(
     except Exception as e:
         print(f"VLM page OCR error: {e}")
         import traceback
+
         print(f"VLM page OCR error traceback: {traceback.format_exc()}")
         return {
             "text": [],
@@ -1388,14 +1571,17 @@ def _vlm_page_ocr_predict(
 def _llama_server_page_ocr_predict(
     image: Image.Image,
     image_name: str = "llama_server_page_ocr_input_image.png",
+    normalised_coords_range: Optional[int] = 999,
 ) -> Dict[str, List]:
     """
     Llama-server page-level OCR prediction that returns structured line-level results with bounding boxes.
     Calls an external llama-server API instead of a local model.
-    
+
     Args:
         image: PIL Image to process (full page)
         image_name: Name of the image for debugging
+        normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
+            from 0 to this value (e.g., 999, default for Qwen3-VL). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
         matching the format expected by perform_ocr
@@ -1431,7 +1617,9 @@ def _llama_server_page_ocr_predict(
                     "model": [],
                 }
         except Exception as size_error:
-            print(f"Llama-server page OCR error: Could not get image size: {size_error}")
+            print(
+                f"Llama-server page OCR error: Could not get image size: {size_error}"
+            )
             return {
                 "text": [],
                 "left": [],
@@ -1448,7 +1636,9 @@ def _llama_server_page_ocr_predict(
                 image = image.convert("RGB")
                 width, height = image.size
         except Exception as convert_error:
-            print(f"Llama-server page OCR error: Could not convert image to RGB: {convert_error}")
+            print(
+                f"Llama-server page OCR error: Could not convert image to RGB: {convert_error}"
+            )
             return {
                 "text": [],
                 "left": [],
@@ -1462,15 +1652,34 @@ def _llama_server_page_ocr_predict(
         # Check and resize image if it exceeds maximum size or DPI limits
         scale_x = 1.0
         scale_y = 1.0
+        # In _llama_server_page_ocr_predict, around line 1465-1471:
         try:
             original_width, original_height = image.size
-            image = _prepare_image_for_vlm(image)
-            processed_width, processed_height = image.size
-            # Calculate scale factors if image was resized
-            scale_x = original_width / processed_width if processed_width > 0 else 1.0
-            scale_y = original_height / processed_height if processed_height > 0 else 1.0
+            processed_image = _prepare_image_for_vlm(image)
+            processed_width, processed_height = processed_image.size
+
+            # Use float division to avoid rounding errors
+            scale_x = (
+                float(original_width) / float(processed_width)
+                if processed_width > 0
+                else 1.0
+            )
+            scale_y = (
+                float(original_height) / float(processed_height)
+                if processed_height > 0
+                else 1.0
+            )
+
+            # Debug: print scale factors to verify
+            if scale_x != 1.0 or scale_y != 1.0:
+                print(f"Scale factors: x={scale_x:.6f}, y={scale_y:.6f}")
+                print(
+                    f"Original: {original_width}x{original_height}, Processed: {processed_width}x{processed_height}"
+                )
         except Exception as prep_error:
-            print(f"Llama-server page OCR error: Could not prepare image for VLM: {prep_error}")
+            print(
+                f"Llama-server page OCR error: Could not prepare image for VLM: {prep_error}"
+            )
             return {
                 "text": [],
                 "left": [],
@@ -1493,19 +1702,21 @@ def _llama_server_page_ocr_predict(
                 image_name_shortened = image_name_safe[:20]
                 filename = f"{image_name_shortened}_llama_server_page_input_image.png"
                 filepath = os.path.join(vlm_debug_dir, filename)
-                image.save(filepath)
+                processed_image.save(filepath)
                 # print(f"Saved VLM input image to: {filepath}")
             except Exception as save_error:
-                print(
-                    f"Warning: Could not save VLM input image: {save_error}"
-                )
+                print(f"Warning: Could not save VLM input image: {save_error}")
 
         # Create prompt that requests structured JSON output with bounding boxes
         prompt = full_page_ocr_vlm_prompt
 
+        # Get processed image dimensions for normalization
+        # PIL Image.size returns (width, height), not (height, width)
+        processed_width, processed_height = processed_image.size
+
         # Use the llama-server API to extract structured text
         extracted_text = _call_llama_server_vlm_api(
-            image=image,
+            image=processed_image,
             prompt=prompt,
             max_new_tokens=None,
             temperature=None,
@@ -1530,44 +1741,89 @@ def _llama_server_page_ocr_predict(
         # Try to parse JSON from the response
         # The API might return JSON wrapped in markdown code blocks or with extra text
         extracted_text = extracted_text.strip()
-        
+
         lines_data = None
-        
+
         # First, try to parse the entire response as JSON
         try:
             lines_data = json.loads(extracted_text)
         except json.JSONDecodeError:
             pass
-        
+
         # If that fails, try to extract JSON from markdown code blocks
         if lines_data is None:
-            json_match = re.search(r'```(?:json)?\s*(\[.*?\])', extracted_text, re.DOTALL)
+            json_match = re.search(
+                r"```(?:json)?\s*(\[.*?\])", extracted_text, re.DOTALL
+            )
             if json_match:
                 try:
                     lines_data = json.loads(json_match.group(1))
                 except json.JSONDecodeError:
                     pass
-        
+
         # If that fails, try to find JSON array in the text (more lenient)
         if lines_data is None:
             # Try to find array starting with [ and ending with ]
-            start_idx = extracted_text.find('[')
+            start_idx = extracted_text.find("[")
             if start_idx >= 0:
                 bracket_count = 0
                 end_idx = start_idx
                 for i in range(start_idx, len(extracted_text)):
-                    if extracted_text[i] == '[':
+                    if extracted_text[i] == "[":
                         bracket_count += 1
-                    elif extracted_text[i] == ']':
+                    elif extracted_text[i] == "]":
                         bracket_count -= 1
                         if bracket_count == 0:
                             end_idx = i
                             break
                 if end_idx > start_idx:
                     try:
-                        lines_data = json.loads(extracted_text[start_idx:end_idx + 1])
+                        lines_data = json.loads(extracted_text[start_idx : end_idx + 1])
                     except json.JSONDecodeError:
                         pass
+
+        # If that fails, try parsing multiple JSON arrays (may span multiple lines)
+        # This handles cases where the response has multiple JSON arrays separated by newlines
+        # Each array might be on a single line or span multiple lines
+        if lines_data is None:
+            try:
+                combined_data = []
+                # Find all JSON arrays in the text (they may span multiple lines)
+                # This approach handles both single-line and multi-line arrays
+                text = extracted_text
+                while True:
+                    start_idx = text.find("[")
+                    if start_idx < 0:
+                        break
+
+                    # Find the matching closing bracket
+                    bracket_count = 0
+                    end_idx = start_idx
+                    for i in range(start_idx, len(text)):
+                        if text[i] == "[":
+                            bracket_count += 1
+                        elif text[i] == "]":
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                end_idx = i
+                                break
+
+                    if end_idx > start_idx:
+                        try:
+                            array_str = text[start_idx : end_idx + 1]
+                            array_data = json.loads(array_str)
+                            if isinstance(array_data, list):
+                                combined_data.extend(array_data)
+                        except json.JSONDecodeError:
+                            pass
+
+                    # Move past this array to find the next one
+                    text = text[end_idx + 1 :]
+
+                if combined_data:
+                    lines_data = combined_data
+            except Exception:
+                pass
 
         # Final attempt: try to parse as-is
         if lines_data is None:
@@ -1578,8 +1834,10 @@ def _llama_server_page_ocr_predict(
 
         # If we still couldn't parse JSON, return empty results
         if lines_data is None:
-            print(f"Llama-server page OCR error: Could not parse JSON response")
-            print(f"Response text: {extracted_text[:500]}")  # Print first 500 chars for debugging
+            print("Llama-server page OCR error: Could not parse JSON response")
+            print(
+                f"Response text: {extracted_text[:500]}"
+            )  # Print first 500 chars for debugging
             return {
                 "text": [],
                 "left": [],
@@ -1603,6 +1861,23 @@ def _llama_server_page_ocr_predict(
                 "model": [],
             }
 
+        if SAVE_VLM_INPUT_IMAGES:
+            plot_text_bounding_boxes(
+                processed_image,
+                extracted_text,
+                image_name=image_name,
+                image_folder="llama_server_whole_page_visualisations",
+            )
+
+        # Store a copy of the processed image for debug visualization (before rescaling)
+        # IMPORTANT: This must be the EXACT same image that was sent to the API
+        processed_image_for_debug = (
+            processed_image.copy() if SAVE_VLM_INPUT_IMAGES else None
+        )
+
+        # Collect all valid bounding boxes before rescaling for debug visualization
+        pre_scaled_boxes = []
+
         # Convert API results to expected format
         result = {
             "text": [],
@@ -1618,18 +1893,27 @@ def _llama_server_page_ocr_predict(
             if not isinstance(line_item, dict):
                 continue
 
-            text = line_item.get("text", "").strip()
+            # Check for text_content (matching ocr.ipynb) or text field
+            text = line_item.get("text_content") or line_item.get("text", "").strip()
             if not text:
                 continue
 
-            bbox = line_item.get("bbox", [])
-            confidence = line_item.get("confidence", 50)  # Default to 50 if not provided
+            # Check for bbox_2d format (matching ocr.ipynb) or bbox format
+            bbox = line_item.get("bbox_2d") or line_item.get("bbox", [])
+            confidence = line_item.get(
+                "confidence", 95
+            )  # Default to 50 if not provided
 
             # Validate bounding box format
             if not isinstance(bbox, list) or len(bbox) != 4:
-                print(f"Llama-server page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}")
+                print(
+                    f"Llama-server page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}"
+                )
                 continue
 
+            # Handle bbox_2d format [x1, y1, x2, y2] (matching ocr.ipynb) or bbox format [x1, y1, x2, y2]
+            # ocr.ipynb uses bbox_2d with format [x1, y1, x2, y2] - same as standard bbox format
+            # Both formats use [x1, y1, x2, y2] order
             x1, y1, x2, y2 = bbox
 
             # Ensure coordinates are valid numbers
@@ -1639,15 +1923,34 @@ def _llama_server_page_ocr_predict(
                 x2 = float(x2)
                 y2 = float(y2)
             except (ValueError, TypeError):
-                print(f"Llama-server page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}")
+                print(
+                    f"Llama-server page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}"
+                )
                 continue
 
             # Ensure x2 > x1 and y2 > y1
             if x2 <= x1 or y2 <= y1:
-                print(f"Llama-server page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}")
+                print(
+                    f"Llama-server page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}"
+                )
                 continue
 
-            # Scale coordinates back to original image space if image was resized
+            # If coordinates are normalized (0 to normalised_coords_range), rescale directly to processed image dimensions
+            # This matches the ocr.ipynb approach: direct normalization to image size using /999 * dimension
+            if normalised_coords_range is not None and normalised_coords_range > 0:
+                # Direct normalization: match ocr.ipynb approach exactly
+                # Formula: (coord / normalised_coords_range) * image_dimension
+                # Note: ocr.ipynb uses 999, but we allow configurable range
+                x1 = (x1 / float(normalised_coords_range)) * processed_width
+                y1 = (y1 / float(normalised_coords_range)) * processed_height
+                x2 = (x2 / float(normalised_coords_range)) * processed_width
+                y2 = (y2 / float(normalised_coords_range)) * processed_height
+
+            # Store bounding box after normalization (if applied) but before rescaling to original image space
+            if processed_image_for_debug is not None:
+                pre_scaled_boxes.append({"bbox": (x1, y1, x2, y2), "text": text})
+
+            # Step 3: Scale coordinates back to original image space if image was resized
             if scale_x != 1.0 or scale_y != 1.0:
                 x1 = x1 * scale_x
                 y1 = y1 * scale_y
@@ -1673,13 +1976,14 @@ def _llama_server_page_ocr_predict(
             result["width"].append(width)
             result["height"].append(height)
             result["conf"].append(int(round(confidence)))
-            result["model"].append("Llama erver")
+            result["model"].append("Llama server")
 
         return result
 
     except Exception as e:
         print(f"Llama-server page OCR error: {e}")
         import traceback
+
         print(f"Llama-server page OCR error traceback: {traceback.format_exc()}")
         return {
             "text": [],
@@ -3201,8 +3505,10 @@ class CustomImageAnalyzerEngine:
                 try:
                     from paddleocr import PaddleOCR
                 except Exception as e:
-                    raise ImportError(f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry.")
-                    
+                    raise ImportError(
+                        f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
+                    )
+
             # Try hybrid with original image for cropping:
             ocr_data = self._perform_hybrid_ocr(image, image_name=image_name)
 
@@ -3229,7 +3535,9 @@ class CustomImageAnalyzerEngine:
                 if original_image_for_visualization is not None
                 else image
             )
-            ocr_data = _llama_server_page_ocr_predict(llama_server_image, image_name=image_name)
+            ocr_data = _llama_server_page_ocr_predict(
+                llama_server_image, image_name=image_name, normalised_coords_range=999
+            )
             # Llama-server returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "tesseract":
@@ -3272,12 +3580,14 @@ class CustomImageAnalyzerEngine:
                     raise ValueError(
                         "No OCR object provided and 'paddle_ocr' is not initialised."
                     )
-            
+
             if PaddleOCR is None:
                 try:
                     from paddleocr import PaddleOCR
                 except Exception as e:
-                    raise ImportError(f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry.")
+                    raise ImportError(
+                        f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
+                    )
 
             if not image_path:
                 image_np = np.array(image)  # image_processed
@@ -3586,11 +3896,7 @@ class CustomImageAnalyzerEngine:
                             else (
                                 "Paddle"
                                 if self.ocr_engine == "hybrid-paddle-vlm"
-                                else (
-                                    "VLM"
-                                    if self.ocr_engine == "vlm"
-                                    else None
-                                )
+                                else ("VLM" if self.ocr_engine == "vlm" else None)
                             )
                         )
                     )

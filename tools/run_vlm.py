@@ -113,7 +113,9 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     quantization_config = None
     if QUANTISE_VLM_MODELS is True:
         if not torch.cuda.is_available():
-            print("Warning: 4-bit quantisation requires CUDA, but CUDA is not available.")
+            print(
+                "Warning: 4-bit quantisation requires CUDA, but CUDA is not available."
+            )
             print("Falling back to loading models without quantisation")
             quantization_config = None
         else:
@@ -224,7 +226,9 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 2.0
         model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = False # I found that this doesn't work when using transformers
+        model_supports_presence_penalty = (
+            False  # I found that this doesn't work when using transformers
+        )
 
     elif SELECTED_MODEL == "Qwen3-VL-4B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
@@ -249,7 +253,9 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
         model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = False # I found that this doesn't work when using transformers
+        model_supports_presence_penalty = (
+            False  # I found that this doesn't work when using transformers
+        )
 
     elif SELECTED_MODEL == "PaddleOCR-VL":
         MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
@@ -268,7 +274,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
         model_default_prompt = """OCR:"""
         model_default_max_new_tokens = MAX_NEW_TOKENS
-    
+
     elif SELECTED_MODEL == "None":
         model = None
         processor = None
@@ -451,35 +457,17 @@ def extract_text_from_image_vlm(
     # Return the complete text only at the end
     return buffer
 
-full_page_ocr_vlm_prompt = """Extract ALL individual text lines from this document image. 
+
+full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bbox_2d': [x1, y1, x2, y2], 'text_content': 'text'}, ...].
 
 IMPORTANT: Extract each horizontal line of text separately. Do NOT combine multiple lines into paragraphs. Each line that appears on a separate horizontal row in the image should be a separate entry.
 
-For each individual line of text, provide:
-1. The text content (only the text on that single horizontal line)
-2. The bounding box coordinates as [x1, y1, x2, y2] where (x1,y1) is top-left and (x2,y2) is bottom-right of that specific line
-3. A confidence score between 0-100
-
 Rules:
 - Each line must be on a separate horizontal row in the image
+- Even if a sentence is split over multiple horizontal lines, it should be split into separate entries (one per line)
 - If text spans multiple horizontal lines, split it into separate entries (one per line)
 - Do NOT combine lines that appear on different horizontal rows
 - Each bounding box should tightly fit around a single horizontal line of text
 - Empty lines should be skipped
-
-Return the results as a JSON array of objects with this exact format:
-[
-  {
-    "text": "first line text here",
-    "bbox": [x1, y1, x2, y2],
-    "confidence": 95
-  },
-  {
-    "text": "second line text here",
-    "bbox": [x1, y1, x2, y2],
-    "confidence": 95
-  },
-  ...
-]
 
 Only return valid JSON, no additional text or explanation."""

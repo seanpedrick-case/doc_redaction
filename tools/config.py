@@ -594,8 +594,8 @@ MAX_INPUT_TOKEN_LENGTH = int(
 )  # Maximum number of tokens to input to the VLM
 
 VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "1000000")
-)  # Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. Default is 1000000 (1000x1000).
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "600000")
+)  # Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. Default is 600000(approx 774x774).
 
 VLM_MAX_DPI = float(
     get_or_create_env_var("VLM_MAX_DPI", "300.0")
@@ -616,8 +616,7 @@ OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-) # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "vlm", "llama-server"
-
+)  # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "vlm", "llama-server"
 
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
@@ -634,22 +633,29 @@ SHOW_LLAMA_SERVER_OPTIONS = convert_string_to_boolean(
 
 LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
 
-CHOSEN_LOCAL_MODEL_INTRO_TEXT = get_or_create_env_var("CHOSEN_LOCAL_MODEL_INTRO_TEXT", """Choose a local OCR model. "tesseract" is the default and will work for documents with clear typed text. """)
+CHOSEN_LOCAL_MODEL_INTRO_TEXT = get_or_create_env_var(
+    "CHOSEN_LOCAL_MODEL_INTRO_TEXT",
+    """Choose a local OCR model. "tesseract" is the default and will work for documents with clear typed text. """,
+)
 
 PADDLE_OCR_INTRO_TEXT = get_or_create_env_var(
-    "PADDLE_OCR_INTRO_TEXT", """"paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. """
+    "PADDLE_OCR_INTRO_TEXT",
+    """"paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. """,
 )
 
 VLM_OCR_INTRO_TEXT = get_or_create_env_var(
-    "VLM_OCR_INTRO_TEXT", """"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM. """
+    "VLM_OCR_INTRO_TEXT",
+    """"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM. """,
 )
 
 LLAMA_SERVER_OCR_INTRO_TEXT = get_or_create_env_var(
-    "LLAMA_SERVER_OCR_INTRO_TEXT", """"llama-server" will call an external llama-server API to perform OCR using a vision model hosted remotely. """
+    "LLAMA_SERVER_OCR_INTRO_TEXT",
+    """"llama-server" will call an external llama-server API to perform OCR using a vision model hosted remotely. """,
 )
 
 HYBRID_PADDLE_VLM_INTRO_TEXT = get_or_create_env_var(
-    "HYBRID_PADDLE_VLM_INTRO_TEXT", """"hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM."""
+    "HYBRID_PADDLE_VLM_INTRO_TEXT",
+    """"hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.""",
 )
 
 
