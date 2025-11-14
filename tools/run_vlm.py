@@ -12,6 +12,7 @@ from tools.config import (
     PADDLE_DET_DB_UNCLIP_RATIO,
     PADDLE_MODEL_PATH,
     PADDLE_USE_TEXTLINE_ORIENTATION,
+    QUANTISE_VLM_MODELS,
     SHOW_VLM_MODEL_OPTIONS,
 )
 
@@ -56,6 +57,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     from transformers import (
         AutoModelForCausalLM,
         AutoProcessor,
+        BitsAndBytesConfig,
         Qwen2_5_VLForConditionalGeneration,
         Qwen3VLForConditionalGeneration,
         TextIteratorStreamer,
@@ -64,6 +66,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     from tools.config import (
         MAX_NEW_TOKENS,
         MODEL_CACHE_PATH,
+        QUANTISE_VLM_MODELS,
         SELECTED_MODEL,
         USE_FLASH_ATTENTION,
     )
@@ -98,11 +101,36 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     model_default_repetition_penalty = None
     model_default_presence_penalty = None
     model_default_max_new_tokens = None
+    # Track which models support presence_penalty (only Qwen3-VL models currently)
+    model_supports_presence_penalty = False
 
     if USE_FLASH_ATTENTION is True:
         attn_implementation = "flash_attention_2"
     else:
         attn_implementation = "eager"
+
+    # Setup quantisation config if enabled
+    quantization_config = None
+    if QUANTISE_VLM_MODELS is True:
+        if not torch.cuda.is_available():
+            print(
+                "Warning: 4-bit quantisation requires CUDA, but CUDA is not available."
+            )
+            print("Falling back to loading models without quantisation")
+            quantization_config = None
+        else:
+            try:
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                )
+                print("4-bit quantization enabled using bitsandbytes")
+            except Exception as e:
+                print(f"Warning: Could not setup bitsandbytes quantization: {e}")
+                print("Falling back to loading models without quantization")
+                quantization_config = None
 
     print(f"Loading vision model: {SELECTED_MODEL}")
 
@@ -110,13 +138,19 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     if SELECTED_MODEL == "Nanonets-OCR2-3B":
         MODEL_ID = "nanonets/Nanonets-OCR2-3B"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        model = (
-            Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                MODEL_ID, trust_remote_code=True, torch_dtype=torch.float16
-            )
-            .to(device)
-            .eval()
-        )
+        load_kwargs = {
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
+            load_kwargs["device_map"] = "auto"
+        else:
+            load_kwargs["torch_dtype"] = torch.float16
+        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            MODEL_ID, **load_kwargs
+        ).eval()
+        if quantization_config is None:
+            model = model.to(device)
 
         model_default_prompt = """Extract the text from the above document as if you were reading it naturally."""
 
@@ -155,38 +189,60 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
         MODEL_ID = model_path_d_local
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID,
-            attn_implementation=attn_implementation,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            trust_remote_code=True,
-        ).eval()
+        load_kwargs = {
+            "attn_implementation": attn_implementation,
+            "device_map": "auto",
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
+        else:
+            load_kwargs["torch_dtype"] = torch.bfloat16
+        model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs).eval()
 
         model_default_prompt = """Extract the text content from this image."""
         model_default_max_new_tokens = MAX_NEW_TOKENS
 
     elif SELECTED_MODEL == "Qwen3-VL-2B-Instruct":
-        MODEL_ID = "Qwen/3-VL-2B-Instruct"
+        MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        load_kwargs = {
+            "device_map": "auto",
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
+        else:
+            load_kwargs["dtype"] = "auto"
         model = Qwen3VLForConditionalGeneration.from_pretrained(
-            MODEL_ID, dtype="auto", device_map="auto", trust_remote_code=True
+            MODEL_ID, **load_kwargs
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
         model_default_greedy = False  # 'false' string converted to boolean
-        model_default_top_p = 0.8
-        model_default_top_k = 20
-        model_default_temperature = 0.7
+        model_default_top_p = 1.0
+        model_default_top_k = 40
+        model_default_temperature = 1.0
         model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
+        model_default_presence_penalty = 2.0
         model_default_max_new_tokens = MAX_NEW_TOKENS
+        model_supports_presence_penalty = (
+            False  # I found that this doesn't work when using transformers
+        )
 
     elif SELECTED_MODEL == "Qwen3-VL-4B-Instruct":
-        MODEL_ID = "Qwen/3-VL-4B-Instruct"
+        MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        load_kwargs = {
+            "device_map": "auto",
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
+        else:
+            load_kwargs["dtype"] = "auto"
         model = Qwen3VLForConditionalGeneration.from_pretrained(
-            MODEL_ID, dtype="auto", device_map="auto", trust_remote_code=True
+            MODEL_ID, **load_kwargs
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
@@ -197,20 +253,31 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
         model_default_max_new_tokens = MAX_NEW_TOKENS
+        model_supports_presence_penalty = (
+            False  # I found that this doesn't work when using transformers
+        )
 
     elif SELECTED_MODEL == "PaddleOCR-VL":
         MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
-        model = (
-            AutoModelForCausalLM.from_pretrained(
-                MODEL_ID, trust_remote_code=True, torch_dtype=torch.bfloat16
-            )
-            .to(device)
-            .eval()
-        )
+        load_kwargs = {
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
+            load_kwargs["device_map"] = "auto"
+        else:
+            load_kwargs["torch_dtype"] = torch.bfloat16
+        model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs).eval()
+        if quantization_config is None:
+            model = model.to(device)
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
 
         model_default_prompt = """OCR:"""
         model_default_max_new_tokens = MAX_NEW_TOKENS
+
+    elif SELECTED_MODEL == "None":
+        model = None
+        processor = None
 
     else:
         raise ValueError(
@@ -367,8 +434,9 @@ def extract_text_from_image_vlm(
         "repetition_penalty": actual_repetition_penalty,
     }
 
-    # Add presence_penalty if it's set (some models may support it)
-    if actual_presence_penalty is not None:
+    # Add presence_penalty if it's set and the model supports it
+    # Only Qwen3-VL models currently support presence_penalty
+    if actual_presence_penalty is not None and model_supports_presence_penalty:
         generation_kwargs["presence_penalty"] = actual_presence_penalty
     thread = Thread(target=model.generate, kwargs=generation_kwargs)
     thread.start()
@@ -388,3 +456,18 @@ def extract_text_from_image_vlm(
 
     # Return the complete text only at the end
     return buffer
+
+
+full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bbox_2d': [x1, y1, x2, y2], 'text_content': 'text'}, ...].
+
+IMPORTANT: Extract each horizontal line of text separately. Do NOT combine multiple lines into paragraphs. Each line that appears on a separate horizontal row in the image should be a separate entry.
+
+Rules:
+- Each line must be on a separate horizontal row in the image
+- Even if a sentence is split over multiple horizontal lines, it should be split into separate entries (one per line)
+- If text spans multiple horizontal lines, split it into separate entries (one per line)
+- Do NOT combine lines that appear on different horizontal rows
+- Each bounding box should tightly fit around a single horizontal line of text
+- Empty lines should be skipped
+
+Only return valid JSON, no additional text or explanation."""

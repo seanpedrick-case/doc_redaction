@@ -4154,7 +4154,7 @@ def redact_image_pdf(
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Write the updated existing textract data back to the JSON file
 
-        if original_textract_data != textract_data:
+        if OVERWRITE_EXISTING_OCR_RESULTS or original_textract_data != textract_data:
             secure_file_write(
                 output_folder,
                 file_name + textract_suffix + "_textract.json",
@@ -4165,11 +4165,12 @@ def redact_image_pdf(
             log_files_output_paths.append(textract_json_file_path)
 
     if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
-        print(
-            f"Writing updated existing local OCR data back to the JSON file: {all_page_line_level_ocr_results_with_words_json_file_path}"
-        )
+        # print(
+        #     f"Writing updated existing local OCR data back to the JSON file: {all_page_line_level_ocr_results_with_words_json_file_path}"
+        # )
         if (
-            original_all_page_line_level_ocr_results_with_words
+            OVERWRITE_EXISTING_OCR_RESULTS
+            or original_all_page_line_level_ocr_results_with_words
             != all_page_line_level_ocr_results_with_words
         ):
             # Write the updated existing textract data back to the JSON file
@@ -5234,6 +5235,8 @@ def visualise_ocr_words_bounding_boxes(
         log_files_output_paths: List of file paths used for saving redaction process logging results.
     """
     # Determine visualization folder based on text extraction method
+    # Initialize base_model_name with a default value
+    base_model_name = "OCR"  # Default fallback value
 
     if visualisation_folder is None:
         if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
@@ -5269,7 +5272,20 @@ def visualise_ocr_words_bounding_boxes(
         ):
             base_model_name = "Paddle"
             visualisation_folder = "hybrid_paddle_vlm_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "vlm"
+        ):
+            base_model_name = "VLM"
+            visualisation_folder = "vlm_whole_page_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "llama-server"
+        ):
+            base_model_name = "Llama server"
+            visualisation_folder = "llama_server_visualisations"
         else:
+            base_model_name = "OCR"
             visualisation_folder = "ocr_visualisations"
 
     if not ocr_results:
