@@ -137,6 +137,7 @@ from tools.config import (
     SHOW_AWS_EXAMPLES,
     SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
     SHOW_COSTS,
+    SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
     SHOW_LANGUAGE_SELECTION,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
@@ -388,6 +389,32 @@ in_fully_redacted_list_state = gr.Dataframe(
     wrap=True,
 )
 
+page_min = gr.Number(
+    value=DEFAULT_PAGE_MIN,
+    precision=0,
+    minimum=0,
+    maximum=9999,
+    label="Lowest page to redact (set to 0 to redact from the first page)",
+)
+
+page_max = gr.Number(
+    value=DEFAULT_PAGE_MAX,
+    precision=0,
+    minimum=0,
+    maximum=9999,
+    label="Highest page to redact (set to 0 to redact to the last page)",
+)
+
+
+local_ocr_method_radio = gr.Radio(
+    label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
+    value=CHOSEN_LOCAL_OCR_MODEL,
+    choices=LOCAL_OCR_MODEL_OPTIONS,
+    interactive=True,
+    visible=SHOW_LOCAL_OCR_MODEL_OPTIONS,
+)
+
+
 
 ## Deduplication examples
 in_duplicate_pages = gr.File(
@@ -514,10 +541,6 @@ with blocks:
         allow_custom_value=True,
         visible=False,
     )
-
-    # local_ocr_method_radio = gr.Textbox(
-    #     CHOSEN_LOCAL_OCR_MODEL, label="local_ocr_method_radio", visible=False
-    # )
 
     session_hash_state = gr.Textbox(label="session_hash_state", value="", visible=False)
     host_name_textbox = gr.Textbox(
@@ -1261,6 +1284,86 @@ with blocks:
                     fn=show_info_box_on_click,
                     run_on_click=True,
                 )
+        if SHOW_DIFFICULT_OCR_EXAMPLES:
+            gr.Markdown(
+                "### Try one of the following examples to test the OCR methods with difficult documents:"
+            )
+            ocr_example_files = [
+                "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+                "example_data/Difficult handwritten note.jpg",
+            ]
+            available_ocr_examples = list()
+            ocr_example_labels = list()
+            if os.path.exists(ocr_example_files[0]):
+                available_ocr_examples.append(
+                    [
+                        [ocr_example_files[0]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Only extract text (no redaction)",
+                        ["Extract handwriting", "Extract signatures"],
+                        [ocr_example_files[0]],
+                        ocr_example_files[0],
+                        7,
+                        6,
+                        6,
+                        "vlm",
+                    ],
+                )
+                ocr_example_labels.append("Scanned document page with signatures")
+            if os.path.exists(ocr_example_files[1]):
+                available_ocr_examples.append(
+                    [
+                        [ocr_example_files[1]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Only extract text (no redaction)",
+                        ["Extract handwriting", "Extract signatures"],
+                        [ocr_example_files[1]],
+                        ocr_example_files[1],
+                        1,
+                        0,
+                        0,
+                        "vlm",
+                    ],
+                )
+                ocr_example_labels.append("Unclear handwritten note")
+
+            # Only create examples if we have available files
+            if available_ocr_examples:
+
+                def show_info_box_on_click(
+                    in_doc_files,
+                    text_extract_method_radio,
+                    pii_identification_method_drop,
+                    handwrite_signature_checkbox,
+                    prepared_pdf_state,
+                    doc_full_file_name_textbox,                    
+                    total_pdf_page_count,
+                    page_min,
+                    page_max,
+                    local_ocr_method_radio,
+                ):
+                    gr.Info(
+                        "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
+                    )
+
+                ocr_examples = gr.Examples(
+                    examples=available_ocr_examples,
+                    inputs=[
+                        in_doc_files,
+                        text_extract_method_radio,
+                        pii_identification_method_drop,
+                        handwrite_signature_checkbox,
+                        prepared_pdf_state,
+                        doc_full_file_name_textbox,                    
+                        total_pdf_page_count,
+                        page_min,
+                        page_max,
+                        local_ocr_method_radio,
+                    ],
+                    example_labels=ocr_example_labels,
+                    fn=show_info_box_on_click,
+                    run_on_click=True,
+                )
 
         with gr.Accordion("Redact document", open=True):
             in_doc_files.render()
@@ -1294,21 +1397,9 @@ with blocks:
                         label="Change default local OCR model",
                         open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                     ):
-                        local_ocr_method_radio = gr.Radio(
-                            label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
-                            value=CHOSEN_LOCAL_OCR_MODEL,
-                            choices=LOCAL_OCR_MODEL_OPTIONS,
-                            interactive=True,
-                            visible=True,
-                        )
+                        local_ocr_method_radio.render()
                 else:
-                    local_ocr_method_radio = gr.Radio(
-                        label="Choose local OCR model",
-                        value=CHOSEN_LOCAL_OCR_MODEL,
-                        choices=LOCAL_OCR_MODEL_OPTIONS,
-                        interactive=False,
-                        visible=False,
-                    )
+                    local_ocr_method_radio.render()
 
                 if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
                     with gr.Accordion(
@@ -1401,7 +1492,7 @@ with blocks:
                                 visible=True,
                             )
 
-            if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS is True:
+            if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
                 with gr.Accordion(
                     "Submit whole document to AWS Textract API (quickest text extraction for large documents)",
                     open=False,
@@ -2372,21 +2463,9 @@ with blocks:
                 )
 
         with gr.Accordion("Redact only selected pages", open=False):
-            with gr.Row():
-                page_min = gr.Number(
-                    value=DEFAULT_PAGE_MIN,
-                    precision=0,
-                    minimum=0,
-                    maximum=9999,
-                    label="Lowest page to redact (set to 0 to redact from the first page)",
-                )
-                page_max = gr.Number(
-                    value=DEFAULT_PAGE_MAX,
-                    precision=0,
-                    minimum=0,
-                    maximum=9999,
-                    label="Highest page to redact (set to 0 to redact to the last page)",
-                )
+            with gr.Row():                
+                page_min.render()
+                page_max.render()
 
         if SHOW_LANGUAGE_SELECTION:
             with gr.Accordion("Language selection", open=False):
@@ -2684,7 +2763,7 @@ with blocks:
         )
 
     # Allow user to select items from cost code dataframe for cost code
-    if SHOW_COSTS is True and (GET_COST_CODES is True or ENFORCE_COST_CODES is True):
+    if SHOW_COSTS and (GET_COST_CODES or ENFORCE_COST_CODES):
         cost_code_dataframe.select(
             df_select_callback_cost,
             inputs=[cost_code_dataframe],
@@ -5944,7 +6023,7 @@ with blocks:
         )
 
     # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location
-    if GET_DEFAULT_ALLOW_LIST is True and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
+    if GET_DEFAULT_ALLOW_LIST and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
         if (
             not os.path.exists(ALLOW_LIST_PATH)
             and S3_ALLOW_LIST_PATH
@@ -5978,7 +6057,7 @@ with blocks:
             print("Could not load in default allow list")
 
     # If relevant environment variable is set, load in the default cost code file from S3 or locally
-    if GET_COST_CODES is True and (COST_CODES_PATH or S3_COST_CODES_PATH):
+    if GET_COST_CODES and (COST_CODES_PATH or S3_COST_CODES_PATH):
         if (
             not os.path.exists(COST_CODES_PATH)
             and S3_COST_CODES_PATH
@@ -6056,7 +6135,7 @@ with blocks:
     pdf_callback = CSVLogger_custom(dataset_file_name=FEEDBACK_LOG_FILE_NAME)
     data_callback = CSVLogger_custom(dataset_file_name=FEEDBACK_LOG_FILE_NAME)
 
-    if DISPLAY_FILE_NAMES_IN_LOGS is True:
+    if DISPLAY_FILE_NAMES_IN_LOGS:
         # User submitted feedback for pdf redactions
         pdf_callback.setup(
             [
@@ -6185,7 +6264,7 @@ with blocks:
     # Log processing usage - time taken for redaction queries, and also logs for queries to Textract/Comprehend
     usage_callback = CSVLogger_custom(dataset_file_name=USAGE_LOG_FILE_NAME)
 
-    if DISPLAY_FILE_NAMES_IN_LOGS is True:
+    if DISPLAY_FILE_NAMES_IN_LOGS:
         usage_callback.setup(
             [
                 session_hash_textbox,

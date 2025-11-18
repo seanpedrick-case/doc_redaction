@@ -611,7 +611,7 @@ QUANTISE_VLM_MODELS = convert_string_to_boolean(
 
 REPORT_VLM_OUTPUTS_TO_GUI = convert_string_to_boolean(
     get_or_create_env_var("REPORT_VLM_OUTPUTS_TO_GUI", "False")
-)  # Whether to report VLM outputs to the GUI.
+)  # Whether to report VLM outputs to the GUI with info boxes as they are processed..
 
 OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
     get_or_create_env_var("OVERWRITE_EXISTING_OCR_RESULTS", "False")
@@ -1036,6 +1036,9 @@ SHOW_EXAMPLES = convert_string_to_boolean(
 )
 SHOW_AWS_EXAMPLES = convert_string_to_boolean(
     get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
+)
+SHOW_DIFFICULT_OCR_EXAMPLES = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_DIFFICULT_OCR_EXAMPLES", "False")
 )
 
 FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))

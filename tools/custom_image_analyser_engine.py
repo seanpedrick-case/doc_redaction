@@ -1063,6 +1063,7 @@ def plot_text_bounding_boxes(
     bounding_boxes: List[Dict],
     image_name: str = "output_image_with_bounding_boxes.png",
     image_folder: str = "inference_server_visualisations",
+    output_folder: str = OUTPUT_FOLDER,
 ):
     """
     Plots bounding boxes on an image with markers for each a name, using PIL, normalised coordinates, and different colors.
@@ -1072,7 +1073,8 @@ def plot_text_bounding_boxes(
         bounding_boxes: A list of bounding boxes containing the name of the object
          and their positions in normalized [y1 x1 y2 x2] format.
         image_name: The name of the image for debugging.
-        image_folder: The folder name (relative to OUTPUT_FOLDER) where the image will be saved.
+        image_folder: The folder name (relative to output_folder) where the image will be saved.
+        output_folder: The folder where the image will be saved.
     """
 
     # Load the image
@@ -1137,7 +1139,7 @@ def plot_text_bounding_boxes(
 
     try:
         debug_dir = os.path.join(
-            OUTPUT_FOLDER,
+            output_folder,
             image_folder,
         )
         # Security: Validate that the constructed path is safe
@@ -1306,6 +1308,7 @@ def _vlm_page_ocr_predict(
     image: Image.Image,
     image_name: str = "vlm_page_ocr_input_image.png",
     normalised_coords_range: Optional[int] = 999,
+    output_folder: str = OUTPUT_FOLDER,
 ) -> Dict[str, List]:
     """
     VLM page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -1315,6 +1318,7 @@ def _vlm_page_ocr_predict(
         image_name: Name of the image for debugging
         normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
             from 0 to this value (e.g., 999, default for Qwen3-VL). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
+        output_folder: The folder where output images will be saved
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
         matching the format expected by perform_ocr
@@ -1599,6 +1603,7 @@ def _vlm_page_ocr_predict(
                 extracted_text,
                 image_name=image_name,
                 image_folder="vlm_visualisations",
+                output_folder=output_folder,
             )
 
         # Store a copy of the processed image for debug visualization (before rescaling)
@@ -1745,6 +1750,7 @@ def _inference_server_page_ocr_predict(
     image: Image.Image,
     image_name: str = "inference_server_page_ocr_input_image.png",
     normalised_coords_range: Optional[int] = 999,
+    output_folder: str = OUTPUT_FOLDER,
 ) -> Dict[str, List]:
     """
     Inference-server page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -1755,6 +1761,7 @@ def _inference_server_page_ocr_predict(
         image_name: Name of the image for debugging
         normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
             from 0 to this value (e.g., 999, default for Qwen3-VL). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
+        output_folder: The folder where output images will be saved
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
         matching the format expected by perform_ocr
@@ -2050,6 +2057,7 @@ def _inference_server_page_ocr_predict(
                 extracted_text,
                 image_name=image_name,
                 image_folder="inference_server_visualisations",
+                output_folder=output_folder,
             )
 
         # Store a copy of the processed image for debug visualization (before rescaling)
@@ -3556,7 +3564,7 @@ class CustomImageAnalyzerEngine:
                         if SAVE_VLM_INPUT_IMAGES:
                             try:
                                 vlm_debug_dir = os.path.join(
-                                    OUTPUT_FOLDER,
+                                    self.output_folder,
                                     "hybrid_paddle_vlm_visualisations/vlm_input_images",
                                 )
                                 os.makedirs(vlm_debug_dir, exist_ok=True)
@@ -3930,7 +3938,7 @@ class CustomImageAnalyzerEngine:
                         if SAVE_VLM_INPUT_IMAGES:
                             try:
                                 inference_server_debug_dir = os.path.join(
-                                    OUTPUT_FOLDER,
+                                    self.output_folder,
                                     "hybrid_paddle_inference_server_visualisations/inference_server_input_images",
                                 )
                                 os.makedirs(inference_server_debug_dir, exist_ok=True)
@@ -4151,7 +4159,7 @@ class CustomImageAnalyzerEngine:
                 if original_image_for_visualization is not None
                 else image
             )
-            ocr_data = _vlm_page_ocr_predict(vlm_image, image_name=image_name)
+            ocr_data = _vlm_page_ocr_predict(vlm_image, image_name=image_name, output_folder=self.output_folder)
             # VLM returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "inference-server":
@@ -4166,6 +4174,7 @@ class CustomImageAnalyzerEngine:
                 inference_server_image,
                 image_name=image_name,
                 normalised_coords_range=999,
+                output_folder=self.output_folder,
             )
             # Inference-server returns data already in the expected format, so no conversion needed
 
