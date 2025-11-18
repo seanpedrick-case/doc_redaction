@@ -609,6 +609,10 @@ QUANTISE_VLM_MODELS = convert_string_to_boolean(
     get_or_create_env_var("QUANTISE_VLM_MODELS", "False")
 )  # Whether to use 4-bit quantisation (bitsandbytes) for VLM models. Only applies when SHOW_VLM_MODEL_OPTIONS is True.
 
+REPORT_VLM_OUTPUTS_TO_GUI = convert_string_to_boolean(
+    get_or_create_env_var("REPORT_VLM_OUTPUTS_TO_GUI", "False")
+)  # Whether to report VLM outputs to the GUI.
+
 OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
     get_or_create_env_var("OVERWRITE_EXISTING_OCR_RESULTS", "False")
 )  # If True, always create new OCR results instead of loading from existing JSON files

@@ -3,6 +3,7 @@ import sys
 import time
 from threading import Thread
 
+import gradio as gr
 import spaces
 from PIL import Image
 
@@ -13,6 +14,7 @@ from tools.config import (
     PADDLE_MODEL_PATH,
     PADDLE_USE_TEXTLINE_ORIENTATION,
     QUANTISE_VLM_MODELS,
+    REPORT_VLM_OUTPUTS_TO_GUI,
     SHOW_VLM_MODEL_OPTIONS,
 )
 
@@ -408,7 +410,7 @@ def extract_text_from_image_vlm(
     elif model_default_temperature is not None:
         actual_temperature = model_default_temperature
     else:
-        actual_temperature = 0.7  # General default
+        actual_temperature = 0.1  # General default
 
     # top_p: function arg > model default > general default
     if top_p is not None:
@@ -416,7 +418,7 @@ def extract_text_from_image_vlm(
     elif model_default_top_p is not None:
         actual_top_p = model_default_top_p
     else:
-        actual_top_p = 0.9  # General default
+        actual_top_p = 0.8  # General default
 
     # top_k: function arg > model default > general default
     if top_k is not None:
@@ -424,7 +426,7 @@ def extract_text_from_image_vlm(
     elif model_default_top_k is not None:
         actual_top_k = model_default_top_k
     else:
-        actual_top_k = 50  # General default
+        actual_top_k = 20  # General default
 
     # repetition_penalty: function arg > model default > general default
     if repetition_penalty is not None:
@@ -497,6 +499,9 @@ def extract_text_from_image_vlm(
 
         # Print to console as it streams
         print(new_text, end="", flush=True)
+
+        if REPORT_VLM_OUTPUTS_TO_GUI and new_text.endswith("\n"):
+            gr.Info(new_text, duration=2)
 
         time.sleep(0.01)
 

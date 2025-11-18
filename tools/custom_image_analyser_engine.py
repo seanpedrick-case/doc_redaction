@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import pytesseract
 import requests
+import spaces
 from pdfminer.layout import LTChar
 from PIL import Image, ImageDraw, ImageFont
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
@@ -34,11 +35,13 @@ from tools.config import (
     LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
+    MAX_SPACES_GPU_RUN_TIME,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
     PADDLE_MODEL_PATH,
     PADDLE_USE_TEXTLINE_ORIENTATION,
     PREPROCESS_LOCAL_OCR_IMAGES,
+    REPORT_VLM_OUTPUTS_TO_GUI,
     SAVE_EXAMPLE_HYBRID_IMAGES,
     SAVE_PAGE_OCR_VISUALISATIONS,
     SAVE_PREPROCESS_IMAGES,
@@ -3315,6 +3318,7 @@ class CustomImageAnalyzerEngine:
 
         return final_data
 
+    @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
     def _perform_hybrid_paddle_vlm_ocr(
         self,
         image: Image.Image,
@@ -3479,12 +3483,6 @@ class CustomImageAnalyzerEngine:
 
                 # If confidence is low, use VLM for a second opinion
                 if line_conf < confidence_threshold:
-                    # Debug: Print line dimensions before cropping
-                    # print(
-                    #     f"  Line {i}: '{line_text[:50]}...' "
-                    #     f"conf={line_conf}, "
-                    #     f"bbox=({line_left:.1f}, {line_top:.1f}, {line_width:.1f}, {line_height:.1f})"
-                    # )
 
                     # Ensure minimum line height for VLM processing
                     # If line_height is too small, use a minimum height based on typical text line height
@@ -3497,12 +3495,6 @@ class CustomImageAnalyzerEngine:
                     crop_top = line_top
                     crop_right = line_left + line_width
                     crop_bottom = line_top + min_line_height
-
-                    # print(
-                    #     f"  Crop coordinates: left={crop_left}, top={crop_top}, "
-                    #     f"right={crop_right}, bottom={crop_bottom}, "
-                    #     f"size=({crop_right - crop_left}x{crop_bottom - crop_top})"
-                    # )
 
                     # Ensure crop dimensions are valid
                     if crop_right <= crop_left or crop_bottom <= crop_top:
@@ -3518,12 +3510,6 @@ class CustomImageAnalyzerEngine:
                     crop_width = crop_right - crop_left
                     crop_height = crop_bottom - crop_top
                     if crop_width < 10 or crop_height < 10:
-                        # print(
-                        #     f"  Line: '{line_text}' (conf: {line_conf}) -> "
-                        #     f"Cropped image too small ({crop_width}x{crop_height} pixels). "
-                        #     f"Skipping VLM, keeping PaddleOCR result."
-                        # )
-                        # Keep original PaddleOCR result for this line
                         continue
 
                     # Ensure cropped image is in RGB mode before passing to VLM
@@ -3589,10 +3575,12 @@ class CustomImageAnalyzerEngine:
                             and vlm_word_count - paddle_word_count
                             >= -word_count_allowed_difference
                         ):
-                            print(
-                                f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
-                                f"-> '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) [VLM]"
-                            )
+                            text_output = f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
+                            text_output += f"-> '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) [VLM]"
+                            print(text_output)
+
+                            if REPORT_VLM_OUTPUTS_TO_GUI:
+                                gr.Info(text_output, duration=2)
 
                             # For exporting example image comparisons
                             safe_filename = self._create_safe_filename_with_confidence(
@@ -3642,9 +3630,6 @@ class CustomImageAnalyzerEngine:
                             rec_models[i] = "VLM"
                             # Ensure page_result is updated with the modified rec_models list
                             page_result["rec_models"] = rec_models
-                            # print(
-                            #     f"  Set rec_models[{i}] = 'VLM' for line '{vlm_text[:50]}...'"
-                            # )
                         else:
                             print(
                                 f"  Line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) -> "
@@ -3655,10 +3640,6 @@ class CustomImageAnalyzerEngine:
                         # VLM returned empty or no results - keep original PaddleOCR result
                         if line_conf < confidence_threshold:
                             pass
-                            # print(
-                            #     f"  Line: '{line_text}' (conf: {line_conf:.1f}) -> "
-                            #     f"VLM returned no results. Keeping original PaddleOCR result."
-                            # )
 
         # Debug: Print summary of model labels before returning
         for page_idx, page_result in enumerate(modified_paddle_results):
