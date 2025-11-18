@@ -513,7 +513,7 @@ def extract_text_from_image_vlm(
             # Keep the last part (after the last newline) for the next line
             line_buffer = parts[-1] if parts else ""
 
-        time.sleep(0.01)
+        # time.sleep(0.01)
 
     # Print final newline after streaming is complete
     print()  # Add newline at the end
