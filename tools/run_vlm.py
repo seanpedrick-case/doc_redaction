@@ -493,15 +493,25 @@ def extract_text_from_image_vlm(
     thread.start()
 
     buffer = ""
+    line_buffer = ""  # Accumulate text for the current line
     for new_text in streamer:
         buffer += new_text
         buffer = buffer.replace("<|im_end|>", "")
+        line_buffer += new_text
 
         # Print to console as it streams
         print(new_text, end="", flush=True)
 
-        if REPORT_VLM_OUTPUTS_TO_GUI and new_text.endswith("\n"):
-            gr.Info(new_text, duration=2)
+        # If we hit a newline, report the entire accumulated line to GUI
+        if REPORT_VLM_OUTPUTS_TO_GUI and "\n" in new_text:
+            # Split by newline to handle the line(s) we just completed
+            parts = line_buffer.split("\n")
+            # Report all complete lines (everything except the last part which may be incomplete)
+            for line in parts[:-1]:
+                if line.strip():  # Only report non-empty lines
+                    gr.Info(line, duration=2)
+            # Keep the last part (after the last newline) for the next line
+            line_buffer = parts[-1] if parts else ""
 
         time.sleep(0.01)
 

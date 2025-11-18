@@ -17,7 +17,6 @@ import numpy as np
 import pandas as pd
 import pytesseract
 import requests
-import spaces
 from pdfminer.layout import LTChar
 from PIL import Image, ImageDraw, ImageFont
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
@@ -35,7 +34,6 @@ from tools.config import (
     LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
-    MAX_SPACES_GPU_RUN_TIME,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
     PADDLE_MODEL_PATH,
@@ -3318,7 +3316,6 @@ class CustomImageAnalyzerEngine:
 
         return final_data
 
-    @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
     def _perform_hybrid_paddle_vlm_ocr(
         self,
         image: Image.Image,
