@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import gradio as gr
@@ -261,27 +262,36 @@ FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 ###
 # Load in FastAPI app
 ###
-app = FastAPI()
 
 
-def register_log_filter() -> None:
-    """
-    Removes logs from healthiness/readiness endpoints so they don't spam
-    and pollute application log flow
-    """
+# Custom logging filter to remove logs from healthiness/readiness endpoints so they don't fill up application log flow
+class EndpointFilter(logging.Filter):
+    def __init__(self, path: str, *args, **kwargs):
+        self._path = path
+        super().__init__(*args, **kwargs)
 
-    class EndpointFilter(logging.Filter):
-        def filter(self, record: logging.LogRecord) -> bool:
-            return (
-                record.args  # type: ignore
-                and len(record.args) >= 3
-                and record.args[2] not in ["/_/health", "/_/ready"]  # type: ignore
-            )
-
-    logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage().find(self._path) == -1
 
 
-register_log_filter()
+# 2. Define the lifespan context manager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- STARTUP LOGIC ---
+    # Filter out /health logging to declutter ECS logs
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.addFilter(EndpointFilter(path="/health"))
+
+    # Yield control back to the application
+    yield
+
+    # --- SHUTDOWN LOGIC ---
+    # (Any cleanup code would go here, e.g., closing DB connections)
+    pass
+
+
+# 3. Initialize the App with the lifespan parameter
+app = FastAPI(lifespan=lifespan)
 
 # Added to pass lint check, no effect
 spaces.annotations
@@ -3102,6 +3112,7 @@ with blocks:
             textract_query_number,
             task_textbox,
         ],
+        show_progress_on=[job_current_status],
     ).success(check_for_provided_job_id, inputs=[job_id_textbox]).success(
         poll_whole_document_textract_analysis_progress_and_download,
         inputs=[
@@ -3121,14 +3132,18 @@ with blocks:
             textract_job_detail_df,
             doc_file_name_no_extension_textbox,
         ],
+        show_progress_on=[job_current_status],
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
         outputs=[textract_output_found_checkbox],
+        show_progress_on=[job_current_status],
     )
 
     check_state_of_textract_api_call_btn.click(
-        check_for_provided_job_id, inputs=[job_id_textbox]
+        check_for_provided_job_id,
+        inputs=[job_id_textbox],
+        show_progress_on=[job_current_status],
     ).success(
         poll_whole_document_textract_analysis_progress_and_download,
         inputs=[
@@ -3148,10 +3163,12 @@ with blocks:
             textract_job_detail_df,
             doc_file_name_no_extension_textbox,
         ],
+        show_progress_on=[job_current_status],
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
         outputs=[textract_output_found_checkbox],
+        show_progress_on=[job_current_status],
     )
 
     textract_job_detail_df.select(
@@ -3178,6 +3195,7 @@ with blocks:
             doc_file_name_textbox_list,
             total_pdf_page_count,
         ],
+        show_progress_on=[redaction_output_summary_textbox],
     ).success(
         fn=prepare_image_or_pdf,
         inputs=[

@@ -565,7 +565,7 @@ SHOW_VLM_MODEL_OPTIONS = convert_string_to_boolean(
 )  # Whether to show the VLM model options in the UI
 
 SELECTED_MODEL = get_or_create_env_var(
-    "SELECTED_MODEL", "Dots.OCR"
+    "SELECTED_MODEL", "Qwen3-VL-4B-Instruct"
 )  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "PaddleOCR-VL"
 
 if SHOW_VLM_MODEL_OPTIONS:
@@ -616,7 +616,7 @@ OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-)  # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "vlm", "llama-server"
+)  # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "hybrid-paddle-inference-server", "vlm", "inference-server"
 
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
@@ -627,8 +627,12 @@ SHOW_PADDLE_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_PADDLE_MODEL_OPTIONS", "False")
 )
 
-SHOW_LLAMA_SERVER_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_LLAMA_SERVER_OPTIONS", "False")
+SHOW_INFERENCE_SERVER_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_OPTIONS", "False")
+)
+
+SHOW_HYBRID_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_HYBRID_MODELS", "False")
 )
 
 LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
@@ -640,17 +644,27 @@ CHOSEN_LOCAL_MODEL_INTRO_TEXT = get_or_create_env_var(
 
 PADDLE_OCR_INTRO_TEXT = get_or_create_env_var(
     "PADDLE_OCR_INTRO_TEXT",
-    """"paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. """,
+    """"paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. """,
+)
+
+PADDLE_OCR_HYBRID_INTRO_TEXT = get_or_create_env_var(
+    "PADDLE_OCR_HYBRID_INTRO_TEXT",
+    """"hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. """,
 )
 
 VLM_OCR_INTRO_TEXT = get_or_create_env_var(
     "VLM_OCR_INTRO_TEXT",
-    """"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM. """,
+    """"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes. """,
 )
 
-LLAMA_SERVER_OCR_INTRO_TEXT = get_or_create_env_var(
-    "LLAMA_SERVER_OCR_INTRO_TEXT",
-    """"llama-server" will call an external llama-server API to perform OCR using a vision model hosted remotely. """,
+VLM_OCR_HYBRID_INTRO_TEXT = get_or_create_env_var(
+    "VLM_OCR_HYBRID_INTRO_TEXT",
+    """"hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). """,
+)
+
+INFERENCE_SERVER_OCR_INTRO_TEXT = get_or_create_env_var(
+    "INFERENCE_SERVER_OCR_INTRO_TEXT",
+    """"inference-server" will call an external inference-server API to perform OCR using a vision model hosted remotely. """,
 )
 
 HYBRID_PADDLE_VLM_INTRO_TEXT = get_or_create_env_var(
@@ -658,37 +672,53 @@ HYBRID_PADDLE_VLM_INTRO_TEXT = get_or_create_env_var(
     """"hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.""",
 )
 
+HYBRID_PADDLE_INFERENCE_SERVER_INTRO_TEXT = get_or_create_env_var(
+    "HYBRID_PADDLE_INFERENCE_SERVER_INTRO_TEXT",
+    """"hybrid-paddle-inference-server" is a combination of PaddleOCR with an external inference-server API.""",
+)
 
-paddle_options = ["paddle", "hybrid-paddle"]
+paddle_options = ["paddle"]
+# if SHOW_HYBRID_MODELS:
+#     paddle_options.append("hybrid-paddle")
 if SHOW_PADDLE_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(paddle_options)
     CHOSEN_LOCAL_MODEL_INTRO_TEXT += PADDLE_OCR_INTRO_TEXT
+    # if SHOW_HYBRID_MODELS:
+    #     CHOSEN_LOCAL_MODEL_INTRO_TEXT += PADDLE_OCR_HYBRID_INTRO_TEXT
 
-vlm_options = ["hybrid-vlm", "vlm"]
+vlm_options = ["vlm"]
+# if SHOW_HYBRID_MODELS:
+#     vlm_options.append("hybrid-vlm")
 if SHOW_VLM_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(vlm_options)
     CHOSEN_LOCAL_MODEL_INTRO_TEXT += VLM_OCR_INTRO_TEXT
+    # if SHOW_HYBRID_MODELS:
+    #     CHOSEN_LOCAL_MODEL_INTRO_TEXT += VLM_OCR_HYBRID_INTRO_TEXT
 
-if SHOW_PADDLE_MODEL_OPTIONS and SHOW_VLM_MODEL_OPTIONS:
+if SHOW_PADDLE_MODEL_OPTIONS and SHOW_VLM_MODEL_OPTIONS and SHOW_HYBRID_MODELS:
     LOCAL_OCR_MODEL_OPTIONS.append("hybrid-paddle-vlm")
     CHOSEN_LOCAL_MODEL_INTRO_TEXT += HYBRID_PADDLE_VLM_INTRO_TEXT
 
-llama_server_options = ["llama-server"]
-if SHOW_LLAMA_SERVER_OPTIONS:
-    LOCAL_OCR_MODEL_OPTIONS.extend(llama_server_options)
-    CHOSEN_LOCAL_MODEL_INTRO_TEXT += LLAMA_SERVER_OCR_INTRO_TEXT
+if SHOW_PADDLE_MODEL_OPTIONS and SHOW_INFERENCE_SERVER_OPTIONS and SHOW_HYBRID_MODELS:
+    LOCAL_OCR_MODEL_OPTIONS.append("hybrid-paddle-inference-server")
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += HYBRID_PADDLE_INFERENCE_SERVER_INTRO_TEXT
 
-# Llama-server API configuration
-LLAMA_SERVER_API_URL = get_or_create_env_var(
-    "LLAMA_SERVER_API_URL", "http://localhost:8080"
-)  # Base URL of the llama-server API
+inference_server_options = ["inference-server"]
+if SHOW_INFERENCE_SERVER_OPTIONS:
+    LOCAL_OCR_MODEL_OPTIONS.extend(inference_server_options)
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += INFERENCE_SERVER_OCR_INTRO_TEXT
 
-LLAMA_SERVER_MODEL_NAME = get_or_create_env_var(
-    "LLAMA_SERVER_MODEL_NAME", ""
+# Inference-server API configuration
+INFERENCE_SERVER_API_URL = get_or_create_env_var(
+    "INFERENCE_SERVER_API_URL", "http://localhost:8080"
+)  # Base URL of the inference-server API
+
+INFERENCE_SERVER_MODEL_NAME = get_or_create_env_var(
+    "INFERENCE_SERVER_MODEL_NAME", ""
 )  # Optional model name to use. If empty, uses the default model on the server
 
-LLAMA_SERVER_TIMEOUT = int(
-    get_or_create_env_var("LLAMA_SERVER_TIMEOUT", "300")
+INFERENCE_SERVER_TIMEOUT = int(
+    get_or_create_env_var("INFERENCE_SERVER_TIMEOUT", "300")
 )  # Timeout in seconds for API requests
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")

@@ -48,6 +48,6 @@ pytest>=7.0.0
 pytest-cov>=4.0.0
 
 # --- PyTorch (CUDA 12.6) ---
---extra-index-url https://download.pytorch.org/whl/cu126
+--extra-index-url https://download.pytorch.org/whl/cu129
 torch>=2.5.1,<=2.8.0
-torchvision>=0.20.1
+torchvision

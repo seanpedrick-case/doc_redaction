@@ -25,12 +25,14 @@ ARG INSTALL_PADDLEOCR=False
 ENV INSTALL_PADDLEOCR=${INSTALL_PADDLEOCR}
 
 RUN if [ "$INSTALL_PADDLEOCR" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install paddleocr==3.3.0 paddlepaddle==3.2.0; \
+    pip install --verbose --no-cache-dir --target=/install paddlepaddle==3.2.1 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/; \
+    pip install --verbose --no-cache-dir --target=/install paddleocr==3.3.0; \
 fi
 
 RUN if [ "$INSTALL_VLM" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install torch==2.8.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cu126; \
-    pip install --verbose --no-cache-dir --target=/install transformers==4.57.1 accelerate==1.11.0 bitsandbytes==0.48.1; \
+    pip install --verbose --no-cache-dir --target=/install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129; \
+    pip install --verbose --no-cache-dir --target=/install torchvision --index-url https://download.pytorch.org/whl/cu129; \
+    pip install --verbose --no-cache-dir --target=/install transformers<=4.57.1 accelerate<=1.11.0 bitsandbytes<=0.48.1; \
 fi
 
 # ===================================================================

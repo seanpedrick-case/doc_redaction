@@ -20,6 +20,8 @@ if LOAD_PADDLE_AT_STARTUP is True:
     try:
         from paddleocr import PaddleOCR
 
+        print("PaddleOCR imported successfully")
+
         paddle_kwargs = None
 
         # Set PaddleOCR model directory environment variable (only if specified).
@@ -42,7 +44,29 @@ if LOAD_PADDLE_AT_STARTUP is True:
             # Enforce language if not explicitly provided
             paddle_kwargs.setdefault("lang", "en")
 
-        PaddleOCR(**paddle_kwargs)
+        try:
+            PaddleOCR(**paddle_kwargs)
+        except Exception as e:
+            # Handle DLL loading errors (common on Windows with GPU version)
+            if (
+                "WinError 127" in str(e)
+                or "could not be found" in str(e).lower()
+                or "dll" in str(e).lower()
+            ):
+                print(
+                    f"Warning: GPU initialization failed (likely missing CUDA/cuDNN dependencies): {e}"
+                )
+                print("PaddleOCR will not be available. To fix GPU issues:")
+                print("1. Install Visual C++ Redistributables (latest version)")
+                print("2. Ensure CUDA runtime libraries are in your PATH")
+                print(
+                    "3. Or reinstall paddlepaddle CPU version: pip install paddlepaddle"
+                )
+                raise ImportError(
+                    f"Error initializing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
+                )
+            else:
+                raise e
 
     except ImportError:
         PaddleOCR = None
@@ -73,7 +97,6 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    print("CUDA_VISIBLE_DEVICES=", os.environ.get("CUDA_VISIBLE_DEVICES"))
     print("torch.__version__ =", torch.__version__)
     print("torch.version.cuda =", torch.version.cuda)
     print("cuda available:", torch.cuda.is_available())
@@ -307,7 +330,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     else:
         raise ValueError(
-            f"Invalid model selected: {SELECTED_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, PaddleOCR-VL"
+            f"Invalid model selected: {SELECTED_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, PaddleOCR-VL"
         )
 
     print(f"Successfully loaded {SELECTED_MODEL}")
@@ -484,7 +507,7 @@ def extract_text_from_image_vlm(
     return buffer
 
 
-full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bbox_2d': [x1, y1, x2, y2], 'text_content': 'text'}, ...].
+full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': 'identified text'}, ...].
 
 IMPORTANT: Extract each horizontal line of text separately. Do NOT combine multiple lines into paragraphs. Each line that appears on a separate horizontal row in the image should be a separate entry.
 
