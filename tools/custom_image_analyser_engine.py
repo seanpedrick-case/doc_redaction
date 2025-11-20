@@ -72,6 +72,18 @@ from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
 
 if LOAD_PADDLE_AT_STARTUP:
+    # Set PaddleOCR font path BEFORE importing to prevent font downloads during import
+    if (
+        PADDLE_FONT_PATH
+        and PADDLE_FONT_PATH.strip()
+        and os.path.exists(PADDLE_FONT_PATH)
+    ):
+        os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = PADDLE_FONT_PATH
+    else:
+        system_font_path = get_system_font_path()
+        if system_font_path:
+            os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = system_font_path
+
     try:
         from paddleocr import PaddleOCR
 
@@ -2335,12 +2347,8 @@ class CustomImageAnalyzerEngine:
             or self.ocr_engine == "hybrid-paddle-vlm"
             or self.ocr_engine == "hybrid-paddle-inference-server"
         ):
-            try:
-                from paddleocr import PaddleOCR
-            except Exception as e:
-                raise ImportError(
-                    f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
-                )
+            # Set PaddleOCR environment variables BEFORE importing PaddleOCR
+            # This ensures fonts are configured before the package loads
 
             # Set PaddleOCR model directory environment variable (only if specified).
             if PADDLE_MODEL_PATH and PADDLE_MODEL_PATH.strip():
@@ -2350,6 +2358,7 @@ class CustomImageAnalyzerEngine:
                 print("Using default PaddleOCR model storage location")
 
             # Set PaddleOCR font path to use system fonts instead of downloading simfang.ttf/PingFang-SC-Regular.ttf
+            # This MUST be set before importing PaddleOCR to prevent font downloads
             if (
                 PADDLE_FONT_PATH
                 and PADDLE_FONT_PATH.strip()
@@ -2370,6 +2379,13 @@ class CustomImageAnalyzerEngine:
                     print(
                         "Warning: No suitable system font found. PaddleOCR may download default fonts."
                     )
+
+            try:
+                from paddleocr import PaddleOCR
+            except Exception as e:
+                raise ImportError(
+                    f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
+                )
 
             # Default paddle configuration if none provided
             if paddle_kwargs is None:

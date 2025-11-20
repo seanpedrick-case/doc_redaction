@@ -45,7 +45,7 @@ ARG APP_MODE=gradio
 ENV APP_MODE=${APP_MODE}
 
 # Set build-time and runtime environment variable for whether to run in FastAPI mode
-ARG RUN_FASTAPI=0
+ARG RUN_FASTAPI=False
 ENV RUN_FASTAPI=${RUN_FASTAPI}
 
 # Install runtime system dependencies

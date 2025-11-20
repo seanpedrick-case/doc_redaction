@@ -29,37 +29,41 @@ from tools.config import (
 from tools.helper_functions import get_system_font_path
 
 if LOAD_PADDLE_AT_STARTUP is True:
+    # Set PaddleOCR environment variables BEFORE importing PaddleOCR
+    # This ensures fonts are configured before the package loads
+
+    # Set PaddleOCR model directory environment variable (only if specified).
+    if PADDLE_MODEL_PATH and PADDLE_MODEL_PATH.strip():
+        os.environ["PADDLEOCR_MODEL_DIR"] = PADDLE_MODEL_PATH
+        print(f"Setting PaddleOCR model path to: {PADDLE_MODEL_PATH}")
+    else:
+        print("Using default PaddleOCR model storage location")
+
+    # Set PaddleOCR font path to use system fonts instead of downloading simfang.ttf/PingFang-SC-Regular.ttf
+    # This MUST be set before importing PaddleOCR to prevent font downloads
+    if (
+        PADDLE_FONT_PATH
+        and PADDLE_FONT_PATH.strip()
+        and os.path.exists(PADDLE_FONT_PATH)
+    ):
+        os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = PADDLE_FONT_PATH
+        print(f"Setting PaddleOCR font path to configured font: {PADDLE_FONT_PATH}")
+    else:
+        system_font_path = get_system_font_path()
+        if system_font_path:
+            os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = system_font_path
+            print(f"Setting PaddleOCR font path to system font: {system_font_path}")
+        else:
+            print(
+                "Warning: No suitable system font found. PaddleOCR may download default fonts."
+            )
+
     try:
         from paddleocr import PaddleOCR
 
         print("PaddleOCR imported successfully")
 
         paddle_kwargs = None
-
-        # Set PaddleOCR model directory environment variable (only if specified).
-        if PADDLE_MODEL_PATH and PADDLE_MODEL_PATH.strip():
-            os.environ["PADDLEOCR_MODEL_DIR"] = PADDLE_MODEL_PATH
-            print(f"Setting PaddleOCR model path to: {PADDLE_MODEL_PATH}")
-        else:
-            print("Using default PaddleOCR model storage location")
-
-        # Set PaddleOCR font path to use system fonts instead of downloading simfang.ttf/PingFang-SC-Regular.ttf
-        if (
-            PADDLE_FONT_PATH
-            and PADDLE_FONT_PATH.strip()
-            and os.path.exists(PADDLE_FONT_PATH)
-        ):
-            os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = PADDLE_FONT_PATH
-            print(f"Setting PaddleOCR font path to configured font: {PADDLE_FONT_PATH}")
-        else:
-            system_font_path = get_system_font_path()
-            if system_font_path:
-                os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = system_font_path
-                print(f"Setting PaddleOCR font path to system font: {system_font_path}")
-            else:
-                print(
-                    "Warning: No suitable system font found. PaddleOCR may download default fonts."
-                )
 
         # Default paddle configuration if none provided
         if paddle_kwargs is None:
