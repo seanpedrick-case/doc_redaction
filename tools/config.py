@@ -635,7 +635,7 @@ VLM_DEFAULT_TOP_K = int(
 )  # Default top_k for VLM generation. Used when model-specific defaults are not set.
 
 VLM_DEFAULT_REPETITION_PENALTY = float(
-    get_or_create_env_var("VLM_DEFAULT_REPETITION_PENALTY", "1.3")
+    get_or_create_env_var("VLM_DEFAULT_REPETITION_PENALTY", "1.0")
 )  # Default repetition penalty for VLM generation. Used when model-specific defaults are not set.
 
 VLM_DEFAULT_GREEDY = convert_string_to_boolean(
@@ -762,7 +762,7 @@ MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
-    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "80")
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "90")
 )  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
 
 HYBRID_OCR_PADDING = int(

@@ -240,6 +240,139 @@ class AdaptiveSegmenter:
             unlabeled_boxes.append((start_x, 0, img_w - start_x, img_h))
         return unlabeled_boxes
 
+    def _enforce_logical_constraints(
+        self, output: Dict[str, List], image_width: int, image_height: int
+    ) -> Dict[str, List]:
+        """
+        Enforces geometric sanity checks with improved robustness:
+        1. VERTICAL SNAP: Expands small/floating boxes to match the line's median vertical bounds.
+        2. INFLATE: Expands 'THIN' widths.
+        3. SORT: Sorts by position AND size.
+        4. CLEAN: Removes nested boxes.
+        5. RESOLVE: Fixes sequential overlaps.
+        6. BOUND: Clamps to image.
+        """
+        if not output or not output["text"]:
+            return output
+
+        # --- 1. UNPACK ---
+        num_items = len(output["text"])
+        boxes = []
+        for i in range(num_items):
+            boxes.append(
+                {
+                    "text": output["text"][i],
+                    "left": int(output["left"][i]),
+                    "top": int(output["top"][i]),
+                    "width": int(output["width"][i]),
+                    "height": int(output["height"][i]),
+                    "conf": output["conf"][i],
+                }
+            )
+
+        # --- 2. VERTICAL STANDARDIZATION (New Step) ---
+        if boxes:
+            # Calculate the median vertical bounds for this line
+            tops = [b["top"] for b in boxes]
+            bottoms = [b["top"] + b["height"] for b in boxes]
+
+            median_top = int(np.median(tops))
+            median_bottom = int(np.median(bottoms))
+            median_height = median_bottom - median_top
+
+            # Heuristic: If a box is 'short' (e.g., < 60% of median height),
+            # it is likely a noise speck, punctuation, or diacritic floating high/low.
+            # We expand it to match the line's median bounds.
+            for box in boxes:
+                box_bottom = box["top"] + box["height"]
+
+                # Check if box is too short relative to the line
+                # (We use 0.6 as a safe threshold; real words are usually > 60% of line height)
+                if median_height > 0 and box["height"] < (0.6 * median_height):
+                    # Snap to the median bounds
+                    # We use min/max to ensure we extend, never shrink
+                    new_top = min(box["top"], median_top)
+                    new_bottom = max(box_bottom, median_bottom)
+
+                    box["top"] = new_top
+                    box["height"] = max(1, new_bottom - new_top)
+
+        # --- 3. INFLATE THIN WIDTHS ---
+        if boxes:
+            widths = [b["width"] for b in boxes]
+            median_width = np.median(widths)
+
+            # Rule: Box must be at least 12px OR 35% of median width.
+            min_viable_width = max(12, int(median_width * 0.35))
+
+            for box in boxes:
+                # Skip punctuation from aggressive width inflation
+                is_punctuation = len(box["text"]) == 1 and not box["text"].isalnum()
+
+                if not is_punctuation and box["width"] < min_viable_width:
+                    target_width = min_viable_width
+                    diff = target_width - box["width"]
+                    box["left"] -= diff // 2
+                    box["width"] = target_width
+
+        # --- 4. ROBUST SORT ---
+        # Sort by 'left' (ascending), then by 'width' (descending).
+        boxes.sort(key=lambda b: (b["left"], -b["width"]))
+
+        # --- 5. REMOVE NESTED BOXES ---
+        valid_boxes = []
+        if boxes:
+            current_base = boxes[0]
+            valid_boxes.append(current_base)
+
+            for i in range(1, len(boxes)):
+                candidate = boxes[i]
+                base_x1 = current_base["left"] + current_base["width"]
+                cand_x1 = candidate["left"] + candidate["width"]
+
+                # Check for nesting with a small buffer
+                if (
+                    candidate["left"] >= current_base["left"] - 2
+                    and cand_x1 <= base_x1 + 2
+                ):
+                    continue
+                else:
+                    valid_boxes.append(candidate)
+                    current_base = candidate
+
+        boxes = valid_boxes
+
+        # --- 6. RESOLVE SEQUENTIAL OVERLAPS & BOUNDARIES ---
+        for i in range(len(boxes)):
+            curr = boxes[i]
+
+            # Boundary Check
+            curr["left"] = max(0, curr["left"])
+            curr["top"] = max(0, curr["top"])
+            if curr["left"] + curr["width"] > image_width:
+                curr["width"] = max(1, image_width - curr["left"])
+
+            # Overlap Check
+            if i < len(boxes) - 1:
+                next_box = boxes[i + 1]
+                curr_x1 = curr["left"] + curr["width"]
+                next_x0 = next_box["left"]
+
+                if curr_x1 > next_x0:
+                    overlap = curr_x1 - next_x0
+                    new_width = curr["width"] - overlap
+                    curr["width"] = max(1, new_width)
+
+        # --- 7. REPACK ---
+        cleaned_output = {
+            k: [] for k in ["text", "left", "top", "width", "height", "conf"]
+        }
+        for box in boxes:
+            for key in cleaned_output.keys():
+                cleaned_output[key].append(box[key])
+
+        return cleaned_output
+
     def segment(
         self,
         line_data: Dict[str, List],
@@ -583,6 +716,9 @@ class AdaptiveSegmenter:
         # Calculate the horizontal projection profile on the cleaned image
         horizontal_projection = np.sum(clean_binary, axis=1)
 
+        # Track y_start offset for coordinate system conversion
+        y_start = 0  # Default: no vertical cropping
+
         # Find the top and bottom boundaries of the text
         non_zero_rows = np.where(horizontal_projection > 0)[0]
         if len(non_zero_rows) > 0:
@@ -608,6 +744,7 @@ class AdaptiveSegmenter:
                 analysis_image = clean_binary[y_start:y_end, :]
             else:
                 # If trimming would result in an empty image, use the full text region
+                y_start = text_top
                 analysis_image = clean_binary[text_top:text_bottom, :]
         else:
             # If no text is found, use the original cleaned image
@@ -782,33 +919,84 @@ class AdaptiveSegmenter:
             )
 
             num_to_process = min(len(words), len(unlabeled_boxes))
-            
+
+            # Get the height of cca_source_image to filter components outside text region
+            cca_img_h, cca_img_w = cca_source_image.shape[:2]
+
             # First pass: assign each component to the box it overlaps with most
             # This prevents components from being assigned to multiple boxes, which causes overlapping words
+            # We use component center point as the primary criterion, with overlap as a tie-breaker
             component_assignments = {}  # component_index -> box_index
             for j in range(1, num_labels):  # Skip background
                 comp_x = stats[j, cv2.CC_STAT_LEFT]
                 comp_w = stats[j, cv2.CC_STAT_WIDTH]
                 comp_r = comp_x + comp_w
-                
+                comp_center_x = comp_x + comp_w / 2  # Component center x coordinate
+                comp_y = stats[j, cv2.CC_STAT_TOP]
+                comp_h = stats[j, cv2.CC_STAT_HEIGHT]
+
+                # Filter out components that are clearly outside the text region
+                # Components should be roughly in the middle 80% of the image height
+                # (accounting for vertical cropping that was done)
+                comp_center_y = comp_y + comp_h / 2
+                if comp_center_y < cca_img_h * 0.1 or comp_center_y > cca_img_h * 0.9:
+                    continue  # Skip components too far from text region
+
                 best_box_idx = None
                 max_overlap = 0
-                
+                best_center_distance = float(
+                    "inf"
+                )  # Distance from component center to box center
+                component_center_in_box = (
+                    False  # Track if component center is within any box
+                )
+
                 for i in range(num_to_process):
-                    box_x, _, box_w, _ = unlabeled_boxes[i]
+                    box_x, box_y, box_w, box_h = unlabeled_boxes[i]
                     box_r = box_x + box_w
-                    
-                    # Check if component overlaps with this box
+                    box_center_x = box_x + box_w / 2  # Box center x coordinate
+
+                    # Heuristic: If component is more than 1.5x the width of the box it's matching,
+                    # it's likely a merged blob spanning multiple words. Do NOT assign it.
+                    if comp_w > box_w * 1.5:
+                        continue
+
+                    # Check if component overlaps with this box horizontally
+                    # Note: unlabeled_boxes are in analysis_image coordinate system (x matches, y=0)
+                    # but cca_source_image might be full image, so we only check x overlap
                     if comp_x < box_r and box_x < comp_r:
-                        # Calculate overlap amount
+                        # Calculate horizontal overlap amount
                         overlap_start = max(comp_x, box_x)
                         overlap_end = min(comp_r, box_r)
-                        overlap = max(0, overlap_end - overlap_start)
-                        
-                        if overlap > max_overlap:
-                            max_overlap = overlap
-                            best_box_idx = i
-                
+                        overlap = overlap_end - overlap_start
+
+                        # Only consider boxes with actual overlap (not just touching)
+                        if overlap > 0:
+                            # Check if component center falls within this box's boundaries
+                            center_in_box = box_x <= comp_center_x < box_r
+
+                            # Calculate distance from component center to box center
+                            center_distance = abs(comp_center_x - box_center_x)
+
+                            # Priority 1: If component center is within box boundaries, prefer it
+                            # Priority 2: If no box contains the center, use closest center distance
+                            if center_in_box:
+                                # Component center is within this box - this is the best match
+                                if not component_center_in_box or overlap > max_overlap:
+                                    component_center_in_box = True
+                                    best_center_distance = center_distance
+                                    max_overlap = overlap
+                                    best_box_idx = i
+                            elif not component_center_in_box:
+                                # Component center not in any box yet - use closest center distance
+                                if center_distance < best_center_distance or (
+                                    center_distance == best_center_distance
+                                    and overlap > max_overlap
+                                ):
+                                    best_center_distance = center_distance
+                                    max_overlap = overlap
+                                    best_box_idx = i
+
                 if best_box_idx is not None:
                     component_assignments[j] = best_box_idx
 
@@ -816,27 +1004,37 @@ class AdaptiveSegmenter:
             refined_boxes_list = []
             for i in range(num_to_process):
                 word_label = words[i]
-                
+
                 # Find all components assigned to this box
                 components_in_box = []
                 for j, box_idx in component_assignments.items():
                     if box_idx == i:
                         components_in_box.append(stats[j])
-                
+
                 if not components_in_box:
                     # Fallback: use the original box if no components assigned
+                    # Adjust y coordinate from analysis_image space to cca_source_image space
                     box_x, box_y, box_w, box_h = unlabeled_boxes[i]
-                    refined_boxes_list.append({
-                        "text": word_label,
-                        "left": box_x,
-                        "top": box_y,
-                        "width": box_w,
-                        "height": box_h,
-                        "conf": line_data["conf"][0],
-                    })
+                    # unlabeled_boxes have y=0 relative to analysis_image (vertically cropped)
+                    # cca_source_image is always the full image (clean_binary or closed_binary)
+                    # So we need to adjust y coordinate by adding y_start offset
+                    adjusted_box_y = (
+                        y_start + box_y
+                    )  # box_y is typically 0, but add offset for safety
+                    refined_boxes_list.append(
+                        {
+                            "text": word_label,
+                            "left": box_x,
+                            "top": adjusted_box_y,
+                            "width": box_w,
+                            "height": box_h,
+                            "conf": line_data["conf"][0],
+                        }
+                    )
                     continue
-                
+
                 # Calculate bounding box from assigned components
+                # Components are already in cca_source_image coordinate system
                 min_x = min(c[cv2.CC_STAT_LEFT] for c in components_in_box)
                 min_y = min(c[cv2.CC_STAT_TOP] for c in components_in_box)
                 max_r = max(
@@ -847,14 +1045,18 @@ class AdaptiveSegmenter:
                     c[cv2.CC_STAT_TOP] + c[cv2.CC_STAT_HEIGHT]
                     for c in components_in_box
                 )
-                
+
+                # Validate dimensions
+                box_width = max(1, max_r - min_x)
+                box_height = max(1, max_b - min_y)
+
                 refined_boxes_list.append(
                     {
                         "text": word_label,
                         "left": min_x,
                         "top": min_y,
-                        "width": max_r - min_x,
-                        "height": max_b - min_y,
+                        "width": box_width,
+                        "height": box_height,
                         "conf": line_data["conf"][0],
                     }
                 )
@@ -928,6 +1130,12 @@ class AdaptiveSegmenter:
         for box in remapped_boxes_list:
             for key in remapped_output.keys():
                 remapped_output[key].append(box[key])
+
+        # Apply Final Logical Constraint Checks
+        img_h, img_w = line_image.shape[:2]
+        remapped_output = self._enforce_logical_constraints(
+            remapped_output, img_w, img_h
+        )
 
         # Visualisation
         if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:

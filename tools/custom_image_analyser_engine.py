@@ -1511,7 +1511,7 @@ def _vlm_page_ocr_predict(
                             pattern, lambda m: incremented_str + m.group(2), image_name
                         )
                 image_name_safe = safe_sanitize_text(incremented_image_name)
-                image_name_shortened = image_name_safe[:20]
+                image_name_shortened = image_name_safe[:50]
                 filename = f"{image_name_shortened}_vlm_page_input_image.png"
                 filepath = os.path.join(vlm_debug_dir, filename)
                 processed_image.save(filepath)
@@ -1976,7 +1976,7 @@ def _inference_server_page_ocr_predict(
                             pattern, lambda m: incremented_str + m.group(2), image_name
                         )
                 image_name_safe = safe_sanitize_text(incremented_image_name)
-                image_name_shortened = image_name_safe[:20]
+                image_name_shortened = image_name_safe[:50]
                 filename = (
                     f"{image_name_shortened}_inference_server_page_input_image.png"
                 )
@@ -4073,12 +4073,16 @@ class CustomImageAnalyzerEngine:
                 # Process each line
                 for i in range(num_lines):
                     line_text = rec_texts[i]
+
                     line_conf = float(rec_scores[i]) * 100  # Convert to percentage
                     bounding_box = rec_polys[i]
 
                     # Skip if bounding box is empty (from padding)
                     # Handle numpy arrays, lists, and None values safely
                     if bounding_box is None:
+                        print(
+                            f"Current line {i + 1} of {num_lines}: Bounding box is None"
+                        )
                         continue
 
                     # Convert to list first to handle numpy arrays safely
@@ -4089,10 +4093,14 @@ class CustomImageAnalyzerEngine:
 
                     # Check if box is empty (handles both list and numpy array cases)
                     if not box or (isinstance(box, list) and len(box) == 0):
+                        print(f"Current line {i + 1} of {num_lines}: Box is empty")
                         continue
 
                     # Skip empty lines
                     if not line_text.strip():
+                        print(
+                            f"Current line {i + 1} of {num_lines}: Line text is empty"
+                        )
                         continue
 
                     # Convert polygon to bounding box
@@ -4118,6 +4126,7 @@ class CustomImageAnalyzerEngine:
 
                     # If confidence is low, use inference-server for a second opinion
                     if line_conf <= confidence_threshold:
+
                         # Ensure minimum line height for inference-server processing
                         min_line_height = max(
                             line_height, 20
@@ -4137,6 +4146,9 @@ class CustomImageAnalyzerEngine:
                         # Ensure crop dimensions are valid
                         if crop_right <= crop_left or crop_bottom <= crop_top:
                             # Invalid crop, keep original PaddleOCR result
+                            print(
+                                f"Current line {i + 1} of {num_lines}: Invalid crop, keeping original PaddleOCR result"
+                            )
                             continue
 
                         # Crop the line image
@@ -4149,6 +4161,9 @@ class CustomImageAnalyzerEngine:
                         crop_height = crop_bottom - crop_top
                         if crop_width < 10 or crop_height < 10:
                             # Keep original PaddleOCR result for this line
+                            print(
+                                f"Current line {i + 1} of {num_lines}: Cropped image is too small, keeping original PaddleOCR result"
+                            )
                             continue
 
                         # Ensure cropped image is in RGB mode before passing to inference-server
@@ -4191,12 +4206,16 @@ class CustomImageAnalyzerEngine:
                                 if inference_server_result
                                 else []
                             )
+
                             inference_server_rec_scores = (
                                 inference_server_result.get("rec_scores", [])
                                 if inference_server_result
                                 else []
                             )
-                        except Exception:
+                        except Exception as e:
+                            print(
+                                f"Current line {i + 1} of {num_lines}: Error in inference-server OCR: {e}"
+                            )
                             # Ensure we keep original PaddleOCR result on error
                             inference_server_rec_texts = []
                             inference_server_rec_scores = []
@@ -4515,10 +4534,10 @@ class CustomImageAnalyzerEngine:
 
             if self.ocr_engine == "hybrid-paddle-vlm":
 
-                paddle_results = self._perform_hybrid_paddle_vlm_ocr(
+                modified_paddle_results = self._perform_hybrid_paddle_vlm_ocr(
                     paddle_processed_image,  # Use the exact image PaddleOCR processed
                     ocr=ocr,
-                    paddle_results=paddle_results,
+                    paddle_results=copy.deepcopy(paddle_results),
                     image_name=image_name,
                     input_image_width=original_image_width,
                     input_image_height=original_image_height,
@@ -4526,17 +4545,19 @@ class CustomImageAnalyzerEngine:
 
             elif self.ocr_engine == "hybrid-paddle-inference-server":
 
-                paddle_results = self._perform_hybrid_paddle_inference_server_ocr(
+                modified_paddle_results = self._perform_hybrid_paddle_inference_server_ocr(
                     paddle_processed_image,  # Use the exact image PaddleOCR processed
                     ocr=ocr,
-                    paddle_results=paddle_results,
+                    paddle_results=copy.deepcopy(paddle_results),
                     image_name=image_name,
                     input_image_width=original_image_width,
                     input_image_height=original_image_height,
                 )
+            else:
+                modified_paddle_results = copy.deepcopy(paddle_results)
 
             ocr_data = self._convert_paddle_to_tesseract_format(
-                paddle_results,
+                modified_paddle_results,
                 input_image_width=original_image_width,
                 input_image_height=original_image_height,
             )

@@ -1045,15 +1045,15 @@ llama-server \
     --n-gpu-layers -1 \
     --jinja \
     --top-p 0.8 \
-    --top-k 20 \
-    --temp 0 \
+    --top-k -1 \
+    --temp 0.0 \
     --min-p 0.0 \
     --flash-attn on \
     --presence-penalty 1.5 \
     --ctx-size 8192 \
     --host 0.0.0.0 \
     --port 7862 \
-    --image-min-tokens 2300 \
+    --image-min-tokens 1024 \
     --image-max-tokens 2301 \
     --no-warmup
 ```
