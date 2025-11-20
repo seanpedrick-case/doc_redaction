@@ -57,6 +57,7 @@ from tools.config import (
     USAGE_LOGS_FOLDER,
     USE_GREEDY_DUPLICATE_DETECTION,
     WHOLE_PAGE_REDACTION_LIST_PATH,
+    convert_string_to_boolean,
 )
 
 
@@ -69,7 +70,7 @@ def get_username_and_folders(
     username: str = "",
     output_folder_textbox: str = OUTPUT_FOLDER,
     input_folder_textbox: str = INPUT_FOLDER,
-    session_output_folder: str = SESSION_OUTPUT_FOLDER,
+    session_output_folder: bool = SESSION_OUTPUT_FOLDER,
     textract_document_upload_input_folder: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     textract_document_upload_output_folder: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
     s3_textract_document_logs_subfolder: str = TEXTRACT_JOBS_S3_LOC,
@@ -82,7 +83,7 @@ def get_username_and_folders(
     else:
         out_session_hash = _generate_session_hash()
 
-    if session_output_folder == "True" or session_output_folder is True:
+    if session_output_folder:
         output_folder = output_folder_textbox + out_session_hash + "/"
         input_folder = input_folder_textbox + out_session_hash + "/"
 
@@ -646,10 +647,8 @@ python cli_redact.py --task textract --textract_action list
         args.match_fuzzy_whole_phrase_bool = True
     else:
         args.match_fuzzy_whole_phrase_bool = False
-    if args.save_to_user_folders == "True":
-        args.save_to_user_folders = True
-    else:
-        args.save_to_user_folders = False
+    # Convert save_to_user_folders to boolean (handles both string and boolean values)
+    args.save_to_user_folders = convert_string_to_boolean(args.save_to_user_folders)
 
     # Combine extraction options
     extraction_options = (

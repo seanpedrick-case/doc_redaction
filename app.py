@@ -551,7 +551,7 @@ with blocks:
         label="s3_output_folder_state", value="", visible=False
     )
     session_output_folder_textbox = gr.Textbox(
-        value=SESSION_OUTPUT_FOLDER,
+        value=str(SESSION_OUTPUT_FOLDER),
         label="session_output_folder_textbox",
         visible=False,
     )

@@ -10,7 +10,12 @@ import boto3
 import gradio as gr
 import numpy as np
 import pandas as pd
-from botocore.exceptions import ClientError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    NoCredentialsError,
+    PartialCredentialsError,
+)
 from gradio_image_annotation import image_annotator
 
 from tools.config import (
@@ -34,6 +39,7 @@ from tools.config import (
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
     aws_comprehend_language_choices,
+    convert_string_to_boolean,
     textract_language_choices,
 )
 from tools.secure_path_utils import secure_join
@@ -500,12 +506,15 @@ async def get_connection_params(
     request: gr.Request,
     output_folder_textbox: str = OUTPUT_FOLDER,
     input_folder_textbox: str = INPUT_FOLDER,
-    session_output_folder: str = SESSION_OUTPUT_FOLDER,
+    session_output_folder: bool = SESSION_OUTPUT_FOLDER,
     textract_document_upload_input_folder: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     textract_document_upload_output_folder: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
     s3_textract_document_logs_subfolder: str = TEXTRACT_JOBS_S3_LOC,
     local_textract_document_logs_subfolder: str = TEXTRACT_JOBS_LOCAL_LOC,
 ):
+    # Convert session_output_folder to boolean if it's a string (from Gradio Textbox)
+    if isinstance(session_output_folder, str):
+        session_output_folder = convert_string_to_boolean(session_output_folder)
 
     # print("Session hash:", request.session_hash)
 
@@ -531,34 +540,46 @@ async def get_connection_params(
         out_session_hash = request.headers["x-cognito-id"]
         # print("Cognito ID found:", out_session_hash)
 
-    elif "x-amzn-oidc-identity" in request.headers and AWS_USER_POOL_ID:
+    elif "x-amzn-oidc-identity" in request.headers:
         out_session_hash = request.headers["x-amzn-oidc-identity"]
 
-        # Fetch email address using Cognito client
-        cognito_client = boto3.client("cognito-idp")
-        try:
-            response = cognito_client.admin_get_user(
-                UserPoolId=AWS_USER_POOL_ID,  # Replace with your User Pool ID
-                Username=out_session_hash,
-            )
-            email = next(
-                attr["Value"]
-                for attr in response["UserAttributes"]
-                if attr["Name"] == "email"
-            )
-            # print("Email address found:", email)
+        if AWS_USER_POOL_ID:
+            try:
+                # Fetch email address using Cognito client
+                cognito_client = boto3.client("cognito-idp")
 
-            out_session_hash = email
-        except ClientError as e:
-            print("Error fetching user details:", e)
-            email = None
+                response = cognito_client.admin_get_user(
+                    UserPoolId=AWS_USER_POOL_ID,  # Replace with your User Pool ID
+                    Username=out_session_hash,
+                )
+                email = next(
+                    attr["Value"]
+                    for attr in response["UserAttributes"]
+                    if attr["Name"] == "email"
+                )
+                print("Cognito email address found, will be used as session hash")
 
-        print("Cognito ID found:", out_session_hash)
+                out_session_hash = email
+            except (
+                ClientError,
+                NoCredentialsError,
+                PartialCredentialsError,
+                BotoCoreError,
+            ) as e:
+                print(f"Error fetching Cognito user details: {e}")
+                print("Falling back to using AWS ID as session hash")
+                # out_session_hash already set to the AWS ID from header, so no need to change it
+            except Exception as e:
+                print(f"Unexpected error when fetching Cognito user details: {e}")
+                print("Falling back to using AWS ID as session hash")
+                # out_session_hash already set to the AWS ID from header, so no need to change it
+
+        print("AWS ID found, will be used as username for session:", out_session_hash)
 
     else:
         out_session_hash = request.session_hash
 
-    if session_output_folder == "True":
+    if session_output_folder:
         output_folder = output_folder_textbox + out_session_hash + "/"
         input_folder = input_folder_textbox + out_session_hash + "/"
 

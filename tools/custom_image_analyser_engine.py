@@ -3522,7 +3522,7 @@ class CustomImageAnalyzerEngine:
             input_image_height: int,
             confidence_threshold: float,
             image_name: str,
-            instance_self: object,
+            output_folder: str,
             padding: int = 0,
         ):
             """
@@ -3544,11 +3544,60 @@ class CustomImageAnalyzerEngine:
                 confidence_threshold (float): Lines recognized by PaddleOCR with confidence lower than this
                     threshold will be replaced using the VLM.
                 image_name (str): The name of the source image, used for logging/debugging.
-                instance_self (object): The enclosing class instance to access instance methods.
+                output_folder (str): The output folder path for saving example images.
+                padding (int): Padding to add around line crops.
 
             Returns:
-                None. Modifies page_results in place with higher-confidence text replacements when possible.
+                Modified page_results with VLM replacements for low-confidence lines.
             """
+
+            # Helper function to create safe filename (inlined to avoid needing instance_self)
+            def _create_safe_filename_with_confidence(
+                original_text: str,
+                new_text: str,
+                conf: int,
+                new_conf: int,
+                ocr_type: str = "OCR",
+            ) -> str:
+                """Creates a safe filename using confidence values when text sanitization fails."""
+
+                # Helper to sanitize text similar to _sanitize_filename
+                def _sanitize_text_for_filename(
+                    text: str,
+                    max_length: int = 20,
+                    fallback_prefix: str = "unknown_text",
+                ) -> str:
+                    """Sanitizes text for use in filenames."""
+                    sanitized = safe_sanitize_text(text)
+                    # Remove leading/trailing underscores and spaces
+                    sanitized = sanitized.strip("_ ")
+                    # If empty after sanitization, use a default value
+                    if not sanitized:
+                        sanitized = fallback_prefix
+                    # Limit to max_length characters
+                    if len(sanitized) > max_length:
+                        sanitized = sanitized[:max_length]
+                        sanitized = sanitized.rstrip("_")
+                    # Final check: if still empty or too short, use fallback
+                    if not sanitized or len(sanitized) < 3:
+                        sanitized = fallback_prefix
+                    return sanitized
+
+                # Try to sanitize both texts
+                safe_original = _sanitize_text_for_filename(
+                    original_text, max_length=15, fallback_prefix=f"orig_conf_{conf}"
+                )
+                safe_new = _sanitize_text_for_filename(
+                    new_text, max_length=15, fallback_prefix=f"new_conf_{new_conf}"
+                )
+
+                # If both sanitizations resulted in fallback names, create a confidence-based name
+                if safe_original.startswith("orig_conf") and safe_new.startswith(
+                    "new_conf"
+                ):
+                    return f"{ocr_type}_conf_{conf}_to_conf_{new_conf}"
+
+                return f"{safe_original}_conf_{conf}_to_{safe_new}_conf_{new_conf}"
 
             # Process each page result in paddle_results
             for page_result in page_results:
@@ -3674,7 +3723,7 @@ class CustomImageAnalyzerEngine:
                         if SAVE_VLM_INPUT_IMAGES:
                             try:
                                 vlm_debug_dir = os.path.join(
-                                    self.output_folder,
+                                    output_folder,
                                     "hybrid_paddle_vlm_visualisations/hybrid_analysis_input_images",
                                 )
                                 os.makedirs(vlm_debug_dir, exist_ok=True)
@@ -3733,17 +3782,15 @@ class CustomImageAnalyzerEngine:
                                     gr.Info(text_output, duration=2)
 
                                 # For exporting example image comparisons
-                                safe_filename = (
-                                    instance_self._create_safe_filename_with_confidence(
-                                        line_text,
-                                        vlm_text,
-                                        int(line_conf),
-                                        int(vlm_conf * 100),
-                                        "VLM",
-                                    )
+                                safe_filename = _create_safe_filename_with_confidence(
+                                    line_text,
+                                    vlm_text,
+                                    int(line_conf),
+                                    int(vlm_conf * 100),
+                                    "VLM",
                                 )
 
-                                if SAVE_EXAMPLE_HYBRID_IMAGES is True:
+                                if SAVE_EXAMPLE_HYBRID_IMAGES:
                                     # Normalize and validate image_name to prevent path traversal attacks
                                     normalized_image_name = os.path.normpath(
                                         image_name + "_hybrid_paddle_vlm"
@@ -3756,7 +3803,7 @@ class CustomImageAnalyzerEngine:
                                         normalized_image_name = "safe_image"
 
                                     hybrid_ocr_examples_folder = (
-                                        instance_self.output_folder
+                                        output_folder
                                         + f"/hybrid_ocr_examples/{normalized_image_name}"
                                     )
                                     # Validate the constructed path is safe
@@ -3811,7 +3858,7 @@ class CustomImageAnalyzerEngine:
             input_image_height,
             confidence_threshold,
             image_name,
-            self,
+            self.output_folder,
             padding,
         )
 

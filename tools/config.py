@@ -269,8 +269,8 @@ MAX_IMAGE_PIXELS = get_or_create_env_var(
 # File I/O options
 ###
 
-SESSION_OUTPUT_FOLDER = get_or_create_env_var(
-    "SESSION_OUTPUT_FOLDER", "False"
+SESSION_OUTPUT_FOLDER = convert_string_to_boolean(
+    get_or_create_env_var("SESSION_OUTPUT_FOLDER", "False")
 )  # i.e. do you want your input and output folders saved within a subfolder based on session hash value within output/input folders
 
 OUTPUT_FOLDER = get_or_create_env_var("GRADIO_OUTPUT_FOLDER", "output/")  # 'output/'
