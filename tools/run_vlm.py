@@ -8,6 +8,7 @@ from PIL import Image
 
 from tools.config import (
     LOAD_PADDLE_AT_STARTUP,
+    MAX_NEW_TOKENS,
     MAX_SPACES_GPU_RUN_TIME,
     PADDLE_DET_DB_UNCLIP_RATIO,
     PADDLE_MODEL_PATH,
@@ -82,6 +83,19 @@ if LOAD_PADDLE_AT_STARTUP is True:
         print(
             "PaddleOCR not found. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
         )
+
+
+# Define module-level defaults for model parameters (always available for import)
+# These will be overridden inside the SHOW_VLM_MODEL_OPTIONS block if enabled
+model_default_prompt = """Read all the text in the image."""
+model_default_greedy = VLM_DEFAULT_GREEDY
+model_default_top_p = float(VLM_DEFAULT_TOP_P)
+model_default_top_k = int(VLM_DEFAULT_TOP_K)
+model_default_temperature = float(VLM_DEFAULT_TEMPERATURE)
+model_default_repetition_penalty = float(VLM_DEFAULT_REPETITION_PENALTY)
+model_default_presence_penalty = VLM_DEFAULT_PRESENCE_PENALTY
+model_default_max_new_tokens = int(MAX_NEW_TOKENS)
+model_default_seed = int(VLM_SEED)
 
 
 if SHOW_VLM_MODEL_OPTIONS is True:
