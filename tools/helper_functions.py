@@ -531,7 +531,7 @@ async def get_connection_params(
         out_session_hash = request.headers["x-cognito-id"]
         # print("Cognito ID found:", out_session_hash)
 
-    elif "x-amzn-oidc-identity" in request.headers:
+    elif "x-amzn-oidc-identity" in request.headers and AWS_USER_POOL_ID:
         out_session_hash = request.headers["x-amzn-oidc-identity"]
 
         # Fetch email address using Cognito client
