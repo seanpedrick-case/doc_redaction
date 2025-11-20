@@ -1214,7 +1214,7 @@ def plot_text_bounding_boxes(
 
         image_name_safe = safe_sanitize_text(incremented_image_name)
         image_name_shortened = image_name_safe[:50]
-        filename = f"{image_name_shortened}_output_image_with_bounding_boxes.png"
+        filename = f"{image_name_shortened}_initial_bounding_box_output.png"
         filepath = os.path.join(normalized_debug_dir, filename)
         img.save(filepath)
     except Exception as e:
@@ -4596,12 +4596,30 @@ class CustomImageAnalyzerEngine:
                 # Generate safe filename
                 if image_name:
                     base_name = os.path.splitext(os.path.basename(image_name))[0]
+                    # Increment the number at the end of base_name
+                    # This converts zero-indexed input to one-indexed output
+                    incremented_base_name = base_name
+                    # Find the number pattern at the end
+                    # Matches patterns like: _0, _00, 0, 00, etc.
+                    pattern = r"(\d+)$"
+                    match = re.search(pattern, base_name)
+                    if match:
+                        number_str = match.group(1)
+                        number = int(number_str)
+                        incremented_number = number + 1
+                        # Preserve the same number of digits (padding with zeros if needed)
+                        incremented_str = str(incremented_number).zfill(len(number_str))
+                        incremented_base_name = re.sub(
+                            pattern, incremented_str, base_name
+                        )
                     # Sanitize filename to avoid issues with special characters
-                    base_name = safe_sanitize_text(base_name, max_length=50)
-                    filename = f"{base_name}_ocr_visualisation.jpg"
+                    incremented_base_name = safe_sanitize_text(
+                        incremented_base_name, max_length=50
+                    )
+                    filename = f"{incremented_base_name}_initial_bounding_boxes.jpg"
                 else:
                     timestamp = int(time.time())
-                    filename = f"ocr_visualisation_{timestamp}.jpg"
+                    filename = f"initial_bounding_boxes_{timestamp}.jpg"
 
                 output_path = os.path.join(paddle_viz_folder, filename)
                 cv2.imwrite(output_path, image_cv)
