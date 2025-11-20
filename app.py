@@ -1653,6 +1653,10 @@ with blocks:
                     height=200,
                 )
         else:
+            all_output_files_btn = gr.Button(
+                    "Update files in output folder", variant="secondary", visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER
+                )
+            
             all_output_files = gr.FileExplorer(
                 root_dir=OUTPUT_FOLDER,
                 label="Choose output files for download",
