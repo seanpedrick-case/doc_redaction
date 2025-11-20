@@ -1035,6 +1035,39 @@ If the SHOW_HYBRID_MODELS environment variable is set to 'True' in your app_conf
 - **Hybrid-paddle-vlm**: This uses PaddleOCR's line-level detection with a VLM's advanced recognition capabilities. PaddleOCR is better at identifying bounding boxes for difficult documents, and so this is probably the most usable of the three options, if you can get both Paddle and the VLM model working in the same environment.
 - **Hybrid-paddle-inference-server**: This uses PaddleOCR's line-level detection with an inference server's advanced recognition capabilities. This is the same as the Hybrid-paddle-vlm option, but uses an inference server instead of a VLM model. This allows for the use of GGUF or AWQ/GPTQ quantised models via llama.cpp or vllm servers.
 
+### Inference server options
+
+If using a local inference server, I would suggest using (llama.cpp)[https://github.com/ggml-org/llama.cpp] as it is much faster than transformers/torch inference, and it will offload to cpu/ram automatically rather than failing as vllm tends to do. Here is the run command I use for my llama server locally ion a wsl or linux environment) to get good results (need at least 12GB of VRAM to run with all gpu layers assigned to your graphics card):
+
+```
+llama-server \
+    -hf unsloth/Qwen3-VL-8B-Instruct-GGUF:UD-Q4_K_XL \
+    --n-gpu-layers -1 \
+    --jinja \
+    --top-p 0.8 \
+    --top-k 20 \
+    --temp 0 \
+    --min-p 0.0 \
+    --flash-attn on \
+    --presence-penalty 1.5 \
+    --ctx-size 8192 \
+    --host 0.0.0.0 \
+    --port 7862 \
+    --image-min-tokens 2300 \
+    --image-max-tokens 2301 \
+    --no-warmup
+```
+
+If running llama.cpp on the same computer as the doc redaction app, you can then set the following variable in config/app_config.env to run:
+
+```
+SHOW_INFERENCE_SERVER_OPTIONS=True
+INFERENCE_SERVER_API_URL=http://localhost:7862
+```
+
+The above setup with host = 0.0.0.0 allows you to access this server from other computers in your home network. Find your internal ip for the computer hosting llama server (e.g. using ipconfig in Windows), and then replace 'localhost' in the above variable with this value.
+
+
 ## Command Line Interface (CLI)
 
 The app includes a comprehensive command-line interface (`cli_redact.py`) that allows you to perform redaction, deduplication, and AWS Textract operations directly from the terminal. This is particularly useful for batch processing, automation, and integration with other systems.

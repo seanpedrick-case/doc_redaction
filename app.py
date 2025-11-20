@@ -108,9 +108,11 @@ from tools.config import (
     HOST_NAME,
     INPUT_FOLDER,
     INTRO_TEXT,
+    LANGUAGE_CHOICES,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     LOCAL_OCR_MODEL_OPTIONS,
     LOG_FILE_NAME,
+    MAPPED_LANGUAGE_CHOICES,
     MAX_FILE_SIZE,
     MAX_OPEN_TEXT_CHARACTERS,
     MAX_QUEUE_SIZE,
@@ -134,6 +136,7 @@ from tools.config import (
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SESSION_OUTPUT_FOLDER,
+    SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
     SHOW_AWS_EXAMPLES,
     SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
     SHOW_COSTS,
@@ -176,8 +179,7 @@ from tools.find_duplicate_tabular import (
     run_tabular_duplicate_detection,
 )
 from tools.helper_functions import (
-    LANGUAGE_CHOICES,
-    MAPPED_LANGUAGE_CHOICES,
+    all_outputs_file_download_fn,
     calculate_aws_costs,
     calculate_time_taken,
     check_for_existing_textract_file,
@@ -413,7 +415,6 @@ local_ocr_method_radio = gr.Radio(
     interactive=True,
     visible=SHOW_LOCAL_OCR_MODEL_OPTIONS,
 )
-
 
 
 ## Deduplication examples
@@ -1101,7 +1102,7 @@ with blocks:
         # Examples for PDF/image redaction
         if SHOW_EXAMPLES:
             gr.Markdown(
-                "### Try an example - Click on an example below and then the 'Extract text and redact document' button:"
+                "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
             )
 
             # Check which example files exist and create examples only for available files
@@ -1286,7 +1287,7 @@ with blocks:
                 )
         if SHOW_DIFFICULT_OCR_EXAMPLES:
             gr.Markdown(
-                "### Try one of the following examples to test the OCR methods with difficult documents:"
+                "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
             )
             ocr_example_files = [
                 "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
@@ -1295,6 +1296,22 @@ with blocks:
             available_ocr_examples = list()
             ocr_example_labels = list()
             if os.path.exists(ocr_example_files[0]):
+                available_ocr_examples.append(
+                    [
+                        [ocr_example_files[0]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Only extract text (no redaction)",
+                        ["Extract handwriting", "Extract signatures"],
+                        [ocr_example_files[0]],
+                        ocr_example_files[0],
+                        7,
+                        1,
+                        1,
+                        "vlm",
+                    ],
+                )
+                ocr_example_labels.append("Baseline 'easy' document page")
+
                 available_ocr_examples.append(
                     [
                         [ocr_example_files[0]],
@@ -1325,7 +1342,7 @@ with blocks:
                         "vlm",
                     ],
                 )
-                ocr_example_labels.append("Unclear handwritten note")
+                ocr_example_labels.append("Unclear text on handwritten note")
 
             # Only create examples if we have available files
             if available_ocr_examples:
@@ -1336,7 +1353,7 @@ with blocks:
                     pii_identification_method_drop,
                     handwrite_signature_checkbox,
                     prepared_pdf_state,
-                    doc_full_file_name_textbox,                    
+                    doc_full_file_name_textbox,
                     total_pdf_page_count,
                     page_min,
                     page_max,
@@ -1354,7 +1371,7 @@ with blocks:
                         pii_identification_method_drop,
                         handwrite_signature_checkbox,
                         prepared_pdf_state,
-                        doc_full_file_name_textbox,                    
+                        doc_full_file_name_textbox,
                         total_pdf_page_count,
                         page_min,
                         page_max,
@@ -1588,6 +1605,83 @@ with blocks:
             label="Please give more detailed feedback about the results:", visible=False
         )
         pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
+
+        # Feedback elements are invisible until revealed by redaction action
+        # all_outputs_in_output_folder_title = gr.Markdown(value="## All outputs in output folder", visible=False)
+        # all_outputs_in_output_folder_dataframe = gr.FileExplorer(
+        #     root_dir=OUTPUT_FOLDER,
+        #     label="All outputs in output folder",
+        #     file_count="multiple",
+        #     visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+        #     interactive=True,
+        # )
+
+        if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
+            with gr.Accordion(
+                "View all and download all output files from this session", open=False
+            ):
+                all_output_files_btn = gr.Button(
+                    "Update files in output folder", variant="secondary"
+                )
+                all_output_files = gr.FileExplorer(
+                    root_dir=OUTPUT_FOLDER,
+                    label="Choose output files for download",
+                    file_count="multiple",
+                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                    interactive=True,
+                    max_height=400,
+                )
+
+                all_outputs_file_download = gr.File(
+                    label="Download output files",
+                    file_count="multiple",
+                    file_types=[
+                        ".pdf",
+                        ".jpg",
+                        ".jpeg",
+                        ".png",
+                        ".csv",
+                        ".xlsx",
+                        ".xls",
+                        ".txt",
+                        ".doc",
+                        ".docx",
+                        ".json",
+                    ],
+                    interactive=False,
+                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                    height=200,
+                )
+        else:
+            all_output_files = gr.FileExplorer(
+                root_dir=OUTPUT_FOLDER,
+                label="Choose output files for download",
+                file_count="multiple",
+                visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                interactive=True,
+                max_height=400,
+            )
+
+            all_outputs_file_download = gr.File(
+                label="Download output files",
+                file_count="multiple",
+                file_types=[
+                    ".pdf",
+                    ".jpg",
+                    ".jpeg",
+                    ".png",
+                    ".csv",
+                    ".xlsx",
+                    ".xls",
+                    ".txt",
+                    ".doc",
+                    ".docx",
+                    ".json",
+                ],
+                interactive=False,
+                visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                height=200,
+            )
 
     ###
     # REVIEW REDACTIONS TAB
@@ -2463,7 +2557,7 @@ with blocks:
                 )
 
         with gr.Accordion("Redact only selected pages", open=False):
-            with gr.Row():                
+            with gr.Row():
                 page_min.render()
                 page_max.render()
 
@@ -2531,17 +2625,6 @@ with blocks:
             )
             merge_multiple_review_files_btn = gr.Button(
                 "Merge multiple review files into one", variant="primary"
-            )
-
-        with gr.Accordion("View all output files from this session", open=False):
-            all_output_files_btn = gr.Button(
-                "Click here to view all output files", variant="secondary"
-            )
-            all_output_files = gr.File(
-                label="All files in output folder",
-                file_count="multiple",
-                file_types=[".csv"],
-                interactive=False,
             )
 
     ###
@@ -5949,9 +6032,19 @@ with blocks:
         outputs=multiple_review_files_in_out,
     )
 
-    #
+    # Need to momentarilly change the root directory of the file explorer to another non-sensitive folder when the button is clicked to get it to update (workaround))
     all_output_files_btn.click(
+        fn=lambda: gr.FileExplorer(root_dir=FEEDBACK_LOGS_FOLDER),
+        inputs=None,
+        outputs=all_output_files,
+    ).success(
         fn=load_all_output_files, inputs=output_folder_textbox, outputs=all_output_files
+    )
+
+    all_output_files.change(
+        fn=all_outputs_file_download_fn,
+        inputs=all_output_files,
+        outputs=all_outputs_file_download,
     )
 
     # Language selection dropdown
@@ -5997,7 +6090,12 @@ with blocks:
                 local_whole_document_textract_logs_subfolder,
             ],
             outputs=[textract_job_detail_df],
+        ).success(
+            fn=load_all_output_files,
+            inputs=output_folder_textbox,
+            outputs=all_output_files,
         )
+
     else:
         blocks.load(
             get_connection_params,
@@ -6020,6 +6118,10 @@ with blocks:
                 s3_whole_document_textract_logs_subfolder,
                 local_whole_document_textract_logs_subfolder,
             ],
+        ).success(
+            fn=load_all_output_files,
+            inputs=output_folder_textbox,
+            outputs=all_output_files,
         )
 
     # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location

@@ -617,6 +617,39 @@ OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
     get_or_create_env_var("OVERWRITE_EXISTING_OCR_RESULTS", "False")
 )  # If True, always create new OCR results instead of loading from existing JSON files
 
+# VLM generation parameter defaults
+VLM_SEED = int(
+    get_or_create_env_var("VLM_SEED", "42")
+)  # Random seed for VLM generation. If empty, no seed is set (non-deterministic). If set to an integer, generation will be deterministic.
+
+VLM_DEFAULT_TEMPERATURE = float(
+    get_or_create_env_var("VLM_DEFAULT_TEMPERATURE", "0.1")
+)  # Default temperature for VLM generation. Used when model-specific defaults are not set.
+
+VLM_DEFAULT_TOP_P = float(
+    get_or_create_env_var("VLM_DEFAULT_TOP_P", "0.8")
+)  # Default top_p (nucleus sampling) for VLM generation. Used when model-specific defaults are not set.
+
+VLM_DEFAULT_TOP_K = int(
+    get_or_create_env_var("VLM_DEFAULT_TOP_K", "20")
+)  # Default top_k for VLM generation. Used when model-specific defaults are not set.
+
+VLM_DEFAULT_REPETITION_PENALTY = float(
+    get_or_create_env_var("VLM_DEFAULT_REPETITION_PENALTY", "1.3")
+)  # Default repetition penalty for VLM generation. Used when model-specific defaults are not set.
+
+VLM_DEFAULT_GREEDY = convert_string_to_boolean(
+    get_or_create_env_var("VLM_DEFAULT_GREEDY", "False")
+)  # Default greedy setting for VLM generation. False means use sampling (do_sample=True), True means use greedy decoding (do_sample=False). Used when model-specific defaults are not set.
+
+VLM_DEFAULT_PRESENCE_PENALTY = get_or_create_env_var(
+    "VLM_DEFAULT_PRESENCE_PENALTY", ""
+)  # Default presence penalty for VLM generation. If empty, defaults to None. Used when model-specific defaults are not set.
+if VLM_DEFAULT_PRESENCE_PENALTY:
+    VLM_DEFAULT_PRESENCE_PENALTY = float(VLM_DEFAULT_PRESENCE_PENALTY)
+else:
+    VLM_DEFAULT_PRESENCE_PENALTY = None
+
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
@@ -731,9 +764,10 @@ MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
     get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "80")
 )  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
+
 HYBRID_OCR_PADDING = int(
     get_or_create_env_var("HYBRID_OCR_PADDING", "1")
-)  # The padding to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
+)  # The padding (in pixels) to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
 
 TESSERACT_WORD_LEVEL_OCR = convert_string_to_boolean(
     get_or_create_env_var("TESSERACT_WORD_LEVEL_OCR", "True")
@@ -1028,6 +1062,10 @@ COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "
 
 SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_FEEDBACK_BUTTONS", "False")
+)
+
+SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER", "False")
 )
 
 
@@ -1352,3 +1390,15 @@ if ALLOWED_ORIGINS:
 
 if ALLOWED_HOSTS:
     ALLOWED_HOSTS = _get_env_list(ALLOWED_HOSTS)
+
+if textract_language_choices:
+    textract_language_choices = _get_env_list(textract_language_choices)
+if aws_comprehend_language_choices:
+    aws_comprehend_language_choices = _get_env_list(aws_comprehend_language_choices)
+
+if MAPPED_LANGUAGE_CHOICES:
+    MAPPED_LANGUAGE_CHOICES = _get_env_list(MAPPED_LANGUAGE_CHOICES)
+if LANGUAGE_CHOICES:
+    LANGUAGE_CHOICES = _get_env_list(LANGUAGE_CHOICES)
+
+LANGUAGE_MAP = dict(zip(MAPPED_LANGUAGE_CHOICES, LANGUAGE_CHOICES))

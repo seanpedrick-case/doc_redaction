@@ -21,7 +21,7 @@ from tools.config import (
     DEFAULT_LANGUAGE,
     INPUT_FOLDER,
     LANGUAGE_CHOICES,
-    MAPPED_LANGUAGE_CHOICES,
+    LANGUAGE_MAP,
     NO_REDACTION_PII_OPTION,
     OUTPUT_FOLDER,
     SELECTABLE_TEXT_EXTRACT_OPTION,
@@ -37,28 +37,6 @@ from tools.config import (
     textract_language_choices,
 )
 from tools.secure_path_utils import secure_join
-
-
-def _get_env_list(env_var_name: str) -> List[str]:
-    """Parses a comma-separated environment variable into a list of strings."""
-    value = env_var_name[1:-1].strip().replace('"', "").replace("'", "")
-    if not value:
-        return []
-    # Split by comma and filter out any empty strings that might result from extra commas
-    return [s.strip() for s in value.split(",") if s.strip()]
-
-
-if textract_language_choices:
-    textract_language_choices = _get_env_list(textract_language_choices)
-if aws_comprehend_language_choices:
-    aws_comprehend_language_choices = _get_env_list(aws_comprehend_language_choices)
-
-if MAPPED_LANGUAGE_CHOICES:
-    MAPPED_LANGUAGE_CHOICES = _get_env_list(MAPPED_LANGUAGE_CHOICES)
-if LANGUAGE_CHOICES:
-    LANGUAGE_CHOICES = _get_env_list(LANGUAGE_CHOICES)
-
-LANGUAGE_MAP = dict(zip(MAPPED_LANGUAGE_CHOICES, LANGUAGE_CHOICES))
 
 
 def reset_state_vars():
@@ -691,19 +669,20 @@ def _generate_unique_ids(
 
 def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:
     """Get the file paths of all files in the given folder and its subfolders."""
-    file_paths = list()
 
-    # Ensure folder_path is a safe, absolute path
-    safe_folder_path = Path(folder_path).resolve()
+    safe_folder_path_resolved = Path(folder_path).resolve()
 
-    # Walk through all files in the directory tree
-    for root, dirs, files in os.walk(safe_folder_path):
-        for filename in files:
-            # Construct full file path using secure_join to prevent path traversal
-            full_path = secure_join(Path(root), filename)
-            file_paths.append(full_path)
+    return gr.FileExplorer(
+        root_dir=safe_folder_path_resolved,
+    )
 
-    return file_paths
+
+def update_file_explorer_object():
+    return gr.FileExplorer()
+
+
+def all_outputs_file_download_fn(file_explorer_object: list[str]):
+    return file_explorer_object
 
 
 def calculate_aws_costs(

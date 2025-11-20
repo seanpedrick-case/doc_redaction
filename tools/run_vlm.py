@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 from threading import Thread
 
 import gradio as gr
@@ -16,6 +15,14 @@ from tools.config import (
     QUANTISE_VLM_MODELS,
     REPORT_VLM_OUTPUTS_TO_GUI,
     SHOW_VLM_MODEL_OPTIONS,
+    USE_FLASH_ATTENTION,
+    VLM_DEFAULT_GREEDY,
+    VLM_DEFAULT_PRESENCE_PENALTY,
+    VLM_DEFAULT_REPETITION_PENALTY,
+    VLM_DEFAULT_TEMPERATURE,
+    VLM_DEFAULT_TOP_K,
+    VLM_DEFAULT_TOP_P,
+    VLM_SEED,
 )
 
 if LOAD_PADDLE_AT_STARTUP is True:
@@ -95,6 +102,13 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         QUANTISE_VLM_MODELS,
         SELECTED_MODEL,
         USE_FLASH_ATTENTION,
+        VLM_DEFAULT_GREEDY,
+        VLM_DEFAULT_PRESENCE_PENALTY,
+        VLM_DEFAULT_REPETITION_PENALTY,
+        VLM_DEFAULT_TEMPERATURE,
+        VLM_DEFAULT_TOP_K,
+        VLM_DEFAULT_TOP_P,
+        VLM_SEED,
     )
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -118,16 +132,17 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     model = None
 
     # Initialize model-specific generation parameters (will be set by specific models if needed)
-    model_default_prompt = None
-    model_default_greedy = None
-    model_default_top_p = None
-    model_default_top_k = None
-    model_default_temperature = None
-    model_default_repetition_penalty = None
-    model_default_presence_penalty = None
-    model_default_max_new_tokens = None
+    model_default_prompt = """Read all the text in the image."""
+    model_default_greedy = VLM_DEFAULT_GREEDY
+    model_default_top_p = float(VLM_DEFAULT_TOP_P)
+    model_default_top_k = int(VLM_DEFAULT_TOP_K)
+    model_default_temperature = float(VLM_DEFAULT_TEMPERATURE)
+    model_default_repetition_penalty = float(VLM_DEFAULT_REPETITION_PENALTY)
+    model_default_presence_penalty = VLM_DEFAULT_PRESENCE_PENALTY
+    model_default_max_new_tokens = int(MAX_NEW_TOKENS)
     # Track which models support presence_penalty (only Qwen3-VL models currently)
     model_supports_presence_penalty = False
+    model_default_seed = int(VLM_SEED)
 
     if USE_FLASH_ATTENTION is True:
         attn_implementation = "flash_attention_2"
@@ -349,6 +364,8 @@ def extract_text_from_image_vlm(
     repetition_penalty: float = None,
     greedy: bool = None,
     presence_penalty: float = None,
+    seed: int = None,
+    model_default_prompt: str = None,
 ):
     """
     Generates responses using the configured vision model for image input.
@@ -378,6 +395,10 @@ def extract_text_from_image_vlm(
         presence_penalty (float, optional): Penalty for token presence.
             Defaults to model-specific value (1.5 for Qwen3-VL models) or None.
             Note: Not all models support this parameter.
+        seed (int, optional): Random seed for generation. If None, uses VLM_SEED
+            from config if set, otherwise no seed is set (non-deterministic).
+        model_default_prompt (str, optional): The default prompt to use if no text is provided.
+            Defaults to model-specific value (None for Dots.OCR, "Read all the text in the image." for Qwen3-VL models) or "Read all the text in the image."
 
     Returns:
         str: The complete generated text response from the model.
@@ -404,53 +425,71 @@ def extract_text_from_image_vlm(
     else:
         actual_max_new_tokens = MAX_NEW_TOKENS  # General default (from config)
 
-    # temperature: function arg > model default > general default
+    # temperature: function arg > model default > config default
     if temperature is not None:
         actual_temperature = temperature
     elif model_default_temperature is not None:
         actual_temperature = model_default_temperature
     else:
-        actual_temperature = 0.1  # General default
+        actual_temperature = VLM_DEFAULT_TEMPERATURE  # Config default
 
-    # top_p: function arg > model default > general default
+    # top_p: function arg > model default > config default
     if top_p is not None:
         actual_top_p = top_p
     elif model_default_top_p is not None:
         actual_top_p = model_default_top_p
     else:
-        actual_top_p = 0.8  # General default
+        actual_top_p = VLM_DEFAULT_TOP_P  # Config default
 
-    # top_k: function arg > model default > general default
+    # top_k: function arg > model default > config default
     if top_k is not None:
         actual_top_k = top_k
     elif model_default_top_k is not None:
         actual_top_k = model_default_top_k
     else:
-        actual_top_k = 20  # General default
+        actual_top_k = VLM_DEFAULT_TOP_K  # Config default
 
-    # repetition_penalty: function arg > model default > general default
+    # repetition_penalty: function arg > model default > config default
     if repetition_penalty is not None:
         actual_repetition_penalty = repetition_penalty
     elif model_default_repetition_penalty is not None:
         actual_repetition_penalty = model_default_repetition_penalty
     else:
-        actual_repetition_penalty = 1.3  # General default
+        actual_repetition_penalty = VLM_DEFAULT_REPETITION_PENALTY  # Config default
 
-    # greedy/do_sample: function arg > model default > general default
+    # greedy/do_sample: function arg > model default > config default
     # greedy=False means do_sample=True (sampling), greedy=True means do_sample=False (greedy)
     if greedy is not None:
         actual_do_sample = not greedy
     elif model_default_greedy is not None:
         actual_do_sample = not model_default_greedy
     else:
-        actual_do_sample = True  # General default: use sampling
+        actual_do_sample = (
+            not VLM_DEFAULT_GREEDY
+        )  # Config default: convert greedy to do_sample
 
-    # presence_penalty: function arg > model default > None (not used if not available)
+    # presence_penalty: function arg > model default > config default > None
     actual_presence_penalty = None
     if presence_penalty is not None:
         actual_presence_penalty = presence_penalty
     elif model_default_presence_penalty is not None:
         actual_presence_penalty = model_default_presence_penalty
+    elif VLM_DEFAULT_PRESENCE_PENALTY and VLM_DEFAULT_PRESENCE_PENALTY.strip():
+        try:
+            actual_presence_penalty = float(VLM_DEFAULT_PRESENCE_PENALTY)
+        except ValueError:
+            actual_presence_penalty = None
+
+    # seed: function arg > config default
+    actual_seed = None
+    if seed is not None:
+        actual_seed = seed
+    elif model_default_seed is not None:
+        actual_seed = model_default_seed
+    elif VLM_SEED is not None:
+        actual_seed = int(VLM_SEED)
+    else:
+        actual_seed = 42
 
     messages = [
         {
@@ -473,6 +512,12 @@ def extract_text_from_image_vlm(
         processor, skip_prompt=True, skip_special_tokens=True
     )
 
+    # Set random seed if specified
+    if actual_seed is not None:
+        torch.manual_seed(actual_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(actual_seed)
+
     # Build generation kwargs with resolved parameters
     generation_kwargs = {
         **inputs,
@@ -483,6 +528,7 @@ def extract_text_from_image_vlm(
         "top_p": actual_top_p,
         "top_k": actual_top_k,
         "repetition_penalty": actual_repetition_penalty,
+        "seed": actual_seed,
     }
 
     # Add presence_penalty if it's set and the model supports it
