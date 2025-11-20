@@ -781,29 +781,62 @@ class AdaptiveSegmenter:
                 cca_source_image, 8, cv2.CV_32S
             )
 
-            refined_boxes_list = []
             num_to_process = min(len(words), len(unlabeled_boxes))
+            
+            # First pass: assign each component to the box it overlaps with most
+            # This prevents components from being assigned to multiple boxes, which causes overlapping words
+            component_assignments = {}  # component_index -> box_index
+            for j in range(1, num_labels):  # Skip background
+                comp_x = stats[j, cv2.CC_STAT_LEFT]
+                comp_w = stats[j, cv2.CC_STAT_WIDTH]
+                comp_r = comp_x + comp_w
+                
+                best_box_idx = None
+                max_overlap = 0
+                
+                for i in range(num_to_process):
+                    box_x, _, box_w, _ = unlabeled_boxes[i]
+                    box_r = box_x + box_w
+                    
+                    # Check if component overlaps with this box
+                    if comp_x < box_r and box_x < comp_r:
+                        # Calculate overlap amount
+                        overlap_start = max(comp_x, box_x)
+                        overlap_end = min(comp_r, box_r)
+                        overlap = max(0, overlap_end - overlap_start)
+                        
+                        if overlap > max_overlap:
+                            max_overlap = overlap
+                            best_box_idx = i
+                
+                if best_box_idx is not None:
+                    component_assignments[j] = best_box_idx
+
+            # Second pass: build refined boxes from assigned components
+            refined_boxes_list = []
             for i in range(num_to_process):
                 word_label = words[i]
-                box_x, _, box_w, _ = unlabeled_boxes[i]
-                box_r = box_x + box_w  # Box right edge
-
+                
+                # Find all components assigned to this box
                 components_in_box = []
-                for j in range(1, num_labels):  # Skip background
-                    comp_x = stats[j, cv2.CC_STAT_LEFT]
-                    comp_w = stats[j, cv2.CC_STAT_WIDTH]
-                    comp_r = comp_x + comp_w  # Component right edge
-
-                    # --- THE CRITICAL FIX: Check for OVERLAP, not strict containment ---
-                    # Old logic: if box_x <= comp_x < box_r:
-                    # New logic:
-                    if comp_x < box_r and box_x < comp_r:
+                for j, box_idx in component_assignments.items():
+                    if box_idx == i:
                         components_in_box.append(stats[j])
-
+                
                 if not components_in_box:
+                    # Fallback: use the original box if no components assigned
+                    box_x, box_y, box_w, box_h = unlabeled_boxes[i]
+                    refined_boxes_list.append({
+                        "text": word_label,
+                        "left": box_x,
+                        "top": box_y,
+                        "width": box_w,
+                        "height": box_h,
+                        "conf": line_data["conf"][0],
+                    })
                     continue
-
-                # The rest of the CCA union logic is unchanged
+                
+                # Calculate bounding box from assigned components
                 min_x = min(c[cv2.CC_STAT_LEFT] for c in components_in_box)
                 min_y = min(c[cv2.CC_STAT_TOP] for c in components_in_box)
                 max_r = max(
@@ -814,7 +847,7 @@ class AdaptiveSegmenter:
                     c[cv2.CC_STAT_TOP] + c[cv2.CC_STAT_HEIGHT]
                     for c in components_in_box
                 )
-
+                
                 refined_boxes_list.append(
                     {
                         "text": word_label,
