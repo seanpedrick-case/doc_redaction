@@ -11,6 +11,7 @@ from tools.config import (
     MAX_NEW_TOKENS,
     MAX_SPACES_GPU_RUN_TIME,
     PADDLE_DET_DB_UNCLIP_RATIO,
+    PADDLE_FONT_PATH,
     PADDLE_MODEL_PATH,
     PADDLE_USE_TEXTLINE_ORIENTATION,
     QUANTISE_VLM_MODELS,
@@ -25,6 +26,7 @@ from tools.config import (
     VLM_DEFAULT_TOP_P,
     VLM_SEED,
 )
+from tools.helper_functions import get_system_font_path
 
 if LOAD_PADDLE_AT_STARTUP is True:
     try:
@@ -40,6 +42,24 @@ if LOAD_PADDLE_AT_STARTUP is True:
             print(f"Setting PaddleOCR model path to: {PADDLE_MODEL_PATH}")
         else:
             print("Using default PaddleOCR model storage location")
+
+        # Set PaddleOCR font path to use system fonts instead of downloading simfang.ttf/PingFang-SC-Regular.ttf
+        if (
+            PADDLE_FONT_PATH
+            and PADDLE_FONT_PATH.strip()
+            and os.path.exists(PADDLE_FONT_PATH)
+        ):
+            os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = PADDLE_FONT_PATH
+            print(f"Setting PaddleOCR font path to configured font: {PADDLE_FONT_PATH}")
+        else:
+            system_font_path = get_system_font_path()
+            if system_font_path:
+                os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = system_font_path
+                print(f"Setting PaddleOCR font path to system font: {system_font_path}")
+            else:
+                print(
+                    "Warning: No suitable system font found. PaddleOCR may download default fonts."
+                )
 
         # Default paddle configuration if none provided
         if paddle_kwargs is None:
@@ -542,7 +562,6 @@ def extract_text_from_image_vlm(
         "top_p": actual_top_p,
         "top_k": actual_top_k,
         "repetition_penalty": actual_repetition_penalty,
-        "seed": actual_seed,
     }
 
     # Add presence_penalty if it's set and the model supports it

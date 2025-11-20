@@ -1,4 +1,5 @@
 import os
+import platform
 import random
 import string
 import unicodedata
@@ -933,3 +934,55 @@ def update_language_dropdown(
         )
 
     return chosen_language_drop
+
+
+def get_system_font_path():
+    """
+    Returns the path to a standard font that exists on most operating systems.
+    Used to replace PaddleOCR's default fonts (simfang.ttf, PingFang-SC-Regular.ttf).
+
+    Returns:
+        str: Path to a system font, or None if no suitable font found
+    """
+    system = platform.system()
+
+    # Windows font paths
+    if system == "Windows":
+        windows_fonts = [
+            os.path.join(
+                os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "simsun.ttc"
+            ),  # SimSun
+            os.path.join(
+                os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "msyh.ttc"
+            ),  # Microsoft YaHei
+            os.path.join(
+                os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "arial.ttf"
+            ),  # Arial (fallback)
+        ]
+        for font_path in windows_fonts:
+            if os.path.exists(font_path):
+                return font_path
+
+    # macOS font paths
+    elif system == "Darwin":
+        mac_fonts = [
+            "/System/Library/Fonts/STSong.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+        ]
+        for font_path in mac_fonts:
+            if os.path.exists(font_path):
+                return font_path
+
+    # Linux font paths
+    elif system == "Linux":
+        linux_fonts = [
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+        for font_path in linux_fonts:
+            if os.path.exists(font_path):
+                return font_path
+
+    return None

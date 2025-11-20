@@ -810,6 +810,10 @@ PADDLE_MODEL_PATH = get_or_create_env_var(
     "PADDLE_MODEL_PATH", ""
 )  # Directory for PaddleOCR model storage. Uses default location if not set.
 
+PADDLE_FONT_PATH = get_or_create_env_var(
+    "PADDLE_FONT_PATH", ""
+)  # Custom font path for PaddleOCR. If empty, will attempt to use system fonts to avoid downloading simfang.ttf/PingFang-SC-Regular.ttf.
+
 SPACY_MODEL_PATH = get_or_create_env_var(
     "SPACY_MODEL_PATH", ""
 )  # Directory for spaCy model storage. Uses default location if not set.

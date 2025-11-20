@@ -38,6 +38,7 @@ from tools.config import (
     MAX_SPACES_GPU_RUN_TIME,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
+    PADDLE_FONT_PATH,
     PADDLE_MODEL_PATH,
     PADDLE_USE_TEXTLINE_ORIENTATION,
     PREPROCESS_LOCAL_OCR_IMAGES,
@@ -52,7 +53,7 @@ from tools.config import (
     VLM_MAX_DPI,
     VLM_MAX_IMAGE_SIZE,
 )
-from tools.helper_functions import clean_unicode_text
+from tools.helper_functions import clean_unicode_text, get_system_font_path
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.run_vlm import (
@@ -2347,6 +2348,28 @@ class CustomImageAnalyzerEngine:
                 print(f"Setting PaddleOCR model path to: {PADDLE_MODEL_PATH}")
             else:
                 print("Using default PaddleOCR model storage location")
+
+            # Set PaddleOCR font path to use system fonts instead of downloading simfang.ttf/PingFang-SC-Regular.ttf
+            if (
+                PADDLE_FONT_PATH
+                and PADDLE_FONT_PATH.strip()
+                and os.path.exists(PADDLE_FONT_PATH)
+            ):
+                os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = PADDLE_FONT_PATH
+                print(
+                    f"Setting PaddleOCR font path to configured font: {PADDLE_FONT_PATH}"
+                )
+            else:
+                system_font_path = get_system_font_path()
+                if system_font_path:
+                    os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = system_font_path
+                    print(
+                        f"Setting PaddleOCR font path to system font: {system_font_path}"
+                    )
+                else:
+                    print(
+                        "Warning: No suitable system font found. PaddleOCR may download default fonts."
+                    )
 
             # Default paddle configuration if none provided
             if paddle_kwargs is None:
