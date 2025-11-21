@@ -2952,6 +2952,7 @@ class CustomImageAnalyzerEngine:
                 "width": [line_width],
                 "height": [line_height],
                 "conf": [line_conf],
+                "line": [i],
             }
 
             # Validate line_image before passing to segmenter

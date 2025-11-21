@@ -762,7 +762,7 @@ MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
-    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "90")
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "95")
 )  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
 
 HYBRID_OCR_PADDING = int(
