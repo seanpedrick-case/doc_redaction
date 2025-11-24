@@ -113,15 +113,23 @@ if LOAD_PADDLE_AT_STARTUP is True:
 # Define module-level defaults for model parameters (always available for import)
 # These will be overridden inside the SHOW_VLM_MODEL_OPTIONS block if enabled
 model_default_prompt = """Read all the text in the image."""
-model_default_do_sample = VLM_DEFAULT_DO_SAMPLE
-model_default_top_p = float(VLM_DEFAULT_TOP_P)
-model_default_min_p = float(VLM_DEFAULT_MIN_P)
-model_default_top_k = int(VLM_DEFAULT_TOP_K)
-model_default_temperature = float(VLM_DEFAULT_TEMPERATURE)
-model_default_repetition_penalty = float(VLM_DEFAULT_REPETITION_PENALTY)
+model_default_do_sample = (
+    VLM_DEFAULT_DO_SAMPLE if VLM_DEFAULT_DO_SAMPLE is not None else None
+)
+model_default_top_p = VLM_DEFAULT_TOP_P if VLM_DEFAULT_TOP_P is not None else None
+model_default_min_p = VLM_DEFAULT_MIN_P if VLM_DEFAULT_MIN_P is not None else None
+model_default_top_k = VLM_DEFAULT_TOP_K if VLM_DEFAULT_TOP_K is not None else None
+model_default_temperature = (
+    VLM_DEFAULT_TEMPERATURE if VLM_DEFAULT_TEMPERATURE is not None else None
+)
+model_default_repetition_penalty = (
+    VLM_DEFAULT_REPETITION_PENALTY
+    if VLM_DEFAULT_REPETITION_PENALTY is not None
+    else None
+)
 model_default_presence_penalty = VLM_DEFAULT_PRESENCE_PENALTY
 model_default_max_new_tokens = int(MAX_NEW_TOKENS)
-model_default_seed = int(VLM_SEED)
+model_default_seed = VLM_SEED if VLM_SEED is not None else None
 
 
 if SHOW_VLM_MODEL_OPTIONS is True:
@@ -173,18 +181,27 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     model = None
 
     # Initialize model-specific generation parameters (will be set by specific models if needed)
+    # If config values are provided, use them; otherwise leave as None to use model defaults
     model_default_prompt = """Read all the text in the image."""
-    model_default_do_sample = VLM_DEFAULT_DO_SAMPLE
-    model_default_top_p = float(VLM_DEFAULT_TOP_P)
-    model_default_min_p = float(VLM_DEFAULT_MIN_P)
-    model_default_top_k = int(VLM_DEFAULT_TOP_K)
-    model_default_temperature = float(VLM_DEFAULT_TEMPERATURE)
-    model_default_repetition_penalty = float(VLM_DEFAULT_REPETITION_PENALTY)
+    model_default_do_sample = (
+        VLM_DEFAULT_DO_SAMPLE if VLM_DEFAULT_DO_SAMPLE is not None else None
+    )
+    model_default_top_p = VLM_DEFAULT_TOP_P if VLM_DEFAULT_TOP_P is not None else None
+    model_default_min_p = VLM_DEFAULT_MIN_P if VLM_DEFAULT_MIN_P is not None else None
+    model_default_top_k = VLM_DEFAULT_TOP_K if VLM_DEFAULT_TOP_K is not None else None
+    model_default_temperature = (
+        VLM_DEFAULT_TEMPERATURE if VLM_DEFAULT_TEMPERATURE is not None else None
+    )
+    model_default_repetition_penalty = (
+        VLM_DEFAULT_REPETITION_PENALTY
+        if VLM_DEFAULT_REPETITION_PENALTY is not None
+        else None
+    )
     model_default_presence_penalty = VLM_DEFAULT_PRESENCE_PENALTY
     model_default_max_new_tokens = int(MAX_NEW_TOKENS)
     # Track which models support presence_penalty (only Qwen3-VL models currently)
     model_supports_presence_penalty = False
-    model_default_seed = int(VLM_SEED)
+    model_default_seed = VLM_SEED if VLM_SEED is not None else None
 
     if USE_FLASH_ATTENTION is True:
         attn_implementation = "flash_attention_2"
@@ -301,11 +318,11 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = True
+        model_default_do_sample = False
         model_default_top_p = 0.8
         model_default_min_p = 0.0
-        model_default_top_k = 100
-        model_default_temperature = 0.1
+        model_default_top_k = 20
+        model_default_temperature = 0.7
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
         model_default_max_new_tokens = MAX_NEW_TOKENS
@@ -329,11 +346,11 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = True
+        model_default_do_sample = False
         model_default_top_p = 0.8
         model_default_min_p = 0.0
-        model_default_top_k = 100
-        model_default_temperature = 0.1
+        model_default_top_k = 20
+        model_default_temperature = 0.7
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
         model_default_max_new_tokens = MAX_NEW_TOKENS
@@ -356,11 +373,11 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = True
+        model_default_do_sample = False
         model_default_top_p = 0.8
         model_default_min_p = 0.0
-        model_default_top_k = 100
-        model_default_temperature = 0.1
+        model_default_top_k = 20
+        model_default_temperature = 0.7
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
         model_default_max_new_tokens = MAX_NEW_TOKENS
@@ -386,11 +403,11 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = True
+        model_default_do_sample = False
         model_default_top_p = 0.8
         model_default_min_p = 0.0
-        model_default_top_k = 100
-        model_default_temperature = 0.1
+        model_default_top_k = 20
+        model_default_temperature = 0.7
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
         model_default_max_new_tokens = MAX_NEW_TOKENS
@@ -425,6 +442,25 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             f"Invalid model selected: {SELECTED_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, PaddleOCR-VL"
         )
 
+    # Override model defaults with user-provided config values if they are set
+    # Priority: user config value > model default
+    if VLM_DEFAULT_DO_SAMPLE is not None:
+        model_default_do_sample = VLM_DEFAULT_DO_SAMPLE
+    if VLM_DEFAULT_TOP_P is not None:
+        model_default_top_p = VLM_DEFAULT_TOP_P
+    if VLM_DEFAULT_MIN_P is not None:
+        model_default_min_p = VLM_DEFAULT_MIN_P
+    if VLM_DEFAULT_TOP_K is not None:
+        model_default_top_k = VLM_DEFAULT_TOP_K
+    if VLM_DEFAULT_TEMPERATURE is not None:
+        model_default_temperature = VLM_DEFAULT_TEMPERATURE
+    if VLM_DEFAULT_REPETITION_PENALTY is not None:
+        model_default_repetition_penalty = VLM_DEFAULT_REPETITION_PENALTY
+    if VLM_DEFAULT_PRESENCE_PENALTY is not None:
+        model_default_presence_penalty = VLM_DEFAULT_PRESENCE_PENALTY
+    if VLM_SEED is not None:
+        model_default_seed = VLM_SEED
+
     print(f"Successfully loaded {SELECTED_MODEL}")
 
 
@@ -438,7 +474,7 @@ def extract_text_from_image_vlm(
     min_p: float = None,
     top_k: int = None,
     repetition_penalty: float = None,
-    greedy: bool = None,
+    do_sample: bool = None,
     presence_penalty: float = None,
     seed: int = None,
     model_default_prompt: str = None,
@@ -467,7 +503,7 @@ def extract_text_from_image_vlm(
             Defaults to model-specific value (20 for Qwen3-VL models) or 50.
         repetition_penalty (float, optional): Penalty for token repetition.
             Defaults to model-specific value (1.0 for Qwen3-VL models) or 1.3.
-        greedy (bool, optional): If True, use greedy decoding (do_sample=False).
+        do_sample (bool, optional): If True, use sampling (do_sample=True).
             If False, use sampling (do_sample=True). If None, defaults to False
             (sampling) for Qwen3-VL models, or True (sampling) for other models.
         presence_penalty (float, optional): Penalty for token presence.
@@ -503,77 +539,73 @@ def extract_text_from_image_vlm(
     else:
         actual_max_new_tokens = MAX_NEW_TOKENS  # General default (from config)
 
-    # temperature: function arg > model default > config default
+    # temperature: function arg > model default (which may include config override)
     if temperature is not None:
         actual_temperature = temperature
     elif model_default_temperature is not None:
         actual_temperature = model_default_temperature
     else:
-        actual_temperature = VLM_DEFAULT_TEMPERATURE  # Config default
+        # Fallback to a sensible default if neither function arg nor model default is set
+        actual_temperature = 0.1
 
-    # top_p: function arg > model default > config default
+    # top_p: function arg > model default (which may include config override)
     if top_p is not None:
         actual_top_p = top_p
     elif model_default_top_p is not None:
         actual_top_p = model_default_top_p
     else:
-        actual_top_p = VLM_DEFAULT_TOP_P  # Config default
+        # Fallback to a sensible default if neither function arg nor model default is set
+        actual_top_p = 0.8
 
-    # min_p: function arg > model default > config default
+    # min_p: function arg > model default (which may include config override)
     if min_p is not None:
         actual_min_p = min_p
     elif model_default_min_p is not None:
         actual_min_p = model_default_min_p
     else:
-        actual_min_p = VLM_DEFAULT_MIN_P  # Config default
+        # Fallback to a sensible default if neither function arg nor model default is set
+        actual_min_p = 0.0
 
-    # top_k: function arg > model default > config default
+    # top_k: function arg > model default (which may include config override)
     if top_k is not None:
         actual_top_k = top_k
     elif model_default_top_k is not None:
         actual_top_k = model_default_top_k
     else:
-        actual_top_k = VLM_DEFAULT_TOP_K  # Config default
+        # Fallback to a sensible default if neither function arg nor model default is set
+        actual_top_k = 20
 
-    # repetition_penalty: function arg > model default > config default
+    # repetition_penalty: function arg > model default (which may include config override)
     if repetition_penalty is not None:
         actual_repetition_penalty = repetition_penalty
     elif model_default_repetition_penalty is not None:
         actual_repetition_penalty = model_default_repetition_penalty
     else:
-        actual_repetition_penalty = VLM_DEFAULT_REPETITION_PENALTY  # Config default
+        # Fallback to a sensible default if neither function arg nor model default is set
+        actual_repetition_penalty = 1.0
 
-    # do_sample: function arg > model default > config default
-    # greedy=False means do_sample=True (sampling), greedy=True means do_sample=False (greedy)
-    if greedy is not None:
-        actual_do_sample = not greedy
+    # do_sample: function arg > model default (which may include config override)
+    if do_sample is not None:
+        actual_do_sample = do_sample
     elif model_default_do_sample is not None:
         actual_do_sample = model_default_do_sample
     else:
-        actual_do_sample = VLM_DEFAULT_DO_SAMPLE  # Config default
+        # Fallback to a sensible default if neither function arg nor model default is set
+        actual_do_sample = True
 
-    # presence_penalty: function arg > model default > config default > None
+    # presence_penalty: function arg > model default (which may include config override) > None
     actual_presence_penalty = None
     if presence_penalty is not None:
         actual_presence_penalty = presence_penalty
     elif model_default_presence_penalty is not None:
         actual_presence_penalty = model_default_presence_penalty
-    elif VLM_DEFAULT_PRESENCE_PENALTY and VLM_DEFAULT_PRESENCE_PENALTY.strip():
-        try:
-            actual_presence_penalty = float(VLM_DEFAULT_PRESENCE_PENALTY)
-        except ValueError:
-            actual_presence_penalty = None
 
-    # seed: function arg > config default
+    # seed: function arg > model default (which may include config override)
     actual_seed = None
     if seed is not None:
         actual_seed = seed
     elif model_default_seed is not None:
         actual_seed = model_default_seed
-    elif VLM_SEED is not None:
-        actual_seed = int(VLM_SEED)
-    else:
-        actual_seed = 42
 
     messages = [
         {
@@ -664,4 +696,19 @@ Rules:
 - Each bounding box should tightly fit around a single horizontal line of text
 - Empty lines should be skipped
 
-Only return valid JSON, no additional text or explanation."""
+# Only return valid JSON, no additional text or explanation."""
+
+# Test for word-level OCR with VLMs - makes some mistakes but not bad
+# full_page_ocr_vlm_prompt = """Spot all the text in the image at word-level, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': 'identified word'}, ...].
+
+# IMPORTANT: Extract each word in the image separately. Do NOT combine words into longer fragments, sentences, or paragraphs. Each entry must correspond to a single, individual word as visually separated in the image.
+
+# Rules:
+# - Each entry should correspond to a single distinct word (not groups of words, not whole lines).
+# - For each word, provide a tight bounding box [x1, y1, x2, y2] around just that word.
+# - Do not merge words. Do not split words into letters. Only return one entry per word.
+# - Maintain the order of words as they appear spatially from top to bottom, left to right.
+# - Skip any empty or whitespace-only entries.
+# - Do not include extraneous text, explanations, or formatting beyond the required JSON.
+
+# Only return valid JSON, no additional text or explanation."""

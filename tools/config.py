@@ -711,11 +711,11 @@ MAX_SPACES_GPU_RUN_TIME = int(
 )  # Maximum number of seconds to run the GPU on Spaces
 
 MAX_NEW_TOKENS = int(
-    get_or_create_env_var("MAX_NEW_TOKENS", "4192")
+    get_or_create_env_var("MAX_NEW_TOKENS", "4096")
 )  # Maximum number of tokens to generate
 
 DEFAULT_MAX_NEW_TOKENS = int(
-    get_or_create_env_var("DEFAULT_MAX_NEW_TOKENS", "4192")
+    get_or_create_env_var("DEFAULT_MAX_NEW_TOKENS", "4096")
 )  # Default maximum number of tokens to generate
 
 HYBRID_OCR_MAX_NEW_TOKENS = int(
@@ -727,8 +727,8 @@ MAX_INPUT_TOKEN_LENGTH = int(
 )  # Maximum number of tokens to input to the VLM
 
 VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "600000")
-)  # Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. Default is 600000(approx 774x774).
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "800000")
+)  # Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. Default is 800000 (approx 895x895).
 
 VLM_MAX_DPI = float(
     get_or_create_env_var("VLM_MAX_DPI", "300.0")
@@ -751,38 +751,67 @@ OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
 )  # If True, always create new OCR results instead of loading from existing JSON files
 
 # VLM generation parameter defaults
-VLM_SEED = int(
-    get_or_create_env_var("VLM_SEED", "42")
+# If empty, these will be None and model defaults will be used instead
+VLM_SEED = get_or_create_env_var(
+    "VLM_SEED", ""
 )  # Random seed for VLM generation. If empty, no seed is set (non-deterministic). If set to an integer, generation will be deterministic.
+if VLM_SEED and VLM_SEED.strip():
+    VLM_SEED = int(VLM_SEED)
+else:
+    VLM_SEED = None
 
-VLM_DEFAULT_TEMPERATURE = float(
-    get_or_create_env_var("VLM_DEFAULT_TEMPERATURE", "0.1")
-)  # Default temperature for VLM generation. Used when model-specific defaults are not set.
+VLM_DEFAULT_TEMPERATURE = get_or_create_env_var(
+    "VLM_DEFAULT_TEMPERATURE", ""
+)  # Default temperature for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_TEMPERATURE and VLM_DEFAULT_TEMPERATURE.strip():
+    VLM_DEFAULT_TEMPERATURE = float(VLM_DEFAULT_TEMPERATURE)
+else:
+    VLM_DEFAULT_TEMPERATURE = None
 
-VLM_DEFAULT_TOP_P = float(
-    get_or_create_env_var("VLM_DEFAULT_TOP_P", "0.8")
-)  # Default top_p (nucleus sampling) for VLM generation. Used when model-specific defaults are not set.
+VLM_DEFAULT_TOP_P = get_or_create_env_var(
+    "VLM_DEFAULT_TOP_P", ""
+)  # Default top_p (nucleus sampling) for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_TOP_P and VLM_DEFAULT_TOP_P.strip():
+    VLM_DEFAULT_TOP_P = float(VLM_DEFAULT_TOP_P)
+else:
+    VLM_DEFAULT_TOP_P = None
 
-VLM_DEFAULT_MIN_P = float(
-    get_or_create_env_var("VLM_DEFAULT_MIN_P", "0.0")
-)  # Default min_p (minimum probability threshold) for VLM generation. Used when model-specific defaults are not set.
+VLM_DEFAULT_MIN_P = get_or_create_env_var(
+    "VLM_DEFAULT_MIN_P", ""
+)  # Default min_p (minimum probability threshold) for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_MIN_P and VLM_DEFAULT_MIN_P.strip():
+    VLM_DEFAULT_MIN_P = float(VLM_DEFAULT_MIN_P)
+else:
+    VLM_DEFAULT_MIN_P = None
 
-VLM_DEFAULT_TOP_K = int(
-    get_or_create_env_var("VLM_DEFAULT_TOP_K", "20")
-)  # Default top_k for VLM generation. Used when model-specific defaults are not set.
+VLM_DEFAULT_TOP_K = get_or_create_env_var(
+    "VLM_DEFAULT_TOP_K", ""
+)  # Default top_k for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_TOP_K and VLM_DEFAULT_TOP_K.strip():
+    VLM_DEFAULT_TOP_K = int(VLM_DEFAULT_TOP_K)
+else:
+    VLM_DEFAULT_TOP_K = None
 
-VLM_DEFAULT_REPETITION_PENALTY = float(
-    get_or_create_env_var("VLM_DEFAULT_REPETITION_PENALTY", "1.0")
-)  # Default repetition penalty for VLM generation. Used when model-specific defaults are not set.
+VLM_DEFAULT_REPETITION_PENALTY = get_or_create_env_var(
+    "VLM_DEFAULT_REPETITION_PENALTY", ""
+)  # Default repetition penalty for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_REPETITION_PENALTY and VLM_DEFAULT_REPETITION_PENALTY.strip():
+    VLM_DEFAULT_REPETITION_PENALTY = float(VLM_DEFAULT_REPETITION_PENALTY)
+else:
+    VLM_DEFAULT_REPETITION_PENALTY = None
 
-VLM_DEFAULT_DO_SAMPLE = convert_string_to_boolean(
-    get_or_create_env_var("VLM_DEFAULT_DO_SAMPLE", "True")
-)  # Default do_sample setting for VLM generation. True means use sampling, False means use greedy decoding (do_sample=False). Used when model-specific defaults are not set.
+VLM_DEFAULT_DO_SAMPLE = get_or_create_env_var(
+    "VLM_DEFAULT_DO_SAMPLE", ""
+)  # Default do_sample setting for VLM generation. If empty, model-specific defaults will be used. True means use sampling, False means use greedy decoding (do_sample=False).
+if VLM_DEFAULT_DO_SAMPLE and VLM_DEFAULT_DO_SAMPLE.strip():
+    VLM_DEFAULT_DO_SAMPLE = convert_string_to_boolean(VLM_DEFAULT_DO_SAMPLE)
+else:
+    VLM_DEFAULT_DO_SAMPLE = None
 
 VLM_DEFAULT_PRESENCE_PENALTY = get_or_create_env_var(
     "VLM_DEFAULT_PRESENCE_PENALTY", ""
-)  # Default presence penalty for VLM generation. If empty, defaults to None. Used when model-specific defaults are not set.
-if VLM_DEFAULT_PRESENCE_PENALTY:
+)  # Default presence penalty for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_PRESENCE_PENALTY and VLM_DEFAULT_PRESENCE_PENALTY.strip():
     VLM_DEFAULT_PRESENCE_PENALTY = float(VLM_DEFAULT_PRESENCE_PENALTY)
 else:
     VLM_DEFAULT_PRESENCE_PENALTY = None

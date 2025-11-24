@@ -59,7 +59,10 @@ from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.run_vlm import (
     extract_text_from_image_vlm,
     full_page_ocr_vlm_prompt,
+    model_default_do_sample,
     model_default_max_new_tokens,
+    model_default_min_p,
+    model_default_presence_penalty,
     model_default_prompt,
     model_default_repetition_penalty,
     model_default_seed,
@@ -687,6 +690,9 @@ def _call_inference_server_vlm_api(
     timeout: int = None,
     stream: bool = True,
     seed: int = None,
+    do_sample: bool = None,
+    min_p: float = None,
+    presence_penalty: float = None,
 ) -> str:
     """
     Calls a inference-server API endpoint with an image and text prompt.
@@ -707,7 +713,10 @@ def _call_inference_server_vlm_api(
         timeout: Request timeout in seconds (defaults to INFERENCE_SERVER_TIMEOUT from config)
         stream: Whether to stream the response
         seed: Random seed for generation
-
+        do_sample: If True, use sampling (do_sample=True).
+            If False, use greedy decoding (do_sample=False).
+        min_p: Minimum probability threshold for token sampling.
+        presence_penalty: Penalty for token presence.
     Returns:
         str: The generated text response from the model
 
@@ -752,18 +761,47 @@ def _call_inference_server_vlm_api(
     # Add optional parameters if provided
     if model_name:
         payload["model"] = model_name
+    if do_sample is not None:
+        payload["do_sample"] = do_sample
+
+    # Handle deterministic (greedy) vs non-deterministic (sampling) generation
+    if do_sample is False:
+        # Greedy decoding (deterministic): always pick the highest probability token
+        # This emulates transformers' do_sample=False behavior
+        payload["temperature"] = 0  # Temperature=0 makes it deterministic
+        payload["top_k"] = 1  # Only consider top 1 token (greedy)
+        payload["top_p"] = 1.0  # Consider all tokens (but top_k=1 overrides this)
+        payload["min_p"] = 0.0  # Minimum probability threshold for token sampling.
+        payload["presence_penalty"] = 1.0  # Penalty for token presence.
+        # Don't set min_p for greedy decoding - it's a sampling parameter
+        # Use repetition_penalty=1.0 (no penalty) for deterministic generation
+        # If a repetition_penalty was provided, use it; otherwise default to 1.0
+        if repetition_penalty is not None:
+            payload["repeat_penalty"] = repetition_penalty
+        else:
+            payload["repeat_penalty"] = 1.0  # No penalty for deterministic
+    else:
+        # Sampling (non-deterministic): use provided sampling parameters
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if min_p is not None:
+            payload["min_p"] = min_p
+        if top_k is not None:
+            payload["top_k"] = top_k
+        if repetition_penalty is not None:
+            payload["repeat_penalty"] = repetition_penalty
+        if presence_penalty is not None:
+            payload["presence_penalty"] = presence_penalty
+
     if max_new_tokens is not None:
         payload["max_tokens"] = max_new_tokens
-    if temperature is not None:
-        payload["temperature"] = temperature
-    if top_p is not None:
-        payload["top_p"] = top_p
-    if top_k is not None:
-        payload["top_k"] = top_k
-    if repetition_penalty is not None:
-        payload["repeat_penalty"] = repetition_penalty
     if seed is not None:
         payload["seed"] = seed
+
+    # print(f"Payload: {payload}")
+
     endpoint = f"{api_url}/v1/chat/completions"
 
     try:
@@ -1044,7 +1082,14 @@ def _inference_server_ocr_predict(
                     top_p=model_default_top_p,
                     top_k=model_default_top_k,
                     repetition_penalty=model_default_repetition_penalty,
-                    seed=int(model_default_seed),
+                    seed=(
+                        int(model_default_seed)
+                        if model_default_seed is not None
+                        else None
+                    ),
+                    do_sample=model_default_do_sample,
+                    min_p=model_default_min_p,
+                    presence_penalty=model_default_presence_penalty,
                 )
                 # If we get here, the API call succeeded
                 break
@@ -1524,16 +1569,19 @@ def _vlm_page_ocr_predict(
         prompt = full_page_ocr_vlm_prompt
 
         # Use the VLM to extract structured text
+        # Pass explicit model_default_* values for consistency with _inference_server_page_ocr_predict
         extracted_text = extract_text_from_image_vlm(
             text=prompt,
             image=processed_image,
-            max_new_tokens=None,
-            temperature=None,
-            top_p=None,
-            min_p=None,
-            top_k=None,
-            repetition_penalty=None,
-            presence_penalty=None,
+            max_new_tokens=model_default_max_new_tokens,
+            temperature=model_default_temperature,
+            top_p=model_default_top_p,
+            min_p=model_default_min_p,
+            top_k=model_default_top_k,
+            repetition_penalty=model_default_repetition_penalty,
+            presence_penalty=model_default_presence_penalty,
+            seed=model_default_seed,
+            do_sample=model_default_do_sample,
         )
 
         # Check if extracted_text is None or empty
@@ -1992,11 +2040,9 @@ def _inference_server_page_ocr_predict(
         # Create prompt that requests structured JSON output with bounding boxes
         prompt = full_page_ocr_vlm_prompt
 
-        # Get processed image dimensions for normalization
-        # PIL Image.size returns (width, height), not (height, width)
-        processed_width, processed_height = processed_image.size
-
         # Use the inference-server API to extract structured text
+        # Note: processed_width and processed_height were already captured on line 1921
+        # after _prepare_image_for_vlm, so we use those values for normalization
         extracted_text = _call_inference_server_vlm_api(
             image=processed_image,
             prompt=prompt,
@@ -2006,6 +2052,9 @@ def _inference_server_page_ocr_predict(
             top_k=model_default_top_k,
             repetition_penalty=model_default_repetition_penalty,
             seed=model_default_seed,
+            do_sample=model_default_do_sample,
+            min_p=model_default_min_p,
+            presence_penalty=model_default_presence_penalty,
         )
 
         # Check if extracted_text is None or empty
