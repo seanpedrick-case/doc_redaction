@@ -502,9 +502,29 @@ if ROOT_PATH:
 
 head_html = f"<base href='{base_href}'>"
 
+css = """
+/* Target tab navigation buttons only - not buttons inside tab content */
+/* Gradio renders tab buttons with role="tab" in the navigation area */
+button[role="tab"] {
+    font-size: 1.3em !important;
+    padding: 0.75em 1.5em !important;
+}
+
+/* Alternative selectors for different Gradio versions */
+.tab-nav button,
+nav button[role="tab"],
+div[class*="tab-nav"] button {
+    font-size: 1.2em !important;
+    padding: 0.75em 1.5em !important;
+}
+"""
+
 # Create the gradio interface
 blocks = gr.Blocks(
-    theme=gr.themes.Default(primary_hue="blue"), fill_width=True, head=head_html
+    theme=gr.themes.Default(primary_hue="blue"),
+    fill_width=True,
+    head=head_html,
+    css=css,
 )
 
 with blocks:
@@ -1097,7 +1117,7 @@ with blocks:
     ###
     # REDACTION PDF/IMAGES TABLE
     ###
-    with gr.Tab("Redact PDFs/images"):
+    with gr.Tab("Redact PDFs/images", elem_id="app_tab"):
 
         # Examples for PDF/image redaction
         if SHOW_EXAMPLES:
@@ -1382,7 +1402,7 @@ with blocks:
                     run_on_click=True,
                 )
 
-        with gr.Accordion("Redact document", open=True):
+        with gr.Accordion("Extract text and redact document", open=True):
             in_doc_files.render()
             open_tab_text = ""
             default_text = ""
@@ -1621,7 +1641,7 @@ with blocks:
                 "View all and download all output files from this session", open=False
             ):
                 all_output_files_btn = gr.Button(
-                    "Update files in output folder", variant="secondary"
+                    "Refresh files in output folder", variant="secondary"
                 )
                 all_output_files = gr.FileExplorer(
                     root_dir=OUTPUT_FOLDER,
@@ -1692,7 +1712,7 @@ with blocks:
     ###
     # REVIEW REDACTIONS TAB
     ###
-    with gr.Tab("Review redactions", id="tab_object_annotation"):
+    with gr.Tab("Review redactions", elem_id="app_tab"):
 
         all_page_line_level_ocr_results_with_words_df_base = gr.Dataframe(
             type="pandas",
@@ -1832,7 +1852,7 @@ with blocks:
                     value="Save changes on current page to file", variant="primary"
                 )
 
-                with gr.Tab("Modify existing redactions"):
+                with gr.Tab("Modify existing redactions", elem_id="app_tab"):
                     with gr.Accordion("Search suggested redactions", open=True):
                         with gr.Row(equal_height=True):
                             recogniser_entity_dropdown = gr.Dropdown(
@@ -1897,7 +1917,7 @@ with blocks:
                             value="Undo last element removal", variant="primary"
                         )
 
-                with gr.Tab("Search text to make new redactions"):
+                with gr.Tab("Search text to make new redactions", elem_id="app_tab"):
                     with gr.Accordion("Search text", open=True):
                         with gr.Row(equal_height=True):
                             page_entity_dropdown_redaction = gr.Dropdown(
@@ -2070,7 +2090,7 @@ with blocks:
     ###
     # IDENTIFY DUPLICATE PAGES TAB
     ###
-    with gr.Tab(label="Identify duplicate pages"):
+    with gr.Tab(label="Identify duplicate pages", elem_id="app_tab"):
         gr.Markdown(
             "Search for duplicate pages/subdocuments in your ocr_output files. By default, this function will search for duplicate text across multiple pages, and then join consecutive matching pages together into matched 'subdocuments'. The results can be reviewed below, false positives removed, and then the verified results applied to a document you have loaded in on the 'Review redactions' tab."
         )
@@ -2225,7 +2245,7 @@ with blocks:
     ###
     # WORD / TABULAR DATA TAB
     ###
-    with gr.Tab(label="Word or Excel/csv files"):
+    with gr.Tab(label="Word or Excel/csv files", elem_id="app_tab"):
         gr.Markdown(
             """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
         )
@@ -2492,7 +2512,7 @@ with blocks:
     ###
     # SETTINGS TAB
     ###
-    with gr.Tab(label="Redaction settings"):
+    with gr.Tab(label="Redaction settings", elem_id="app_tab"):
         with gr.Accordion(
             "Custom allow, deny, and full page redaction lists", open=True
         ):

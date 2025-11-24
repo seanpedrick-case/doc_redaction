@@ -5,13 +5,18 @@ import socket
 import tempfile
 import urllib.parse
 from datetime import datetime
+from pathlib import Path
 from typing import List
 
 import bleach
 from dotenv import load_dotenv
 from tldextract import TLDExtract
 
-from tools.secure_path_utils import secure_file_read, validate_path_safety
+from tools.secure_path_utils import (
+    secure_file_read,
+    secure_path_join,
+    validate_path_safety,
+)
 
 today_rev = datetime.now().strftime("%Y%m%d")
 HOST_NAME = socket.gethostname()
@@ -39,6 +44,109 @@ def convert_string_to_boolean(value: str) -> bool:
         return False
     else:
         raise ValueError(f"Invalid boolean value: {value}")
+
+
+def ensure_folder_within_app_directory(
+    folder_path: str, app_base_dir: str = None
+) -> str:
+    """
+    Ensure that a folder path is within the app directory for security.
+
+    This function validates that user-defined folder paths are contained within
+    the app directory to prevent path traversal attacks and ensure data isolation.
+
+    Args:
+        folder_path: The folder path to validate and normalize
+        app_base_dir: The base directory of the app (defaults to current working directory)
+
+    Returns:
+        A normalized folder path that is guaranteed to be within the app directory
+
+    Raises:
+        ValueError: If the path cannot be safely contained within the app directory
+    """
+    if not folder_path or not folder_path.strip():
+        return folder_path
+
+    # Get the app base directory (where the app is run from)
+    if app_base_dir is None:
+        app_base_dir = os.getcwd()
+
+    app_base_dir = Path(app_base_dir).resolve()
+    folder_path = folder_path.strip()
+
+    # Preserve trailing separator preference
+    has_trailing_sep = folder_path.endswith(("/", "\\"))
+
+    # Handle special case for "TEMP" - this is handled separately in the code
+    if folder_path == "TEMP":
+        return folder_path
+
+    # Handle absolute paths
+    if os.path.isabs(folder_path):
+        folder_path_resolved = Path(folder_path).resolve()
+        # Check if the absolute path is within the app directory
+        try:
+            folder_path_resolved.relative_to(app_base_dir)
+            # Path is already within app directory, return it normalized
+            result = str(folder_path_resolved)
+            if has_trailing_sep and not result.endswith(os.sep):
+                result = result + os.sep
+            return result
+        except ValueError:
+            # Path is outside app directory - this is a security issue
+            # For system paths like /usr/share/tessdata, we'll allow them but log a warning
+            # For other absolute paths outside app directory, we'll raise an error
+            normalized_path = os.path.normpath(folder_path).lower()
+            system_path_prefixes = [
+                "/usr",
+                "/opt",
+                "/var",
+                "/etc",
+                "c:\\windows",
+                "c:\\program files",
+                "c:\\programdata",
+            ]
+            if any(
+                normalized_path.startswith(prefix) for prefix in system_path_prefixes
+            ):
+                # System paths are allowed but we log a warning
+                print(
+                    f"Warning: Using system path outside app directory: {folder_path}"
+                )
+                return folder_path
+            else:
+                raise ValueError(
+                    f"Folder path '{folder_path}' is outside the app directory '{app_base_dir}'. "
+                    f"For security, all user-defined folder paths must be within the app directory."
+                )
+
+    # Handle relative paths - ensure they're within app directory
+    try:
+        # Use secure_path_join to safely join and validate
+        # This will prevent path traversal attacks (e.g., "../../etc/passwd")
+        safe_path = secure_path_join(app_base_dir, folder_path)
+        result = str(safe_path)
+        if has_trailing_sep and not result.endswith(os.sep):
+            result = result + os.sep
+        return result
+    except (PermissionError, ValueError) as e:
+        # If path contains dangerous patterns, sanitize and try again
+        # Extract just the folder name from the path to prevent traversal
+        folder_name = os.path.basename(folder_path.rstrip("/\\"))
+        if folder_name:
+            safe_path = secure_path_join(app_base_dir, folder_name)
+            result = str(safe_path)
+            if has_trailing_sep and not result.endswith(os.sep):
+                result = result + os.sep
+            print(
+                f"Warning: Sanitized folder path '{folder_path}' to '{result}' for security"
+            )
+            return result
+        else:
+            raise ValueError(
+                f"Cannot safely normalize folder path: {folder_path}"
+            ) from e
 
 
 def get_or_create_env_var(var_name: str, default_value: str, print_val: bool = False):
@@ -193,6 +301,7 @@ def sanitize_markdown_text(text: str) -> str:
 ###
 
 CONFIG_FOLDER = get_or_create_env_var("CONFIG_FOLDER", "config/")
+CONFIG_FOLDER = ensure_folder_within_app_directory(CONFIG_FOLDER)
 
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
 APP_CONFIG_PATH = get_or_create_env_var(
@@ -286,11 +395,19 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
             OUTPUT_FOLDER = temp_dir + "/"
         if INPUT_FOLDER == "TEMP":
             INPUT_FOLDER = temp_dir + "/"
+else:
+    # Ensure folders are within app directory (skip validation for TEMP as it's handled above)
+    OUTPUT_FOLDER = ensure_folder_within_app_directory(OUTPUT_FOLDER)
+    INPUT_FOLDER = ensure_folder_within_app_directory(INPUT_FOLDER)
 
 GRADIO_TEMP_DIR = get_or_create_env_var(
     "GRADIO_TEMP_DIR", ""
 )  # Default Gradio temp folder
+if GRADIO_TEMP_DIR:
+    GRADIO_TEMP_DIR = ensure_folder_within_app_directory(GRADIO_TEMP_DIR)
 MPLCONFIGDIR = get_or_create_env_var("MPLCONFIGDIR", "")  # Matplotlib cache folder
+if MPLCONFIGDIR:
+    MPLCONFIGDIR = ensure_folder_within_app_directory(MPLCONFIGDIR)
 
 ###
 # LOGGING OPTIONS
@@ -311,6 +428,11 @@ FEEDBACK_LOGS_FOLDER = get_or_create_env_var("FEEDBACK_LOGS_FOLDER", "feedback/"
 ACCESS_LOGS_FOLDER = get_or_create_env_var("ACCESS_LOGS_FOLDER", "logs/")
 USAGE_LOGS_FOLDER = get_or_create_env_var("USAGE_LOGS_FOLDER", "usage/")
 
+# Ensure log folders are within app directory before adding subfolders
+FEEDBACK_LOGS_FOLDER = ensure_folder_within_app_directory(FEEDBACK_LOGS_FOLDER)
+ACCESS_LOGS_FOLDER = ensure_folder_within_app_directory(ACCESS_LOGS_FOLDER)
+USAGE_LOGS_FOLDER = ensure_folder_within_app_directory(USAGE_LOGS_FOLDER)
+
 if USE_LOG_SUBFOLDERS:
     day_log_subfolder = today_rev + "/"
     host_name_subfolder = HOST_NAME + "/"
@@ -319,6 +441,11 @@ if USE_LOG_SUBFOLDERS:
     FEEDBACK_LOGS_FOLDER = FEEDBACK_LOGS_FOLDER + full_log_subfolder
     ACCESS_LOGS_FOLDER = ACCESS_LOGS_FOLDER + full_log_subfolder
     USAGE_LOGS_FOLDER = USAGE_LOGS_FOLDER + full_log_subfolder
+
+    # Re-validate after adding subfolders to ensure still within app directory
+    FEEDBACK_LOGS_FOLDER = ensure_folder_within_app_directory(FEEDBACK_LOGS_FOLDER)
+    ACCESS_LOGS_FOLDER = ensure_folder_within_app_directory(ACCESS_LOGS_FOLDER)
+    USAGE_LOGS_FOLDER = ensure_folder_within_app_directory(USAGE_LOGS_FOLDER)
 
 S3_FEEDBACK_LOGS_FOLDER = get_or_create_env_var(
     "S3_FEEDBACK_LOGS_FOLDER", "feedback/" + full_log_subfolder
@@ -438,16 +565,22 @@ LOAD_REDACTION_ANNOTATIONS_FROM_PDF = convert_string_to_boolean(
 TESSERACT_FOLDER = get_or_create_env_var(
     "TESSERACT_FOLDER", ""
 )  #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
+if TESSERACT_FOLDER:
+    TESSERACT_FOLDER = ensure_folder_within_app_directory(TESSERACT_FOLDER)
+    add_folder_to_path(TESSERACT_FOLDER)
+
 TESSERACT_DATA_FOLDER = get_or_create_env_var(
     "TESSERACT_DATA_FOLDER", "/usr/share/tessdata"
 )
+# Only validate if it's a relative path (system paths like /usr/share/tessdata are allowed)
+if TESSERACT_DATA_FOLDER and not os.path.isabs(TESSERACT_DATA_FOLDER):
+    TESSERACT_DATA_FOLDER = ensure_folder_within_app_directory(TESSERACT_DATA_FOLDER)
+
 POPPLER_FOLDER = get_or_create_env_var(
     "POPPLER_FOLDER", ""
 )  # If installing on Windows,install Poppler from here https://github.com/oschwartz10612/poppler-windows. This variable needs to point to the poppler bin folder e.g. poppler/poppler-24.02.0/Library/bin/
-
-if TESSERACT_FOLDER:
-    add_folder_to_path(TESSERACT_FOLDER)
 if POPPLER_FOLDER:
+    POPPLER_FOLDER = ensure_folder_within_app_directory(POPPLER_FOLDER)
     add_folder_to_path(POPPLER_FOLDER)
 
 # Extraction and PII options open by default:
@@ -759,6 +892,7 @@ INFERENCE_SERVER_TIMEOUT = int(
 )  # Timeout in seconds for API requests
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
+MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)
 
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
@@ -801,6 +935,10 @@ SAVE_PAGE_OCR_VISUALISATIONS = convert_string_to_boolean(
     get_or_create_env_var("SAVE_PAGE_OCR_VISUALISATIONS", "False")
 )  # Whether to save visualisations of Tesseract, PaddleOCR, and Textract bounding boxes.
 
+INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES = convert_string_to_boolean(
+    get_or_create_env_var("INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES", "False")
+)  # Whether to include OCR visualisation outputs in the final output file list returned by choose_and_run_redactor.
+
 SAVE_WORD_SEGMENTER_OUTPUT_IMAGES = convert_string_to_boolean(
     get_or_create_env_var("SAVE_WORD_SEGMENTER_OUTPUT_IMAGES", "False")
 )  # Whether to save output images from the word segmenter.
@@ -809,14 +947,20 @@ SAVE_WORD_SEGMENTER_OUTPUT_IMAGES = convert_string_to_boolean(
 PADDLE_MODEL_PATH = get_or_create_env_var(
     "PADDLE_MODEL_PATH", ""
 )  # Directory for PaddleOCR model storage. Uses default location if not set.
+if PADDLE_MODEL_PATH:
+    PADDLE_MODEL_PATH = ensure_folder_within_app_directory(PADDLE_MODEL_PATH)
 
 PADDLE_FONT_PATH = get_or_create_env_var(
     "PADDLE_FONT_PATH", ""
 )  # Custom font path for PaddleOCR. If empty, will attempt to use system fonts to avoid downloading simfang.ttf/PingFang-SC-Regular.ttf.
+if PADDLE_FONT_PATH:
+    PADDLE_FONT_PATH = ensure_folder_within_app_directory(PADDLE_FONT_PATH)
 
 SPACY_MODEL_PATH = get_or_create_env_var(
     "SPACY_MODEL_PATH", ""
 )  # Directory for spaCy model storage. Uses default location if not set.
+if SPACY_MODEL_PATH:
+    SPACY_MODEL_PATH = ensure_folder_within_app_directory(SPACY_MODEL_PATH)
 
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
     "PREPROCESS_LOCAL_OCR_IMAGES", "True"
@@ -988,7 +1132,7 @@ APPLY_REDACTIONS_IMAGES = int(
 )  # The default (2) blanks out overlapping pixels. PDF_REDACT_IMAGE_NONE | 0 ignores, and PDF_REDACT_IMAGE_REMOVE | 1 completely removes images overlapping any redaction annotation. Option PDF_REDACT_IMAGE_REMOVE_UNLESS_INVISIBLE | 3 only removes images that are actually visible.
 APPLY_REDACTIONS_GRAPHICS = int(
     get_or_create_env_var("APPLY_REDACTIONS_GRAPHICS", "0")
-)  # How to redact overlapping vector graphics (also called “line-art” or “drawings”). The default (2) removes any overlapping vector graphics. PDF_REDACT_LINE_ART_NONE | 0 ignores, and PDF_REDACT_LINE_ART_REMOVE_IF_COVERED | 1 removes graphics fully contained in a redaction annotation.
+)  # How to redact overlapping vector graphics (also called "line-art" or "drawings"). (2) removes any overlapping vector graphics. PDF_REDACT_LINE_ART_NONE | 0 ignores, and PDF_REDACT_LINE_ART_REMOVE_IF_COVERED | 1 removes graphics fully contained in a redaction annotation.
 APPLY_REDACTIONS_TEXT = int(
     get_or_create_env_var("APPLY_REDACTIONS_TEXT", "0")
 )  # The default PDF_REDACT_TEXT_REMOVE | 0 removes all characters whose boundary box overlaps any redaction rectangle. This complies with the original legal / data protection intentions of redaction annotations. Other use cases however may require to keep text while redacting vector graphics or images. This can be achieved by setting text=True|PDF_REDACT_TEXT_NONE | 1. This does not comply with the data protection intentions of redaction annotations. Do so at your own risk.
@@ -1035,6 +1179,8 @@ if INTRO_TEXT.endswith(".txt"):
         try:
             # Use secure file read with explicit encoding
             INTRO_TEXT = secure_file_read(".", INTRO_TEXT, encoding="utf-8")
+            # Format the text to replace {USER_GUIDE_URL} with the actual value
+            INTRO_TEXT = INTRO_TEXT.format(USER_GUIDE_URL=USER_GUIDE_URL)
         except FileNotFoundError:
             print(f"Warning: Intro text file not found: {INTRO_TEXT}")
             INTRO_TEXT = DEFAULT_INTRO_TEXT
@@ -1055,6 +1201,7 @@ if not INTRO_TEXT or not INTRO_TEXT.strip():
     INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
 
 TLDEXTRACT_CACHE = get_or_create_env_var("TLDEXTRACT_CACHE", "tmp/tld/")
+TLDEXTRACT_CACHE = ensure_folder_within_app_directory(TLDEXTRACT_CACHE)
 try:
     extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
 except Exception as e:
@@ -1102,6 +1249,7 @@ DIRECT_MODE_INPUT_FILE = get_or_create_env_var(
 DIRECT_MODE_OUTPUT_DIR = get_or_create_env_var(
     "DIRECT_MODE_OUTPUT_DIR", OUTPUT_FOLDER
 )  # Output directory
+DIRECT_MODE_OUTPUT_DIR = ensure_folder_within_app_directory(DIRECT_MODE_OUTPUT_DIR)
 DIRECT_MODE_DUPLICATE_TYPE = get_or_create_env_var(
     "DIRECT_MODE_DUPLICATE_TYPE", "pages"
 )  # 'pages' or 'tabular'

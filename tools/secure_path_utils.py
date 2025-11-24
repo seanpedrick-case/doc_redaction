@@ -202,8 +202,11 @@ def validate_path_safety(
         dangerous_patterns = [
             "..",  # Parent directory
             "//",  # Double slashes
-            "\\",  # Backslashes (on Unix systems)
         ]
+
+        # Only check for backslashes on non-Windows systems
+        if os.name != "nt":  # 'nt' is Windows
+            dangerous_patterns.append("\\")  # Backslashes (on Unix systems)
 
         for pattern in dangerous_patterns:
             if pattern in path_str:
@@ -212,7 +215,11 @@ def validate_path_safety(
         # If base path is provided, ensure the path is within it
         if base_path:
             base_path = Path(base_path).resolve()
-            path = path.resolve()
+            # For relative paths, join with base_path before resolving
+            if not path.is_absolute():
+                path = (base_path / path).resolve()
+            else:
+                path = path.resolve()
             try:
                 path.relative_to(base_path)
             except ValueError:

@@ -348,6 +348,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Custom directory for PaddleOCR and spaCy model storage, useful for environments like AWS Lambda.
     * **Default Value:** `''` (uses default location).
 
+* **`PADDLE_FONT_PATH`**
+    * **Description:** Custom font path for PaddleOCR. If empty, the application will attempt to use system fonts to avoid downloading `simfang.ttf` or `PingFang-SC-Regular.ttf`. Set this if you want to use a specific font file for PaddleOCR text rendering.
+    * **Default Value:** `''` (uses system fonts).
+
 ### Local OCR (Tesseract & PaddleOCR)
 
 * **`CHOSEN_LOCAL_OCR_MODEL`**
@@ -379,7 +383,11 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Default Value:** `"False"`
 
 * **`SAVE_PAGE_OCR_VISUALISATIONS`**
-    * **Description:** Saves images with PaddleOCR's detected bounding boxes overlaid.
+    * **Description:** If set to `"True"`, saves visualisations of Tesseract, PaddleOCR, and Textract bounding boxes overlaid on the page images.
+    * **Default Value:** `"False"`
+
+* **`INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES`**
+    * **Description:** If set to `"True"`, OCR visualisation output files (created when `SAVE_PAGE_OCR_VISUALISATIONS` is enabled) will be included in the final output file list returned by `choose_and_run_redactor`. This makes the visualisation files available in the Gradio output interface.
     * **Default Value:** `"False"`
 
 * **`SAVE_WORD_SEGMENTER_OUTPUT_IMAGES`**

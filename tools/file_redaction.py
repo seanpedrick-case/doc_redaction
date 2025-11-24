@@ -47,6 +47,7 @@ from tools.config import (
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
     IMAGES_DPI,
+    INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
     INPUT_FOLDER,
     LOAD_TRUNCATED_IMAGES,
     MAX_DOC_PAGES,
@@ -1028,6 +1029,7 @@ def choose_and_run_redactor(
                 all_page_line_level_ocr_results_with_words,
                 selection_element_results_list_df,
                 form_key_value_results_list_df,
+                out_file_paths,
             ) = redact_image_pdf(
                 file_path,
                 pdf_image_file_paths,
@@ -1061,6 +1063,7 @@ def choose_and_run_redactor(
                 all_page_line_level_ocr_results_with_words,
                 chosen_local_ocr_model,
                 log_files_output_paths=log_files_output_paths,
+                out_file_paths=out_file_paths,
                 nlp_analyser=nlp_analyser,
                 output_folder=output_folder,
                 input_folder=input_folder,
@@ -3112,6 +3115,7 @@ def redact_image_pdf(
     chosen_local_ocr_model: str = CHOSEN_LOCAL_OCR_MODEL,
     page_break_val: int = int(PAGE_BREAK_VALUE),
     log_files_output_paths: List = list(),
+    out_file_paths: List = list(),
     max_time: int = int(MAX_TIME_VALUE),
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     output_folder: str = OUTPUT_FOLDER,
@@ -3154,6 +3158,7 @@ def redact_image_pdf(
     - chosen_local_ocr_model (str, optional): The local model chosen for OCR. Defaults to CHOSEN_LOCAL_OCR_MODEL, other choices are "paddle" for PaddleOCR, or "hybrid-paddle" for a combination of both.
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to PAGE_BREAK_VALUE.
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
+    - out_file_paths (List, optional): List of file paths used for saving redaction process output results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
     - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
     - output_folder (str, optional): The folder for file outputs.
@@ -3757,6 +3762,10 @@ def redact_image_pdf(
 
                     # Only proceed if we have a valid image or image path
                     if image_for_visualization is not None:
+                        # Store the length before the call to detect new additions
+                        log_files_output_paths_length_before = len(
+                            log_files_output_paths
+                        )
                         log_files_output_paths = visualise_ocr_words_bounding_boxes(
                             image_for_visualization,
                             page_line_level_ocr_results_with_words["results"],
@@ -3766,6 +3775,17 @@ def redact_image_pdf(
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
                         )
+                        # If config is enabled and a new visualization file was added, add it to out_file_paths
+                        if (
+                            INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES
+                            and log_files_output_paths is not None
+                            and len(log_files_output_paths)
+                            > log_files_output_paths_length_before
+                        ):
+                            # Get the newly added visualization file path (last item in the list)
+                            new_visualisation_path = log_files_output_paths[-1]
+                            if new_visualisation_path not in out_file_paths:
+                                out_file_paths.append(new_visualisation_path)
                     else:
                         print(
                             f"Warning: Could not determine image for visualization at page {reported_page_number}. Skipping visualization."
@@ -4048,6 +4068,7 @@ def redact_image_pdf(
                     all_page_line_level_ocr_results_with_words,
                     selection_element_results_list_df,
                     form_key_value_results_list_df,
+                    out_file_paths,
                 )
 
         # If it's an image file
@@ -4149,6 +4170,7 @@ def redact_image_pdf(
                 all_page_line_level_ocr_results_with_words,
                 selection_element_results_list_df,
                 form_key_value_results_list_df,
+                out_file_paths,
             )
 
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
@@ -4236,6 +4258,7 @@ def redact_image_pdf(
         all_page_line_level_ocr_results_with_words,
         selection_element_results_list_df,
         form_key_value_results_list_df,
+        out_file_paths,
     )
 
 
@@ -5295,7 +5318,7 @@ def visualise_ocr_words_bounding_boxes(
             visualisation_folder = "ocr_visualisations"
 
     if not ocr_results:
-        return
+        return log_files_output_paths
 
     if isinstance(image, str):
         image = Image.open(image)

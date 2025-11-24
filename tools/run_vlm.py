@@ -361,6 +361,33 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
+    elif SELECTED_MODEL == "Qwen3-VL-30B-A3B-Instruct":
+        MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        load_kwargs = {
+            "device_map": "auto",
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
+        else:
+            load_kwargs["dtype"] = "auto"
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
+            MODEL_ID, **load_kwargs
+        ).eval()
+
+        model_default_prompt = """Read all the text in the image."""
+        model_default_greedy = False  # 'false' string converted to boolean
+        model_default_top_p = 0.8
+        model_default_top_k = 20
+        model_default_temperature = 0.1
+        model_default_repetition_penalty = 1.0
+        model_default_presence_penalty = 1.5
+        model_default_max_new_tokens = MAX_NEW_TOKENS
+        model_supports_presence_penalty = (
+            False  # I found that this doesn't work when using transformers
+        )
+
     elif SELECTED_MODEL == "PaddleOCR-VL":
         MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
         load_kwargs = {
