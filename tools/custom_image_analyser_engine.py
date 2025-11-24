@@ -923,6 +923,7 @@ def _vlm_ocr_predict(
             max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
             temperature=None,  # Use model default if available, otherwise 0.7
             top_p=None,  # Use model default if available, otherwise 0.9
+            min_p=None,  # Use model default if available, otherwise 0.0
             top_k=None,  # Use model default if available, otherwise 50
             repetition_penalty=None,  # Use model default if available, otherwise 1.3
             presence_penalty=None,  # Use model default if available, otherwise None (only supported by Qwen3-VL models)
@@ -1529,6 +1530,7 @@ def _vlm_page_ocr_predict(
             max_new_tokens=None,
             temperature=None,
             top_p=None,
+            min_p=None,
             top_k=None,
             repetition_penalty=None,
             presence_penalty=None,

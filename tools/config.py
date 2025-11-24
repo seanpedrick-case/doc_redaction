@@ -763,6 +763,10 @@ VLM_DEFAULT_TOP_P = float(
     get_or_create_env_var("VLM_DEFAULT_TOP_P", "0.8")
 )  # Default top_p (nucleus sampling) for VLM generation. Used when model-specific defaults are not set.
 
+VLM_DEFAULT_MIN_P = float(
+    get_or_create_env_var("VLM_DEFAULT_MIN_P", "0.0")
+)  # Default min_p (minimum probability threshold) for VLM generation. Used when model-specific defaults are not set.
+
 VLM_DEFAULT_TOP_K = int(
     get_or_create_env_var("VLM_DEFAULT_TOP_K", "20")
 )  # Default top_k for VLM generation. Used when model-specific defaults are not set.
@@ -771,9 +775,9 @@ VLM_DEFAULT_REPETITION_PENALTY = float(
     get_or_create_env_var("VLM_DEFAULT_REPETITION_PENALTY", "1.0")
 )  # Default repetition penalty for VLM generation. Used when model-specific defaults are not set.
 
-VLM_DEFAULT_GREEDY = convert_string_to_boolean(
-    get_or_create_env_var("VLM_DEFAULT_GREEDY", "False")
-)  # Default greedy setting for VLM generation. False means use sampling (do_sample=True), True means use greedy decoding (do_sample=False). Used when model-specific defaults are not set.
+VLM_DEFAULT_DO_SAMPLE = convert_string_to_boolean(
+    get_or_create_env_var("VLM_DEFAULT_DO_SAMPLE", "True")
+)  # Default do_sample setting for VLM generation. True means use sampling, False means use greedy decoding (do_sample=False). Used when model-specific defaults are not set.
 
 VLM_DEFAULT_PRESENCE_PENALTY = get_or_create_env_var(
     "VLM_DEFAULT_PRESENCE_PENALTY", ""

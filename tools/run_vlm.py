@@ -18,7 +18,8 @@ from tools.config import (
     REPORT_VLM_OUTPUTS_TO_GUI,
     SHOW_VLM_MODEL_OPTIONS,
     USE_FLASH_ATTENTION,
-    VLM_DEFAULT_GREEDY,
+    VLM_DEFAULT_DO_SAMPLE,
+    VLM_DEFAULT_MIN_P,
     VLM_DEFAULT_PRESENCE_PENALTY,
     VLM_DEFAULT_REPETITION_PENALTY,
     VLM_DEFAULT_TEMPERATURE,
@@ -112,8 +113,9 @@ if LOAD_PADDLE_AT_STARTUP is True:
 # Define module-level defaults for model parameters (always available for import)
 # These will be overridden inside the SHOW_VLM_MODEL_OPTIONS block if enabled
 model_default_prompt = """Read all the text in the image."""
-model_default_greedy = VLM_DEFAULT_GREEDY
+model_default_do_sample = VLM_DEFAULT_DO_SAMPLE
 model_default_top_p = float(VLM_DEFAULT_TOP_P)
+model_default_min_p = float(VLM_DEFAULT_MIN_P)
 model_default_top_k = int(VLM_DEFAULT_TOP_K)
 model_default_temperature = float(VLM_DEFAULT_TEMPERATURE)
 model_default_repetition_penalty = float(VLM_DEFAULT_REPETITION_PENALTY)
@@ -140,7 +142,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         QUANTISE_VLM_MODELS,
         SELECTED_MODEL,
         USE_FLASH_ATTENTION,
-        VLM_DEFAULT_GREEDY,
+        VLM_DEFAULT_DO_SAMPLE,
+        VLM_DEFAULT_MIN_P,
         VLM_DEFAULT_PRESENCE_PENALTY,
         VLM_DEFAULT_REPETITION_PENALTY,
         VLM_DEFAULT_TEMPERATURE,
@@ -171,8 +174,9 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     # Initialize model-specific generation parameters (will be set by specific models if needed)
     model_default_prompt = """Read all the text in the image."""
-    model_default_greedy = VLM_DEFAULT_GREEDY
+    model_default_do_sample = VLM_DEFAULT_DO_SAMPLE
     model_default_top_p = float(VLM_DEFAULT_TOP_P)
+    model_default_min_p = float(VLM_DEFAULT_MIN_P)
     model_default_top_k = int(VLM_DEFAULT_TOP_K)
     model_default_temperature = float(VLM_DEFAULT_TEMPERATURE)
     model_default_repetition_penalty = float(VLM_DEFAULT_REPETITION_PENALTY)
@@ -297,9 +301,10 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
-        model_default_greedy = False  # 'false' string converted to boolean
+        model_default_do_sample = True
         model_default_top_p = 0.8
-        model_default_top_k = 20
+        model_default_min_p = 0.0
+        model_default_top_k = 100
         model_default_temperature = 0.1
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
@@ -324,9 +329,10 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
-        model_default_greedy = False  # 'false' string converted to boolean
+        model_default_do_sample = True
         model_default_top_p = 0.8
-        model_default_top_k = 20
+        model_default_min_p = 0.0
+        model_default_top_k = 100
         model_default_temperature = 0.1
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
@@ -350,9 +356,10 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
-        model_default_greedy = False  # 'false' string converted to boolean
+        model_default_do_sample = True
         model_default_top_p = 0.8
-        model_default_top_k = 20
+        model_default_min_p = 0.0
+        model_default_top_k = 100
         model_default_temperature = 0.1
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
@@ -363,6 +370,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_MODEL == "Qwen3-VL-30B-A3B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+        from transformers import Qwen3VLMoeForConditionalGeneration
+
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
             "device_map": "auto",
@@ -372,14 +381,15 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
+        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
             MODEL_ID, **load_kwargs
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
-        model_default_greedy = False  # 'false' string converted to boolean
+        model_default_do_sample = True
         model_default_top_p = 0.8
-        model_default_top_k = 20
+        model_default_min_p = 0.0
+        model_default_top_k = 100
         model_default_temperature = 0.1
         model_default_repetition_penalty = 1.0
         model_default_presence_penalty = 1.5
@@ -425,6 +435,7 @@ def extract_text_from_image_vlm(
     max_new_tokens: int = None,
     temperature: float = None,
     top_p: float = None,
+    min_p: float = None,
     top_k: int = None,
     repetition_penalty: float = None,
     greedy: bool = None,
@@ -450,6 +461,8 @@ def extract_text_from_image_vlm(
             Defaults to model-specific value (0.7 for Qwen3-VL models) or 0.7.
         top_p (float, optional): Nucleus sampling parameter (top-p).
             Defaults to model-specific value (0.8 for Qwen3-VL models) or 0.9.
+        min_p (float, optional): Minimum probability threshold for token sampling.
+            Defaults to model-specific value or 0.0.
         top_k (int, optional): Top-k sampling parameter.
             Defaults to model-specific value (20 for Qwen3-VL models) or 50.
         repetition_penalty (float, optional): Penalty for token repetition.
@@ -506,6 +519,14 @@ def extract_text_from_image_vlm(
     else:
         actual_top_p = VLM_DEFAULT_TOP_P  # Config default
 
+    # min_p: function arg > model default > config default
+    if min_p is not None:
+        actual_min_p = min_p
+    elif model_default_min_p is not None:
+        actual_min_p = model_default_min_p
+    else:
+        actual_min_p = VLM_DEFAULT_MIN_P  # Config default
+
     # top_k: function arg > model default > config default
     if top_k is not None:
         actual_top_k = top_k
@@ -522,16 +543,14 @@ def extract_text_from_image_vlm(
     else:
         actual_repetition_penalty = VLM_DEFAULT_REPETITION_PENALTY  # Config default
 
-    # greedy/do_sample: function arg > model default > config default
+    # do_sample: function arg > model default > config default
     # greedy=False means do_sample=True (sampling), greedy=True means do_sample=False (greedy)
     if greedy is not None:
         actual_do_sample = not greedy
-    elif model_default_greedy is not None:
-        actual_do_sample = not model_default_greedy
+    elif model_default_do_sample is not None:
+        actual_do_sample = model_default_do_sample
     else:
-        actual_do_sample = (
-            not VLM_DEFAULT_GREEDY
-        )  # Config default: convert greedy to do_sample
+        actual_do_sample = VLM_DEFAULT_DO_SAMPLE  # Config default
 
     # presence_penalty: function arg > model default > config default > None
     actual_presence_penalty = None
@@ -591,6 +610,7 @@ def extract_text_from_image_vlm(
         "do_sample": actual_do_sample,
         "temperature": actual_temperature,
         "top_p": actual_top_p,
+        "min_p": actual_min_p,
         "top_k": actual_top_k,
         "repetition_penalty": actual_repetition_penalty,
     }

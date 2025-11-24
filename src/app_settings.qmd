@@ -517,6 +517,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Default top_p (nucleus sampling) for VLM generation. Used when model-specific defaults are not set.
     * **Default Value:** `0.8`
 
+* **`VLM_DEFAULT_MIN_P`**
+    * **Description:** Default min_p (minimum probability threshold) for VLM generation. Used when model-specific defaults are not set.
+    * **Default Value:** `0.0`
+
 * **`VLM_DEFAULT_TOP_K`**
     * **Description:** Default top_k for VLM generation. Used when model-specific defaults are not set.
     * **Default Value:** `20`
@@ -525,9 +529,9 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Default repetition penalty for VLM generation. Used when model-specific defaults are not set.
     * **Default Value:** `1.3`
 
-* **`VLM_DEFAULT_GREEDY`**
-    * **Description:** Default greedy setting for VLM generation. `"False"` means use sampling (do_sample=True), `"True"` means use greedy decoding (do_sample=False). Used when model-specific defaults are not set.
-    * **Default Value:** `"False"`
+* **`VLM_DEFAULT_DO_SAMPLE`**
+    * **Description:** Default do_sample setting for VLM generation. `"True"` means use sampling (do_sample=True), `"False"` means use greedy decoding (do_sample=False). Used when model-specific defaults are not set.
+    * **Default Value:** `"True"`
 
 * **`VLM_DEFAULT_PRESENCE_PENALTY`**
     * **Description:** Default presence penalty for VLM generation. If empty, defaults to None. Used when model-specific defaults are not set.
