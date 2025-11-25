@@ -37,7 +37,7 @@ jobs:
           git lfs install
           
           # 5. Add the remote
-          git remote add hf https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID_ZERO_GPU
+          git remote add hf https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID
           
           # 6. Add all files
           # Since this is a fresh init, Git sees EVERY file as "New"
