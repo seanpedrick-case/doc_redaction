@@ -125,7 +125,8 @@ ul.task-list li input[type="checkbox"] {
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#app-configuration-file-config.env" id="toc-app-configuration-file-config.env" class="nav-link active" data-scroll-target="#app-configuration-file-config.env">App Configuration File (<code>config.env</code>)</a></li>
+  <li><a href="#value-format-notes" id="toc-value-format-notes" class="nav-link active" data-scroll-target="#value-format-notes">Value Format Notes</a></li>
+  <li><a href="#app-configuration-file-config.env" id="toc-app-configuration-file-config.env" class="nav-link" data-scroll-target="#app-configuration-file-config.env">App Configuration File (<code>config.env</code>)</a></li>
   <li><a href="#aws-options" id="toc-aws-options" class="nav-link" data-scroll-target="#aws-options">AWS Options</a></li>
   <li><a href="#image-options" id="toc-image-options" class="nav-link" data-scroll-target="#image-options">Image Options</a></li>
   <li><a href="#file-io-options" id="toc-file-io-options" class="nav-link" data-scroll-target="#file-io-options">File I/O Options</a></li>
@@ -178,6 +179,14 @@ ul.task-list li input[type="checkbox"] {
 
 
 <p>Settings for the redaction app can be set from outside by changing values in the <code>.env</code> file stored in your local config folder, or in S3 if running on AWS. This guide provides an overview of how to configure the application using environment variables. The application loads configurations using <code>os.environ.get()</code>. It first attempts to load variables from the file specified by <code>APP_CONFIG_PATH</code> (which defaults to <code>config/app_config.env</code>). If <code>AWS_CONFIG_PATH</code> is also set (e.g., to <code>config/aws_config.env</code>), variables are loaded from that file as well. Environment variables set directly in the system will always take precedence over those defined in these <code>.env</code> files.</p>
+<section id="value-format-notes" class="level3">
+<h3 class="anchored" data-anchor-id="value-format-notes">Value Format Notes</h3>
+<ul>
+<li><p><strong>Boolean Values:</strong> Boolean environment variables accept multiple formats: <code>"True"</code>, <code>"1"</code>, <code>"true"</code>, or <code>"TRUE"</code> for true; <code>"False"</code>, <code>"0"</code>, <code>"false"</code>, or <code>"FALSE"</code> for false.</p></li>
+<li><p><strong>List Values:</strong> List environment variables should be provided as comma-separated strings within square brackets, e.g., <code>"['item1', 'item2', 'item3']"</code>. The application will automatically parse these into Python lists.</p></li>
+<li><p><strong>Temporary Folders:</strong> Setting <code>OUTPUT_FOLDER</code> or <code>INPUT_FOLDER</code> to <code>"TEMP"</code> will create a temporary directory that is automatically cleaned up when the application exits. This is useful for increased security in some deployment scenarios.</p></li>
+</ul>
+</section>
 <section id="app-configuration-file-config.env" class="level2">
 <h2 class="anchored" data-anchor-id="app-configuration-file-config.env">App Configuration File (<code>config.env</code>)</h2>
 <p>This section details variables related to the main application configuration file.</p>
@@ -315,6 +324,7 @@ ul.task-list li input[type="checkbox"] {
 <section id="logging-options" class="level2">
 <h2 class="anchored" data-anchor-id="logging-options">Logging Options</h2>
 <p>Settings for configuring application logging.</p>
+<p><strong>Note:</strong> By default, logs are stored in subfolders based on today’s date and the hostname of the instance running the app (e.g., <code>logs/20240101/hostname/</code>). This prevents log files from one instance overwriting logs from another instance, which is especially important when running on S3 or in multi-instance deployments. If you’re always running the app on a single system or just locally, you can disable this behavior by setting <code>USE_LOG_SUBFOLDERS</code> to <code>"False"</code>.</p>
 <ul>
 <li><strong><code>SAVE_LOGS_TO_CSV</code></strong>
 <ul>
@@ -395,7 +405,7 @@ ul.task-list li input[type="checkbox"] {
 <li><strong><code>GRADIO_SERVER_NAME</code></strong>
 <ul>
 <li><strong>Description:</strong> The IP address the Gradio server will bind to. Use <code>"0.0.0.0"</code> to allow external access.</li>
-<li><strong>Default Value:</strong> <code>"0.0.0.0"</code></li>
+<li><strong>Default Value:</strong> <code>"127.0.0.1"</code></li>
 </ul></li>
 <li><strong><code>GRADIO_SERVER_PORT</code></strong>
 <ul>
@@ -459,8 +469,9 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>PAGE_BREAK_VALUE</code></strong>
 <ul>
-<li><strong>Description:</strong> Number of pages to process before breaking and restarting from the last finished page (not currently activated).</li>
+<li><strong>Description:</strong> Number of pages to process before breaking and restarting from the last finished page.</li>
 <li><strong>Default Value:</strong> <code>99999</code></li>
+<li><strong>Note:</strong> This feature is not currently activated in the application.</li>
 </ul></li>
 <li><strong><code>MAX_TIME_VALUE</code></strong>
 <ul>
@@ -489,7 +500,7 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>INTRO_TEXT</code></strong>
 <ul>
-<li><strong>Description:</strong> Custom introduction text for the app. Should be in Markdown format, html is stripped out.</li>
+<li><strong>Description:</strong> Custom introduction text for the app. Should be in Markdown format, html is stripped out. Can also be set to a path to a <code>.txt</code> file (e.g., <code>"intro.txt"</code>), which will be read and used as the intro text. The text is automatically sanitized to remove dangerous HTML/scripts while preserving safe markdown syntax.</li>
 <li><strong>Default Value:</strong> <code>"Too long to display here, see tools/config.py"</code></li>
 </ul></li>
 <li><strong><code>SHOW_EXAMPLES</code></strong>
@@ -500,6 +511,16 @@ ul.task-list li input[type="checkbox"] {
 <li><strong><code>SHOW_AWS_EXAMPLES</code></strong>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, includes AWS-specific examples.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SHOW_DIFFICULT_OCR_EXAMPLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, includes examples that demonstrate difficult OCR scenarios.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, displays all output files in the output folder interface.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>FILE_INPUT_HEIGHT</code></strong>
@@ -524,6 +545,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Controls whether local (Tesseract) or AWS (Textract) text extraction options are shown in the UI.</li>
 <li><strong>Default Value:</strong> <code>"True"</code> for both.</li>
+<li><strong>Note:</strong> If both are set to <code>"False"</code>, the application will automatically enable <code>SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS</code> to ensure at least one option is available.</li>
 </ul></li>
 <li><strong><code>SELECTABLE_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>TESSERACT_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>TEXTRACT_TEXT_EXTRACT_OPTION</code></strong>
 <ul>
@@ -539,16 +561,17 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Controls whether local or AWS (Comprehend) PII detection options are shown in the UI.</li>
 <li><strong>Default Value:</strong> <code>"True"</code> for both.</li>
+<li><strong>Note:</strong> If both are set to <code>"False"</code>, the application will automatically enable <code>SHOW_LOCAL_PII_DETECTION_OPTIONS</code> to ensure at least one option is available.</li>
 </ul></li>
 <li><strong><code>DEFAULT_TEXT_EXTRACTION_MODEL</code></strong>
 <ul>
 <li><strong>Description:</strong> Sets the default text extraction model selected in the UI.</li>
-<li><strong>Default Value:</strong> Defaults to AWS Textract if available, otherwise local selectable text.</li>
+<li><strong>Default Value:</strong> Automatically defaults to AWS Textract if <code>SHOW_AWS_TEXT_EXTRACTION_OPTIONS</code> is enabled, otherwise defaults to the local selectable text option.</li>
 </ul></li>
 <li><strong><code>DEFAULT_PII_DETECTION_MODEL</code></strong>
 <ul>
 <li><strong>Description:</strong> Sets the default PII detection model selected in the UI.</li>
-<li><strong>Default Value:</strong> Defaults to AWS Comprehend if available, otherwise the local model.</li>
+<li><strong>Default Value:</strong> Automatically defaults to AWS Comprehend if <code>SHOW_AWS_PII_DETECTION_OPTIONS</code> is enabled, otherwise defaults to the local model.</li>
 </ul></li>
 <li><strong><code>LOAD_REDACTION_ANNOTATIONS_FROM_PDF</code></strong>
 <ul>
@@ -564,6 +587,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Path to the local Tesseract OCR installation folder.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
+<li><strong>Installation Note:</strong> For Windows, install Tesseract 5.5.0 from <a href="https://github.com/UB-Mannheim/tesseract/wiki">UB-Mannheim/tesseract</a>. This environment variable should point to the Tesseract folder (e.g., <code>tesseract/</code>).</li>
 </ul></li>
 <li><strong><code>TESSERACT_DATA_FOLDER</code></strong>
 <ul>
@@ -574,11 +598,17 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Path to the local Poppler installation’s <code>bin</code> folder.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
+<li><strong>Installation Note:</strong> For Windows, install Poppler from <a href="https://github.com/oschwartz10612/poppler-windows">oschwartz10612/poppler-windows</a>. This variable needs to point to the Poppler bin folder (e.g., <code>poppler/poppler-24.02.0/Library/bin/</code>).</li>
 </ul></li>
 <li><strong><code>PADDLE_MODEL_PATH</code></strong> / <strong><code>SPACY_MODEL_PATH</code></strong>
 <ul>
 <li><strong>Description:</strong> Custom directory for PaddleOCR and spaCy model storage, useful for environments like AWS Lambda.</li>
 <li><strong>Default Value:</strong> <code>''</code> (uses default location).</li>
+</ul></li>
+<li><strong><code>PADDLE_FONT_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Custom font path for PaddleOCR. If empty, the application will attempt to use system fonts to avoid downloading <code>simfang.ttf</code> or <code>PingFang-SC-Regular.ttf</code>. Set this if you want to use a specific font file for PaddleOCR text rendering.</li>
+<li><strong>Default Value:</strong> <code>''</code> (uses system fonts).</li>
 </ul></li>
 </ul>
 </section>
@@ -587,7 +617,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong><code>CHOSEN_LOCAL_OCR_MODEL</code></strong>
 <ul>
-<li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, or <code>"hybrid-paddle"</code>.</li>
+<li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, <code>"hybrid-paddle"</code>, <code>"hybrid-vlm"</code>, <code>"hybrid-paddle-vlm"</code>, <code>"hybrid-paddle-inference-server"</code>, <code>"vlm"</code>, or <code>"inference-server"</code>.</li>
 <li><strong>Default Value:</strong> <code>"tesseract"</code></li>
 </ul></li>
 <li><strong><code>SHOW_LOCAL_OCR_MODEL_OPTIONS</code></strong>
@@ -622,7 +652,12 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>SAVE_PAGE_OCR_VISUALISATIONS</code></strong>
 <ul>
-<li><strong>Description:</strong> Saves images with PaddleOCR’s detected bounding boxes overlaid.</li>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves visualisations of Tesseract, PaddleOCR, and Textract bounding boxes overlaid on the page images.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, OCR visualisation output files (created when <code>SAVE_PAGE_OCR_VISUALISATIONS</code> is enabled) will be included in the final output file list returned by <code>choose_and_run_redactor</code>. This makes the visualisation files available in the Gradio output interface.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>SAVE_WORD_SEGMENTER_OUTPUT_IMAGES</code></strong>
@@ -634,6 +669,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, images will be preprocessed before local OCR. Can slow down processing.</li>
 <li><strong>Default Value:</strong> <code>"True"</code></li>
+<li><strong>Note:</strong> Testing has shown that preprocessing doesn’t necessarily improve OCR results and can significantly slow down extraction. Consider setting this to <code>"False"</code> if processing speed is a priority.</li>
 </ul></li>
 <li><strong><code>SAVE_PREPROCESS_IMAGES</code></strong>
 <ul>
@@ -670,6 +706,31 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> If set to <code>"True"</code>, loads the PaddleOCR model at application startup.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
+<li><strong><code>SHOW_INFERENCE_SERVER_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select inference-server-related options from the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SHOW_HYBRID_MODELS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, enables hybrid model options (e.g., hybrid-paddle-vlm, hybrid-paddle-inference-server) in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>INFERENCE_SERVER_API_URL</code></strong>
+<ul>
+<li><strong>Description:</strong> Base URL of the inference-server API for remote OCR processing.</li>
+<li><strong>Default Value:</strong> <code>"http://localhost:8080"</code></li>
+</ul></li>
+<li><strong><code>INFERENCE_SERVER_MODEL_NAME</code></strong>
+<ul>
+<li><strong>Description:</strong> Optional model name to use for inference-server API. If empty, uses the default model on the server.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>INFERENCE_SERVER_TIMEOUT</code></strong>
+<ul>
+<li><strong>Description:</strong> Timeout in seconds for inference-server API requests.</li>
+<li><strong>Default Value:</strong> <code>300</code></li>
+</ul></li>
 </ul>
 </section>
 <section id="vision-language-model-vlm-options" class="level3">
@@ -682,8 +743,28 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>SELECTED_MODEL</code></strong>
 <ul>
-<li><strong>Description:</strong> Selected vision model for OCR. Choose from: <code>"Nanonets-OCR2-3B"</code>, <code>"Dots.OCR"</code>, <code>"Qwen3-VL-2B-Instruct"</code>, <code>"Qwen3-VL-4B-Instruct"</code>, <code>"PaddleOCR-VL"</code>.</li>
-<li><strong>Default Value:</strong> <code>"Dots.OCR"</code></li>
+<li><strong>Description:</strong> Selected vision model for OCR. Choose from: <code>"Nanonets-OCR2-3B"</code>, <code>"Dots.OCR"</code>, <code>"Qwen3-VL-2B-Instruct"</code>, <code>"Qwen3-VL-4B-Instruct"</code>, <code>"Qwen3-VL-8B-Instruct"</code>, <code>"PaddleOCR-VL"</code>.</li>
+<li><strong>Default Value:</strong> <code>"Qwen3-VL-4B-Instruct"</code></li>
+</ul></li>
+<li><strong><code>QUANTISE_VLM_MODELS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the VLM models will be quantized using 4-bit quantisation (bitsandbytes).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>USE_FLASH_ATTENTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses flash attention for the VLM, which can improve performance (not possible on Windows).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>VLM_MAX_IMAGE_SIZE</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio.</li>
+<li><strong>Default Value:</strong> <code>600000</code> (approximately 774x774)</li>
+</ul></li>
+<li><strong><code>VLM_MAX_DPI</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.</li>
+<li><strong>Default Value:</strong> <code>300.0</code></li>
 </ul></li>
 <li><strong><code>MAX_SPACES_GPU_RUN_TIME</code></strong>
 <ul>
@@ -693,32 +774,17 @@ ul.task-list li input[type="checkbox"] {
 <li><strong><code>MAX_NEW_TOKENS</code></strong>
 <ul>
 <li><strong>Description:</strong> Maximum number of tokens to generate for VLM responses.</li>
-<li><strong>Default Value:</strong> <code>30</code></li>
+<li><strong>Default Value:</strong> <code>4192</code></li>
 </ul></li>
 <li><strong><code>DEFAULT_MAX_NEW_TOKENS</code></strong>
 <ul>
 <li><strong>Description:</strong> Default maximum number of tokens to generate for VLM responses.</li>
-<li><strong>Default Value:</strong> <code>30</code></li>
+<li><strong>Default Value:</strong> <code>4192</code></li>
 </ul></li>
 <li><strong><code>MAX_INPUT_TOKEN_LENGTH</code></strong>
 <ul>
 <li><strong>Description:</strong> Maximum number of tokens that can be input to the VLM.</li>
-<li><strong>Default Value:</strong> <code>4096</code></li>
-</ul></li>
-<li><strong><code>VLM_MAX_IMAGE_SIZE</code></strong>
-<ul>
-<li><strong>Description:</strong> Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio.</li>
-<li><strong>Default Value:</strong> <code>1000000</code> (1000x1000)</li>
-</ul></li>
-<li><strong><code>VLM_MAX_DPI</code></strong>
-<ul>
-<li><strong>Description:</strong> Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.</li>
-<li><strong>Default Value:</strong> <code>300.0</code></li>
-</ul></li>
-<li><strong><code>USE_FLASH_ATTENTION</code></strong>
-<ul>
-<li><strong>Description:</strong> If set to <code>"True"</code>, uses flash attention for the VLM, which can improve performance.</li>
-<li><strong>Default Value:</strong> <code>"False"</code></li>
+<li><strong>Default Value:</strong> <code>8192</code></li>
 </ul></li>
 <li><strong><code>OVERWRITE_EXISTING_OCR_RESULTS</code></strong>
 <ul>
@@ -729,6 +795,56 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, saves input images sent to VLM OCR for debugging purposes.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>HYBRID_OCR_MAX_NEW_TOKENS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of tokens to generate for hybrid OCR operations.</li>
+<li><strong>Default Value:</strong> <code>30</code></li>
+</ul></li>
+<li><strong><code>REPORT_VLM_OUTPUTS_TO_GUI</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, reports VLM outputs to the GUI with info boxes as they are processed.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>VLM_SEED</code></strong>
+<ul>
+<li><strong>Description:</strong> Random seed for VLM generation. If empty, no seed is set (non-deterministic). If set to an integer, generation will be deterministic.</li>
+<li><strong>Default Value:</strong> <code>"42"</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_TEMPERATURE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default temperature for VLM generation. Used when model-specific defaults are not set.</li>
+<li><strong>Default Value:</strong> <code>0.1</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_TOP_P</code></strong>
+<ul>
+<li><strong>Description:</strong> Default top_p (nucleus sampling) for VLM generation. Used when model-specific defaults are not set.</li>
+<li><strong>Default Value:</strong> <code>0.8</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_MIN_P</code></strong>
+<ul>
+<li><strong>Description:</strong> Default min_p (minimum probability threshold) for VLM generation. Used when model-specific defaults are not set.</li>
+<li><strong>Default Value:</strong> <code>0.0</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_TOP_K</code></strong>
+<ul>
+<li><strong>Description:</strong> Default top_k for VLM generation. Used when model-specific defaults are not set.</li>
+<li><strong>Default Value:</strong> <code>20</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_REPETITION_PENALTY</code></strong>
+<ul>
+<li><strong>Description:</strong> Default repetition penalty for VLM generation. Used when model-specific defaults are not set.</li>
+<li><strong>Default Value:</strong> <code>1.3</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_DO_SAMPLE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default do_sample setting for VLM generation. <code>"True"</code> means use sampling (do_sample=True), <code>"False"</code> means use greedy decoding (do_sample=False). Used when model-specific defaults are not set.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_PRESENCE_PENALTY</code></strong>
+<ul>
+<li><strong>Description:</strong> Default presence penalty for VLM generation. If empty, defaults to None. Used when model-specific defaults are not set.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 </ul>
 </section>
@@ -823,6 +939,13 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> The default language’s full name (e.g., “english”) and its short code (e.g., “en”).</li>
 <li><strong>Default Values:</strong> <code>"english"</code>, <code>"en"</code></li>
+<li><strong>Language Support Notes:</strong>
+<ul>
+<li><strong>Tesseract:</strong> Ensure the Tesseract language data (e.g., <code>fra.traineddata</code>) is installed. Find language packs at <a href="https://github.com/tesseract-ocr/tessdata">tesseract-ocr/tessdata</a>.</li>
+<li><strong>PaddleOCR:</strong> Ensure the PaddleOCR language data is installed. See supported languages at <a href="https://www.paddleocr.ai/main/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5_multi_languages.html">PaddleOCR documentation</a>.</li>
+<li><strong>AWS Comprehend:</strong> Only English (<code>en</code>) and Spanish (<code>es</code>) are supported. See <a href="https://docs.aws.amazon.com/comprehend/latest/dg/how-pii.html">AWS Comprehend PII documentation</a>.</li>
+<li><strong>AWS Textract:</strong> Automatically detects language and supports English, Spanish, Italian, Portuguese, French, and German. Note that handwriting, invoices, receipts, identity documents, and queries processing are in English only. See <a href="https://aws.amazon.com/textract/faqs/#topic-0">AWS Textract FAQs</a>.</li>
+</ul></li>
 </ul></li>
 <li><strong><code>textract_language_choices</code></strong> / <strong><code>aws_comprehend_language_choices</code></strong>
 <ul>
@@ -856,7 +979,7 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>DEFAULT_COMBINE_PAGES</code></strong>
 <ul>
-<li><strong>Description:</strong> If <code>"True"</code>, text from the same page number across different files is combined before checking for duplicates.</li>
+<li><strong>Description:</strong> If <code>"True"</code>, text from the same page number across different files is combined before checking for duplicates. If <code>"False"</code>, line-level duplicate detection will be enabled instead.</li>
 <li><strong>Default Value:</strong> <code>"True"</code></li>
 </ul></li>
 <li><strong><code>DEFAULT_MIN_WORD_COUNT</code></strong>
@@ -881,13 +1004,19 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>CUSTOM_BOX_COLOUR</code></strong>
 <ul>
-<li><strong>Description:</strong> Specifies the color for redaction boxes as an RGB tuple string, e.g., <code>"(0, 0, 0)"</code> for black.</li>
+<li><strong>Description:</strong> Specifies the color for redaction boxes as an RGB tuple string, e.g., <code>"(0, 0, 0)"</code> for black. Alternatively, you can use the named color <code>"grey"</code> (which maps to RGB <code>(128, 128, 128)</code>).</li>
 <li><strong>Default Value:</strong> <code>"(0, 0, 0)"</code></li>
 </ul></li>
 <li><strong><code>APPLY_REDACTIONS_IMAGES</code></strong>, <strong><code>APPLY_REDACTIONS_GRAPHICS</code></strong>, <strong><code>APPLY_REDACTIONS_TEXT</code></strong>
 <ul>
 <li><strong>Description:</strong> Advanced control over how redactions are applied to underlying images, vector graphics, and text in the PDF, based on PyMuPDF options. <code>0</code> is the default for a standard redaction workflow.</li>
 <li><strong>Default Value:</strong> <code>0</code> for all.</li>
+<li><strong>Detailed Options:</strong>
+<ul>
+<li><strong><code>APPLY_REDACTIONS_IMAGES</code>:</strong> <code>0</code> = ignore (default), <code>1</code> = completely remove images overlapping redaction annotations, <code>2</code> = blank out overlapping pixels, <code>3</code> = only remove images that are actually visible. Note: Text in images is effectively removed by the overlapping rectangle shape.</li>
+<li><strong><code>APPLY_REDACTIONS_GRAPHICS</code>:</strong> <code>0</code> = ignore (default), <code>1</code> = remove graphics fully contained in redaction annotation, <code>2</code> = remove any overlapping vector graphics.</li>
+<li><strong><code>APPLY_REDACTIONS_TEXT</code>:</strong> <code>0</code> = remove all characters whose boundary box overlaps any redaction rectangle (default, complies with legal/data protection intentions), <code>1</code> = keep text while redacting graphics/images (does NOT comply with data protection intentions - use at your own risk).</li>
+</ul></li>
 </ul></li>
 <li><strong><code>RETURN_PDF_FOR_REVIEW</code></strong>
 <ul>
@@ -903,12 +1032,14 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> If set to <code>'True'</code>, the redacted PDF output will be compressed.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
+<li><strong>Warning:</strong> On low memory systems, the compression options in PyMuPDF can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to <code>"False"</code> will save the PDF only with a basic cleaning option enabled, which is more memory-efficient.</li>
 </ul></li>
 </ul>
 </section>
 <section id="direct-mode-lambda-configuration" class="level2">
 <h2 class="anchored" data-anchor-id="direct-mode-lambda-configuration">Direct Mode &amp; Lambda Configuration</h2>
 <p>Settings for running the application from the command line (Direct Mode) or as an AWS Lambda function.</p>
+<p><strong>Note:</strong> Many <code>DIRECT_MODE_*</code> variables inherit their default values from their corresponding non-direct-mode variables if not explicitly set. For example, <code>DIRECT_MODE_LANGUAGE</code> defaults to <code>DEFAULT_LANGUAGE</code>, <code>DIRECT_MODE_IMAGES_DPI</code> defaults to <code>IMAGES_DPI</code>, etc.</p>
 <section id="direct-mode" class="level3">
 <h3 class="anchored" data-anchor-id="direct-mode">Direct Mode</h3>
 <ul>
@@ -1097,6 +1228,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Booleans (<code>"True"</code>/<code>"False"</code>) to enable the use of allow, deny, or whole-page redaction lists.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
+<li><strong>Note:</strong> <code>GET_DEFAULT_WHOLE_PAGE_REDACTION_LIST</code> is stored as a string value, not converted to boolean (unlike the other two variables).</li>
 </ul></li>
 <li><strong><code>ALLOW_LIST_PATH</code></strong>, <strong><code>DENY_LIST_PATH</code></strong>, <strong><code>WHOLE_PAGE_REDACTION_LIST_PATH</code></strong>
 <ul>
@@ -1132,6 +1264,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Local or S3 path to a CSV file containing available cost codes.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
+<li><strong>File Format:</strong> The CSV file should contain a single table with two columns and a header row. The first column should contain cost codes, and the second column should contain a name or description for each cost code.</li>
 </ul></li>
 <li><strong><code>ENFORCE_COST_CODES</code></strong>
 <ul>
@@ -1147,6 +1280,7 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Controls whether UI options for asynchronous whole document Textract calls are displayed.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
+<li><strong>Note:</strong> This feature is not currently fully implemented in the application.</li>
 </ul></li>
 <li><strong><code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET</code></strong>
 <ul>
