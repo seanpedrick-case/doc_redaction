@@ -3479,10 +3479,42 @@ def redact_image_pdf(
                         page_width = pymupdf_page.mediabox.width
                         page_height = pymupdf_page.mediabox.height
                 else:
-                    pass
-                    # print(
-                    #     "Image is None and not a placeholder - using mediabox coordinates"
-                    # )
+                    try:
+                        # Create the actual image using process_single_page_for_image_conversion
+                        _, created_image_path, page_width, page_height = (
+                            process_single_page_for_image_conversion(
+                                pdf_path=file_path,
+                                page_num=page_no,
+                                image_dpi=IMAGES_DPI,
+                                create_images=True,
+                                input_folder=input_folder,
+                            )
+                        )
+                    
+
+                        # Load the created image
+                        if os.path.exists(created_image_path):
+                            image = Image.open(created_image_path)
+                            # print(
+                            #     f"Successfully created and loaded image from: {created_image_path}"
+                            # )
+                        else:
+                            # print(f"Failed to create image at: {created_image_path}")
+                            page_width = pymupdf_page.mediabox.width
+                            page_height = pymupdf_page.mediabox.height
+                        # print(
+                        #     "Image is None and not a placeholder - using mediabox coordinates"
+                        # )
+
+                    except Exception as e:
+                        print(f"Error creating image from file_path: {e}")
+                        page_width = pymupdf_page.mediabox.width
+                        page_height = pymupdf_page.mediabox.height
+
+            if image is None:
+                print("Image is None - using mediabox coordinates")
+                page_width = pymupdf_page.mediabox.width
+                page_height = pymupdf_page.mediabox.height
 
             # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
             # If using Tesseract
