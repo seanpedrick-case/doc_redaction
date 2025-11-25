@@ -103,9 +103,7 @@ def ensure_folder_within_app_directory(
                 "/opt",
                 "/var",
                 "/etc",
-                "c:\\windows",
-                "c:\\program files",
-                "c:\\programdata",
+                "/tmp",
             ]
             if any(
                 normalized_path.startswith(prefix) for prefix in system_path_prefixes
