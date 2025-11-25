@@ -56,6 +56,7 @@ def scan_table():
 
     return items
 
+
 # Export to CSV
 def export_to_csv(items, output_path, fields_to_drop: list = None):
     if not items:
