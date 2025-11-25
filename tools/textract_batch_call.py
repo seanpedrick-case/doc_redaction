@@ -679,14 +679,6 @@ def poll_whole_document_textract_analysis_progress_and_download(
         print(message)
         # logging.info("Polling Textract for job completion status...")
 
-        print(f"job_id: {job_id}")
-        print(f"job_type_dropdown: {job_type_dropdown}")
-        print(f"s3_output_prefix: {s3_output_prefix}")
-        print(f"pdf_filename: {pdf_filename}")
-        print(f"job_df: {job_df}")
-        print(f"s3_bucket_name: {s3_bucket_name}")
-        print(f"local_output_dir: {local_output_dir}")
-        print(f"load_s3_jobs_loc: {load_s3_jobs_loc}")
         # Update Textract document history df
         try:
             job_df = load_in_textract_job_details(

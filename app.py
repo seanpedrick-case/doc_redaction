@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import gradio as gr
@@ -23,6 +24,7 @@ from tools.config import (
     AWS_REGION,
     AWS_SECRET_KEY,
     CHOSEN_COMPREHEND_ENTITIES,
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT,
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
     COGNITO_AUTH,
@@ -106,9 +108,11 @@ from tools.config import (
     HOST_NAME,
     INPUT_FOLDER,
     INTRO_TEXT,
+    LANGUAGE_CHOICES,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     LOCAL_OCR_MODEL_OPTIONS,
     LOG_FILE_NAME,
+    MAPPED_LANGUAGE_CHOICES,
     MAX_FILE_SIZE,
     MAX_OPEN_TEXT_CHARACTERS,
     MAX_QUEUE_SIZE,
@@ -132,9 +136,11 @@ from tools.config import (
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SESSION_OUTPUT_FOLDER,
+    SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
     SHOW_AWS_EXAMPLES,
     SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
     SHOW_COSTS,
+    SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
     SHOW_LANGUAGE_SELECTION,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
@@ -173,8 +179,7 @@ from tools.find_duplicate_tabular import (
     run_tabular_duplicate_detection,
 )
 from tools.helper_functions import (
-    LANGUAGE_CHOICES,
-    MAPPED_LANGUAGE_CHOICES,
+    all_outputs_file_download_fn,
     calculate_aws_costs,
     calculate_time_taken,
     check_for_existing_textract_file,
@@ -260,27 +265,36 @@ FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 ###
 # Load in FastAPI app
 ###
-app = FastAPI()
 
 
-def register_log_filter() -> None:
-    """
-    Removes logs from healthiness/readiness endpoints so they don't spam
-    and pollute application log flow
-    """
+# Custom logging filter to remove logs from healthiness/readiness endpoints so they don't fill up application log flow
+class EndpointFilter(logging.Filter):
+    def __init__(self, path: str, *args, **kwargs):
+        self._path = path
+        super().__init__(*args, **kwargs)
 
-    class EndpointFilter(logging.Filter):
-        def filter(self, record: logging.LogRecord) -> bool:
-            return (
-                record.args  # type: ignore
-                and len(record.args) >= 3
-                and record.args[2] not in ["/_/health", "/_/ready"]  # type: ignore
-            )
-
-    logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage().find(self._path) == -1
 
 
-register_log_filter()
+# 2. Define the lifespan context manager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- STARTUP LOGIC ---
+    # Filter out /health logging to declutter ECS logs
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.addFilter(EndpointFilter(path="/health"))
+
+    # Yield control back to the application
+    yield
+
+    # --- SHUTDOWN LOGIC ---
+    # (Any cleanup code would go here, e.g., closing DB connections)
+    pass
+
+
+# 3. Initialize the App with the lifespan parameter
+app = FastAPI(lifespan=lifespan)
 
 # Added to pass lint check, no effect
 spaces.annotations
@@ -377,6 +391,31 @@ in_fully_redacted_list_state = gr.Dataframe(
     wrap=True,
 )
 
+page_min = gr.Number(
+    value=DEFAULT_PAGE_MIN,
+    precision=0,
+    minimum=0,
+    maximum=9999,
+    label="Lowest page to redact (set to 0 to redact from the first page)",
+)
+
+page_max = gr.Number(
+    value=DEFAULT_PAGE_MAX,
+    precision=0,
+    minimum=0,
+    maximum=9999,
+    label="Highest page to redact (set to 0 to redact to the last page)",
+)
+
+
+local_ocr_method_radio = gr.Radio(
+    label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
+    value=CHOSEN_LOCAL_OCR_MODEL,
+    choices=LOCAL_OCR_MODEL_OPTIONS,
+    interactive=True,
+    visible=SHOW_LOCAL_OCR_MODEL_OPTIONS,
+)
+
 
 ## Deduplication examples
 in_duplicate_pages = gr.File(
@@ -463,9 +502,29 @@ if ROOT_PATH:
 
 head_html = f"<base href='{base_href}'>"
 
+css = """
+/* Target tab navigation buttons only - not buttons inside tab content */
+/* Gradio renders tab buttons with role="tab" in the navigation area */
+button[role="tab"] {
+    font-size: 1.3em !important;
+    padding: 0.75em 1.5em !important;
+}
+
+/* Alternative selectors for different Gradio versions */
+.tab-nav button,
+nav button[role="tab"],
+div[class*="tab-nav"] button {
+    font-size: 1.2em !important;
+    padding: 0.75em 1.5em !important;
+}
+"""
+
 # Create the gradio interface
 blocks = gr.Blocks(
-    theme=gr.themes.Default(primary_hue="blue"), fill_width=True, head=head_html
+    theme=gr.themes.Default(primary_hue="blue"),
+    fill_width=True,
+    head=head_html,
+    css=css,
 )
 
 with blocks:
@@ -504,10 +563,6 @@ with blocks:
         visible=False,
     )
 
-    # local_ocr_method_radio = gr.Textbox(
-    #     CHOSEN_LOCAL_OCR_MODEL, label="local_ocr_method_radio", visible=False
-    # )
-
     session_hash_state = gr.Textbox(label="session_hash_state", value="", visible=False)
     host_name_textbox = gr.Textbox(
         label="host_name_textbox", value=HOST_NAME, visible=False
@@ -516,7 +571,7 @@ with blocks:
         label="s3_output_folder_state", value="", visible=False
     )
     session_output_folder_textbox = gr.Textbox(
-        value=SESSION_OUTPUT_FOLDER,
+        value=str(SESSION_OUTPUT_FOLDER),
         label="session_output_folder_textbox",
         visible=False,
     )
@@ -1062,12 +1117,12 @@ with blocks:
     ###
     # REDACTION PDF/IMAGES TABLE
     ###
-    with gr.Tab("Redact PDFs/images"):
+    with gr.Tab("Redact PDFs/images", elem_id="app_tab"):
 
         # Examples for PDF/image redaction
         if SHOW_EXAMPLES:
             gr.Markdown(
-                "### Try an example - Click on an example below and then the 'Extract text and redact document' button:"
+                "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
             )
 
             # Check which example files exist and create examples only for available files
@@ -1250,8 +1305,104 @@ with blocks:
                     fn=show_info_box_on_click,
                     run_on_click=True,
                 )
+        if SHOW_DIFFICULT_OCR_EXAMPLES:
+            gr.Markdown(
+                "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
+            )
+            ocr_example_files = [
+                "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+                "example_data/Difficult handwritten note.jpg",
+            ]
+            available_ocr_examples = list()
+            ocr_example_labels = list()
+            if os.path.exists(ocr_example_files[0]):
+                available_ocr_examples.append(
+                    [
+                        [ocr_example_files[0]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Only extract text (no redaction)",
+                        ["Extract handwriting", "Extract signatures"],
+                        [ocr_example_files[0]],
+                        ocr_example_files[0],
+                        7,
+                        1,
+                        1,
+                        "vlm",
+                    ],
+                )
+                ocr_example_labels.append("Baseline 'easy' document page")
 
-        with gr.Accordion("Redact document", open=True):
+                available_ocr_examples.append(
+                    [
+                        [ocr_example_files[0]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Only extract text (no redaction)",
+                        ["Extract handwriting", "Extract signatures"],
+                        [ocr_example_files[0]],
+                        ocr_example_files[0],
+                        7,
+                        6,
+                        6,
+                        "vlm",
+                    ],
+                )
+                ocr_example_labels.append("Scanned document page with signatures")
+            if os.path.exists(ocr_example_files[1]):
+                available_ocr_examples.append(
+                    [
+                        [ocr_example_files[1]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Only extract text (no redaction)",
+                        ["Extract handwriting", "Extract signatures"],
+                        [ocr_example_files[1]],
+                        ocr_example_files[1],
+                        1,
+                        0,
+                        0,
+                        "vlm",
+                    ],
+                )
+                ocr_example_labels.append("Unclear text on handwritten note")
+
+            # Only create examples if we have available files
+            if available_ocr_examples:
+
+                def show_info_box_on_click(
+                    in_doc_files,
+                    text_extract_method_radio,
+                    pii_identification_method_drop,
+                    handwrite_signature_checkbox,
+                    prepared_pdf_state,
+                    doc_full_file_name_textbox,
+                    total_pdf_page_count,
+                    page_min,
+                    page_max,
+                    local_ocr_method_radio,
+                ):
+                    gr.Info(
+                        "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
+                    )
+
+                ocr_examples = gr.Examples(
+                    examples=available_ocr_examples,
+                    inputs=[
+                        in_doc_files,
+                        text_extract_method_radio,
+                        pii_identification_method_drop,
+                        handwrite_signature_checkbox,
+                        prepared_pdf_state,
+                        doc_full_file_name_textbox,
+                        total_pdf_page_count,
+                        page_min,
+                        page_max,
+                        local_ocr_method_radio,
+                    ],
+                    example_labels=ocr_example_labels,
+                    fn=show_info_box_on_click,
+                    run_on_click=True,
+                )
+
+        with gr.Accordion("Extract text and redact document", open=True):
             in_doc_files.render()
             open_tab_text = ""
             default_text = ""
@@ -1283,21 +1434,9 @@ with blocks:
                         label="Change default local OCR model",
                         open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                     ):
-                        local_ocr_method_radio = gr.Radio(
-                            label="""Choose a local OCR model. "tesseract" is the default and will work for documents with clear typed text. "paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. The hybrid models will do a first pass with one model, and a second pass on words/phrases with low confidence with a more powerful model. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.""",
-                            value=CHOSEN_LOCAL_OCR_MODEL,
-                            choices=LOCAL_OCR_MODEL_OPTIONS,
-                            interactive=True,
-                            visible=True,
-                        )
+                        local_ocr_method_radio.render()
                 else:
-                    local_ocr_method_radio = gr.Radio(
-                        label="Choose local OCR model",
-                        value=CHOSEN_LOCAL_OCR_MODEL,
-                        choices=LOCAL_OCR_MODEL_OPTIONS,
-                        interactive=False,
-                        visible=False,
-                    )
+                    local_ocr_method_radio.render()
 
                 if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
                     with gr.Accordion(
@@ -1390,7 +1529,7 @@ with blocks:
                                 visible=True,
                             )
 
-            if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS is True:
+            if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
                 with gr.Accordion(
                     "Submit whole document to AWS Textract API (quickest text extraction for large documents)",
                     open=False,
@@ -1487,10 +1626,93 @@ with blocks:
         )
         pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
+        # Feedback elements are invisible until revealed by redaction action
+        # all_outputs_in_output_folder_title = gr.Markdown(value="## All outputs in output folder", visible=False)
+        # all_outputs_in_output_folder_dataframe = gr.FileExplorer(
+        #     root_dir=OUTPUT_FOLDER,
+        #     label="All outputs in output folder",
+        #     file_count="multiple",
+        #     visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+        #     interactive=True,
+        # )
+
+        if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
+            with gr.Accordion(
+                "View all and download all output files from this session", open=False
+            ):
+                all_output_files_btn = gr.Button(
+                    "Refresh files in output folder", variant="secondary"
+                )
+                all_output_files = gr.FileExplorer(
+                    root_dir=OUTPUT_FOLDER,
+                    label="Choose output files for download",
+                    file_count="multiple",
+                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                    interactive=True,
+                    max_height=400,
+                )
+
+                all_outputs_file_download = gr.File(
+                    label="Download output files",
+                    file_count="multiple",
+                    file_types=[
+                        ".pdf",
+                        ".jpg",
+                        ".jpeg",
+                        ".png",
+                        ".csv",
+                        ".xlsx",
+                        ".xls",
+                        ".txt",
+                        ".doc",
+                        ".docx",
+                        ".json",
+                    ],
+                    interactive=False,
+                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                    height=200,
+                )
+        else:
+            all_output_files_btn = gr.Button(
+                "Update files in output folder",
+                variant="secondary",
+                visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+            )
+
+            all_output_files = gr.FileExplorer(
+                root_dir=OUTPUT_FOLDER,
+                label="Choose output files for download",
+                file_count="multiple",
+                visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                interactive=True,
+                max_height=400,
+            )
+
+            all_outputs_file_download = gr.File(
+                label="Download output files",
+                file_count="multiple",
+                file_types=[
+                    ".pdf",
+                    ".jpg",
+                    ".jpeg",
+                    ".png",
+                    ".csv",
+                    ".xlsx",
+                    ".xls",
+                    ".txt",
+                    ".doc",
+                    ".docx",
+                    ".json",
+                ],
+                interactive=False,
+                visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                height=200,
+            )
+
     ###
     # REVIEW REDACTIONS TAB
     ###
-    with gr.Tab("Review redactions", id="tab_object_annotation"):
+    with gr.Tab("Review redactions", elem_id="app_tab"):
 
         all_page_line_level_ocr_results_with_words_df_base = gr.Dataframe(
             type="pandas",
@@ -1630,7 +1852,7 @@ with blocks:
                     value="Save changes on current page to file", variant="primary"
                 )
 
-                with gr.Tab("Modify existing redactions"):
+                with gr.Tab("Modify existing redactions", elem_id="app_tab"):
                     with gr.Accordion("Search suggested redactions", open=True):
                         with gr.Row(equal_height=True):
                             recogniser_entity_dropdown = gr.Dropdown(
@@ -1695,7 +1917,7 @@ with blocks:
                             value="Undo last element removal", variant="primary"
                         )
 
-                with gr.Tab("Search text to make new redactions"):
+                with gr.Tab("Search text to make new redactions", elem_id="app_tab"):
                     with gr.Accordion("Search text", open=True):
                         with gr.Row(equal_height=True):
                             page_entity_dropdown_redaction = gr.Dropdown(
@@ -1868,7 +2090,7 @@ with blocks:
     ###
     # IDENTIFY DUPLICATE PAGES TAB
     ###
-    with gr.Tab(label="Identify duplicate pages"):
+    with gr.Tab(label="Identify duplicate pages", elem_id="app_tab"):
         gr.Markdown(
             "Search for duplicate pages/subdocuments in your ocr_output files. By default, this function will search for duplicate text across multiple pages, and then join consecutive matching pages together into matched 'subdocuments'. The results can be reviewed below, false positives removed, and then the verified results applied to a document you have loaded in on the 'Review redactions' tab."
         )
@@ -2023,7 +2245,7 @@ with blocks:
     ###
     # WORD / TABULAR DATA TAB
     ###
-    with gr.Tab(label="Word or Excel/csv files"):
+    with gr.Tab(label="Word or Excel/csv files", elem_id="app_tab"):
         gr.Markdown(
             """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
         )
@@ -2290,7 +2512,7 @@ with blocks:
     ###
     # SETTINGS TAB
     ###
-    with gr.Tab(label="Redaction settings"):
+    with gr.Tab(label="Redaction settings", elem_id="app_tab"):
         with gr.Accordion(
             "Custom allow, deny, and full page redaction lists", open=True
         ):
@@ -2362,20 +2584,8 @@ with blocks:
 
         with gr.Accordion("Redact only selected pages", open=False):
             with gr.Row():
-                page_min = gr.Number(
-                    value=DEFAULT_PAGE_MIN,
-                    precision=0,
-                    minimum=0,
-                    maximum=9999,
-                    label="Lowest page to redact (set to 0 to redact from the first page)",
-                )
-                page_max = gr.Number(
-                    value=DEFAULT_PAGE_MAX,
-                    precision=0,
-                    minimum=0,
-                    maximum=9999,
-                    label="Highest page to redact (set to 0 to redact to the last page)",
-                )
+                page_min.render()
+                page_max.render()
 
         if SHOW_LANGUAGE_SELECTION:
             with gr.Accordion("Language selection", open=False):
@@ -2441,17 +2651,6 @@ with blocks:
             )
             merge_multiple_review_files_btn = gr.Button(
                 "Merge multiple review files into one", variant="primary"
-            )
-
-        with gr.Accordion("View all output files from this session", open=False):
-            all_output_files_btn = gr.Button(
-                "Click here to view all output files", variant="secondary"
-            )
-            all_output_files = gr.File(
-                label="All files in output folder",
-                file_count="multiple",
-                file_types=[".csv"],
-                interactive=False,
             )
 
     ###
@@ -2673,7 +2872,7 @@ with blocks:
         )
 
     # Allow user to select items from cost code dataframe for cost code
-    if SHOW_COSTS is True and (GET_COST_CODES is True or ENFORCE_COST_CODES is True):
+    if SHOW_COSTS and (GET_COST_CODES or ENFORCE_COST_CODES):
         cost_code_dataframe.select(
             df_select_callback_cost,
             inputs=[cost_code_dataframe],
@@ -3101,6 +3300,7 @@ with blocks:
             textract_query_number,
             task_textbox,
         ],
+        show_progress_on=[job_current_status],
     ).success(check_for_provided_job_id, inputs=[job_id_textbox]).success(
         poll_whole_document_textract_analysis_progress_and_download,
         inputs=[
@@ -3120,14 +3320,18 @@ with blocks:
             textract_job_detail_df,
             doc_file_name_no_extension_textbox,
         ],
+        show_progress_on=[job_current_status],
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
         outputs=[textract_output_found_checkbox],
+        show_progress_on=[job_current_status],
     )
 
     check_state_of_textract_api_call_btn.click(
-        check_for_provided_job_id, inputs=[job_id_textbox]
+        check_for_provided_job_id,
+        inputs=[job_id_textbox],
+        show_progress_on=[job_current_status],
     ).success(
         poll_whole_document_textract_analysis_progress_and_download,
         inputs=[
@@ -3147,10 +3351,12 @@ with blocks:
             textract_job_detail_df,
             doc_file_name_no_extension_textbox,
         ],
+        show_progress_on=[job_current_status],
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
         outputs=[textract_output_found_checkbox],
+        show_progress_on=[job_current_status],
     )
 
     textract_job_detail_df.select(
@@ -3177,6 +3383,7 @@ with blocks:
             doc_file_name_textbox_list,
             total_pdf_page_count,
         ],
+        show_progress_on=[redaction_output_summary_textbox],
     ).success(
         fn=prepare_image_or_pdf,
         inputs=[
@@ -5851,9 +6058,19 @@ with blocks:
         outputs=multiple_review_files_in_out,
     )
 
-    #
+    # Need to momentarilly change the root directory of the file explorer to another non-sensitive folder when the button is clicked to get it to update (workaround))
     all_output_files_btn.click(
+        fn=lambda: gr.FileExplorer(root_dir=FEEDBACK_LOGS_FOLDER),
+        inputs=None,
+        outputs=all_output_files,
+    ).success(
         fn=load_all_output_files, inputs=output_folder_textbox, outputs=all_output_files
+    )
+
+    all_output_files.change(
+        fn=all_outputs_file_download_fn,
+        inputs=all_output_files,
+        outputs=all_outputs_file_download,
     )
 
     # Language selection dropdown
@@ -5899,7 +6116,12 @@ with blocks:
                 local_whole_document_textract_logs_subfolder,
             ],
             outputs=[textract_job_detail_df],
+        ).success(
+            fn=load_all_output_files,
+            inputs=output_folder_textbox,
+            outputs=all_output_files,
         )
+
     else:
         blocks.load(
             get_connection_params,
@@ -5922,10 +6144,14 @@ with blocks:
                 s3_whole_document_textract_logs_subfolder,
                 local_whole_document_textract_logs_subfolder,
             ],
+        ).success(
+            fn=load_all_output_files,
+            inputs=output_folder_textbox,
+            outputs=all_output_files,
         )
 
     # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location
-    if GET_DEFAULT_ALLOW_LIST is True and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
+    if GET_DEFAULT_ALLOW_LIST and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
         if (
             not os.path.exists(ALLOW_LIST_PATH)
             and S3_ALLOW_LIST_PATH
@@ -5959,7 +6185,7 @@ with blocks:
             print("Could not load in default allow list")
 
     # If relevant environment variable is set, load in the default cost code file from S3 or locally
-    if GET_COST_CODES is True and (COST_CODES_PATH or S3_COST_CODES_PATH):
+    if GET_COST_CODES and (COST_CODES_PATH or S3_COST_CODES_PATH):
         if (
             not os.path.exists(COST_CODES_PATH)
             and S3_COST_CODES_PATH
@@ -6037,7 +6263,7 @@ with blocks:
     pdf_callback = CSVLogger_custom(dataset_file_name=FEEDBACK_LOG_FILE_NAME)
     data_callback = CSVLogger_custom(dataset_file_name=FEEDBACK_LOG_FILE_NAME)
 
-    if DISPLAY_FILE_NAMES_IN_LOGS is True:
+    if DISPLAY_FILE_NAMES_IN_LOGS:
         # User submitted feedback for pdf redactions
         pdf_callback.setup(
             [
@@ -6166,7 +6392,7 @@ with blocks:
     # Log processing usage - time taken for redaction queries, and also logs for queries to Textract/Comprehend
     usage_callback = CSVLogger_custom(dataset_file_name=USAGE_LOG_FILE_NAME)
 
-    if DISPLAY_FILE_NAMES_IN_LOGS is True:
+    if DISPLAY_FILE_NAMES_IN_LOGS:
         usage_callback.setup(
             [
                 session_hash_textbox,

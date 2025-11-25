@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "1.5.3"
+version = "1.6.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 authors = [
@@ -78,19 +78,27 @@ test = ["pytest", "pytest-cov"]
 # To install the app with paddle and vlm support with pip, example command (in base folder and correct python environment): pip install .[paddle,vlm], or uv pip install .[ocr,vlm] if using uv. Note need to GPU version of Torch below
 
 # Extra dependencies for PaddleOCR
-# If you want the GPU-accelerated version, run manually pip install paddlepaddle-gpu<=3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+# The following installs the CPU version of paddleOCR. If you want the GPU-accelerated version, run manually pip install paddlepaddle-gpu<=3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
 paddle = [
     "paddlepaddle>=3.0.0,<=3.2.1", 
     "paddleocr==3.3.0",
+    "pycocotools==2.0.10",
 ]
 
 # Extra dependencies for VLM models
-# For torch you should use --index-url https://download.pytorch.org/whl/cu126 for cuda support for paddleocr, need to install manually
+# The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install --index-url https://download.pytorch.org/whl/cu129 after installation
 vlm = [
     "torch>=2.5.1,<=2.8.0", 
     "torchvision>=0.20.1",
-    "transformers==4.57.1",
+    "transformers==4.57.2",
     "accelerate==1.11.0",
+    "bitsandbytes==0.48.2",
+    "sentencepiece==0.2.1", # Needed for PaddleOCRVL
+]
+
+# Run Gradio as an mcp server
+mcp = [
+    "gradio[mcp]==5.49.1"
 ]
 
 [project.urls]

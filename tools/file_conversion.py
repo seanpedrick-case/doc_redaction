@@ -1166,8 +1166,10 @@ def prepare_image_or_pdf(
                 # Copy it to the output folder so it can be used later.
                 # Check if file already has a textract suffix pattern (e.g., _sig_textract.json, _form_textract.json, etc.)
                 # Pattern matches: _textract.json or _*_textract.json
+                # Fixed ReDoS vulnerability: use pattern that requires at least one letter to avoid catastrophic backtracking
+                # Pattern ensures at least one letter (not just underscores) appears before _textract
                 textract_pattern = re.compile(
-                    r"_[a-z_]+_textract\.json$|_textract\.json$"
+                    r"_textract\.json$|_[a-z]+(?:_[a-z]+)*_textract\.json$"
                 )
                 if textract_pattern.search(file_path):
                     # File already has a textract suffix, preserve it

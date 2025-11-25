@@ -5,13 +5,18 @@ import socket
 import tempfile
 import urllib.parse
 from datetime import datetime
+from pathlib import Path
 from typing import List
 
 import bleach
 from dotenv import load_dotenv
 from tldextract import TLDExtract
 
-from tools.secure_path_utils import secure_file_read, validate_path_safety
+from tools.secure_path_utils import (
+    secure_file_read,
+    secure_path_join,
+    validate_path_safety,
+)
 
 today_rev = datetime.now().strftime("%Y%m%d")
 HOST_NAME = socket.gethostname()
@@ -39,6 +44,107 @@ def convert_string_to_boolean(value: str) -> bool:
         return False
     else:
         raise ValueError(f"Invalid boolean value: {value}")
+
+
+def ensure_folder_within_app_directory(
+    folder_path: str, app_base_dir: str = None
+) -> str:
+    """
+    Ensure that a folder path is within the app directory for security.
+
+    This function validates that user-defined folder paths are contained within
+    the app directory to prevent path traversal attacks and ensure data isolation.
+
+    Args:
+        folder_path: The folder path to validate and normalize
+        app_base_dir: The base directory of the app (defaults to current working directory)
+
+    Returns:
+        A normalized folder path that is guaranteed to be within the app directory
+
+    Raises:
+        ValueError: If the path cannot be safely contained within the app directory
+    """
+    if not folder_path or not folder_path.strip():
+        return folder_path
+
+    # Get the app base directory (where the app is run from)
+    if app_base_dir is None:
+        app_base_dir = os.getcwd()
+
+    app_base_dir = Path(app_base_dir).resolve()
+    folder_path = folder_path.strip()
+
+    # Preserve trailing separator preference
+    has_trailing_sep = folder_path.endswith(("/", "\\"))
+
+    # Handle special case for "TEMP" - this is handled separately in the code
+    if folder_path == "TEMP":
+        return folder_path
+
+    # Handle absolute paths
+    if os.path.isabs(folder_path):
+        folder_path_resolved = Path(folder_path).resolve()
+        # Check if the absolute path is within the app directory
+        try:
+            folder_path_resolved.relative_to(app_base_dir)
+            # Path is already within app directory, return it normalized
+            result = str(folder_path_resolved)
+            if has_trailing_sep and not result.endswith(os.sep):
+                result = result + os.sep
+            return result
+        except ValueError:
+            # Path is outside app directory - this is a security issue
+            # For system paths like /usr/share/tessdata, we'll allow them but log a warning
+            # For other absolute paths outside app directory, we'll raise an error
+            normalized_path = os.path.normpath(folder_path).lower()
+            system_path_prefixes = [
+                "/usr",
+                "/opt",
+                "/var",
+                "/etc",
+                "/tmp",
+            ]
+            if any(
+                normalized_path.startswith(prefix) for prefix in system_path_prefixes
+            ):
+                # System paths are allowed but we log a warning
+                print(
+                    f"Warning: Using system path outside app directory: {folder_path}"
+                )
+                return folder_path
+            else:
+                raise ValueError(
+                    f"Folder path '{folder_path}' is outside the app directory '{app_base_dir}'. "
+                    f"For security, all user-defined folder paths must be within the app directory."
+                )
+
+    # Handle relative paths - ensure they're within app directory
+    try:
+        # Use secure_path_join to safely join and validate
+        # This will prevent path traversal attacks (e.g., "../../etc/passwd")
+        safe_path = secure_path_join(app_base_dir, folder_path)
+        result = str(safe_path)
+        if has_trailing_sep and not result.endswith(os.sep):
+            result = result + os.sep
+        return result
+    except (PermissionError, ValueError) as e:
+        # If path contains dangerous patterns, sanitize and try again
+        # Extract just the folder name from the path to prevent traversal
+        folder_name = os.path.basename(folder_path.rstrip("/\\"))
+        if folder_name:
+            safe_path = secure_path_join(app_base_dir, folder_name)
+            result = str(safe_path)
+            if has_trailing_sep and not result.endswith(os.sep):
+                result = result + os.sep
+            print(
+                f"Warning: Sanitized folder path '{folder_path}' to '{result}' for security"
+            )
+            return result
+        else:
+            raise ValueError(
+                f"Cannot safely normalize folder path: {folder_path}"
+            ) from e
 
 
 def get_or_create_env_var(var_name: str, default_value: str, print_val: bool = False):
@@ -193,6 +299,7 @@ def sanitize_markdown_text(text: str) -> str:
 ###
 
 CONFIG_FOLDER = get_or_create_env_var("CONFIG_FOLDER", "config/")
+CONFIG_FOLDER = ensure_folder_within_app_directory(CONFIG_FOLDER)
 
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
 APP_CONFIG_PATH = get_or_create_env_var(
@@ -269,8 +376,8 @@ MAX_IMAGE_PIXELS = get_or_create_env_var(
 # File I/O options
 ###
 
-SESSION_OUTPUT_FOLDER = get_or_create_env_var(
-    "SESSION_OUTPUT_FOLDER", "False"
+SESSION_OUTPUT_FOLDER = convert_string_to_boolean(
+    get_or_create_env_var("SESSION_OUTPUT_FOLDER", "False")
 )  # i.e. do you want your input and output folders saved within a subfolder based on session hash value within output/input folders
 
 OUTPUT_FOLDER = get_or_create_env_var("GRADIO_OUTPUT_FOLDER", "output/")  # 'output/'
@@ -286,11 +393,19 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
             OUTPUT_FOLDER = temp_dir + "/"
         if INPUT_FOLDER == "TEMP":
             INPUT_FOLDER = temp_dir + "/"
+else:
+    # Ensure folders are within app directory (skip validation for TEMP as it's handled above)
+    OUTPUT_FOLDER = ensure_folder_within_app_directory(OUTPUT_FOLDER)
+    INPUT_FOLDER = ensure_folder_within_app_directory(INPUT_FOLDER)
 
 GRADIO_TEMP_DIR = get_or_create_env_var(
     "GRADIO_TEMP_DIR", ""
 )  # Default Gradio temp folder
+if GRADIO_TEMP_DIR:
+    GRADIO_TEMP_DIR = ensure_folder_within_app_directory(GRADIO_TEMP_DIR)
 MPLCONFIGDIR = get_or_create_env_var("MPLCONFIGDIR", "")  # Matplotlib cache folder
+if MPLCONFIGDIR:
+    MPLCONFIGDIR = ensure_folder_within_app_directory(MPLCONFIGDIR)
 
 ###
 # LOGGING OPTIONS
@@ -311,6 +426,11 @@ FEEDBACK_LOGS_FOLDER = get_or_create_env_var("FEEDBACK_LOGS_FOLDER", "feedback/"
 ACCESS_LOGS_FOLDER = get_or_create_env_var("ACCESS_LOGS_FOLDER", "logs/")
 USAGE_LOGS_FOLDER = get_or_create_env_var("USAGE_LOGS_FOLDER", "usage/")
 
+# Ensure log folders are within app directory before adding subfolders
+FEEDBACK_LOGS_FOLDER = ensure_folder_within_app_directory(FEEDBACK_LOGS_FOLDER)
+ACCESS_LOGS_FOLDER = ensure_folder_within_app_directory(ACCESS_LOGS_FOLDER)
+USAGE_LOGS_FOLDER = ensure_folder_within_app_directory(USAGE_LOGS_FOLDER)
+
 if USE_LOG_SUBFOLDERS:
     day_log_subfolder = today_rev + "/"
     host_name_subfolder = HOST_NAME + "/"
@@ -319,6 +439,11 @@ if USE_LOG_SUBFOLDERS:
     FEEDBACK_LOGS_FOLDER = FEEDBACK_LOGS_FOLDER + full_log_subfolder
     ACCESS_LOGS_FOLDER = ACCESS_LOGS_FOLDER + full_log_subfolder
     USAGE_LOGS_FOLDER = USAGE_LOGS_FOLDER + full_log_subfolder
+
+    # Re-validate after adding subfolders to ensure still within app directory
+    FEEDBACK_LOGS_FOLDER = ensure_folder_within_app_directory(FEEDBACK_LOGS_FOLDER)
+    ACCESS_LOGS_FOLDER = ensure_folder_within_app_directory(ACCESS_LOGS_FOLDER)
+    USAGE_LOGS_FOLDER = ensure_folder_within_app_directory(USAGE_LOGS_FOLDER)
 
 S3_FEEDBACK_LOGS_FOLDER = get_or_create_env_var(
     "S3_FEEDBACK_LOGS_FOLDER", "feedback/" + full_log_subfolder
@@ -438,16 +563,22 @@ LOAD_REDACTION_ANNOTATIONS_FROM_PDF = convert_string_to_boolean(
 TESSERACT_FOLDER = get_or_create_env_var(
     "TESSERACT_FOLDER", ""
 )  #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
+if TESSERACT_FOLDER:
+    TESSERACT_FOLDER = ensure_folder_within_app_directory(TESSERACT_FOLDER)
+    add_folder_to_path(TESSERACT_FOLDER)
+
 TESSERACT_DATA_FOLDER = get_or_create_env_var(
     "TESSERACT_DATA_FOLDER", "/usr/share/tessdata"
 )
+# Only validate if it's a relative path (system paths like /usr/share/tessdata are allowed)
+if TESSERACT_DATA_FOLDER and not os.path.isabs(TESSERACT_DATA_FOLDER):
+    TESSERACT_DATA_FOLDER = ensure_folder_within_app_directory(TESSERACT_DATA_FOLDER)
+
 POPPLER_FOLDER = get_or_create_env_var(
     "POPPLER_FOLDER", ""
 )  # If installing on Windows,install Poppler from here https://github.com/oschwartz10612/poppler-windows. This variable needs to point to the poppler bin folder e.g. poppler/poppler-24.02.0/Library/bin/
-
-if TESSERACT_FOLDER:
-    add_folder_to_path(TESSERACT_FOLDER)
 if POPPLER_FOLDER:
+    POPPLER_FOLDER = ensure_folder_within_app_directory(POPPLER_FOLDER)
     add_folder_to_path(POPPLER_FOLDER)
 
 # Extraction and PII options open by default:
@@ -565,8 +696,8 @@ SHOW_VLM_MODEL_OPTIONS = convert_string_to_boolean(
 )  # Whether to show the VLM model options in the UI
 
 SELECTED_MODEL = get_or_create_env_var(
-    "SELECTED_MODEL", "Dots.OCR"
-)  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "PaddleOCR-VL"
+    "SELECTED_MODEL", "Qwen3-VL-4B-Instruct"
+)  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "PaddleOCR-VL"
 
 if SHOW_VLM_MODEL_OPTIONS:
     VLM_MODEL_OPTIONS = [
@@ -578,20 +709,24 @@ MAX_SPACES_GPU_RUN_TIME = int(
 )  # Maximum number of seconds to run the GPU on Spaces
 
 MAX_NEW_TOKENS = int(
-    get_or_create_env_var("MAX_NEW_TOKENS", "30")
+    get_or_create_env_var("MAX_NEW_TOKENS", "4096")
 )  # Maximum number of tokens to generate
 
 DEFAULT_MAX_NEW_TOKENS = int(
-    get_or_create_env_var("DEFAULT_MAX_NEW_TOKENS", "30")
+    get_or_create_env_var("DEFAULT_MAX_NEW_TOKENS", "4096")
 )  # Default maximum number of tokens to generate
 
+HYBRID_OCR_MAX_NEW_TOKENS = int(
+    get_or_create_env_var("HYBRID_OCR_MAX_NEW_TOKENS", "30")
+)  # Maximum number of tokens to generate for hybrid OCR
+
 MAX_INPUT_TOKEN_LENGTH = int(
-    get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "4096")
+    get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "8192")
 )  # Maximum number of tokens to input to the VLM
 
 VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "1000000")
-)  # Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. Default is 1000000 (1000x1000).
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "800000")
+)  # Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. Default is 800000 (approx 895x895).
 
 VLM_MAX_DPI = float(
     get_or_create_env_var("VLM_MAX_DPI", "300.0")
@@ -601,14 +736,89 @@ USE_FLASH_ATTENTION = convert_string_to_boolean(
     get_or_create_env_var("USE_FLASH_ATTENTION", "False")
 )  # Whether to use flash attention for the VLM
 
+QUANTISE_VLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("QUANTISE_VLM_MODELS", "False")
+)  # Whether to use 4-bit quantisation (bitsandbytes) for VLM models. Only applies when SHOW_VLM_MODEL_OPTIONS is True.
+
+REPORT_VLM_OUTPUTS_TO_GUI = convert_string_to_boolean(
+    get_or_create_env_var("REPORT_VLM_OUTPUTS_TO_GUI", "False")
+)  # Whether to report VLM outputs to the GUI with info boxes as they are processed..
+
 OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
     get_or_create_env_var("OVERWRITE_EXISTING_OCR_RESULTS", "False")
 )  # If True, always create new OCR results instead of loading from existing JSON files
 
+# VLM generation parameter defaults
+# If empty, these will be None and model defaults will be used instead
+VLM_SEED = get_or_create_env_var(
+    "VLM_SEED", ""
+)  # Random seed for VLM generation. If empty, no seed is set (non-deterministic). If set to an integer, generation will be deterministic.
+if VLM_SEED and VLM_SEED.strip():
+    VLM_SEED = int(VLM_SEED)
+else:
+    VLM_SEED = None
+
+VLM_DEFAULT_TEMPERATURE = get_or_create_env_var(
+    "VLM_DEFAULT_TEMPERATURE", ""
+)  # Default temperature for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_TEMPERATURE and VLM_DEFAULT_TEMPERATURE.strip():
+    VLM_DEFAULT_TEMPERATURE = float(VLM_DEFAULT_TEMPERATURE)
+else:
+    VLM_DEFAULT_TEMPERATURE = None
+
+VLM_DEFAULT_TOP_P = get_or_create_env_var(
+    "VLM_DEFAULT_TOP_P", ""
+)  # Default top_p (nucleus sampling) for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_TOP_P and VLM_DEFAULT_TOP_P.strip():
+    VLM_DEFAULT_TOP_P = float(VLM_DEFAULT_TOP_P)
+else:
+    VLM_DEFAULT_TOP_P = None
+
+VLM_DEFAULT_MIN_P = get_or_create_env_var(
+    "VLM_DEFAULT_MIN_P", ""
+)  # Default min_p (minimum probability threshold) for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_MIN_P and VLM_DEFAULT_MIN_P.strip():
+    VLM_DEFAULT_MIN_P = float(VLM_DEFAULT_MIN_P)
+else:
+    VLM_DEFAULT_MIN_P = None
+
+VLM_DEFAULT_TOP_K = get_or_create_env_var(
+    "VLM_DEFAULT_TOP_K", ""
+)  # Default top_k for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_TOP_K and VLM_DEFAULT_TOP_K.strip():
+    VLM_DEFAULT_TOP_K = int(VLM_DEFAULT_TOP_K)
+else:
+    VLM_DEFAULT_TOP_K = None
+
+VLM_DEFAULT_REPETITION_PENALTY = get_or_create_env_var(
+    "VLM_DEFAULT_REPETITION_PENALTY", ""
+)  # Default repetition penalty for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_REPETITION_PENALTY and VLM_DEFAULT_REPETITION_PENALTY.strip():
+    VLM_DEFAULT_REPETITION_PENALTY = float(VLM_DEFAULT_REPETITION_PENALTY)
+else:
+    VLM_DEFAULT_REPETITION_PENALTY = None
+
+VLM_DEFAULT_DO_SAMPLE = get_or_create_env_var(
+    "VLM_DEFAULT_DO_SAMPLE", ""
+)  # Default do_sample setting for VLM generation. If empty, model-specific defaults will be used. True means use sampling, False means use greedy decoding (do_sample=False).
+if VLM_DEFAULT_DO_SAMPLE and VLM_DEFAULT_DO_SAMPLE.strip():
+    VLM_DEFAULT_DO_SAMPLE = convert_string_to_boolean(VLM_DEFAULT_DO_SAMPLE)
+else:
+    VLM_DEFAULT_DO_SAMPLE = None
+
+VLM_DEFAULT_PRESENCE_PENALTY = get_or_create_env_var(
+    "VLM_DEFAULT_PRESENCE_PENALTY", ""
+)  # Default presence penalty for VLM generation. If empty, model-specific defaults will be used.
+if VLM_DEFAULT_PRESENCE_PENALTY and VLM_DEFAULT_PRESENCE_PENALTY.strip():
+    VLM_DEFAULT_PRESENCE_PENALTY = float(VLM_DEFAULT_PRESENCE_PENALTY)
+else:
+    VLM_DEFAULT_PRESENCE_PENALTY = None
+
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
-)  # "tesseract" is the default and will work for documents with clear typed text. "paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. The hybrid models will do a first pass with one model, and a second pass on words/phrases with low confidence with a more powerful model. "hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. "hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). "hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.
+)  # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "hybrid-paddle-inference-server", "vlm", "inference-server"
+
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "False")
@@ -618,28 +828,111 @@ SHOW_PADDLE_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_PADDLE_MODEL_OPTIONS", "False")
 )
 
+SHOW_INFERENCE_SERVER_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_OPTIONS", "False")
+)
+
+SHOW_HYBRID_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_HYBRID_MODELS", "False")
+)
+
 LOCAL_OCR_MODEL_OPTIONS = ["tesseract"]
 
-paddle_options = ["paddle", "hybrid-paddle"]
+CHOSEN_LOCAL_MODEL_INTRO_TEXT = get_or_create_env_var(
+    "CHOSEN_LOCAL_MODEL_INTRO_TEXT",
+    """Choose a local OCR model. "tesseract" is the default and will work for documents with clear typed text. """,
+)
+
+PADDLE_OCR_INTRO_TEXT = get_or_create_env_var(
+    "PADDLE_OCR_INTRO_TEXT",
+    """"paddle" is more accurate for text extraction where the text is not clear or well-formatted, but word-level extract is not natively supported, and so word bounding boxes will be inaccurate. """,
+)
+
+PADDLE_OCR_HYBRID_INTRO_TEXT = get_or_create_env_var(
+    "PADDLE_OCR_HYBRID_INTRO_TEXT",
+    """"hybrid-paddle" will do the first pass with Tesseract, and the second with PaddleOCR. """,
+)
+
+VLM_OCR_INTRO_TEXT = get_or_create_env_var(
+    "VLM_OCR_INTRO_TEXT",
+    """"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes. """,
+)
+
+VLM_OCR_HYBRID_INTRO_TEXT = get_or_create_env_var(
+    "VLM_OCR_HYBRID_INTRO_TEXT",
+    """"hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM). """,
+)
+
+INFERENCE_SERVER_OCR_INTRO_TEXT = get_or_create_env_var(
+    "INFERENCE_SERVER_OCR_INTRO_TEXT",
+    """"inference-server" will call an external inference-server API to perform OCR using a vision model hosted remotely. """,
+)
+
+HYBRID_PADDLE_VLM_INTRO_TEXT = get_or_create_env_var(
+    "HYBRID_PADDLE_VLM_INTRO_TEXT",
+    """"hybrid-paddle-vlm" is a combination of PaddleOCR with the chosen VLM.""",
+)
+
+HYBRID_PADDLE_INFERENCE_SERVER_INTRO_TEXT = get_or_create_env_var(
+    "HYBRID_PADDLE_INFERENCE_SERVER_INTRO_TEXT",
+    """"hybrid-paddle-inference-server" is a combination of PaddleOCR with an external inference-server API.""",
+)
+
+paddle_options = ["paddle"]
+# if SHOW_HYBRID_MODELS:
+#     paddle_options.append("hybrid-paddle")
 if SHOW_PADDLE_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(paddle_options)
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += PADDLE_OCR_INTRO_TEXT
+    # if SHOW_HYBRID_MODELS:
+    #     CHOSEN_LOCAL_MODEL_INTRO_TEXT += PADDLE_OCR_HYBRID_INTRO_TEXT
 
-vlm_options = ["hybrid-vlm"]
+vlm_options = ["vlm"]
+# if SHOW_HYBRID_MODELS:
+#     vlm_options.append("hybrid-vlm")
 if SHOW_VLM_MODEL_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(vlm_options)
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += VLM_OCR_INTRO_TEXT
+    # if SHOW_HYBRID_MODELS:
+    #     CHOSEN_LOCAL_MODEL_INTRO_TEXT += VLM_OCR_HYBRID_INTRO_TEXT
 
-if SHOW_PADDLE_MODEL_OPTIONS and SHOW_VLM_MODEL_OPTIONS:
+if SHOW_PADDLE_MODEL_OPTIONS and SHOW_VLM_MODEL_OPTIONS and SHOW_HYBRID_MODELS:
     LOCAL_OCR_MODEL_OPTIONS.append("hybrid-paddle-vlm")
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += HYBRID_PADDLE_VLM_INTRO_TEXT
+
+if SHOW_PADDLE_MODEL_OPTIONS and SHOW_INFERENCE_SERVER_OPTIONS and SHOW_HYBRID_MODELS:
+    LOCAL_OCR_MODEL_OPTIONS.append("hybrid-paddle-inference-server")
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += HYBRID_PADDLE_INFERENCE_SERVER_INTRO_TEXT
+
+inference_server_options = ["inference-server"]
+if SHOW_INFERENCE_SERVER_OPTIONS:
+    LOCAL_OCR_MODEL_OPTIONS.extend(inference_server_options)
+    CHOSEN_LOCAL_MODEL_INTRO_TEXT += INFERENCE_SERVER_OCR_INTRO_TEXT
+
+# Inference-server API configuration
+INFERENCE_SERVER_API_URL = get_or_create_env_var(
+    "INFERENCE_SERVER_API_URL", "http://localhost:8080"
+)  # Base URL of the inference-server API
+
+INFERENCE_SERVER_MODEL_NAME = get_or_create_env_var(
+    "INFERENCE_SERVER_MODEL_NAME", ""
+)  # Optional model name to use. If empty, uses the default model on the server
+
+INFERENCE_SERVER_TIMEOUT = int(
+    get_or_create_env_var("INFERENCE_SERVER_TIMEOUT", "300")
+)  # Timeout in seconds for API requests
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
+MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)
 
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
-    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "80")
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "95")
 )  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
+
 HYBRID_OCR_PADDING = int(
     get_or_create_env_var("HYBRID_OCR_PADDING", "1")
-)  # The padding to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
+)  # The padding (in pixels) to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
 
 TESSERACT_WORD_LEVEL_OCR = convert_string_to_boolean(
     get_or_create_env_var("TESSERACT_WORD_LEVEL_OCR", "True")
@@ -673,6 +966,10 @@ SAVE_PAGE_OCR_VISUALISATIONS = convert_string_to_boolean(
     get_or_create_env_var("SAVE_PAGE_OCR_VISUALISATIONS", "False")
 )  # Whether to save visualisations of Tesseract, PaddleOCR, and Textract bounding boxes.
 
+INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES = convert_string_to_boolean(
+    get_or_create_env_var("INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES", "False")
+)  # Whether to include OCR visualisation outputs in the final output file list returned by choose_and_run_redactor.
+
 SAVE_WORD_SEGMENTER_OUTPUT_IMAGES = convert_string_to_boolean(
     get_or_create_env_var("SAVE_WORD_SEGMENTER_OUTPUT_IMAGES", "False")
 )  # Whether to save output images from the word segmenter.
@@ -681,10 +978,20 @@ SAVE_WORD_SEGMENTER_OUTPUT_IMAGES = convert_string_to_boolean(
 PADDLE_MODEL_PATH = get_or_create_env_var(
     "PADDLE_MODEL_PATH", ""
 )  # Directory for PaddleOCR model storage. Uses default location if not set.
+if PADDLE_MODEL_PATH:
+    PADDLE_MODEL_PATH = ensure_folder_within_app_directory(PADDLE_MODEL_PATH)
+
+PADDLE_FONT_PATH = get_or_create_env_var(
+    "PADDLE_FONT_PATH", ""
+)  # Custom font path for PaddleOCR. If empty, will attempt to use system fonts to avoid downloading simfang.ttf/PingFang-SC-Regular.ttf.
+if PADDLE_FONT_PATH:
+    PADDLE_FONT_PATH = ensure_folder_within_app_directory(PADDLE_FONT_PATH)
 
 SPACY_MODEL_PATH = get_or_create_env_var(
     "SPACY_MODEL_PATH", ""
 )  # Directory for spaCy model storage. Uses default location if not set.
+if SPACY_MODEL_PATH:
+    SPACY_MODEL_PATH = ensure_folder_within_app_directory(SPACY_MODEL_PATH)
 
 PREPROCESS_LOCAL_OCR_IMAGES = get_or_create_env_var(
     "PREPROCESS_LOCAL_OCR_IMAGES", "True"
@@ -856,7 +1163,7 @@ APPLY_REDACTIONS_IMAGES = int(
 )  # The default (2) blanks out overlapping pixels. PDF_REDACT_IMAGE_NONE | 0 ignores, and PDF_REDACT_IMAGE_REMOVE | 1 completely removes images overlapping any redaction annotation. Option PDF_REDACT_IMAGE_REMOVE_UNLESS_INVISIBLE | 3 only removes images that are actually visible.
 APPLY_REDACTIONS_GRAPHICS = int(
     get_or_create_env_var("APPLY_REDACTIONS_GRAPHICS", "0")
-)  # How to redact overlapping vector graphics (also called “line-art” or “drawings”). The default (2) removes any overlapping vector graphics. PDF_REDACT_LINE_ART_NONE | 0 ignores, and PDF_REDACT_LINE_ART_REMOVE_IF_COVERED | 1 removes graphics fully contained in a redaction annotation.
+)  # How to redact overlapping vector graphics (also called "line-art" or "drawings"). (2) removes any overlapping vector graphics. PDF_REDACT_LINE_ART_NONE | 0 ignores, and PDF_REDACT_LINE_ART_REMOVE_IF_COVERED | 1 removes graphics fully contained in a redaction annotation.
 APPLY_REDACTIONS_TEXT = int(
     get_or_create_env_var("APPLY_REDACTIONS_TEXT", "0")
 )  # The default PDF_REDACT_TEXT_REMOVE | 0 removes all characters whose boundary box overlaps any redaction rectangle. This complies with the original legal / data protection intentions of redaction annotations. Other use cases however may require to keep text while redacting vector graphics or images. This can be achieved by setting text=True|PDF_REDACT_TEXT_NONE | 1. This does not comply with the data protection intentions of redaction annotations. Do so at your own risk.
@@ -903,6 +1210,8 @@ if INTRO_TEXT.endswith(".txt"):
         try:
             # Use secure file read with explicit encoding
             INTRO_TEXT = secure_file_read(".", INTRO_TEXT, encoding="utf-8")
+            # Format the text to replace {USER_GUIDE_URL} with the actual value
+            INTRO_TEXT = INTRO_TEXT.format(USER_GUIDE_URL=USER_GUIDE_URL)
         except FileNotFoundError:
             print(f"Warning: Intro text file not found: {INTRO_TEXT}")
             INTRO_TEXT = DEFAULT_INTRO_TEXT
@@ -923,6 +1232,7 @@ if not INTRO_TEXT or not INTRO_TEXT.strip():
     INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
 
 TLDEXTRACT_CACHE = get_or_create_env_var("TLDEXTRACT_CACHE", "tmp/tld/")
+TLDEXTRACT_CACHE = ensure_folder_within_app_directory(TLDEXTRACT_CACHE)
 try:
     extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
 except Exception as e:
@@ -936,12 +1246,19 @@ SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_FEEDBACK_BUTTONS", "False")
 )
 
+SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER", "False")
+)
+
 
 SHOW_EXAMPLES = convert_string_to_boolean(
     get_or_create_env_var("SHOW_EXAMPLES", "True")
 )
 SHOW_AWS_EXAMPLES = convert_string_to_boolean(
     get_or_create_env_var("SHOW_AWS_EXAMPLES", "False")
+)
+SHOW_DIFFICULT_OCR_EXAMPLES = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_DIFFICULT_OCR_EXAMPLES", "False")
 )
 
 FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))
@@ -963,6 +1280,7 @@ DIRECT_MODE_INPUT_FILE = get_or_create_env_var(
 DIRECT_MODE_OUTPUT_DIR = get_or_create_env_var(
     "DIRECT_MODE_OUTPUT_DIR", OUTPUT_FOLDER
 )  # Output directory
+DIRECT_MODE_OUTPUT_DIR = ensure_folder_within_app_directory(DIRECT_MODE_OUTPUT_DIR)
 DIRECT_MODE_DUPLICATE_TYPE = get_or_create_env_var(
     "DIRECT_MODE_DUPLICATE_TYPE", "pages"
 )  # 'pages' or 'tabular'
@@ -1255,3 +1573,15 @@ if ALLOWED_ORIGINS:
 
 if ALLOWED_HOSTS:
     ALLOWED_HOSTS = _get_env_list(ALLOWED_HOSTS)
+
+if textract_language_choices:
+    textract_language_choices = _get_env_list(textract_language_choices)
+if aws_comprehend_language_choices:
+    aws_comprehend_language_choices = _get_env_list(aws_comprehend_language_choices)
+
+if MAPPED_LANGUAGE_CHOICES:
+    MAPPED_LANGUAGE_CHOICES = _get_env_list(MAPPED_LANGUAGE_CHOICES)
+if LANGUAGE_CHOICES:
+    LANGUAGE_CHOICES = _get_env_list(LANGUAGE_CHOICES)
+
+LANGUAGE_MAP = dict(zip(MAPPED_LANGUAGE_CHOICES, LANGUAGE_CHOICES))

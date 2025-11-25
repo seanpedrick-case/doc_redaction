@@ -1,4 +1,5 @@
 import os
+import platform
 import random
 import string
 import unicodedata
@@ -10,7 +11,12 @@ import boto3
 import gradio as gr
 import numpy as np
 import pandas as pd
-from botocore.exceptions import ClientError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    NoCredentialsError,
+    PartialCredentialsError,
+)
 from gradio_image_annotation import image_annotator
 
 from tools.config import (
@@ -21,7 +27,7 @@ from tools.config import (
     DEFAULT_LANGUAGE,
     INPUT_FOLDER,
     LANGUAGE_CHOICES,
-    MAPPED_LANGUAGE_CHOICES,
+    LANGUAGE_MAP,
     NO_REDACTION_PII_OPTION,
     OUTPUT_FOLDER,
     SELECTABLE_TEXT_EXTRACT_OPTION,
@@ -34,31 +40,10 @@ from tools.config import (
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
     aws_comprehend_language_choices,
+    convert_string_to_boolean,
     textract_language_choices,
 )
 from tools.secure_path_utils import secure_join
-
-
-def _get_env_list(env_var_name: str) -> List[str]:
-    """Parses a comma-separated environment variable into a list of strings."""
-    value = env_var_name[1:-1].strip().replace('"', "").replace("'", "")
-    if not value:
-        return []
-    # Split by comma and filter out any empty strings that might result from extra commas
-    return [s.strip() for s in value.split(",") if s.strip()]
-
-
-if textract_language_choices:
-    textract_language_choices = _get_env_list(textract_language_choices)
-if aws_comprehend_language_choices:
-    aws_comprehend_language_choices = _get_env_list(aws_comprehend_language_choices)
-
-if MAPPED_LANGUAGE_CHOICES:
-    MAPPED_LANGUAGE_CHOICES = _get_env_list(MAPPED_LANGUAGE_CHOICES)
-if LANGUAGE_CHOICES:
-    LANGUAGE_CHOICES = _get_env_list(LANGUAGE_CHOICES)
-
-LANGUAGE_MAP = dict(zip(MAPPED_LANGUAGE_CHOICES, LANGUAGE_CHOICES))
 
 
 def reset_state_vars():
@@ -522,12 +507,15 @@ async def get_connection_params(
     request: gr.Request,
     output_folder_textbox: str = OUTPUT_FOLDER,
     input_folder_textbox: str = INPUT_FOLDER,
-    session_output_folder: str = SESSION_OUTPUT_FOLDER,
+    session_output_folder: bool = SESSION_OUTPUT_FOLDER,
     textract_document_upload_input_folder: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     textract_document_upload_output_folder: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
     s3_textract_document_logs_subfolder: str = TEXTRACT_JOBS_S3_LOC,
     local_textract_document_logs_subfolder: str = TEXTRACT_JOBS_LOCAL_LOC,
 ):
+    # Convert session_output_folder to boolean if it's a string (from Gradio Textbox)
+    if isinstance(session_output_folder, str):
+        session_output_folder = convert_string_to_boolean(session_output_folder)
 
     # print("Session hash:", request.session_hash)
 
@@ -556,31 +544,43 @@ async def get_connection_params(
     elif "x-amzn-oidc-identity" in request.headers:
         out_session_hash = request.headers["x-amzn-oidc-identity"]
 
-        # Fetch email address using Cognito client
-        cognito_client = boto3.client("cognito-idp")
-        try:
-            response = cognito_client.admin_get_user(
-                UserPoolId=AWS_USER_POOL_ID,  # Replace with your User Pool ID
-                Username=out_session_hash,
-            )
-            email = next(
-                attr["Value"]
-                for attr in response["UserAttributes"]
-                if attr["Name"] == "email"
-            )
-            # print("Email address found:", email)
+        if AWS_USER_POOL_ID:
+            try:
+                # Fetch email address using Cognito client
+                cognito_client = boto3.client("cognito-idp")
 
-            out_session_hash = email
-        except ClientError as e:
-            print("Error fetching user details:", e)
-            email = None
+                response = cognito_client.admin_get_user(
+                    UserPoolId=AWS_USER_POOL_ID,  # Replace with your User Pool ID
+                    Username=out_session_hash,
+                )
+                email = next(
+                    attr["Value"]
+                    for attr in response["UserAttributes"]
+                    if attr["Name"] == "email"
+                )
+                print("Cognito email address found, will be used as session hash")
 
-        print("Cognito ID found:", out_session_hash)
+                out_session_hash = email
+            except (
+                ClientError,
+                NoCredentialsError,
+                PartialCredentialsError,
+                BotoCoreError,
+            ) as e:
+                print(f"Error fetching Cognito user details: {e}")
+                print("Falling back to using AWS ID as session hash")
+                # out_session_hash already set to the AWS ID from header, so no need to change it
+            except Exception as e:
+                print(f"Unexpected error when fetching Cognito user details: {e}")
+                print("Falling back to using AWS ID as session hash")
+                # out_session_hash already set to the AWS ID from header, so no need to change it
+
+        print("AWS ID found, will be used as username for session:", out_session_hash)
 
     else:
         out_session_hash = request.session_hash
 
-    if session_output_folder == "True":
+    if session_output_folder:
         output_folder = output_folder_textbox + out_session_hash + "/"
         input_folder = input_folder_textbox + out_session_hash + "/"
 
@@ -691,19 +691,20 @@ def _generate_unique_ids(
 
 def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:
     """Get the file paths of all files in the given folder and its subfolders."""
-    file_paths = list()
 
-    # Ensure folder_path is a safe, absolute path
-    safe_folder_path = Path(folder_path).resolve()
+    safe_folder_path_resolved = Path(folder_path).resolve()
 
-    # Walk through all files in the directory tree
-    for root, dirs, files in os.walk(safe_folder_path):
-        for filename in files:
-            # Construct full file path using secure_join to prevent path traversal
-            full_path = secure_join(Path(root), filename)
-            file_paths.append(full_path)
+    return gr.FileExplorer(
+        root_dir=safe_folder_path_resolved,
+    )
 
-    return file_paths
+
+def update_file_explorer_object():
+    return gr.FileExplorer()
+
+
+def all_outputs_file_download_fn(file_explorer_object: list[str]):
+    return file_explorer_object
 
 
 def calculate_aws_costs(
@@ -933,3 +934,55 @@ def update_language_dropdown(
         )
 
     return chosen_language_drop
+
+
+def get_system_font_path():
+    """
+    Returns the path to a standard font that exists on most operating systems.
+    Used to replace PaddleOCR's default fonts (simfang.ttf, PingFang-SC-Regular.ttf).
+
+    Returns:
+        str: Path to a system font, or None if no suitable font found
+    """
+    system = platform.system()
+
+    # Windows font paths
+    if system == "Windows":
+        windows_fonts = [
+            os.path.join(
+                os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "simsun.ttc"
+            ),  # SimSun
+            os.path.join(
+                os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "msyh.ttc"
+            ),  # Microsoft YaHei
+            os.path.join(
+                os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "arial.ttf"
+            ),  # Arial (fallback)
+        ]
+        for font_path in windows_fonts:
+            if os.path.exists(font_path):
+                return font_path
+
+    # macOS font paths
+    elif system == "Darwin":
+        mac_fonts = [
+            "/System/Library/Fonts/STSong.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+        ]
+        for font_path in mac_fonts:
+            if os.path.exists(font_path):
+                return font_path
+
+    # Linux font paths
+    elif system == "Linux":
+        linux_fonts = [
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+        for font_path in linux_fonts:
+            if os.path.exists(font_path):
+                return font_path
+
+    return None

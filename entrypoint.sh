@@ -14,7 +14,7 @@ if [ "$APP_MODE" = "lambda" ]; then
 else
     echo "Starting in Gradio/FastAPI mode..."
 
-    if [ "$RUN_FASTAPI" = "1" ]; then
+    if [ "$RUN_FASTAPI" = "True" ]; then
         echo "Starting in FastAPI mode..."
         
         GRADIO_SERVER_NAME=${GRADIO_SERVER_NAME:-0.0.0.0}

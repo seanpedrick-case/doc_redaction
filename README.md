@@ -10,7 +10,7 @@ license: agpl-3.0
 ---
 # Document redaction
 
-version: 1.5.3
+version: 1.6.0
 
 Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
@@ -128,19 +128,21 @@ Run the following command to install the additional dependencies:
 pip install .[paddle,vlm]
 ```
 
-Alternatively, you can use the full `requirements.txt` file, that contains references to the PaddleOCR and related Torch/transformers dependencies (for cuda 12.6):
+Alternatively, you can use the full `requirements.txt` file, that contains references to the PaddleOCR and related Torch/transformers dependencies (for cuda 12.9):
 ```bash
 pip install -r requirements.txt
 ```
 
 Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the equivalent GPU versions, you will need to run the following commands:
 ```bash
-pip install paddlepaddle-gpu==3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+pip install paddlepaddle-gpu==3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
 ```
 
+**Note:** It is difficult to get paddlepaddle gpu working in an environment alongside torch. You may well need to reinstall the cpu version to ensure compatibility, and run paddlepaddle-gpu in a separate environment without torch installed. If you get errors related to .dll files following paddle gpu install, you may need to install the latest c++ redistributables. For Windows, you can find them [here](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
+
 ```bash
-pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu126
-pip install torchvision --index-url https://download.pytorch.org/whl/cu126
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
+pip install torchvision --index-url https://download.pytorch.org/whl/cu129
 ```
 
 ### 3. Run the Application
@@ -974,6 +976,7 @@ The following parameters can be configured by your system administrator to fine-
 
 #### Hybrid OCR settings
 
+- **SHOW_HYBRID_MODELS** (default: False): If enabled, hybrid OCR options will be shown in the UI.
 - **HYBRID_OCR_CONFIDENCE_THRESHOLD** (default: 80): Tesseract confidence score below which the secondary OCR engine (PaddleOCR or VLM) will be used for re-extraction. Lower values mean more text will be re-extracted.
 - **HYBRID_OCR_PADDING** (default: 1): Padding (in pixels) added to word bounding boxes before re-extraction with the secondary engine.
 - **SAVE_EXAMPLE_HYBRID_IMAGES** (default: False): If enabled, saves comparison images showing Tesseract vs. secondary engine results when using hybrid modes.
@@ -985,6 +988,7 @@ The following parameters can be configured by your system administrator to fine-
 
 #### PaddleOCR settings
 
+- **SHOW_PADDLE_MODEL_OPTIONS** (default: False): If enabled, PaddleOCR options will be shown in the UI.
 - **PADDLE_USE_TEXTLINE_ORIENTATION** (default: False): If enabled, PaddleOCR will detect and correct text line orientation.
 - **PADDLE_DET_DB_UNCLIP_RATIO** (default: 1.2): Controls the expansion ratio of detected text regions. Higher values expand the detection area more.
 - **CONVERT_LINE_TO_WORD_LEVEL** (default: False): If enabled, converts PaddleOCR line-level results to word-level for better precision in bounding boxes (not perfect, but pretty good).
@@ -999,7 +1003,8 @@ The following parameters can be configured by your system administrator to fine-
 
 When VLM options are enabled, the following settings are available:
 
-- **SELECTED_MODEL** (default: "Dots.OCR"): The VLM model to use. Options include: "Nanonets-OCR2-3B", "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "PaddleOCR-VL".
+- **SHOW_VLM_MODEL_OPTIONS** (default: False): If enabled, VLM options will be shown in the UI.
+- **SELECTED_MODEL** (default: "Dots.OCR"): The VLM model to use. Options include: "Nanonets-OCR2-3B", "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "PaddleOCR-VL". Generally, the Qwen3-VL-8B-Instruct model is the most accurate, and vlm/inference server inference is based on using this model, but is also the slowest. Qwen3-VL-4B-Instruct can also work quite well on easier documents.
 - **MAX_SPACES_GPU_RUN_TIME** (default: 60): Maximum seconds to run GPU operations on Hugging Face Spaces.
 - **MAX_NEW_TOKENS** (default: 30): Maximum number of tokens to generate for VLM responses.
 - **MAX_INPUT_TOKEN_LENGTH** (default: 4096): Maximum number of tokens that can be input to the VLM.
@@ -1013,16 +1018,54 @@ When VLM options are enabled, the following settings are available:
 - **MODEL_CACHE_PATH** (default: "./model_cache"): Directory where OCR models are cached.
 - **OVERWRITE_EXISTING_OCR_RESULTS** (default: False): If enabled, always creates new OCR results instead of loading from existing JSON files.
 
-### When to use different OCR models
+### Using an alternative OCR model
 
-- **Tesseract**: Best for general use, providing a good balance of speed and accuracy with precise word-level bounding boxes.
-- **PaddleOCR**: Best for documents with clear, well-formatted text where line-level accuracy is more important than word-level precision.
-- **Hybrid-paddle**: Best for challenging documents where some text has low confidence scores, combining Tesseract's word-level precision with PaddleOCR's improved text recognition.
-- **Hybrid-vlm**: Best for very challenging documents with poor image quality or unusual text layouts, leveraging advanced vision models for difficult text.
-- **Hybrid-paddle-vlm**: Most comprehensive option, combining PaddleOCR's line-level detection with a VLM's advanced recognition capabilities.
+If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_OPTIONS are set to 'True' in your app_config.env file, you should see the following options available under 'Change default redaction settings...' on the front tab. The different OCR options can be used in different contexts.
 
+- **Tesseract (option 'tesseract')**: Best for documents with clear, well-formatted text, providing a good balance of speed and accuracy with precise word-level bounding boxes. But struggles a lot with handwriting or 'noisy' documents (e.g. scanned documents).
+- **PaddleOCR (option 'paddle')**: More powerful than Tesseract, but slower. Does a decent job with unclear typed text on scanned documents. Also, bounding boxes may not all be accurate as they will be calculated from the line-level bounding boxes produced by Paddle after analysis.
+- **VLM (option 'vlm')**: Recommended for use with the Qwen-3-VL 8B model (can set this with the SELECTED_MODEL environment variable in config.py). This model is extremely good at identifying difficult to read handwriting and noisy documents. However, it is much slower than the above options.
+Other models are available as you can see in the tools/run_vlm.py code file. This will conduct inference with the transformers package, and quantise with bitsandbytes if the QUANTISE_VLM_MODELS environment variable is set to True. Inference with this package is *much* slower than with e.g. llama.cpp or vllm servers, which can be used with the inference-server options described below.
+- **Inference server (option 'inference-server')**: This can be used with OpenAI compatible API endpoints, for example [llama-cpp using llama-server](https://github.com/ggml-org/llama.cpp), or [vllm](https://docs.vllm.ai/en/stable). Both of these options will be much faster for inference than the VLM 'in-app' model calls described above, and produce results of a similar quality, but you will need to be able to set up the server separately.
 
+#### Hybrid options
 
+If the SHOW_HYBRID_MODELS environment variable is set to 'True' in your app_config.env file, you will see the hybrid model options available. The hybrid models call a smaller model (paddleOCR) to first identify bounding box position and text, and then pass text sections with low confidence to a more performant model (served in app or via an inference server such as llama.cpp or vllm) to suggest for replacement. **Note:** I have not found that the results from this analysis is significantly better than that from e.g. Paddle or VLM/inference server analysis alone (particularly when using Qwen 3 VL), but are provided for comparison.
+
+- **Hybrid-paddle-vlm**: This uses PaddleOCR's line-level detection with a VLM's advanced recognition capabilities. PaddleOCR is better at identifying bounding boxes for difficult documents, and so this is probably the most usable of the three options, if you can get both Paddle and the VLM model working in the same environment.
+- **Hybrid-paddle-inference-server**: This uses PaddleOCR's line-level detection with an inference server's advanced recognition capabilities. This is the same as the Hybrid-paddle-vlm option, but uses an inference server instead of a VLM model. This allows for the use of GGUF or AWQ/GPTQ quantised models via llama.cpp or vllm servers.
+
+### Inference server options
+
+If using a local inference server, I would suggest using (llama.cpp)[https://github.com/ggml-org/llama.cpp] as it is much faster than transformers/torch inference, and it will offload to cpu/ram automatically rather than failing as vllm tends to do. Here is the run command I use for my llama server locally ion a wsl or linux environment) to get good results (need at least 12GB of VRAM to run with all gpu layers assigned to your graphics card):
+
+```
+llama-server \
+    -hf unsloth/Qwen3-VL-8B-Instruct-GGUF:UD-Q4_K_XL \
+    --n-gpu-layers -1 \
+    --jinja \
+    --top-p 0.8 \
+    --top-k -1 \
+    --temp 0.0 \
+    --min-p 0.0 \
+    --flash-attn on \
+    --presence-penalty 1.5 \
+    --ctx-size 8192 \
+    --host 0.0.0.0 \
+    --port 7862 \
+    --image-min-tokens 1024 \
+    --image-max-tokens 2301 \
+    --no-warmup
+```
+
+If running llama.cpp on the same computer as the doc redaction app, you can then set the following variable in config/app_config.env to run:
+
+```
+SHOW_INFERENCE_SERVER_OPTIONS=True
+INFERENCE_SERVER_API_URL=http://localhost:7862
+```
+
+The above setup with host = 0.0.0.0 allows you to access this server from other computers in your home network. Find your internal ip for the computer hosting llama server (e.g. using ipconfig in Windows), and then replace 'localhost' in the above variable with this value.
 
 
 ## Command Line Interface (CLI)
