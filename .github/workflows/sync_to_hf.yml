@@ -20,27 +20,32 @@ jobs:
 
       - name: Recreate repo history (single-commit force push)
         run: |
-
-          git config --global user.name "$HF_USERNAME"
-          git config --global user.email "$HF_EMAIL"
-
-          git remote add hf https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID
-          
-          # 1. Capture the commit message BEFORE switching branches
+          # 1. Capture the message BEFORE we delete the .git folder
           COMMIT_MSG=$(git log -1 --pretty=%B)
           echo "Syncing commit message: $COMMIT_MSG"
 
-          # 2. Create a fresh orphan branch (disconnects from history)
-          git switch --orphan temp_branch
-          
-          # 3. Add all files currently in the working directory
-          git add -A
-          
-          # 4. Commit using the captured message
-          git commit -m "Sync: $COMMIT_MSG"
+          # 2. DELETE the .git folder. 
+          # This turns the repo into a standard folder of files.
+          rm -rf .git
 
-          # 5. Force push to main on Hugging Face
-          git push --force hf temp_branch:main
+          # 3. Re-initialize a brand new git repo
+          git init -b main
+          git config --global user.name "$HF_USERNAME"
+          git config --global user.email "$HF_EMAIL"
+          
+          # 4. Re-install LFS (needs to be done after git init)
+          git lfs install
+          
+          # 5. Add the remote
+          git remote add hf https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID_ZERO_GPU
+          
+          # 6. Add all files
+          # Since this is a fresh init, Git sees EVERY file as "New"
+          git add .
+          
+          # 7. Commit and Force Push
+          git commit -m "Sync: $COMMIT_MSG"
+          git push --force hf main
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
