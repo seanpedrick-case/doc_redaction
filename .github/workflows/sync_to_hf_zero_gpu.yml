@@ -20,8 +20,11 @@ jobs:
 
       - name: Recreate repo history (single-commit force push)
         run: |
-          git remote add hf https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID_ZERO_GPU
-          
+          git config --global user.name "$HF_USERNAME"
+          git config --global user.email "$HF_EMAIL"
+
+          git remote add hf https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID_ZERO_GPU    
+
           # 1. Capture the commit message BEFORE switching branches
           COMMIT_MSG=$(git log -1 --pretty=%B)
           echo "Syncing commit message: $COMMIT_MSG"
@@ -40,4 +43,5 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_EMAIL: ${{ secrets.HF_EMAIL }}
           HF_REPO_ID_ZERO_GPU: ${{ secrets.HF_REPO_ID_ZERO_GPU }}
