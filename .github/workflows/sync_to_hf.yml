@@ -12,11 +12,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          lfs: true
-      - name: Push to hub
+          fetch-depth: 1      # Only get the latest state
+          lfs: true           # Download actual LFS files so they can be pushed
+
+      - name: Install Git LFS
+        run: git lfs install
+
+      - name: Recreate repo history (single-commit force push)
+        run: |
+          git remote add hf https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID
+          
+          # 1. Capture the commit message BEFORE switching branches
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Syncing commit message: $COMMIT_MSG"
+
+          # 2. Create a fresh orphan branch (disconnects from history)
+          git switch --orphan temp_branch
+          
+          # 3. Add all files currently in the working directory
+          git add -A
+          
+          # 4. Commit using the captured message
+          git commit -m "Sync: $COMMIT_MSG"
+
+          # 5. Force push to main on Hugging Face
+          git push --force hf temp_branch:main
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
           HF_REPO_ID: ${{ secrets.HF_REPO_ID }}
-        run: git push --force https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID main

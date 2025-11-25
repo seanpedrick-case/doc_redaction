@@ -3490,7 +3490,6 @@ def redact_image_pdf(
                                 input_folder=input_folder,
                             )
                         )
-                    
 
                         # Load the created image
                         if os.path.exists(created_image_path):
