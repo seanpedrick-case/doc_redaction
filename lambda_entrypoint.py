@@ -228,14 +228,7 @@ def lambda_handler(event, context):
             print(f"ERROR: .env file does not exist at {input_file_path}")
 
         load_dotenv(input_file_path, override=True)
-        print("Environment variables loaded from .env file (with override=True)")
-
-        # Debug: Print the loaded environment variables
-        print(f"DEFAULT_PAGE_MIN from env: {os.getenv('DEFAULT_PAGE_MIN')}")
-        print(f"DEFAULT_PAGE_MAX from env: {os.getenv('DEFAULT_PAGE_MAX')}")
-        print(
-            f"All DEFAULT_PAGE_* env vars: {[k for k in os.environ.keys() if 'DEFAULT_PAGE' in k]}"
-        )
+        print("Environment variables loaded from .env file")
 
         # Extract the actual input file path from environment variables
         # Look for common environment variable names that might contain the input file path
@@ -287,13 +280,6 @@ def lambda_handler(event, context):
     # 4. Prepare arguments for the CLI function
     # This dictionary should mirror the one in your app.py's "direct mode"
     # If we loaded a .env file, use environment variables as defaults
-
-    # Debug: Print environment variables before constructing cli_args
-    print("Before cli_args construction:")
-    print(f"  DEFAULT_PAGE_MIN from env: {os.getenv('DEFAULT_PAGE_MIN')}")
-    print(f"  DEFAULT_PAGE_MAX from env: {os.getenv('DEFAULT_PAGE_MAX')}")
-    print(f"  DEFAULT_PAGE_MIN from config: {DEFAULT_PAGE_MIN}")
-    print(f"  DEFAULT_PAGE_MAX from config: {DEFAULT_PAGE_MAX}")
 
     cli_args = {
         # Task Selection

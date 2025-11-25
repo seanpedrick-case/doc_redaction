@@ -47,6 +47,7 @@ from tools.config import (
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
     IMAGES_DPI,
+    INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
     INPUT_FOLDER,
     LOAD_TRUNCATED_IMAGES,
     MAX_DOC_PAGES,
@@ -1028,6 +1029,7 @@ def choose_and_run_redactor(
                 all_page_line_level_ocr_results_with_words,
                 selection_element_results_list_df,
                 form_key_value_results_list_df,
+                out_file_paths,
             ) = redact_image_pdf(
                 file_path,
                 pdf_image_file_paths,
@@ -1061,6 +1063,7 @@ def choose_and_run_redactor(
                 all_page_line_level_ocr_results_with_words,
                 chosen_local_ocr_model,
                 log_files_output_paths=log_files_output_paths,
+                out_file_paths=out_file_paths,
                 nlp_analyser=nlp_analyser,
                 output_folder=output_folder,
                 input_folder=input_folder,
@@ -3112,6 +3115,7 @@ def redact_image_pdf(
     chosen_local_ocr_model: str = CHOSEN_LOCAL_OCR_MODEL,
     page_break_val: int = int(PAGE_BREAK_VALUE),
     log_files_output_paths: List = list(),
+    out_file_paths: List = list(),
     max_time: int = int(MAX_TIME_VALUE),
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     output_folder: str = OUTPUT_FOLDER,
@@ -3154,6 +3158,7 @@ def redact_image_pdf(
     - chosen_local_ocr_model (str, optional): The local model chosen for OCR. Defaults to CHOSEN_LOCAL_OCR_MODEL, other choices are "paddle" for PaddleOCR, or "hybrid-paddle" for a combination of both.
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to PAGE_BREAK_VALUE.
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
+    - out_file_paths (List, optional): List of file paths used for saving redaction process output results.
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
     - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
     - output_folder (str, optional): The folder for file outputs.
@@ -3757,6 +3762,10 @@ def redact_image_pdf(
 
                     # Only proceed if we have a valid image or image path
                     if image_for_visualization is not None:
+                        # Store the length before the call to detect new additions
+                        log_files_output_paths_length_before = len(
+                            log_files_output_paths
+                        )
                         log_files_output_paths = visualise_ocr_words_bounding_boxes(
                             image_for_visualization,
                             page_line_level_ocr_results_with_words["results"],
@@ -3766,6 +3775,17 @@ def redact_image_pdf(
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
                         )
+                        # If config is enabled and a new visualization file was added, add it to out_file_paths
+                        if (
+                            INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES
+                            and log_files_output_paths is not None
+                            and len(log_files_output_paths)
+                            > log_files_output_paths_length_before
+                        ):
+                            # Get the newly added visualization file path (last item in the list)
+                            new_visualisation_path = log_files_output_paths[-1]
+                            if new_visualisation_path not in out_file_paths:
+                                out_file_paths.append(new_visualisation_path)
                     else:
                         print(
                             f"Warning: Could not determine image for visualization at page {reported_page_number}. Skipping visualization."
@@ -4048,6 +4068,7 @@ def redact_image_pdf(
                     all_page_line_level_ocr_results_with_words,
                     selection_element_results_list_df,
                     form_key_value_results_list_df,
+                    out_file_paths,
                 )
 
         # If it's an image file
@@ -4149,12 +4170,13 @@ def redact_image_pdf(
                 all_page_line_level_ocr_results_with_words,
                 selection_element_results_list_df,
                 form_key_value_results_list_df,
+                out_file_paths,
             )
 
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Write the updated existing textract data back to the JSON file
 
-        if original_textract_data != textract_data:
+        if OVERWRITE_EXISTING_OCR_RESULTS or original_textract_data != textract_data:
             secure_file_write(
                 output_folder,
                 file_name + textract_suffix + "_textract.json",
@@ -4165,11 +4187,12 @@ def redact_image_pdf(
             log_files_output_paths.append(textract_json_file_path)
 
     if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
-        print(
-            f"Writing updated existing local OCR data back to the JSON file: {all_page_line_level_ocr_results_with_words_json_file_path}"
-        )
+        # print(
+        #     f"Writing updated existing local OCR data back to the JSON file: {all_page_line_level_ocr_results_with_words_json_file_path}"
+        # )
         if (
-            original_all_page_line_level_ocr_results_with_words
+            OVERWRITE_EXISTING_OCR_RESULTS
+            or original_all_page_line_level_ocr_results_with_words
             != all_page_line_level_ocr_results_with_words
         ):
             # Write the updated existing textract data back to the JSON file
@@ -4235,6 +4258,7 @@ def redact_image_pdf(
         all_page_line_level_ocr_results_with_words,
         selection_element_results_list_df,
         form_key_value_results_list_df,
+        out_file_paths,
     )
 
 
@@ -5234,6 +5258,8 @@ def visualise_ocr_words_bounding_boxes(
         log_files_output_paths: List of file paths used for saving redaction process logging results.
     """
     # Determine visualization folder based on text extraction method
+    # Initialize base_model_name with a default value
+    base_model_name = "OCR"  # Default fallback value
 
     if visualisation_folder is None:
         if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
@@ -5269,11 +5295,30 @@ def visualise_ocr_words_bounding_boxes(
         ):
             base_model_name = "Paddle"
             visualisation_folder = "hybrid_paddle_vlm_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "hybrid-paddle-inference-server"
+        ):
+            base_model_name = "Paddle"
+            visualisation_folder = "hybrid_paddle_inference_server_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "vlm"
+        ):
+            base_model_name = "VLM"
+            visualisation_folder = "vlm_visualisations"
+        elif (
+            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            and chosen_local_ocr_model == "inference-server"
+        ):
+            base_model_name = "Inference server"
+            visualisation_folder = "inference_server_visualisations"
         else:
+            base_model_name = "OCR"
             visualisation_folder = "ocr_visualisations"
 
     if not ocr_results:
-        return
+        return log_files_output_paths
 
     if isinstance(image, str):
         image = Image.open(image)
@@ -5286,6 +5331,8 @@ def visualise_ocr_words_bounding_boxes(
     # Detect if coordinates need conversion from PyMuPDF to image space
     # This happens when Textract uses mediabox dimensions (PyMuPDF coordinates)
     # instead of image pixel dimensions
+    # For non-Textract methods (VLM/inference-server), coordinates should already be in image pixel space,
+    # but we need to check if there's a size mismatch between coordinate space and visualization image
     needs_coordinate_conversion = False
     source_width = width
     source_height = height
@@ -5310,26 +5357,45 @@ def visualise_ocr_words_bounding_boxes(
 
         # Check if coordinates appear to be in PyMuPDF range (typically 0-1200 points)
         # and image is much larger (indicating coordinate system mismatch)
-        if all_x_coords and all_y_coords:
-            max_x = max(all_x_coords)
-            max_y = max(all_y_coords)
-            # PyMuPDF coordinates are typically in points (0-1200 range)
-            # If max coordinates are much smaller than image dimensions, likely need conversion
-            if (
-                max_x < width * 0.6
-                and max_y < height * 0.6
-                and max_x < 1500
-                and max_y < 1500
-            ):
-                # Estimate source dimensions from actual coordinate range
-                # Add some padding to account for coordinates not reaching edges
-                source_width = max(
-                    max_x * 1.1, 612
-                )  # Default to US Letter width if too small
-                source_height = max(
-                    max_y * 1.1, 792
-                )  # Default to US Letter height if too small
-                needs_coordinate_conversion = True
+        # if all_x_coords and all_y_coords:
+        #     max_x = max(all_x_coords)
+        #     max_y = max(all_y_coords)
+        #     # PyMuPDF coordinates are typically in points (0-1200 range)
+        #     # If max coordinates are much smaller than image dimensions, likely need conversion
+        #     if (
+        #         max_x < width * 0.6
+        #         and max_y < height * 0.6
+        #         and max_x < 1500
+        #         and max_y < 1500
+        #     ):
+        #         # Estimate source dimensions from actual coordinate range
+        #         # Add some padding to account for coordinates not reaching edges
+        #         source_width = max(
+        #             max_x * 1.1, 612
+        #         )  # Default to US Letter width if too small
+        #         source_height = max(
+        #             max_y * 1.1, 792
+        #         )  # Default to US Letter height if too small
+        #         needs_coordinate_conversion = True
+    else:
+        # For non-Textract methods (Tesseract, VLM, inference-server, etc.),
+        # coordinates should be in image pixel space, but check if there's a size mismatch
+        # Collect all bounding box coordinates to detect coordinate space
+        all_x_coords = []
+        all_y_coords = []
+
+        for line_key, line_data in ocr_results.items():
+            if not isinstance(line_data, dict) or "words" not in line_data:
+                continue
+            words = line_data.get("words", [])
+            for word_data in words:
+                if not isinstance(word_data, dict):
+                    continue
+                bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+                if len(bbox) == 4:
+                    x1, y1, x2, y2 = bbox
+                    all_x_coords.extend([x1, x2])
+                    all_y_coords.extend([y1, y2])
 
     # Calculate scaling factors if conversion is needed
     if needs_coordinate_conversion:

@@ -1007,8 +1007,32 @@ def convert_page_question_answer_to_custom_image_recognizer_results(
             continue  # Skip this entry if page number does not match reported page number
 
         # Get image dimensions safely
-        image_width = page_row["mediabox_width"].iloc[0]
-        image_height = page_row["mediabox_height"].iloc[0]
+        # Textract coordinates are normalized (0-1) relative to MediaBox
+        # We need to convert to image coordinates, not PDF page coordinates
+        # Try to get image dimensions first, fallback to mediabox if not available
+        try:
+            if "image_width" in page_sizes_df.columns:
+                image_width_val = page_row["image_width"].iloc[0]
+                if pd.notna(image_width_val) and image_width_val > 0:
+                    image_width = image_width_val
+                else:
+                    image_width = page_row["mediabox_width"].iloc[0]
+            else:
+                image_width = page_row["mediabox_width"].iloc[0]
+        except (KeyError, IndexError):
+            image_width = page_row["mediabox_width"].iloc[0]
+
+        try:
+            if "image_height" in page_sizes_df.columns:
+                image_height_val = page_row["image_height"].iloc[0]
+                if pd.notna(image_height_val) and image_height_val > 0:
+                    image_height = image_height_val
+                else:
+                    image_height = page_row["mediabox_height"].iloc[0]
+            else:
+                image_height = page_row["mediabox_height"].iloc[0]
+        except (KeyError, IndexError):
+            image_height = page_row["mediabox_height"].iloc[0]
 
         # Get question and answer text safely
         question_text = qa_result.get("Question", "")

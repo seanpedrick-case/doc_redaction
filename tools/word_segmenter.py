@@ -6,42 +6,101 @@ import numpy as np
 
 from tools.config import OUTPUT_FOLDER, SAVE_WORD_SEGMENTER_OUTPUT_IMAGES
 
-INITIAL_KERNEL_WIDTH_FACTOR = 0.05  # Default 0.05
-INITIAL_VALLEY_THRESHOLD_FACTOR = 0.05  # Default 0.05
-MAIN_VALLEY_THRESHOLD_FACTOR = 0.15  # Default 0.15
-C_VALUE = 4  # Default 4
-BLOCK_SIZE_FACTOR = 1.5  # Default 1.5
-MIN_SPACE_FACTOR = 0.3  # Default 0.4
-MATCH_TOLERANCE = 0  # Default 0
-MIN_AREA_THRESHOLD = 6  # Default 6
-DEFAULT_TRIM_PERCENTAGE = 0.2  # Default 0.2
+# Adaptive thresholding parameters
+BLOCK_SIZE_FACTOR = 1.5  # Multiplier for adaptive threshold block size
+C_VALUE = 2  # Constant subtracted from mean in adaptive thresholding
+
+# Word segmentation search parameters
+INITIAL_KERNEL_WIDTH_FACTOR = 0.0  # Starting kernel width factor for Stage 2 search
+INITIAL_VALLEY_THRESHOLD_FACTOR = (
+    0.0  # Starting valley threshold factor for Stage 1 search
+)
+MAIN_VALLEY_THRESHOLD_FACTOR = (
+    0.15  # Primary valley threshold factor for word separation
+)
+MIN_SPACE_FACTOR = 0.2  # Minimum space width relative to character width
+MATCH_TOLERANCE = 0  # Tolerance for word count matching
+
+# Noise removal parameters
+MIN_AREA_THRESHOLD = 6  # Minimum component area to be considered valid text
+DEFAULT_TRIM_PERCENTAGE = (
+    0.2  # Percentage to trim from top/bottom for vertical cropping
+)
+
+# Skew detection parameters
+MIN_SKEW_THRESHOLD = 0.5  # Ignore angles smaller than this (likely noise)
+MAX_SKEW_THRESHOLD = 15.0  # Angles larger than this are extreme and likely errors
+
+
+def _sanitize_filename(filename: str, max_length: int = 100) -> str:
+    """
+    Sanitizes a string to be used as a valid filename.
+    Removes or replaces invalid characters for Windows/Linux file systems.
+
+    Args:
+        filename: The string to sanitize
+        max_length: Maximum length of the sanitized filename
+
+    Returns:
+        A sanitized string safe for use in file names
+    """
+    if not filename:
+        return "unnamed"
+
+    # Replace spaces with underscores
+    sanitized = filename.replace(" ", "_")
+
+    # Remove or replace invalid characters for Windows/Linux
+    # Invalid: < > : " / \ | ? *
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        sanitized = sanitized.replace(char, "_")
+
+    # Remove control characters
+    sanitized = "".join(
+        char for char in sanitized if ord(char) >= 32 or char in "\n\r\t"
+    )
+
+    # Remove leading/trailing dots and spaces (Windows doesn't allow these)
+    sanitized = sanitized.strip(". ")
+
+    # Replace multiple consecutive underscores with a single one
+    while "__" in sanitized:
+        sanitized = sanitized.replace("__", "_")
+
+    # Truncate if too long
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length]
+
+    # Ensure it's not empty after sanitization
+    if not sanitized:
+        sanitized = "unnamed"
+
+    return sanitized
 
 
 class AdaptiveSegmenter:
     """
     Line to word segmentation pipeline. It features:
     1. Adaptive Thresholding.
-    2. Targeted Noise Removal using Connected Component Analysis to isolate the main text body.
+    2. Targeted Noise Removal using Connected Component Analysis.
     3. The robust two-stage adaptive search (Valley -> Kernel).
     4. CCA for final pixel-perfect refinement.
     """
 
     def __init__(self, output_folder: str = OUTPUT_FOLDER):
         self.output_folder = output_folder
+        self.fallback_segmenter = HybridWordSegmenter()
 
     def _correct_orientation(
         self, gray_image: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Detects and corrects 90-degree orientation issues (e.g., vertical text).
-        This runs *before* the fine-grained _deskew_image function.
-
-        Returns the oriented image and the transformation matrix.
+        Detects and corrects 90-degree orientation issues.
         """
         h, w = gray_image.shape
         center = (w // 2, h // 2)
 
-        # --- Binarization (copied from _deskew_image) ---
         block_size = 21
         if h < block_size:
             block_size = h if h % 2 != 0 else h - 1
@@ -60,20 +119,14 @@ class AdaptiveSegmenter:
                 gray_image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
             )
 
-        # Small noise removal
         opening_kernel = np.ones((2, 2), np.uint8)
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, opening_kernel)
 
-        # --- Extract text pixel coordinates ---
         coords = np.column_stack(np.where(binary > 0))
         if len(coords) < 50:
-            # print(
-            #     "Warning: Not enough text pixels for orientation. Assuming horizontal."
-            # )
             M_orient = cv2.getRotationMatrix2D(center, 0, 1.0)
             return gray_image, M_orient
 
-        # --- Robust bounding-box check (no minAreaRect quirks) ---
         ymin, xmin = coords.min(axis=0)
         ymax, xmax = coords.max(axis=0)
         box_height = ymax - ymin
@@ -81,24 +134,13 @@ class AdaptiveSegmenter:
 
         orientation_angle = 0.0
         if box_height > box_width:
-            # print(
-            #     f"Detected vertical orientation (W:{box_width} < H:{box_height}). Applying 90-degree correction."
-            # )
             orientation_angle = 90.0
         else:
-            # print(
-            #     f"Detected horizontal orientation (W:{box_width} >= H:{box_height}). No orientation correction."
-            # )
             M_orient = cv2.getRotationMatrix2D(center, 0, 1.0)
             return gray_image, M_orient
 
-        # --- Apply 90-degree correction ---
         M_orient = cv2.getRotationMatrix2D(center, orientation_angle, 1.0)
-
-        # Calculate new image bounds (they will be swapped)
         new_w, new_h = h, w
-
-        # Adjust translation part of M_orient to center the new image
         M_orient[0, 2] += (new_w - w) / 2
         M_orient[1, 2] += (new_h - h) / 2
 
@@ -114,12 +156,10 @@ class AdaptiveSegmenter:
 
     def _deskew_image(self, gray_image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Detects skew using a robust method that normalizes the output of
-        cv2.minAreaRect to correctly handle its angle/dimension ambiguity.
+        Detects skew using a robust method that normalizes minAreaRect.
         """
         h, w = gray_image.shape
 
-        # Use a single, reliable binarization method for detection.
         block_size = 21
         if h < block_size:
             block_size = h if h % 2 != 0 else h - 1
@@ -143,25 +183,17 @@ class AdaptiveSegmenter:
 
         coords = np.column_stack(np.where(binary > 0))
         if len(coords) < 50:
-            # print("Warning: Not enough text pixels to detect skew. Skipping.")
             M = cv2.getRotationMatrix2D((w // 2, h // 2), 0, 1.0)
             return gray_image, M
 
         rect = cv2.minAreaRect(coords[:, ::-1])
-
         rect_width, rect_height = rect[1]
         angle = rect[2]
 
-        # If the rectangle is described as vertical, normalize it
         if rect_width < rect_height:
-            # Swap dimensions
             rect_width, rect_height = rect_height, rect_width
-            # Correct the angle
             angle += 90
 
-        # The angle from minAreaRect is in [-90, 0). After normalization,
-        # our angle for a horizontal line will be close to 0 or -90/90.
-        # We need one last correction for angles near +/- 90.
         if angle > 45:
             angle -= 90
         elif angle < -45:
@@ -169,22 +201,11 @@ class AdaptiveSegmenter:
 
         correction_angle = angle
 
-        # print(f"Normalized shape (W:{rect_width:.0f}, H:{rect_height:.0f}). Detected angle: {correction_angle:.2f} degrees.")
-
-        # Final sanity checks on the angle
-        MIN_SKEW_THRESHOLD = 0.5  # Ignore angles smaller than this (likely noise)
-        MAX_SKEW_THRESHOLD = (
-            15.0  # Angles larger than this are extreme and likely errors
-        )
-
         if abs(correction_angle) < MIN_SKEW_THRESHOLD:
-            # print(f"Detected angle {correction_angle:.2f}° is too small (likely noise). Skipping deskew.")
             correction_angle = 0.0
         elif abs(correction_angle) > MAX_SKEW_THRESHOLD:
-            # print(f"Warning: Corrected angle {correction_angle:.2f}° is extreme. Skipping deskew.")
             correction_angle = 0.0
 
-        # Create rotation matrix and apply the final correction
         center = (w // 2, h // 2)
         M = cv2.getRotationMatrix2D(center, correction_angle, 1.0)
 
@@ -205,8 +226,9 @@ class AdaptiveSegmenter:
         min_space_factor: float,
         valley_threshold_factor: float,
     ) -> List:
-        # This helper function remains IDENTICAL. No changes needed.
-        # ... (code from the previous version)
+        """
+        Extracts word bounding boxes from vertical projection profile.
+        """
         img_h, img_w = binary_image.shape
         vertical_projection = np.sum(binary_image, axis=0)
         peaks = vertical_projection[vertical_projection > 0]
@@ -215,9 +237,11 @@ class AdaptiveSegmenter:
         avg_peak_height = np.mean(peaks)
         valley_threshold = int(avg_peak_height * valley_threshold_factor)
         min_space_width = int(stable_avg_char_width * min_space_factor)
+
         patched_projection = vertical_projection.copy()
         in_gap = False
         gap_start = 0
+
         for x, col_sum in enumerate(patched_projection):
             if col_sum <= valley_threshold and not in_gap:
                 in_gap = True
@@ -226,6 +250,7 @@ class AdaptiveSegmenter:
                 in_gap = False
                 if (x - gap_start) < min_space_width:
                     patched_projection[gap_start:x] = int(avg_peak_height)
+
         unlabeled_boxes = []
         in_word = False
         start_x = 0
@@ -234,11 +259,197 @@ class AdaptiveSegmenter:
                 start_x = x
                 in_word = True
             elif col_sum <= valley_threshold and in_word:
+                # [NOTE] Returns full height stripe
                 unlabeled_boxes.append((start_x, 0, x - start_x, img_h))
                 in_word = False
         if in_word:
             unlabeled_boxes.append((start_x, 0, img_w - start_x, img_h))
         return unlabeled_boxes
+
+    def _enforce_logical_constraints(
+        self, output: Dict[str, List], image_width: int, image_height: int
+    ) -> Dict[str, List]:
+        """
+        Enforces geometric sanity checks with 2D awareness.
+        """
+        if not output or not output["text"]:
+            return output
+
+        num_items = len(output["text"])
+        boxes = []
+        for i in range(num_items):
+            boxes.append(
+                {
+                    "text": output["text"][i],
+                    "left": int(output["left"][i]),
+                    "top": int(output["top"][i]),
+                    "width": int(output["width"][i]),
+                    "height": int(output["height"][i]),
+                    "conf": output["conf"][i],
+                }
+            )
+
+        valid_boxes = []
+        for box in boxes:
+            x0 = max(0, box["left"])
+            y0 = max(0, box["top"])
+            x1 = min(image_width, box["left"] + box["width"])
+            y1 = min(image_height, box["top"] + box["height"])
+
+            w = x1 - x0
+            h = y1 - y0
+
+            if w > 0 and h > 0:
+                box["left"] = x0
+                box["top"] = y0
+                box["width"] = w
+                box["height"] = h
+                valid_boxes.append(box)
+        boxes = valid_boxes
+
+        is_vertical = image_height > (image_width * 1.2)
+        if is_vertical:
+            boxes.sort(key=lambda b: (b["top"], b["left"]))
+        else:
+            boxes.sort(key=lambda b: (b["left"], -b["width"]))
+
+        final_pass_boxes = []
+        if boxes:
+            keep_indices = [True] * len(boxes)
+            for i in range(len(boxes)):
+                for j in range(len(boxes)):
+                    if i == j:
+                        continue
+                    b1 = boxes[i]
+                    b2 = boxes[j]
+
+                    x_nested = (b1["left"] >= b2["left"] - 2) and (
+                        b1["left"] + b1["width"] <= b2["left"] + b2["width"] + 2
+                    )
+                    y_nested = (b1["top"] >= b2["top"] - 2) and (
+                        b1["top"] + b1["height"] <= b2["top"] + b2["height"] + 2
+                    )
+
+                    if x_nested and y_nested:
+                        if b1["text"] == b2["text"]:
+                            if b1["width"] * b1["height"] <= b2["width"] * b2["height"]:
+                                keep_indices[i] = False
+
+            for i, keep in enumerate(keep_indices):
+                if keep:
+                    final_pass_boxes.append(boxes[i])
+
+        boxes = final_pass_boxes
+
+        if is_vertical:
+            boxes.sort(key=lambda b: (b["top"], b["left"]))
+        else:
+            boxes.sort(key=lambda b: (b["left"], -b["width"]))
+
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                b1 = boxes[i]
+                b2 = boxes[j]
+
+                x_overlap = min(
+                    b1["left"] + b1["width"], b2["left"] + b2["width"]
+                ) - max(b1["left"], b2["left"])
+                y_overlap = min(
+                    b1["top"] + b1["height"], b2["top"] + b2["height"]
+                ) - max(b1["top"], b2["top"])
+
+                if x_overlap > 0 and y_overlap > 0:
+                    if is_vertical:
+                        if b1["top"] < b2["top"]:
+                            new_h = max(1, b2["top"] - b1["top"])
+                            b1["height"] = new_h
+                    else:
+                        if b1["left"] < b2["left"]:
+                            b1_right = b1["left"] + b1["width"]
+                            b2_right = b2["left"] + b2["width"]
+                            left_slice_width = max(0, b2["left"] - b1["left"])
+                            right_slice_width = max(0, b1_right - b2_right)
+
+                            if (
+                                b1_right > b2_right
+                                and right_slice_width > left_slice_width
+                            ):
+                                b1["left"] = b2_right
+                                b1["width"] = right_slice_width
+                            else:
+                                b1["width"] = max(1, left_slice_width)
+
+        cleaned_output = {
+            k: [] for k in ["text", "left", "top", "width", "height", "conf"]
+        }
+        if is_vertical:
+            boxes.sort(key=lambda b: (b["top"], b["left"]))
+        else:
+            boxes.sort(key=lambda b: (b["left"], -b["width"]))
+
+        for box in boxes:
+            for key in cleaned_output.keys():
+                cleaned_output[key].append(box[key])
+
+        return cleaned_output
+
+    def _is_geometry_valid(
+        self,
+        boxes: List[Tuple[int, int, int, int]],
+        words: List[str],
+        expected_height: float = 0,
+    ) -> bool:
+        """
+        Validates if the detected boxes are physically plausible.
+        [FIX] Improved robustness for punctuation and mixed-case text.
+        """
+        if len(boxes) != len(words):
+            return False
+
+        baseline = expected_height
+        # Use median only if provided expected height is unreliable
+        if baseline < 5:
+            heights = [b[3] for b in boxes]
+            if heights:
+                baseline = np.median(heights)
+
+        if baseline < 5:
+            return True
+
+        for i, box in enumerate(boxes):
+            word = words[i]
+
+            # [FIX] Check for punctuation/symbols. They are allowed to be small.
+            # If word is just punctuation, skip geometry checks
+            is_punctuation = not any(c.isalnum() for c in word)
+            if is_punctuation:
+                continue
+
+            # Standard checks for alphanumeric words
+            num_chars = len(word)
+            if num_chars < 1:
+                continue
+
+            width = box[2]
+            height = box[3]
+
+            # [FIX] Only reject height if it's REALLY small compared to baseline
+            # A period might be small, but we skipped that check above.
+            # This check ensures a real word like "The" isn't 2 pixels tall.
+            if height < (baseline * 0.20):
+                return False
+
+            avg_char_width = width / num_chars
+            min_expected = baseline * 0.20
+
+            # Only reject if it fails BOTH absolute (4px) and relative checks
+            if avg_char_width < min_expected and avg_char_width < 4:
+                # Exception: If the word is 1 char long (e.g. "I", "l", "1"), allow it to be skinny.
+                if num_chars == 1 and avg_char_width >= 2:
+                    continue
+                return False
+
+        return True
 
     def segment(
         self,
@@ -249,82 +460,59 @@ class AdaptiveSegmenter:
         image_name: str = None,
     ) -> Tuple[Dict[str, List], bool]:
 
-        if line_image is None:
-            # print(
-            #     f"Error: line_image is None in segment function (image_name: {image_name})"
-            # )
+        if (
+            line_image is None
+            or not isinstance(line_image, np.ndarray)
+            or line_image.size == 0
+        ):
             return ({}, False)
-
-        # Validate line_image is a valid numpy array
-        if not isinstance(line_image, np.ndarray):
-            # print(
-            #     f"Error: line_image is not a numpy array (type: {type(line_image)}, image_name: {image_name})"
-            # )
-            return ({}, False)
-
-        # Validate line_image has valid shape and size
-        if line_image.size == 0:
-            # print(
-            #     f"Error: line_image is empty (shape: {line_image.shape}, image_name: {image_name})"
-            # )
-            return ({}, False)
-
+        # Allow grayscale (2 dims) or color (3 dims)
         if len(line_image.shape) < 2:
-            # print(
-            #     f"Error: line_image has invalid shape {line_image.shape} (image_name: {image_name})"
-            # )
             return ({}, False)
+        if not line_data or not line_data.get("text") or len(line_data["text"]) == 0:
+            return ({}, False)
+
+        line_text = line_data["text"][0]
+        words = line_text.split()
 
         # Early return if 1 or fewer words
-        if line_data and line_data.get("text") and len(line_data["text"]) > 0:
-            line_text = line_data["text"][0]
-            words = line_text.split()
-            if len(words) <= 1:
-                return ({}, False)
-        else:
-            # print(
-            #     f"Error: line_data is empty or does not contain text (image_name: {image_name})"
-            # )
-            return ({}, False)
+        if len(words) <= 1:
+            img_h, img_w = line_image.shape[:2]
+            one_word_result = self.fallback_segmenter.convert_line_to_word_level(
+                line_data, img_w, img_h
+            )
+            return (one_word_result, False)
 
-        # print(f"line_text: {line_text}")
-        shortened_line_text = line_text.replace(" ", "_")[:10]
+        line_number = line_data["line"][0]
+        safe_image_name = _sanitize_filename(image_name or "image", max_length=50)
+        safe_line_number = _sanitize_filename(str(line_number), max_length=10)
+        safe_shortened_line_text = _sanitize_filename(line_text, max_length=10)
 
         if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_original.png"
+            output_path = f"{self.output_folder}/word_segmentation/{safe_image_name}_{safe_line_number}_{safe_shortened_line_text}_original.png"
             os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
             cv2.imwrite(output_path, line_image)
-            # print(f"\nSaved original image to '{output_path}'")
 
-        gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
+        if len(line_image.shape) == 3:
+            gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = line_image.copy()
 
-        # --- STEP 1: Correct major orientation (e.g., 90 degrees) ---
-        # M_orient transforms from ORIGINAL -> ORIENTED
+        # ========================================================================
+        # IMAGE PREPROCESSING (Deskew / Rotate)
+        # ========================================================================
         oriented_gray, M_orient = self._correct_orientation(gray)
-
-        # --- STEP 2: Correct minor skew (e.g., -2 degrees) ---
-        # M_skew transforms from ORIENTED -> DESKEWED
         deskewed_gray, M_skew = self._deskew_image(oriented_gray)
 
-        # --- STEP 3: Combine Transformations ---
-        # We need a single matrix 'M' that transforms from ORIGINAL -> DESKEWED
-        # We do this by converting to 3x3 matrices and multiplying: M = M_skew * M_orient
-
-        # Convert to 3x3
+        # Combine matrices: M_total = M_skew * M_orient
         M_orient_3x3 = np.vstack([M_orient, [0, 0, 1]])
         M_skew_3x3 = np.vstack([M_skew, [0, 0, 1]])
-
-        # Combine transformations
         M_total_3x3 = M_skew_3x3 @ M_orient_3x3
+        M = M_total_3x3[0:2, :]  # Extract 2x3 affine matrix
 
-        # Get the final 2x3 transformation matrix
-        M = M_total_3x3[0:2, :]
-
-        # --- Apply TOTAL transformation to the original color image ---
-        # The final dimensions are those of the *last* image in the chain: deskewed_gray
+        # Apply transformation to the original color image
         h, w = deskewed_gray.shape
-
         deskewed_line_image = cv2.warpAffine(
             line_image,
             M,
@@ -333,58 +521,42 @@ class AdaptiveSegmenter:
             borderMode=cv2.BORDER_REPLICATE,
         )
 
-        # Validate deskewed_line_image before saving
-        if (
-            deskewed_line_image is None
-            or not isinstance(deskewed_line_image, np.ndarray)
-            or deskewed_line_image.size == 0
-        ):
-            # print(
-            #     f"Error: deskewed_line_image is None or empty (image_name: {image_name})"
-            # )
-            return ({}, False)
+        # [FIX] Create Local Line Data that matches the deskewed/rotated image dimensions.
+        # This prevents the fallback segmenter from using vertical dimensions on a horizontal image.
+        local_line_data = {
+            "text": line_data["text"],
+            "conf": line_data["conf"],
+            "left": [0],  # Local coordinate system starts at 0
+            "top": [0],
+            "width": [w],  # Use the ROTATED width
+            "height": [h],  # Use the ROTATED height
+            "line": line_data.get("line", [0]),
+        }
 
-        # Save deskewed image (optional, only if image_name is provided)
         if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_deskewed.png"
-            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
+            output_path = f"{self.output_folder}/word_segmentation/{safe_image_name}_{safe_line_number}_{safe_shortened_line_text}_deskewed.png"
             cv2.imwrite(output_path, deskewed_line_image)
-            # print(f"\nSaved deskewed image to '{output_path}'")
 
-        # --- Step 1: Binarization and Stable Width Calculation (Unchanged) ---
+        # ========================================================================
+        # MAIN SEGMENTATION PIPELINE
+        # ========================================================================
         approx_char_count = len(line_data["text"][0].replace(" ", ""))
         if approx_char_count == 0:
             return {}, False
+
         img_h, img_w = deskewed_gray.shape
+        estimated_char_height = img_h * 0.6
         avg_char_width_approx = img_w / approx_char_count
+
         block_size = int(avg_char_width_approx * BLOCK_SIZE_FACTOR)
         if block_size % 2 == 0:
             block_size += 1
-
-        # Validate deskewed_gray and ensure block_size is valid
-        if deskewed_gray is None or not isinstance(deskewed_gray, np.ndarray):
-            # print(
-            #     f"Error: deskewed_gray is None or not a numpy array (image_name: {image_name})"
-            # )
-            return ({}, False)
-
-        if len(deskewed_gray.shape) != 2:
-            # print(
-            #     f"Error: deskewed_gray must be a 2D grayscale image (shape: {deskewed_gray.shape}, image_name: {image_name})"
-            # )
-            return ({}, False)
-
         if block_size < 3:
-            # print(
-            #     f"Warning: block_size ({block_size}) is too small for adaptiveThreshold. "
-            #     f"Using minimum value of 3. (image_name: {image_name}, "
-            #     f"img_w: {img_w}, approx_char_count: {approx_char_count}, "
-            #     f"avg_char_width_approx: {avg_char_width_approx:.2f})"
-            # )
             block_size = 3
 
-        binary = cv2.adaptiveThreshold(
+        # --- Binarization ---
+        binary_adaptive = cv2.adaptiveThreshold(
             deskewed_gray,
             255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -392,464 +564,351 @@ class AdaptiveSegmenter:
             block_size,
             C_VALUE,
         )
+        otsu_thresh_val, _ = cv2.threshold(
+            deskewed_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
+        strict_thresh_val = otsu_thresh_val * 0.75
+        _, binary_strict = cv2.threshold(
+            deskewed_gray, strict_thresh_val, 255, cv2.THRESH_BINARY_INV
+        )
+        binary = cv2.bitwise_and(binary_adaptive, binary_strict)
 
-        # Validate binary image before saving
-        if binary is None or not isinstance(binary, np.ndarray) or binary.size == 0:
-            # print(
-            #     f"Error: binary image is None or empty (image_name: {image_name})"
-            # )
-            return ({}, False)
-
-        # Save cropped image (optional, only if image_name is provided)
         if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
-            os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_binary.png"
-            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
+            output_path = f"{self.output_folder}/word_segmentation/{safe_image_name}_{safe_line_number}_{safe_shortened_line_text}_binary.png"
             cv2.imwrite(output_path, binary)
-            # print(f"\nSaved cropped image to '{output_path}'")
 
-        # --- NEW STEP 1.5: Post-processing with Morphology ---
-        # This "closes" gaps in letters and joins nearby components.
-
-        # Create a small kernel (e.g., 3x3 rectangle)
-        # You may need to tune this size.
-        kernel_size = 3
-        kernel = np.ones((kernel_size, kernel_size), np.uint8)
-
-        # Use MORPH_CLOSE to close small holes and gaps within the letters
-        # It's a dilation followed by an erosion
+        # --- Morphological Closing ---
+        morph_width = max(3, int(avg_char_width_approx * 0.40))
+        morph_height = max(2, int(avg_char_width_approx * 0.1))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_width, morph_height))
         closed_binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-        # Validate closed_binary image before saving
-        if (
-            closed_binary is None
-            or not isinstance(closed_binary, np.ndarray)
-            or closed_binary.size == 0
-        ):
-            # print(
-            #     f"Error: closed_binary image is None or empty (image_name: {image_name})"
-            # )
-            return ({}, False)
-
-        # (Optional) You could also use a DILATE to make letters thicker
-        # dilated_binary = cv2.dilate(closed_binary, kernel, iterations=1)
-        # Use 'closed_binary' (or 'dilated_binary') from now on.
-
-        if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
-            os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_closed_binary.png"
-            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
-            cv2.imwrite(output_path, closed_binary)
-            # print(f"\nSaved dilated binary image to '{output_path}'")
-
-        # --- Step 2: Intelligent Noise Removal (Improved) ---
+        # --- Noise Removal ---
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
             closed_binary, 8, cv2.CV_32S
         )
         clean_binary = np.zeros_like(binary)
 
+        force_fallback = False
+        significant_labels = 0
         if num_labels > 1:
-            areas = stats[
-                1:, cv2.CC_STAT_AREA
-            ]  # Get all component areas, skip background (label 0)
+            # Only count components with area > 3 pixels
+            significant_labels = np.sum(stats[1:, cv2.CC_STAT_AREA] > 3)
 
-            # Handle edge case of empty 'areas' array
+        if approx_char_count > 0 and significant_labels > (approx_char_count * 12):
+            force_fallback = True
+
+        if num_labels > 1:
+            areas = stats[1:, cv2.CC_STAT_AREA]
             if len(areas) == 0:
                 clean_binary = binary
-                # print("Warning: No components found after binarization.")
-                areas = np.array([0])  # Add a dummy value to prevent crashes
+                areas = np.array([0])
+            else:
+                p1 = np.percentile(areas, 1)
+                img_h, img_w = binary.shape
+                estimated_char_height = img_h * 0.7
+                estimated_min_letter_area = max(
+                    2, int(estimated_char_height * 0.2 * estimated_char_height * 0.15)
+                )
+                area_threshold = max(
+                    MIN_AREA_THRESHOLD, min(p1, estimated_min_letter_area)
+                )
 
-            # --- 1. Calculate the DEFAULT CONSERVATIVE threshold ---
-            # This is your existing logic, which works well for *clean* lines.
-            p1 = np.percentile(areas, 1)
-            img_h, img_w = binary.shape
-            estimated_char_height = img_h * 0.7
-            estimated_min_letter_area = max(
-                2, int(estimated_char_height * 0.2 * estimated_char_height * 0.15)
-            )
-
-            # This is the "safe" threshold that protects small letters on clean lines.
-            area_threshold = max(MIN_AREA_THRESHOLD, min(p1, estimated_min_letter_area))
-            # print(f"Noise Removal: Initial conservative threshold: {area_threshold:.1f} (p1={p1:.1f}, est_min={estimated_min_letter_area:.1f})")
-
-            # --- 2. Find a "Noise-to-Text" Gap (to enable AGGRESSIVE mode) ---
-            sorted_areas = np.sort(areas)
-            has_clear_gap = False
-            aggressive_threshold = -1
-            area_before_gap = -1
-
-            if len(sorted_areas) > 10:  # Need enough components to analyze
+                # Gap detection logic...
+                sorted_areas = np.sort(areas)
                 area_diffs = np.diff(sorted_areas)
-                if len(area_diffs) > 0:
-                    # Use your "gap" logic: find a jump > 3x the 95th percentile jump
+                if len(sorted_areas) > 10 and len(area_diffs) > 0:
                     jump_threshold = np.percentile(area_diffs, 95)
-                    significant_jump_thresh = max(
-                        10, jump_threshold * 3
-                    )  # Add a 10px minimum jump
-
+                    significant_jump_thresh = max(10, jump_threshold * 3)
                     jump_indices = np.where(area_diffs > significant_jump_thresh)[0]
-
                     if len(jump_indices) > 0:
-                        has_clear_gap = True
-                        # This is the index of the *last noise component*
                         gap_idx = jump_indices[0]
                         area_before_gap = sorted_areas[gap_idx]
+                        final_threshold = max(area_before_gap + 1, area_threshold)
+                        final_threshold = min(final_threshold, 15)
+                        area_threshold = final_threshold
 
-                        # The aggressive threshold is 1 pixel *larger* than the biggest noise component
-                        aggressive_threshold = area_before_gap + 1
-
-            # --- 3. ADAPTIVE DECISION: Override if conservative threshold is clearly noise ---
-            if has_clear_gap:
-                # print(
-                #     f"Noise Removal: Gap detected. Noise cluster ends at {area_before_gap}px. Aggressive threshold = {aggressive_threshold:.1f}"
-                # )
-
-                # Only use a more aggressive threshold IF our "safe" threshold is clearly
-                # stuck *inside* the noise cluster.
-                # e.g., Safe threshold = 1, but noise goes up to 10.
-                # (We use 0.8 as a buffer, so if thresh=7 and gap=8, we don't switch)
-                if area_threshold < (area_before_gap * 0.8):
-                    # print(
-                    #     f"Noise Removal: Conservative threshold ({area_threshold:.1f}) is deep in noise cluster (ends at {area_before_gap}px)."
-                    # )
-
-                    # Instead of using large percentage increases, use a very small absolute increment
-                    # This preserves legitimate small letters/words that might be just above the noise
-                    # Use a minimal fixed offset (2-3 pixels) above the noise cluster end
-                    # This ensures we only remove noise, not legitimate small components
-                    small_increment = (
-                        2  # Fixed small increment - just 2 pixels above noise
-                    )
-
-                    moderate_threshold = area_before_gap + small_increment
-
-                    # Also check what the actual first component after the gap is
-                    # This gives us insight into where real text starts
-                    # If the gap is very large (e.g., noise ends at 229, text starts at 500),
-                    # we want to use a threshold closer to the noise end, not the text start
-                    if gap_idx + 1 < len(sorted_areas):
-                        first_after_gap = sorted_areas[gap_idx + 1]
-                        gap_size = first_after_gap - area_before_gap
-
-                        # If there's a large gap, stick close to the noise end (2 pixels above)
-                        # If the gap is small, we might be cutting into text, so be even more conservative
-                        if gap_size > 50:  # Large gap - safe to use noise_end + 2
-                            final_threshold = moderate_threshold
-                        else:  # Small gap - might be cutting into text, use just 1 pixel above noise
-                            final_threshold = area_before_gap + 1
-                    else:
-                        final_threshold = moderate_threshold
-
-                    # Ensure we're at least 1 pixel above the noise cluster
-                    final_threshold = max(final_threshold, area_before_gap + 1)
-
-                    # Cap at aggressive threshold as absolute upper bound (shouldn't be needed)
-                    final_threshold = min(final_threshold, aggressive_threshold)
-
-                    # Cap at 15 pixels as absolute upper bound
-                    final_threshold = min(final_threshold, 15)
-
-                    # print(
-                    #     f"Noise Removal: Using MODERATE threshold: {final_threshold:.1f} (noise ends at {area_before_gap}px, increment: {small_increment}px)"
-                    # )
-                    area_threshold = final_threshold
-                else:
-                    # print(
-                    #     f"Noise Removal: Gap found, but conservative threshold ({area_threshold:.1f}) is sufficient. Sticking with conservative."
-                    # )
-                    pass
-
-            # --- 4. Apply the final, determined threshold ---
-            # print(f"Noise Removal: Final area threshold: {area_threshold:.1f}")
-            for i in range(1, num_labels):
-                # Use >= to be inclusive of the threshold itself
-                if stats[i, cv2.CC_STAT_AREA] >= area_threshold:
-                    clean_binary[labels == i] = 255
+                for i in range(1, num_labels):
+                    if stats[i, cv2.CC_STAT_AREA] >= area_threshold:
+                        clean_binary[labels == i] = 255
         else:
-            # No components found, or only background
             clean_binary = binary
 
-        # Validate clean_binary before proceeding
-        if (
-            clean_binary is None
-            or not isinstance(clean_binary, np.ndarray)
-            or clean_binary.size == 0
-        ):
-            # print(
-            #     f"Error: clean_binary image is None or empty (image_name: {image_name})"
-            # )
-            return ({}, False)
-
-        # Calculate the horizontal projection profile on the cleaned image
+        # --- Vertical Cropping ---
         horizontal_projection = np.sum(clean_binary, axis=1)
-
-        # Find the top and bottom boundaries of the text
+        y_start = 0
         non_zero_rows = np.where(horizontal_projection > 0)[0]
         if len(non_zero_rows) > 0:
-            text_top = non_zero_rows[0]
-            text_bottom = non_zero_rows[-1]
-            text_height = text_bottom - text_top
-
-            # Define a percentage to trim off the top and bottom
-            # This is a tunable parameter. 15% is a good starting point.
-            trim_percentage = DEFAULT_TRIM_PERCENTAGE
-            trim_pixels = int(text_height * trim_percentage)
-
-            # Calculate new, tighter boundaries
-            y_start = text_top + trim_pixels
-            y_end = text_bottom - trim_pixels
-
-            # Ensure the crop is valid
-            if y_start < y_end:
-                # print(
-                #     f"Original text height: {text_height}px. Cropping to middle {100 - (2*trim_percentage*100):.0f}% region."
-                # )
-                # Slice the image to get the vertically cropped ROI
-                analysis_image = clean_binary[y_start:y_end, :]
-            else:
-                # If trimming would result in an empty image, use the full text region
-                analysis_image = clean_binary[text_top:text_bottom, :]
+            p_top = int(np.percentile(non_zero_rows, 5))
+            p_bottom = int(np.percentile(non_zero_rows, 95))
+            core_height = p_bottom - p_top
+            trim_pixels = int(core_height * 0.1)
+            y_start = max(0, p_top + trim_pixels)
+            y_end = min(clean_binary.shape[0], p_bottom - trim_pixels)
+            if y_end - y_start < 5:
+                y_start = p_top
+                y_end = p_bottom
+            analysis_image = clean_binary[y_start:y_end, :]
         else:
-            # If no text is found, use the original cleaned image
             analysis_image = clean_binary
 
-        # Validate analysis_image before proceeding
-        if (
-            analysis_image is None
-            or not isinstance(analysis_image, np.ndarray)
-            or analysis_image.size == 0
-        ):
-            # print(
-            #     f"Error: analysis_image is None or empty (image_name: {image_name})"
-            # )
-            return ({}, False)
-
-        # --- Step 3: Hierarchical Adaptive Search (using the new clean_binary) ---
-        # The rest of the pipeline is identical but now operates on a superior image.
-        words = line_data["text"][0].split()
-        target_word_count = len(words)
-
-        # print(f"Target word count: {target_word_count}")
-
-        # Save cropped image (optional, only if image_name is provided)
         if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
-            os.makedirs(self.output_folder, exist_ok=True)
-            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_clean_binary.png"
-            os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
+            output_path = f"{self.output_folder}/word_segmentation/{safe_image_name}_{safe_line_number}_{safe_shortened_line_text}_clean_binary.png"
             cv2.imwrite(output_path, analysis_image)
-            # print(f"\nSaved cropped image to '{output_path}'")
 
+        # --- Adaptive Search ---
         best_boxes = None
         successful_binary_image = None
 
-        # --- Step 3: Hierarchical Adaptive Search (using the CROPPED analysis_image) ---
-        words = line_data["text"][0].split()
-        target_word_count = len(words)
-        stage1_succeeded = False
+        if not force_fallback:
+            words = line_data["text"][0].split()
+            target = len(words)
+            backup_boxes_s1 = None
 
-        # print("--- Stage 1: Searching with adaptive valley threshold ---")
-        valley_factors_to_try = np.arange(INITIAL_VALLEY_THRESHOLD_FACTOR, 0.45, 0.05)
-        for v_factor in valley_factors_to_try:
-            # Pass the cropped image to the helper
-            unlabeled_boxes = self._get_boxes_from_profile(
-                analysis_image, avg_char_width_approx, min_space_factor, v_factor
-            )
-            # ... (The rest of the Stage 1 loop is the same)
-            if abs(target_word_count - len(unlabeled_boxes)) <= match_tolerance:
-                best_boxes = unlabeled_boxes
-                successful_binary_image = analysis_image
-                stage1_succeeded = True
-                break
-
-        if not stage1_succeeded:
-            # print(
-            #     "\n--- Stage 1 failed. Starting Stage 2: Searching with adaptive kernel ---"
-            # )
-            kernel_factors_to_try = np.arange(INITIAL_KERNEL_WIDTH_FACTOR, 0.5, 0.05)
-            fixed_valley_factor = MAIN_VALLEY_THRESHOLD_FACTOR
-            for k_factor in kernel_factors_to_try:
-                kernel_width = max(1, int(avg_char_width_approx * k_factor))
-                closing_kernel = np.ones((1, kernel_width), np.uint8)
-                # Apply closing on the original clean_binary, then crop it
-                closed_binary = cv2.morphologyEx(
-                    clean_binary, cv2.MORPH_CLOSE, closing_kernel
+            # STAGE 1
+            for v_factor in np.arange(INITIAL_VALLEY_THRESHOLD_FACTOR, 0.60, 0.02):
+                curr_boxes = self._get_boxes_from_profile(
+                    analysis_image, avg_char_width_approx, min_space_factor, v_factor
                 )
-                # Validate closed_binary before proceeding
-                if (
-                    closed_binary is None
-                    or not isinstance(closed_binary, np.ndarray)
-                    or closed_binary.size == 0
-                ):
-                    # print(
-                    #     f"Error: closed_binary in Stage 2 is None or empty (image_name: {image_name}, k_factor: {k_factor:.2f})"
-                    # )
-                    continue  # Skip this iteration and try next kernel factor
-
-                # We need to re-apply the same vertical crop to this new image
-                if len(non_zero_rows) > 0 and y_start < y_end:
-                    analysis_image = closed_binary[y_start:y_end, :]
-                else:
-                    analysis_image = closed_binary
-
-                # Validate analysis_image before using it
-                if (
-                    analysis_image is None
-                    or not isinstance(analysis_image, np.ndarray)
-                    or analysis_image.size == 0
-                ):
-                    # print(
-                    #     f"Error: analysis_image in Stage 2 is None or empty (image_name: {image_name}, k_factor: {k_factor:.2f})"
-                    # )
-                    continue  # Skip this iteration and try next kernel factor
-
-                unlabeled_boxes = self._get_boxes_from_profile(
-                    analysis_image,
-                    avg_char_width_approx,
-                    min_space_factor,
-                    fixed_valley_factor,
+                diff = abs(target - len(curr_boxes))
+                is_geom_valid = self._is_geometry_valid(
+                    curr_boxes, words, estimated_char_height
                 )
 
-                # print(
-                #     f"Testing kernel factor {k_factor:.2f} ({kernel_width}px): Found {len(unlabeled_boxes)} boxes."
-                # )
-                if abs(target_word_count - len(unlabeled_boxes)) <= match_tolerance:
-                    # print("SUCCESS (Stage 2): Found a match.")
-                    best_boxes = unlabeled_boxes
-                    successful_binary_image = (
-                        closed_binary  # For Stage 2, the source is the closed_binary
+                if diff == 0:
+                    if is_geom_valid:
+                        best_boxes = curr_boxes
+                        successful_binary_image = analysis_image
+                        break
+                    else:
+                        if backup_boxes_s1 is None:
+                            backup_boxes_s1 = curr_boxes
+                if diff == 1 and backup_boxes_s1 is None and is_geom_valid:
+                    backup_boxes_s1 = curr_boxes
+
+            # STAGE 2 (if needed)
+            if best_boxes is None:
+                backup_boxes_s2 = None
+                for k_factor in np.arange(INITIAL_KERNEL_WIDTH_FACTOR, 0.5, 0.02):
+                    k_w = max(1, int(avg_char_width_approx * k_factor))
+                    s2_bin = cv2.morphologyEx(
+                        clean_binary, cv2.MORPH_CLOSE, np.ones((1, k_w), np.uint8)
                     )
-                    break
+                    s2_img = (
+                        s2_bin[y_start:y_end, :] if len(non_zero_rows) > 0 else s2_bin
+                    )
+
+                    if s2_img is None or s2_img.size == 0:
+                        continue
+
+                    curr_boxes = self._get_boxes_from_profile(
+                        s2_img,
+                        avg_char_width_approx,
+                        min_space_factor,
+                        MAIN_VALLEY_THRESHOLD_FACTOR,
+                    )
+                    diff = abs(target - len(curr_boxes))
+                    is_geom_valid = self._is_geometry_valid(
+                        curr_boxes, words, estimated_char_height
+                    )
+
+                    if diff == 0 and is_geom_valid:
+                        best_boxes = curr_boxes
+                        successful_binary_image = s2_bin
+                        break
+
+                    if diff == 1 and backup_boxes_s2 is None and is_geom_valid:
+                        backup_boxes_s2 = curr_boxes
+
+                if best_boxes is None:
+                    if backup_boxes_s1 is not None:
+                        best_boxes = backup_boxes_s1
+                        successful_binary_image = analysis_image
+                    elif backup_boxes_s2 is not None:
+                        best_boxes = backup_boxes_s2
+                        successful_binary_image = clean_binary
 
         final_output = None
         used_fallback = False
 
         if best_boxes is None:
-            # print("\nWarning: All adaptive searches failed. Falling back.")
-            fallback_segmenter = HybridWordSegmenter()
+            # --- FALLBACK WITH ROTATED DATA ---
             used_fallback = True
-            final_output = fallback_segmenter.refine_words_bidirectional(
-                line_data, deskewed_line_image
+            # [FIX] Use local_line_data (rotated dims) instead of line_data (original dims)
+            final_output = self.fallback_segmenter.refine_words_bidirectional(
+                local_line_data, deskewed_line_image
             )
-
         else:
-            # --- CCA Refinement using the determined successful_binary_image ---
+            # --- CCA Refinement ---
             unlabeled_boxes = best_boxes
-            cca_source_image = successful_binary_image
-
-            if (
-                successful_binary_image is analysis_image
-            ):  # This comparison might not work as intended
-                # A safer way is to check if Stage 1 succeeded
-                if any(
-                    v_factor in locals()
-                    and abs(
-                        target_word_count
-                        - len(
-                            self._get_boxes_from_profile(
-                                analysis_image,
-                                avg_char_width_approx,
-                                min_space_factor,
-                                v_factor,
-                            )
-                        )
-                    )
-                    <= match_tolerance
-                    for v_factor in np.arange(
-                        INITIAL_VALLEY_THRESHOLD_FACTOR, 0.45, 0.05
-                    )
-                ):
-                    cca_source_image = clean_binary
-                else:  # Stage 2 must have succeeded
-                    # Recreate the successful closed_binary for CCA
-                    successful_k_factor = locals().get("k_factor")
-                    if successful_k_factor is not None:
-                        kernel_width = max(
-                            1, int(avg_char_width_approx * successful_k_factor)
-                        )
-                        closing_kernel = np.ones((1, kernel_width), np.uint8)
-                        cca_source_image = cv2.morphologyEx(
-                            clean_binary, cv2.MORPH_CLOSE, closing_kernel
-                        )
-                    else:
-                        cca_source_image = clean_binary  # Fallback
+            if successful_binary_image is analysis_image:
+                cca_source_image = clean_binary
             else:
                 cca_source_image = successful_binary_image
 
-            # --- Proceed with CCA Refinement ---
-            unlabeled_boxes = best_boxes
             num_labels, _, stats, _ = cv2.connectedComponentsWithStats(
                 cca_source_image, 8, cv2.CV_32S
             )
+            cca_img_h, cca_img_w = cca_source_image.shape[:2]
 
-            refined_boxes_list = []
-            num_to_process = min(len(words), len(unlabeled_boxes))
-            for i in range(num_to_process):
-                word_label = words[i]
-                box_x, _, box_w, _ = unlabeled_boxes[i]
-                box_r = box_x + box_w  # Box right edge
+            component_assignments = {}
+            num_proc = min(len(words), len(unlabeled_boxes))
+            min_valid_component_area = estimated_char_height * 2
 
-                components_in_box = []
-                for j in range(1, num_labels):  # Skip background
-                    comp_x = stats[j, cv2.CC_STAT_LEFT]
-                    comp_w = stats[j, cv2.CC_STAT_WIDTH]
-                    comp_r = comp_x + comp_w  # Component right edge
+            for j in range(1, num_labels):
+                comp_x = stats[j, cv2.CC_STAT_LEFT]
+                comp_w = stats[j, cv2.CC_STAT_WIDTH]
+                comp_area = stats[j, cv2.CC_STAT_AREA]
+                comp_r = comp_x + comp_w
+                comp_center_x = comp_x + comp_w / 2
+                comp_y = stats[j, cv2.CC_STAT_TOP]
+                comp_h = stats[j, cv2.CC_STAT_HEIGHT]
+                comp_center_y = comp_y + comp_h / 2
 
-                    # --- THE CRITICAL FIX: Check for OVERLAP, not strict containment ---
-                    # Old logic: if box_x <= comp_x < box_r:
-                    # New logic:
-                    if comp_x < box_r and box_x < comp_r:
-                        components_in_box.append(stats[j])
-
-                if not components_in_box:
+                if comp_center_y < cca_img_h * 0.1 or comp_center_y > cca_img_h * 0.9:
+                    continue
+                if comp_area < min_valid_component_area:
                     continue
 
-                # The rest of the CCA union logic is unchanged
-                min_x = min(c[cv2.CC_STAT_LEFT] for c in components_in_box)
-                min_y = min(c[cv2.CC_STAT_TOP] for c in components_in_box)
-                max_r = max(
-                    c[cv2.CC_STAT_LEFT] + c[cv2.CC_STAT_WIDTH]
-                    for c in components_in_box
-                )
-                max_b = max(
-                    c[cv2.CC_STAT_TOP] + c[cv2.CC_STAT_HEIGHT]
-                    for c in components_in_box
-                )
+                best_box_idx = None
+                max_overlap = 0
+                best_center_distance = float("inf")
+                component_center_in_box = False
 
-                refined_boxes_list.append(
-                    {
-                        "text": word_label,
-                        "left": min_x,
-                        "top": min_y,
-                        "width": max_r - min_x,
-                        "height": max_b - min_y,
-                        "conf": line_data["conf"][0],
+                num_to_process = min(len(words), len(unlabeled_boxes))
+
+                # Assign components to boxes...
+                for i in range(
+                    num_to_process
+                ):  # Note: ensure num_to_process is defined
+                    box_x, box_y, box_w, box_h = unlabeled_boxes[i]
+                    box_r = box_x + box_w
+                    box_center_x = box_x + box_w / 2
+
+                    if comp_w > box_w * 1.5:
+                        continue
+
+                    if comp_x < box_r and box_x < comp_r:
+                        overlap_start = max(comp_x, box_x)
+                        overlap_end = min(comp_r, box_r)
+                        overlap = overlap_end - overlap_start
+
+                        if overlap > 0:
+                            center_in_box = box_x <= comp_center_x < box_r
+                            center_distance = abs(comp_center_x - box_center_x)
+
+                            if center_in_box:
+                                if not component_center_in_box or overlap > max_overlap:
+                                    component_center_in_box = True
+                                    best_center_distance = center_distance
+                                    max_overlap = overlap
+                                    best_box_idx = i
+                            elif not component_center_in_box:
+                                if center_distance < best_center_distance or (
+                                    center_distance == best_center_distance
+                                    and overlap > max_overlap
+                                ):
+                                    best_center_distance = center_distance
+                                    max_overlap = overlap
+                                    best_box_idx = i
+
+                if best_box_idx is not None:
+                    component_assignments[j] = best_box_idx
+
+            refined_boxes_list = []
+            for i in range(num_proc):
+                word_label = words[i]
+                components_in_box = [
+                    stats[j] for j, b in component_assignments.items() if b == i
+                ]
+
+                use_original_box = False
+                if not components_in_box:
+                    use_original_box = True
+                else:
+                    min_x = min(c[cv2.CC_STAT_LEFT] for c in components_in_box)
+                    min_y = min(c[cv2.CC_STAT_TOP] for c in components_in_box)
+                    max_r = max(
+                        c[cv2.CC_STAT_LEFT] + c[cv2.CC_STAT_WIDTH]
+                        for c in components_in_box
+                    )
+                    max_b = max(
+                        c[cv2.CC_STAT_TOP] + c[cv2.CC_STAT_HEIGHT]
+                        for c in components_in_box
+                    )
+                    cca_h = max(1, max_b - min_y)
+                    if cca_h < (estimated_char_height * 0.35):
+                        use_original_box = True
+
+                if use_original_box:
+                    box_x, box_y, box_w, box_h = unlabeled_boxes[i]
+                    adjusted_box_y = y_start + box_y
+                    refined_boxes_list.append(
+                        {
+                            "text": word_label,
+                            "left": box_x,
+                            "top": adjusted_box_y,
+                            "width": box_w,
+                            "height": box_h,
+                            "conf": line_data["conf"][0],
+                        }
+                    )
+                else:
+                    refined_boxes_list.append(
+                        {
+                            "text": word_label,
+                            "left": min_x,
+                            "top": min_y,
+                            "width": max(1, max_r - min_x),
+                            "height": cca_h,
+                            "conf": line_data["conf"][0],
+                        }
+                    )
+
+            # Check validity
+            cca_check_list = [
+                (b["left"], b["top"], b["width"], b["height"])
+                for b in refined_boxes_list
+            ]
+            if not self._is_geometry_valid(
+                cca_check_list, words, estimated_char_height
+            ):
+                if abs(len(refined_boxes_list) - len(words)) > 1:
+                    best_boxes = None  # Trigger fallback
+                else:
+                    final_output = {
+                        k: []
+                        for k in ["text", "left", "top", "width", "height", "conf"]
                     }
-                )
+                    for box in refined_boxes_list:
+                        for key in final_output.keys():
+                            final_output[key].append(box[key])
+            else:
+                final_output = {
+                    k: [] for k in ["text", "left", "top", "width", "height", "conf"]
+                }
+                for box in refined_boxes_list:
+                    for key in final_output.keys():
+                        final_output[key].append(box[key])
 
-            # Convert to dict format
-            final_output = {
-                k: [] for k in ["text", "left", "top", "width", "height", "conf"]
-            }
-            for box in refined_boxes_list:
-                for key in final_output.keys():
-                    final_output[key].append(box[key])
+        # --- REPEAT FALLBACK IF VALIDATION FAILED ---
+        if best_boxes is None and not used_fallback:
+            used_fallback = True
+            # [FIX] Use local_line_data here too
+            final_output = self.fallback_segmenter.refine_words_bidirectional(
+                local_line_data, deskewed_line_image
+            )
 
-        # --- TRANSFORM COORDINATES BACK ---
-
-        # Get the inverse transformation matrix
+        # ========================================================================
+        # COORDINATE TRANSFORMATION (Map back to Original)
+        # ========================================================================
         M_inv = cv2.invertAffineTransform(M)
-
-        # Create a new list for the re-mapped boxes
         remapped_boxes_list = []
-
-        # Iterate through the boxes found on the deskewed image
         for i in range(len(final_output["text"])):
-            # Get the box coordinates from the deskewed image
             left, top = final_output["left"][i], final_output["top"][i]
             width, height = final_output["width"][i], final_output["height"][i]
 
-            # Define the 4 corners of this box
-            # Use float for accurate transformation
+            # Map the 4 corners
             corners = np.array(
                 [
                     [left, top],
@@ -859,74 +918,129 @@ class AdaptiveSegmenter:
                 ],
                 dtype="float32",
             )
-
-            # Add a '1' to each coordinate for the 2x3 affine matrix
-            # shape (4, 1, 2)
             corners_expanded = np.expand_dims(corners, axis=1)
-
-            # Apply the inverse transformation
-            # shape (4, 1, 2)
             original_corners = cv2.transform(corners_expanded, M_inv)
-
-            # Find the new axis-aligned bounding box in the original image
-            # original_corners is now [[ [x1,y1] ], [ [x2,y2] ], ...]
-            # We need to squeeze it to get [ [x1,y1], [x2,y2], ...]
             squeezed_corners = original_corners.squeeze(axis=1)
 
-            # Find the min/max x and y
+            # Get axis aligned bounding box in original space
             min_x = int(np.min(squeezed_corners[:, 0]))
             max_x = int(np.max(squeezed_corners[:, 0]))
             min_y = int(np.min(squeezed_corners[:, 1]))
             max_y = int(np.max(squeezed_corners[:, 1]))
 
-            # Create the re-mapped box
-            remapped_box = {
-                "text": final_output["text"][i],
-                "left": min_x,
-                "top": min_y,
-                "width": max_x - min_x,
-                "height": max_y - min_y,
-                "conf": final_output["conf"][i],
-            }
-            remapped_boxes_list.append(remapped_box)
+            remapped_boxes_list.append(
+                {
+                    "text": final_output["text"][i],
+                    "left": min_x,
+                    "top": min_y,
+                    "width": max_x - min_x,
+                    "height": max_y - min_y,
+                    "conf": final_output["conf"][i],
+                }
+            )
 
-        # Convert the remapped list back to the dictionary format
         remapped_output = {k: [] for k in final_output.keys()}
         for box in remapped_boxes_list:
             for key in remapped_output.keys():
                 remapped_output[key].append(box[key])
 
-        # Visualisation
+        img_h, img_w = line_image.shape[:2]
+        remapped_output = self._enforce_logical_constraints(
+            remapped_output, img_w, img_h
+        )
+
+        # ========================================================================
+        # FINAL SAFETY NET
+        # ========================================================================
+        words = line_data["text"][0].split()
+        target_count = len(words)
+        current_count = len(remapped_output["text"])
+        has_collapsed_boxes = any(w < 3 for w in remapped_output["width"])
+
+        if current_count > 0:
+            total_text_len = sum(len(t) for t in remapped_output["text"])
+            total_box_width = sum(remapped_output["width"])
+            avg_width_pixels = total_box_width / max(1, total_text_len)
+        else:
+            avg_width_pixels = 0
+        is_suspiciously_thin = avg_width_pixels < 4
+
+        if current_count != target_count or is_suspiciously_thin or has_collapsed_boxes:
+            used_fallback = True
+
+            # [FIX] Do NOT use original line_image/line_data here.
+            # Use the local_line_data + deskewed_line_image pipeline,
+            # then transform back using M_inv (same as above).
+
+            # 1. Run fallback on rotated data
+            temp_local_output = self.fallback_segmenter.refine_words_bidirectional(
+                local_line_data, deskewed_line_image
+            )
+
+            # 2. If bidirectional failed to split correctly, use purely mathematical split on rotated data
+            if len(temp_local_output["text"]) != target_count:
+                h, w = deskewed_line_image.shape[:2]
+                temp_local_output = self.fallback_segmenter.convert_line_to_word_level(
+                    local_line_data, w, h
+                )
+
+            # 3. Transform the result back to original coordinates (M_inv)
+            # (Repeating the transformation logic for the safety net result)
+            remapped_boxes_list = []
+            for i in range(len(temp_local_output["text"])):
+                left, top = temp_local_output["left"][i], temp_local_output["top"][i]
+                width, height = (
+                    temp_local_output["width"][i],
+                    temp_local_output["height"][i],
+                )
+
+                corners = np.array(
+                    [
+                        [left, top],
+                        [left + width, top],
+                        [left + width, top + height],
+                        [left, top + height],
+                    ],
+                    dtype="float32",
+                )
+                corners_expanded = np.expand_dims(corners, axis=1)
+                original_corners = cv2.transform(corners_expanded, M_inv)
+                squeezed_corners = original_corners.squeeze(axis=1)
+
+                min_x = int(np.min(squeezed_corners[:, 0]))
+                max_x = int(np.max(squeezed_corners[:, 0]))
+                min_y = int(np.min(squeezed_corners[:, 1]))
+                max_y = int(np.max(squeezed_corners[:, 1]))
+
+                remapped_boxes_list.append(
+                    {
+                        "text": temp_local_output["text"][i],
+                        "left": min_x,
+                        "top": min_y,
+                        "width": max_x - min_x,
+                        "height": max_y - min_y,
+                        "conf": temp_local_output["conf"][i],
+                    }
+                )
+
+            remapped_output = {k: [] for k in temp_local_output.keys()}
+            for box in remapped_boxes_list:
+                for key in remapped_output.keys():
+                    remapped_output[key].append(box[key])
+
         if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
-            output_path = f"{self.output_folder}/word_segmentation/{image_name}_{shortened_line_text}_final_boxes.png"
+            output_path = f"{self.output_folder}/word_segmentation/{safe_image_name}_{safe_shortened_line_text}_final_boxes.png"
             os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
             output_image_vis = line_image.copy()
-            # Validate output_image_vis before saving
-            if (
-                output_image_vis is None
-                or not isinstance(output_image_vis, np.ndarray)
-                or output_image_vis.size == 0
-            ):
-                pass
-                # print(
-                #     f"Error: output_image_vis is None or empty (image_name: {image_name})"
-                # )
-            else:
-                # print(f"\nFinal refined {len(remapped_output['text'])} words:")
-                for i in range(len(remapped_output["text"])):
-                    word = remapped_output["text"][i]
-                    x, y, w, h = (
-                        int(remapped_output["left"][i]),
-                        int(remapped_output["top"][i]),
-                        int(remapped_output["width"][i]),
-                        int(remapped_output["height"][i]),
-                    )
-                    # print(f"- '{word}' at ({x}, {y}, {w}, {h})")
-                    cv2.rectangle(
-                        output_image_vis, (x, y), (x + w, y + h), (0, 255, 0), 2
-                    )
-                cv2.imwrite(output_path, output_image_vis)
-                # print(f"\nSaved visualisation to '{output_path}'")
+            for i in range(len(remapped_output["text"])):
+                x, y, w, h = (
+                    int(remapped_output["left"][i]),
+                    int(remapped_output["top"][i]),
+                    int(remapped_output["width"][i]),
+                    int(remapped_output["height"][i]),
+                )
+                cv2.rectangle(output_image_vis, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.imwrite(output_path, output_image_vis)
 
         return remapped_output, used_fallback
 
@@ -939,13 +1053,13 @@ class HybridWordSegmenter:
        over-correction.
     """
 
-    def _convert_line_to_word_level_improved(
+    def convert_line_to_word_level(
         self, line_data: Dict[str, List], image_width: int, image_height: int
     ) -> Dict[str, List]:
         """
         Step 1: Converts line-level OCR results to word-level by using a
         robust proportional estimation method.
-        (This function is unchanged from the previous version)
+        Guarantees output box count equals input word count.
         """
         output = {
             "text": list(),
@@ -987,18 +1101,30 @@ class HybridWordSegmenter:
             avg_char_width = line_width / (num_chars if num_chars > 0 else 1)
             estimated_space_width = avg_char_width
 
+        # [SAFETY CHECK] Ensure we never estimate a character width of ~0
+        avg_char_width = max(3.0, avg_char_width)
+        min_word_width = max(5.0, avg_char_width * 0.5)
+
         current_left = line_left
         for word in words:
-            word_width = len(word) * avg_char_width
+            raw_word_width = len(word) * avg_char_width
+
+            # Force the box to have a legible size
+            word_width = max(min_word_width, raw_word_width)
+
             clamped_left = max(0, min(current_left, image_width))
-            clamped_width = max(0, min(word_width, image_width - clamped_left))
+            # We do NOT clamp the width against image_width here because that
+            # causes the "0 width" bug if current_left is at the edge.
+            # It is better to have a box go off-screen than be 0-width.
+
             output["text"].append(word)
             output["left"].append(clamped_left)
             output["top"].append(line_top)
-            output["width"].append(clamped_width)
+            output["width"].append(word_width)
             output["height"].append(line_height)
             output["conf"].append(line_conf)
             current_left += word_width + estimated_space_width
+
         return output
 
     def _run_single_pass(
@@ -1009,7 +1135,11 @@ class HybridWordSegmenter:
         img_w: int,
         direction: str = "ltr",
     ) -> List[Dict]:
-        """Helper function to run one pass of refinement (either LTR or RTL)."""
+        """
+        Helper function to run one pass of refinement.
+        IMPROVED: Uses local minima detection for cursive script where
+        perfect zero-gaps (white space) might not exist.
+        """
 
         refined_boxes = [box.copy() for box in initial_boxes]
 
@@ -1030,30 +1160,71 @@ class HybridWordSegmenter:
 
             new_left, new_right = left, right
 
-            # Bounded Scan (logic is the same for both directions)
-            if right < img_w and vertical_projection[right] > 0:
-                scan_limit = min(img_w, right + max_scan_distance)
-                for x in range(right + 1, scan_limit):
-                    if vertical_projection[x] == 0:
-                        new_right = x
-                        break
+            # --- Boundary search with improved gap detection ---
+            # Priority 1: True gap (zero projection)
+            # Priority 2: Valley with lowest ink density (thinnest connection)
 
-            if left > 0 and vertical_projection[left] > 0:
-                scan_limit = max(0, left - max_scan_distance)
-                for x in range(left - 1, scan_limit, -1):
-                    if vertical_projection[x] == 0:
-                        new_left = x
-                        break
+            if direction == "ltr" or direction == "both":  # Scan right logic
+                if right < img_w:
+                    scan_limit = min(img_w, right + max_scan_distance)
+                    search_range = range(right, scan_limit)
 
-            # Directional De-overlapping
+                    best_x = right
+                    min_density = float("inf")
+                    found_zero = False
+
+                    # Look for the best cut in the window
+                    for x in search_range:
+                        density = vertical_projection[x]
+                        if density == 0:
+                            new_right = x
+                            found_zero = True
+                            break
+                        if density < min_density:
+                            min_density = density
+                            best_x = x
+
+                    if not found_zero:
+                        # No clear gap found, cut at thinnest point (minimum density)
+                        new_right = best_x
+
+            if direction == "rtl" or direction == "both":  # Scan left logic
+                if left > 0:
+                    scan_limit = max(0, left - max_scan_distance)
+                    search_range = range(left, scan_limit, -1)
+
+                    best_x = left
+                    min_density = float("inf")
+                    found_zero = False
+
+                    for x in search_range:
+                        density = vertical_projection[x]
+                        if density == 0:
+                            new_left = x
+                            found_zero = True
+                            break
+                        if density < min_density:
+                            min_density = density
+                            best_x = x
+
+                    if not found_zero:
+                        new_left = best_x
+
+            # --- Directional de-overlapping (strict stitching) ---
             if direction == "ltr":
                 if new_left < last_corrected_right_edge:
                     new_left = last_corrected_right_edge
-                last_corrected_right_edge = max(last_corrected_right_edge, new_right)
+                # Ensure valid width
+                if new_right <= new_left:
+                    new_right = new_left + 1
+                last_corrected_right_edge = new_right
             else:  # rtl
                 if new_right > next_corrected_left_edge:
                     new_right = next_corrected_left_edge
-                next_corrected_left_edge = min(next_corrected_left_edge, new_left)
+                # Ensure valid width
+                if new_left >= new_right:
+                    new_left = new_right - 1
+                next_corrected_left_edge = new_left
 
             box["left"] = new_left
             box["width"] = max(1, new_right - new_left)
@@ -1067,6 +1238,7 @@ class HybridWordSegmenter:
     ) -> Dict[str, List]:
         """
         Refines boxes using a more robust bidirectional scan and averaging.
+        Includes ADAPTIVE NOISE REMOVAL to filter specks based on font size.
         """
         if line_image is None:
             return line_data
@@ -1076,15 +1248,79 @@ class HybridWordSegmenter:
             words = line_data["text"][0].split()
             if len(words) <= 1:
                 img_h, img_w = line_image.shape[:2]
-                return self._convert_line_to_word_level_improved(
-                    line_data, img_w, img_h
+                return self.convert_line_to_word_level(line_data, img_w, img_h)
+
+        # --- PRE-PROCESSING: Stricter Binarization ---
+        gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
+
+        # 1. Calculate standard Otsu threshold first
+        otsu_thresh_val, _ = cv2.threshold(
+            gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
+
+        # 2. Apply "Strictness Factor" to remove dark noise
+        # 0.75 means "Only keep pixels that are in the darkest 75% of what Otsu thought was foreground"
+        # This effectively filters out light-gray noise shadows.
+        strict_thresh_val = otsu_thresh_val * 0.75
+        _, binary = cv2.threshold(gray, strict_thresh_val, 255, cv2.THRESH_BINARY_INV)
+
+        img_h, img_w = binary.shape
+
+        # [NEW STEP 1] Morphological Opening
+        # Physically erodes small protrusions and dust (2x2 pixels or smaller)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        binary_clean = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+
+        # [NEW STEP 2] Adaptive Component Filtering
+        # Instead of hardcoded pixels, we filter relative to the line's text size.
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            binary_clean, 8, cv2.CV_32S
+        )
+
+        # Get heights of all components (excluding background)
+        heights = stats[1:, cv2.CC_STAT_HEIGHT]
+
+        if len(heights) > 0:
+            # Calculate Median Height of "significant" parts (ignore tiny noise for the median calculation)
+            # We assume valid text is at least 20% of the image height
+            significant_heights = heights[heights > img_h * 0.2]
+            if len(significant_heights) > 0:
+                median_h = np.median(significant_heights)
+            else:
+                median_h = np.median(heights)
+
+            # Define Thresholds based on Text Size
+            # 1. Main Threshold: Keep parts taller than 30% of median letter height
+            min_height_thresh = median_h * 0.30
+
+            clean_binary = np.zeros_like(binary)
+            for i in range(1, num_labels):
+                h = stats[i, cv2.CC_STAT_HEIGHT]
+                w = stats[i, cv2.CC_STAT_WIDTH]
+                area = stats[i, cv2.CC_STAT_AREA]
+
+                # Logic: Keep the component IF:
+                # A. It is tall enough to be a letter part (h > threshold)
+                # B. OR it is a "Dot" (Period / i-dot):
+                #    - Height is small (< threshold)
+                #    - Width is ALSO small (roughly square, prevents flat dash/scratch noise)
+                #    - Area is reasonable (> 2px)
+
+                is_tall_enough = h > min_height_thresh
+                is_dot = (
+                    (h <= min_height_thresh) and (w <= min_height_thresh) and (area > 2)
                 )
 
-        gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        img_h, img_w = binary.shape
-        vertical_projection = np.sum(binary, axis=0)
+                if is_tall_enough or is_dot:
+                    clean_binary[labels == i] = 255
 
+            # Use the adaptively cleaned image for projection
+            vertical_projection = np.sum(clean_binary, axis=0)
+        else:
+            # Fallback if no components found (unlikely)
+            vertical_projection = np.sum(binary, axis=0)
+
+        # --- Rest of logic remains the same ---
         char_blobs = []
         in_blob = False
         blob_start = 0
@@ -1099,14 +1335,23 @@ class HybridWordSegmenter:
             char_blobs.append((blob_start, img_w))
 
         if not char_blobs:
-            return self._convert_line_to_word_level_improved(line_data, img_w, img_h)
+            return self.convert_line_to_word_level(line_data, img_w, img_h)
 
-        avg_char_width = np.mean([end - start for start, end in char_blobs])
-        max_scan_distance = int(avg_char_width * 1.5)
+        # [PREVIOUS FIX] Bounded Scan Distance
+        total_chars = len("".join(words))
+        if total_chars > 0:
+            geom_avg_char_width = img_w / total_chars
+        else:
+            geom_avg_char_width = 10
 
-        estimated_data = self._convert_line_to_word_level_improved(
-            line_data, img_w, img_h
-        )
+        blob_avg_char_width = np.mean([end - start for start, end in char_blobs])
+        safe_avg_char_width = min(blob_avg_char_width, geom_avg_char_width * 1.5)
+        max_scan_distance = int(safe_avg_char_width * 2.0)
+
+        # [PREVIOUS FIX] Safety Floor
+        min_safe_box_width = max(4, int(safe_avg_char_width * 0.5))
+
+        estimated_data = self.convert_line_to_word_level(line_data, img_w, img_h)
         if not estimated_data["text"]:
             return estimated_data
 
@@ -1123,7 +1368,7 @@ class HybridWordSegmenter:
                 }
             )
 
-        # 1. & 2. Perform both passes
+        # --- STEP 1 & 2: Perform bidirectional refinement passes ---
         ltr_boxes = self._run_single_pass(
             initial_boxes, vertical_projection, max_scan_distance, img_w, "ltr"
         )
@@ -1131,42 +1376,32 @@ class HybridWordSegmenter:
             initial_boxes, vertical_projection, max_scan_distance, img_w, "rtl"
         )
 
-        # 3. Combine the results by taking the best edge from each pass
+        # --- STEP 3: Combine results using best edge from each pass ---
         combined_boxes = [box.copy() for box in initial_boxes]
         for i in range(len(combined_boxes)):
-
-            # Get the "expert" left boundary from the LTR pass
             final_left = ltr_boxes[i]["left"]
-
-            # Get the "expert" right boundary from the RTL pass
             rtl_right = rtl_boxes[i]["left"] + rtl_boxes[i]["width"]
 
             combined_boxes[i]["left"] = final_left
-            combined_boxes[i]["width"] = max(1, rtl_right - final_left)
+            combined_boxes[i]["width"] = max(min_safe_box_width, rtl_right - final_left)
 
-        # 4. Final De-overlap Pass
-        last_corrected_right_edge = 0
-        for i, box in enumerate(combined_boxes):
-            if box["left"] < last_corrected_right_edge:
-                box["width"] = max(
-                    1, box["width"] - (last_corrected_right_edge - box["left"])
+        # --- STEP 4: Contiguous stitching to eliminate gaps ---
+        for i in range(len(combined_boxes) - 1):
+            if combined_boxes[i + 1]["left"] <= combined_boxes[i]["left"]:
+                combined_boxes[i + 1]["left"] = (
+                    combined_boxes[i]["left"] + min_safe_box_width
                 )
-                box["left"] = last_corrected_right_edge
 
-            if box["width"] < 1:
-                # Handle edge case where a box is completely eliminated
-                if i < len(combined_boxes) - 1:
-                    next_left = combined_boxes[i + 1]["left"]
-                    box["width"] = max(1, next_left - box["left"])
-                else:
-                    box["width"] = 1
+        for i in range(len(combined_boxes) - 1):
+            curr = combined_boxes[i]
+            nxt = combined_boxes[i + 1]
+            gap_width = nxt["left"] - curr["left"]
+            curr["width"] = max(min_safe_box_width, gap_width)
 
-            last_corrected_right_edge = box["left"] + box["width"]
-
-        # Convert back to Tesseract-style output dict
+        # Convert back to output dict
         final_output = {k: [] for k in estimated_data.keys()}
         for box in combined_boxes:
-            if box["width"] > 0:  # Ensure we don't add zero-width boxes
+            if box["width"] >= min_safe_box_width:
                 for key in final_output.keys():
                     final_output[key].append(box[key])
 

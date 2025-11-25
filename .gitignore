@@ -38,3 +38,4 @@ test/tmp/*
 test/usage/*
 .ruff_cache/*
 model_cache/*
+sanitized_file/*
