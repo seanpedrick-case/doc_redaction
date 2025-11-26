@@ -831,6 +831,12 @@ SHOW_INFERENCE_SERVER_OPTIONS=True
 INFERENCE_SERVER_API_URL=http://localhost:7862
 ```
 
+### Identifying people and signatures with VLMs
+
+If VLM or inference server options are enabled, you can also use the VLM to identify photos of people's faces and signatures in the document, and redact them accordingly.
+
+On the 'Redaction Settings' tab, select the CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people's faces and signatures in the document, and redact them accordingly if a redaction option is selected.
+
 ## Command Line Interface (CLI)
 
 The app includes a comprehensive command-line interface (`cli_redact.py`) that allows you to perform redaction, deduplication, and AWS Textract operations directly from the terminal. This is particularly useful for batch processing, automation, and integration with other systems.

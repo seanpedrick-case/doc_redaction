@@ -58,6 +58,8 @@ from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.run_vlm import (
     extract_text_from_image_vlm,
+    full_page_ocr_people_vlm_prompt,
+    full_page_ocr_signature_vlm_prompt,
     full_page_ocr_vlm_prompt,
     model_default_do_sample,
     model_default_max_new_tokens,
@@ -1418,6 +1420,9 @@ def _vlm_page_ocr_predict(
     image_name: str = "vlm_page_ocr_input_image.png",
     normalised_coords_range: Optional[int] = 999,
     output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
 ) -> Dict[str, List]:
     """
     VLM page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -1433,6 +1438,7 @@ def _vlm_page_ocr_predict(
         matching the format expected by perform_ocr
     """
     try:
+
         # Validate image exists and is not None
         if image is None:
             print("VLM page OCR error: Image is None")
@@ -1566,7 +1572,14 @@ def _vlm_page_ocr_predict(
                 print(f"Warning: Could not save VLM input image: {save_error}")
 
         # Create prompt that requests structured JSON output with bounding boxes
-        prompt = full_page_ocr_vlm_prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+        else:
+            prompt = full_page_ocr_vlm_prompt
 
         # Use the VLM to extract structured text
         # Pass explicit model_default_* values for consistency with _inference_server_page_ocr_predict
@@ -1881,6 +1894,9 @@ def _inference_server_page_ocr_predict(
     image_name: str = "inference_server_page_ocr_input_image.png",
     normalised_coords_range: Optional[int] = 999,
     output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
 ) -> Dict[str, List]:
     """
     Inference-server page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -2038,7 +2054,14 @@ def _inference_server_page_ocr_predict(
                 print(f"Warning: Could not save VLM input image: {save_error}")
 
         # Create prompt that requests structured JSON output with bounding boxes
-        prompt = full_page_ocr_vlm_prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+        else:
+            prompt = full_page_ocr_vlm_prompt
 
         # Use the inference-server API to extract structured text
         # Note: processed_width and processed_height were already captured on line 1921

@@ -451,7 +451,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     else:
         raise ValueError(
-            f"Invalid model selected: {SELECTED_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, PaddleOCR-VL"
+            f"Invalid model selected: {SELECTED_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, PaddleOCR-VL"
         )
 
     # Override model defaults with user-provided config values if they are set
@@ -715,16 +715,31 @@ Rules:
 
 # Only return valid JSON, no additional text or explanation."""
 
-full_page_ocr_people_vlm_prompt = """Spot all images of people in the image, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
+full_page_ocr_people_vlm_prompt = """Spot all photos of people's faces in the image, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
 
 Always return the JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
 
 Rules:
-- Each image of a person must be a separate entry.
-- Do NOT combine multiple images into a single entry.
-- Each image of a person that appears in the image should be a separate entry.
+- Each photo of a person's face must be a separate entry.
+- Do NOT combine multiple photos into a single entry.
+- Each photo of a person's face that appears in the image should be a separate entry.
 - 'text' should always be exactly '[PERSON]'.
 - Do NOT include any other text or information in the JSON.
+- If there are no photos of people's faces in the image, return an empty JSON array.
+
+# Only return valid JSON, no additional text or explanation."""
+
+full_page_ocr_signature_vlm_prompt = """Spot all signatures in the image, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[SIGNATURE]'}, ...].
+
+Always return the JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[SIGNATURE]'}, ...].
+
+Rules:
+- Each signature must be a separate entry.
+- Do NOT combine multiple signatures into a single entry.
+- Each signature that appears in the image should be a separate entry.
+- 'text' should always be exactly '[SIGNATURE]'.
+- Do NOT include any other text or information in the JSON.
+- If there are no signatures in the image, return an empty JSON array.
 
 # Only return valid JSON, no additional text or explanation."""
 
