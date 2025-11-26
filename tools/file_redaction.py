@@ -74,6 +74,8 @@ from tools.custom_image_analyser_engine import (
     CustomImageAnalyzerEngine,
     CustomImageRecognizerResult,
     OCRResult,
+    _inference_server_page_ocr_predict,
+    _vlm_page_ocr_predict,
     combine_ocr_results,
     recreate_page_line_level_ocr_results_with_page,
     run_page_text_redaction,
@@ -2932,6 +2934,40 @@ def merge_img_bboxes(
             # print("Extracting signatures in merge_img_bboxes function")
             merged_bboxes.extend(copy.deepcopy(page_signature_recogniser_results))
 
+    # Add VLM [PERSON] and [SIGNATURE] detections from combined_results, if present
+    try:
+        for line_info in combined_results.values():
+            words = line_info.get("words", [])
+            for word in words:
+                text_val = word.get("text")
+                if text_val not in ["[PERSON]", "[SIGNATURE]"]:
+                    continue
+                x0, y0, x1, y1 = word.get("bounding_box", (0, 0, 0, 0))
+                width = x1 - x0
+                height = y1 - y0
+                entity_type = (
+                    "CUSTOM_VLM_PERSON"
+                    if text_val == "[PERSON]"
+                    else "CUSTOM_VLM_SIGNATURE"
+                )
+                merged_bboxes.append(
+                    CustomImageRecognizerResult(
+                        entity_type,
+                        0,
+                        0,
+                        float(word.get("conf", 0.0)),
+                        int(x0),
+                        int(y0),
+                        int(width),
+                        int(height),
+                        text_val,
+                    )
+                )
+    except Exception as e:
+        print(
+            f"Warning: Error while adding VLM [PERSON]/[SIGNATURE] boxes in merge_img_bboxes: {e}"
+        )
+
     # Reconstruct bounding boxes for substrings of interest
     reconstructed_bboxes = list()
     for bbox in bboxes:
@@ -3490,7 +3526,6 @@ def redact_image_pdf(
                                 input_folder=input_folder,
                             )
                         )
-                    
 
                         # Load the created image
                         if os.path.exists(created_image_path):
@@ -3565,6 +3600,218 @@ def redact_image_pdf(
                     all_page_line_level_ocr_results_with_words.append(
                         page_line_level_ocr_results_with_words
                     )
+
+                # Optional additional VLM / inference-server pass to detect people
+                # and inject [PERSON] entries into the word-level OCR structure.
+                # Supports pure and hybrid VLM/inference-server local OCR models.
+                if (
+                    chosen_local_ocr_model
+                    in [
+                        "vlm",
+                        "inference-server",
+                        "hybrid-vlm",
+                        "hybrid-paddle-vlm",
+                        "hybrid-paddle-inference-server",
+                    ]
+                    and "CUSTOM_VLM_PERSON" in chosen_redact_entities
+                    and isinstance(page_line_level_ocr_results_with_words, dict)
+                    and page_line_level_ocr_results_with_words.get("results")
+                    and image is not None
+                ):
+                    try:
+                        image_name = (
+                            os.path.basename(image_path)
+                            if isinstance(image_path, str)
+                            else f"{file_name}_{reported_page_number}.png"
+                        )
+
+                        # Decide which backend to use for people detection
+                        if chosen_local_ocr_model in [
+                            "vlm",
+                            "hybrid-vlm",
+                            "hybrid-paddle-vlm",
+                        ]:
+                            people_ocr = _vlm_page_ocr_predict(
+                                image,
+                                image_name=image_name,
+                                normalised_coords_range=999,
+                                output_folder=output_folder,
+                                detect_people_only=True,
+                            )
+                        else:  # inference-server based hybrids
+                            people_ocr = _inference_server_page_ocr_predict(
+                                image,
+                                image_name=image_name,
+                                normalised_coords_range=999,
+                                output_folder=output_folder,
+                                detect_people_only=True,
+                            )
+
+                        # Convert people_ocr outputs into additional word-level entries
+                        texts = people_ocr.get("text", [])
+                        lefts = people_ocr.get("left", [])
+                        tops = people_ocr.get("top", [])
+                        widths = people_ocr.get("width", [])
+                        heights = people_ocr.get("height", [])
+                        confs = people_ocr.get("conf", [])
+
+                        results_dict = page_line_level_ocr_results_with_words["results"]
+
+                        # Determine a valid starting line number for synthetic [PERSON] lines
+                        existing_lines = []
+                        for _line_key, _line_data in results_dict.items():
+                            line_val = _line_data.get("line")
+                            if isinstance(line_val, (int, float, str)):
+                                try:
+                                    existing_lines.append(int(line_val))
+                                except Exception:
+                                    continue
+                        next_line_number = (
+                            max(existing_lines) if existing_lines else 0
+                        ) + 1
+
+                        existing_keys = list(results_dict.keys())
+                        person_index_start = len(existing_keys) + 1
+
+                        for idx, text in enumerate(texts):
+                            if text != "[PERSON]":
+                                continue
+                            try:
+                                left = int(lefts[idx])
+                                top = int(tops[idx])
+                                width = int(widths[idx])
+                                height = int(heights[idx])
+                                conf = float(confs[idx]) if idx < len(confs) else 0.0
+                            except Exception:
+                                continue
+
+                            key = f"person_line_{person_index_start + idx}"
+                            bbox = (left, top, left + width, top + height)
+                            results_dict[key] = {
+                                "line": int(next_line_number),
+                                "text": "[PERSON]",
+                                "bounding_box": bbox,
+                                "words": [
+                                    {
+                                        "text": "[PERSON]",
+                                        "bounding_box": bbox,
+                                        "conf": conf,
+                                        "model": chosen_local_ocr_model,
+                                    }
+                                ],
+                                "conf": conf,
+                            }
+                            next_line_number += 1
+                    except Exception as e:
+                        print(
+                            f"Warning: VLM person detection failed on page {reported_page_number}: {e}"
+                        )
+
+                # Optional additional VLM / inference-server pass to detect signatures
+                # and inject [SIGNATURE] entries into the word-level OCR structure.
+                # Supports pure and hybrid VLM/inference-server local OCR models.
+                if (
+                    chosen_local_ocr_model
+                    in [
+                        "vlm",
+                        "inference-server",
+                        "hybrid-vlm",
+                        "hybrid-paddle-vlm",
+                        "hybrid-paddle-inference-server",
+                    ]
+                    and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
+                    and isinstance(page_line_level_ocr_results_with_words, dict)
+                    and page_line_level_ocr_results_with_words.get("results")
+                    and image is not None
+                ):
+                    try:
+                        image_name = (
+                            os.path.basename(image_path)
+                            if isinstance(image_path, str)
+                            else f"{file_name}_{reported_page_number}.png"
+                        )
+
+                        # Decide which backend to use for signature detection
+                        if chosen_local_ocr_model in [
+                            "vlm",
+                            "hybrid-vlm",
+                            "hybrid-paddle-vlm",
+                        ]:
+                            sig_ocr = _vlm_page_ocr_predict(
+                                image,
+                                image_name=image_name,
+                                normalised_coords_range=999,
+                                output_folder=output_folder,
+                                detect_signatures_only=True,
+                            )
+                        else:  # inference-server based hybrids
+                            sig_ocr = _inference_server_page_ocr_predict(
+                                image,
+                                image_name=image_name,
+                                normalised_coords_range=999,
+                                output_folder=output_folder,
+                                detect_signatures_only=True,
+                            )
+
+                        # Convert sig_ocr outputs into additional word-level entries
+                        texts = sig_ocr.get("text", [])
+                        lefts = sig_ocr.get("left", [])
+                        tops = sig_ocr.get("top", [])
+                        widths = sig_ocr.get("width", [])
+                        heights = sig_ocr.get("height", [])
+                        confs = sig_ocr.get("conf", [])
+
+                        results_dict = page_line_level_ocr_results_with_words["results"]
+
+                        # Determine a valid starting line number for synthetic [SIGNATURE] lines
+                        existing_lines = []
+                        for _line_key, _line_data in results_dict.items():
+                            line_val = _line_data.get("line")
+                            if isinstance(line_val, (int, float, str)):
+                                try:
+                                    existing_lines.append(int(line_val))
+                                except Exception:
+                                    continue
+                        next_line_number = (
+                            max(existing_lines) if existing_lines else 0
+                        ) + 1
+
+                        existing_keys = list(results_dict.keys())
+                        sig_index_start = len(existing_keys) + 1
+
+                        for idx, text in enumerate(texts):
+                            if text != "[SIGNATURE]":
+                                continue
+                            try:
+                                left = int(lefts[idx])
+                                top = int(tops[idx])
+                                width = int(widths[idx])
+                                height = int(heights[idx])
+                                conf = float(confs[idx]) if idx < len(confs) else 0.0
+                            except Exception:
+                                continue
+
+                            key = f"signature_line_{sig_index_start + idx}"
+                            bbox = (left, top, left + width, top + height)
+                            results_dict[key] = {
+                                "line": int(next_line_number),
+                                "text": "[SIGNATURE]",
+                                "bounding_box": bbox,
+                                "words": [
+                                    {
+                                        "text": "[SIGNATURE]",
+                                        "bounding_box": bbox,
+                                        "conf": conf,
+                                        "model": chosen_local_ocr_model,
+                                    }
+                                ],
+                                "conf": conf,
+                            }
+                            next_line_number += 1
+                    except Exception as e:
+                        print(
+                            f"Warning: VLM signature detection failed on page {reported_page_number}: {e}"
+                        )
 
             # Check if page exists in existing textract data. If not, send to service to analyse
             if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:

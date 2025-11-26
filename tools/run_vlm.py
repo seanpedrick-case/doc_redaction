@@ -25,6 +25,8 @@ from tools.config import (
     VLM_DEFAULT_TEMPERATURE,
     VLM_DEFAULT_TOP_K,
     VLM_DEFAULT_TOP_P,
+    VLM_MAX_IMAGE_SIZE,
+    VLM_MIN_IMAGE_SIZE,
     VLM_SEED,
 )
 from tools.helper_functions import get_system_font_path
@@ -334,6 +336,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
+            "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
         }
@@ -361,6 +364,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
+            "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
         }
@@ -391,9 +395,17 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
+            "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
         }
+
+        # budget for image processor, since the compression ratio is 32 for Qwen3-VL, we can set the number of visual tokens of a single image to 256-1280
+        # processor.image_processor.size = {
+        #     "longest_edge": VLM_MAX_IMAGE_SIZE,
+        #     "shortest_edge": VLM_MIN_IMAGE_SIZE,
+        # }
+
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
         else:
@@ -439,7 +451,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     else:
         raise ValueError(
-            f"Invalid model selected: {SELECTED_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, PaddleOCR-VL"
+            f"Invalid model selected: {SELECTED_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, PaddleOCR-VL"
         )
 
     # Override model defaults with user-provided config values if they are set
@@ -621,7 +633,12 @@ def extract_text_from_image_vlm(
     )
 
     inputs = processor(
-        text=[prompt_full], images=[image], return_tensors="pt", padding=True
+        text=[prompt_full],
+        images=[image],
+        return_tensors="pt",
+        padding=True,
+        min_pixels=VLM_MIN_IMAGE_SIZE,
+        max_pixels=VLM_MAX_IMAGE_SIZE,
     ).to(device)
 
     streamer = TextIteratorStreamer(
@@ -695,6 +712,34 @@ Rules:
 - Do NOT combine lines that appear on different horizontal rows
 - Each bounding box should tightly fit around a single horizontal line of text
 - Empty lines should be skipped
+
+# Only return valid JSON, no additional text or explanation."""
+
+full_page_ocr_people_vlm_prompt = """Spot all photos of people's faces in the image, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
+
+Always return the JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
+
+Rules:
+- Each photo of a person's face must be a separate entry.
+- Do NOT combine multiple photos into a single entry.
+- Each photo of a person's face that appears in the image should be a separate entry.
+- 'text' should always be exactly '[PERSON]'.
+- Do NOT include any other text or information in the JSON.
+- If there are no photos of people's faces in the image, return an empty JSON array.
+
+# Only return valid JSON, no additional text or explanation."""
+
+full_page_ocr_signature_vlm_prompt = """Spot all signatures in the image, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[SIGNATURE]'}, ...].
+
+Always return the JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[SIGNATURE]'}, ...].
+
+Rules:
+- Each signature must be a separate entry.
+- Do NOT combine multiple signatures into a single entry.
+- Each signature that appears in the image should be a separate entry.
+- 'text' should always be exactly '[SIGNATURE]'.
+- Do NOT include any other text or information in the JSON.
+- If there are no signatures in the image, return an empty JSON array.
 
 # Only return valid JSON, no additional text or explanation."""
 

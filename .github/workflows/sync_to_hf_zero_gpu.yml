@@ -1,4 +1,4 @@
-name: Sync to Hugging Face hub (zero GPU)
+name: Sync to Hugging Face hub Zero GPU
 on:
   push:
     branches: [dev]
@@ -12,11 +12,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          lfs: true
-      - name: Push to hub
+          fetch-depth: 1      # Only get the latest state
+          lfs: true           # Download actual LFS files so they can be pushed
+
+      - name: Install Git LFS
+        run: git lfs install
+
+      - name: Recreate repo history (single-commit force push)
+        run: |
+          # 1. Capture the message BEFORE we delete the .git folder
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Syncing commit message: $COMMIT_MSG"
+
+          # 2. DELETE the .git folder. 
+          # This turns the repo into a standard folder of files.
+          rm -rf .git
+
+          # 3. Re-initialize a brand new git repo
+          git init -b main
+          git config --global user.name "$HF_USERNAME"
+          git config --global user.email "$HF_EMAIL"
+          
+          # 4. Re-install LFS (needs to be done after git init)
+          git lfs install
+          
+          # 5. Add the remote
+          git remote add hf https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID_ZERO_GPU
+          
+          # 6. Add all files
+          # Since this is a fresh init, Git sees EVERY file as "New"
+          git add .
+          
+          # 7. Commit and Force Push
+          git commit -m "Sync: $COMMIT_MSG"
+          git push --force hf main
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_EMAIL: ${{ secrets.HF_EMAIL }}
           HF_REPO_ID_ZERO_GPU: ${{ secrets.HF_REPO_ID_ZERO_GPU }}
-        run: git push --force https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$HF_REPO_ID_ZERO_GPU dev:main

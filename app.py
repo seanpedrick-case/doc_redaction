@@ -1312,6 +1312,7 @@ with blocks:
             ocr_example_files = [
                 "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
                 "example_data/Difficult handwritten note.jpg",
+                "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
             ]
             available_ocr_examples = list()
             ocr_example_labels = list()
@@ -1327,7 +1328,8 @@ with blocks:
                         7,
                         1,
                         1,
-                        "vlm",
+                        "paddle",
+                        CHOSEN_REDACT_ENTITIES,
                     ],
                 )
                 ocr_example_labels.append("Baseline 'easy' document page")
@@ -1336,17 +1338,19 @@ with blocks:
                     [
                         [ocr_example_files[0]],
                         "Local OCR model - PDFs without selectable text",
-                        "Only extract text (no redaction)",
+                        "Local",
                         ["Extract handwriting", "Extract signatures"],
                         [ocr_example_files[0]],
                         ocr_example_files[0],
                         7,
                         6,
                         6,
-                        "vlm",
+                        "hybrid-paddle-vlm",
+                        CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
                     ],
                 )
                 ocr_example_labels.append("Scanned document page with signatures")
+
             if os.path.exists(ocr_example_files[1]):
                 available_ocr_examples.append(
                     [
@@ -1360,9 +1364,28 @@ with blocks:
                         0,
                         0,
                         "vlm",
+                        CHOSEN_REDACT_ENTITIES,
                     ],
                 )
                 ocr_example_labels.append("Unclear text on handwritten note")
+
+            if os.path.exists(ocr_example_files[2]):
+                available_ocr_examples.append(
+                    [
+                        [ocr_example_files[2]],
+                        "Local OCR model - PDFs without selectable text",
+                        "Local",
+                        ["Extract handwriting", "Extract signatures"],
+                        [ocr_example_files[2]],
+                        ocr_example_files[2],
+                        1,
+                        0,
+                        0,
+                        "hybrid-paddle-vlm",
+                        CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
+                    ],
+                )
+                ocr_example_labels.append("CV with photo")
 
             # Only create examples if we have available files
             if available_ocr_examples:
@@ -1378,6 +1401,7 @@ with blocks:
                     page_min,
                     page_max,
                     local_ocr_method_radio,
+                    in_redact_entities,
                 ):
                     gr.Info(
                         "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
@@ -1396,6 +1420,7 @@ with blocks:
                         page_min,
                         page_max,
                         local_ocr_method_radio,
+                        in_redact_entities,
                     ],
                     example_labels=ocr_example_labels,
                     fn=show_info_box_on_click,
