@@ -250,6 +250,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#ocr-configuration-parameters" id="toc-ocr-configuration-parameters" class="nav-link" data-scroll-target="#ocr-configuration-parameters">OCR configuration parameters</a></li>
   <li><a href="#using-an-alternative-ocr-model" id="toc-using-an-alternative-ocr-model" class="nav-link" data-scroll-target="#using-an-alternative-ocr-model">Using an alternative OCR model</a></li>
   <li><a href="#inference-server-options" id="toc-inference-server-options" class="nav-link" data-scroll-target="#inference-server-options">Inference server options</a></li>
+  <li><a href="#identifying-people-and-signatures-with-vlms" id="toc-identifying-people-and-signatures-with-vlms" class="nav-link" data-scroll-target="#identifying-people-and-signatures-with-vlms">Identifying people and signatures with VLMs</a></li>
   </ul></li>
   <li><a href="#command-line-interface-cli" id="toc-command-line-interface-cli" class="nav-link" data-scroll-target="#command-line-interface-cli">Command Line Interface (CLI)</a>
   <ul class="collapse">
@@ -484,7 +485,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="downloading-output-files-from-previous-redaction-tasks" class="level3">
 <h3 class="anchored" data-anchor-id="downloading-output-files-from-previous-redaction-tasks">Downloading output files from previous redaction tasks</h3>
-<p>If you are logged in via AWS Cognito and you lose your app page for some reason (e.g.&nbsp;from a crash, reloading), it is possible recover your previous output files, provided the server has not been shut down since you redacted the document. Go to ‘Redaction settings’, then scroll to the bottom to see ‘View all output files from this session’.</p>
+<p>If you are logged in via AWS Cognito and you lose your app page for some reason (e.g.&nbsp;from a crash, reloading), it is possible recover your previous output files, provided the server has not been shut down since you redacted the document. If enabled, this feature can be found at the bottom of the front tab, called ‘View and download all output files from this session’. If you open this and click on ‘Refresh files in output folder’ you should see a file directory of all files. If you click on the box next to a given file, it should appear below for you to download.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/view_all_output_files.PNG" class="img-fluid figure-img"></p>
@@ -1215,26 +1216,33 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="inference-server-options" class="level3">
 <h3 class="anchored" data-anchor-id="inference-server-options">Inference server options</h3>
-<p>If using a local inference server, I would suggest using (llama.cpp)[https://github.com/ggml-org/llama.cpp] as it is much faster than transformers/torch inference, and it will offload to cpu/ram automatically rather than failing as vllm tends to do. Here is the run command I use for my llama server locally ion a wsl or linux environment) to get good results (need at least 12GB of VRAM to run with all gpu layers assigned to your graphics card):</p>
+<p>If using a local inference server, I would suggest using (llama.cpp)[https://github.com/ggml-org/llama.cpp] as it is much faster than transformers/torch inference, and it will offload to cpu/ram automatically rather than failing as vllm tends to do. Here is the run command I use for my llama server locally ion a wsl or linux environment) to get deterministic results (need at least 16GB of VRAM to run with all gpu layers assigned to your graphics card to use the following model):</p>
 <pre><code>llama-server \
-    -hf unsloth/Qwen3-VL-8B-Instruct-GGUF:UD-Q4_K_XL \
-    --n-gpu-layers -1 \
+    -hf unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF:UD-Q4_K_XL \
+    --n-gpu-layers 99 \
     --jinja \
-    --top-p 0.8 \
-    --top-k -1 \
-    --temp 0.0 \
-    --min-p 0.0 \
+    --temp 0 \
+    --top-k 1 \
+    --top-p 1 \
+    --min-p 1 \
+    --frequency-penalty 1 \
+    --presence-penalty 1 \
     --flash-attn on \
-    --presence-penalty 1.5 \
     --ctx-size 8192 \
     --host 0.0.0.0 \
     --port 7862 \
-    --image-min-tokens 1024 \
+    --image-min-tokens 1600 \
     --image-max-tokens 2301 \
-    --no-warmup</code></pre>
+    --no-warmup \
+    --n-cpu-moe 13</code></pre>
 <p>If running llama.cpp on the same computer as the doc redaction app, you can then set the following variable in config/app_config.env to run:</p>
 <pre><code>SHOW_INFERENCE_SERVER_OPTIONS=True
 INFERENCE_SERVER_API_URL=http://localhost:7862</code></pre>
+</section>
+<section id="identifying-people-and-signatures-with-vlms" class="level3">
+<h3 class="anchored" data-anchor-id="identifying-people-and-signatures-with-vlms">Identifying people and signatures with VLMs</h3>
+<p>If VLM or inference server options are enabled, you can also use the VLM to identify photos of people’s faces and signatures in the document, and redact them accordingly.</p>
+<p>On the ‘Redaction Settings’ tab, select the CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people’s faces and signatures in the document, and redact them accordingly if a redaction option is selected.</p>
 </section>
 </section>
 <section id="command-line-interface-cli" class="level2">

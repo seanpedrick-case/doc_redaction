@@ -758,8 +758,13 @@ ul.task-list li input[type="checkbox"] {
 </ul></li>
 <li><strong><code>VLM_MAX_IMAGE_SIZE</code></strong>
 <ul>
-<li><strong>Description:</strong> Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio.</li>
-<li><strong>Default Value:</strong> <code>600000</code> (approximately 774x774)</li>
+<li><strong>Description:</strong> Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. A multiple of 32*32 for Qwen3-VL.</li>
+<li><strong>Default Value:</strong> <code>819200</code> (approximately 800x800)</li>
+</ul></li>
+<li><strong><code>VLM_MIN_IMAGE_SIZE</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum total pixels (width * height) for images passed to VLM. Images with less pixels will be resized while maintaining aspect ratio. A multiple of 32*32 for Qwen3-VL.</li>
+<li><strong>Default Value:</strong> <code>614400</code> (approximately 600x600)</li>
 </ul></li>
 <li><strong><code>VLM_MAX_DPI</code></strong>
 <ul>
