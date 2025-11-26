@@ -401,10 +401,10 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         }
 
         # budget for image processor, since the compression ratio is 32 for Qwen3-VL, we can set the number of visual tokens of a single image to 256-1280
-        processor.image_processor.size = {
-            "longest_edge": VLM_MAX_IMAGE_SIZE,
-            "shortest_edge": VLM_MIN_IMAGE_SIZE,
-        }
+        # processor.image_processor.size = {
+        #     "longest_edge": VLM_MAX_IMAGE_SIZE,
+        #     "shortest_edge": VLM_MIN_IMAGE_SIZE,
+        # }
 
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -633,7 +633,12 @@ def extract_text_from_image_vlm(
     )
 
     inputs = processor(
-        text=[prompt_full], images=[image], return_tensors="pt", padding=True
+        text=[prompt_full],
+        images=[image],
+        return_tensors="pt",
+        padding=True,
+        min_pixels=VLM_MIN_IMAGE_SIZE,
+        max_pixels=VLM_MAX_IMAGE_SIZE,
     ).to(device)
 
     streamer = TextIteratorStreamer(
@@ -707,6 +712,19 @@ Rules:
 - Do NOT combine lines that appear on different horizontal rows
 - Each bounding box should tightly fit around a single horizontal line of text
 - Empty lines should be skipped
+
+# Only return valid JSON, no additional text or explanation."""
+
+full_page_ocr_people_vlm_prompt = """Spot all images of people in the image, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
+
+Always return the JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
+
+Rules:
+- Each image of a person must be a separate entry.
+- Do NOT combine multiple images into a single entry.
+- Each image of a person that appears in the image should be a separate entry.
+- 'text' should always be exactly '[PERSON]'.
+- Do NOT include any other text or information in the JSON.
 
 # Only return valid JSON, no additional text or explanation."""
 

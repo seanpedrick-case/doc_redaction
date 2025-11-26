@@ -7,6 +7,7 @@ sdk: docker
 app_file: app.py
 pinned: true
 license: agpl-3.0
+short_description: OCR / redact PDF documents and tabular data
 ---
 # Document redaction
 
