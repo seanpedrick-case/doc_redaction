@@ -20,19 +20,23 @@ COPY requirements_lightweight.txt .
 
 RUN pip install --verbose --no-cache-dir --target=/install -r requirements_lightweight.txt && rm requirements_lightweight.txt
 
-# Optionally install PaddleOCR if the INSTALL_PADDLEOCR environment variable is set to True. See requirements_lightweight.txt for more details, including installing the GPU version of PaddleOCR.
+# Optionally install PaddleOCR if the INSTALL_PADDLEOCR environment variable is set to True.
 ARG INSTALL_PADDLEOCR=False
 ENV INSTALL_PADDLEOCR=${INSTALL_PADDLEOCR}
 
 RUN if [ "$INSTALL_PADDLEOCR" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install paddlepaddle==3.2.1 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/; \
+    pip install --verbose --no-cache-dir --target=/install paddlepaddle==3.2.1 \
     pip install --verbose --no-cache-dir --target=/install paddleocr==3.3.0; \
 fi
 
+ARG INSTALL_VLM=False
+ENV INSTALL_VLM=${INSTALL_VLM}
+
+# Optionally install VLM if the INSTALL_VLM environment variable is set to True. Use index-url https://download.pytorch.org/whl/cu129 for GPU version of PyTorch.
 RUN if [ "$INSTALL_VLM" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129; \
-    pip install --verbose --no-cache-dir --target=/install torchvision --index-url https://download.pytorch.org/whl/cu129; \
-    pip install --verbose --no-cache-dir --target=/install transformers<=4.57.1 accelerate<=1.11.0 bitsandbytes<=0.48.1; \
+    pip install --verbose --no-cache-dir --target=/install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu; \
+    pip install --verbose --no-cache-dir --target=/install torchvision --index-url https://download.pytorch.org/whl/cpu; \
+    pip install --verbose --no-cache-dir --target=/install transformers<=4.57.2 accelerate<=1.11.0 bitsandbytes<=0.48.1 sentencepiece==0.2.1; \
 fi
 
 # ===================================================================

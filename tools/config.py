@@ -725,8 +725,12 @@ MAX_INPUT_TOKEN_LENGTH = int(
 )  # Maximum number of tokens to input to the VLM
 
 VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "800000")
-)  # Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. Default is 800000 (approx 895x895).
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "819200")
+)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with more pixels will be resized while maintaining aspect ratio. Default is 819200 (800*32*32).
+
+VLM_MIN_IMAGE_SIZE = int(
+    get_or_create_env_var("VLM_MIN_IMAGE_SIZE", "614400")
+)  # Minimum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with less pixels will be resized while maintaining aspect ratio. Default is 614400 (600*32*32).
 
 VLM_MAX_DPI = float(
     get_or_create_env_var("VLM_MAX_DPI", "300.0")
@@ -1016,6 +1020,7 @@ FULL_COMPREHEND_ENTITY_LIST = get_or_create_env_var(
     "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE','SSN','DATE_TIME','PASSPORT_NUMBER','DRIVER_ID','URL','AGE','USERNAME','PASSWORD','AWS_ACCESS_KEY','AWS_SECRET_KEY','IP_ADDRESS','MAC_ADDRESS','ALL','LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER','CA_SOCIAL_INSURANCE_NUMBER','US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER','UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER','IN_PERMANENT_ACCOUNT_NUMBER','IN_NREGA','INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER','CA_HEALTH_NUMBER','IN_AADHAAR','IN_VOTER_NUMBER', 'CUSTOM_FUZZY']",
 )
 
+
 # Entities for local PII redaction option
 CHOSEN_REDACT_ENTITIES = get_or_create_env_var(
     "CHOSEN_REDACT_ENTITIES",
@@ -1027,8 +1032,10 @@ FULL_ENTITY_LIST = get_or_create_env_var(
     "['TITLES', 'PERSON', 'PHONE_NUMBER', 'EMAIL_ADDRESS', 'STREETNAME', 'UKPOSTCODE', 'CREDIT_CARD', 'CRYPTO', 'DATE_TIME', 'IBAN_CODE', 'IP_ADDRESS', 'NRP', 'LOCATION', 'MEDICAL_LICENSE', 'URL', 'UK_NHS', 'CUSTOM', 'CUSTOM_FUZZY']",
 )
 
+
 CUSTOM_ENTITIES = get_or_create_env_var(
-    "CUSTOM_ENTITIES", "['TITLES', 'UKPOSTCODE', 'STREETNAME', 'CUSTOM']"
+    "CUSTOM_ENTITIES",
+    "['TITLES', 'UKPOSTCODE', 'STREETNAME', 'CUSTOM']",
 )
 
 
@@ -1554,6 +1561,10 @@ if CHOSEN_REDACT_ENTITIES:
     CHOSEN_REDACT_ENTITIES = _get_env_list(CHOSEN_REDACT_ENTITIES)
 if FULL_ENTITY_LIST:
     FULL_ENTITY_LIST = _get_env_list(FULL_ENTITY_LIST)
+
+if SHOW_VLM_MODEL_OPTIONS or SHOW_INFERENCE_SERVER_OPTIONS:
+    FULL_ENTITY_LIST.extend(["CUSTOM_VLM_PERSON", "CUSTOM_VLM_SIGNATURE"])
+    FULL_COMPREHEND_ENTITY_LIST.extend(["CUSTOM_VLM_PERSON", "CUSTOM_VLM_SIGNATURE"])
 
 if DEFAULT_TEXT_COLUMNS:
     DEFAULT_TEXT_COLUMNS = _get_env_list(DEFAULT_TEXT_COLUMNS)

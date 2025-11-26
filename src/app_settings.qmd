@@ -466,8 +466,12 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Default Value:** `"False"`
 
 * **`VLM_MAX_IMAGE_SIZE`**
-    * **Description:** Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio.
-    * **Default Value:** `600000` (approximately 774x774)
+    * **Description:** Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. A multiple of 32*32 for Qwen3-VL.
+    * **Default Value:** `819200` (approximately 800x800)
+
+* **`VLM_MIN_IMAGE_SIZE`**
+    * **Description:** Minimum total pixels (width * height) for images passed to VLM. Images with less pixels will be resized while maintaining aspect ratio. A multiple of 32*32 for Qwen3-VL.
+    * **Default Value:** `614400` (approximately 600x600)
 
 * **`VLM_MAX_DPI`**
     * **Description:** Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.

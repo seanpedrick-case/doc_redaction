@@ -58,6 +58,8 @@ from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.run_vlm import (
     extract_text_from_image_vlm,
+    full_page_ocr_people_vlm_prompt,
+    full_page_ocr_signature_vlm_prompt,
     full_page_ocr_vlm_prompt,
     model_default_do_sample,
     model_default_max_new_tokens,
@@ -1155,6 +1157,7 @@ def plot_text_bounding_boxes(
     image_name: str = "initial_vlm_output_bounding_boxes.png",
     image_folder: str = "inference_server_visualisations",
     output_folder: str = OUTPUT_FOLDER,
+    task_type: str = "ocr",
 ):
     """
     Plots bounding boxes on an image with markers for each a name, using PIL, normalised coordinates, and different colors.
@@ -1166,6 +1169,7 @@ def plot_text_bounding_boxes(
         image_name: The name of the image for debugging.
         image_folder: The folder name (relative to output_folder) where the image will be saved.
         output_folder: The folder where the image will be saved.
+        task_type: The type of task the bounding boxes are for ("ocr", "person", "signature").
     """
 
     # Load the image
@@ -1260,14 +1264,14 @@ def plot_text_bounding_boxes(
 
         image_name_safe = safe_sanitize_text(incremented_image_name)
         image_name_shortened = image_name_safe[:50]
-        filename = f"{image_name_shortened}_initial_bounding_box_output.png"
+        task_type_suffix = f"_{task_type}" if task_type != "ocr" else ""
+        filename = (
+            f"{image_name_shortened}_initial_bounding_box_output{task_type_suffix}.png"
+        )
         filepath = os.path.join(normalized_debug_dir, filename)
         img.save(filepath)
     except Exception as e:
         print(f"Error saving image with bounding boxes: {e}")
-
-    # Display the image
-    # img.show()
 
 
 def parse_json(json_output):
@@ -1418,6 +1422,9 @@ def _vlm_page_ocr_predict(
     image_name: str = "vlm_page_ocr_input_image.png",
     normalised_coords_range: Optional[int] = 999,
     output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
 ) -> Dict[str, List]:
     """
     VLM page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -1433,6 +1440,7 @@ def _vlm_page_ocr_predict(
         matching the format expected by perform_ocr
     """
     try:
+
         # Validate image exists and is not None
         if image is None:
             print("VLM page OCR error: Image is None")
@@ -1566,7 +1574,17 @@ def _vlm_page_ocr_predict(
                 print(f"Warning: Could not save VLM input image: {save_error}")
 
         # Create prompt that requests structured JSON output with bounding boxes
-        prompt = full_page_ocr_vlm_prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+            task_type = "person"
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+            task_type = "signature"
+        else:
+            prompt = full_page_ocr_vlm_prompt
+            task_type = "ocr"
 
         # Use the VLM to extract structured text
         # Pass explicit model_default_* values for consistency with _inference_server_page_ocr_predict
@@ -1691,6 +1709,15 @@ def _vlm_page_ocr_predict(
             except Exception:
                 pass
 
+        # If that fails, try to interpret the response as a Python literal (handles single-quoted lists/dicts)
+        if lines_data is None:
+            try:
+                python_data = ast.literal_eval(extracted_text)
+                if isinstance(python_data, list):
+                    lines_data = python_data
+            except Exception:
+                pass
+
         # Final attempt: try to parse as-is
         if lines_data is None:
             try:
@@ -1734,6 +1761,7 @@ def _vlm_page_ocr_predict(
                 image_name=image_name,
                 image_folder="vlm_visualisations",
                 output_folder=output_folder,
+                task_type=task_type,
             )
 
         # Store a copy of the processed image for debug visualization (before rescaling)
@@ -1881,6 +1909,9 @@ def _inference_server_page_ocr_predict(
     image_name: str = "inference_server_page_ocr_input_image.png",
     normalised_coords_range: Optional[int] = 999,
     output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
 ) -> Dict[str, List]:
     """
     Inference-server page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -2038,7 +2069,17 @@ def _inference_server_page_ocr_predict(
                 print(f"Warning: Could not save VLM input image: {save_error}")
 
         # Create prompt that requests structured JSON output with bounding boxes
-        prompt = full_page_ocr_vlm_prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+            task_type = "person"
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+            task_type = "signature"
+        else:
+            prompt = full_page_ocr_vlm_prompt
+            task_type = "ocr"
 
         # Use the inference-server API to extract structured text
         # Note: processed_width and processed_height were already captured on line 1921
@@ -2163,6 +2204,15 @@ def _inference_server_page_ocr_predict(
             except Exception:
                 pass
 
+        # If that fails, try to interpret the response as a Python literal (handles single-quoted lists/dicts)
+        if lines_data is None:
+            try:
+                python_data = ast.literal_eval(extracted_text)
+                if isinstance(python_data, list):
+                    lines_data = python_data
+            except Exception:
+                pass
+
         # Final attempt: try to parse as-is
         if lines_data is None:
             try:
@@ -2208,6 +2258,7 @@ def _inference_server_page_ocr_predict(
                 image_name=image_name,
                 image_folder="inference_server_visualisations",
                 output_folder=output_folder,
+                task_type=task_type,
             )
 
         # Store a copy of the processed image for debug visualization (before rescaling)
