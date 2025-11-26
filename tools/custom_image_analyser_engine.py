@@ -1704,6 +1704,15 @@ def _vlm_page_ocr_predict(
             except Exception:
                 pass
 
+        # If that fails, try to interpret the response as a Python literal (handles single-quoted lists/dicts)
+        if lines_data is None:
+            try:
+                python_data = ast.literal_eval(extracted_text)
+                if isinstance(python_data, list):
+                    lines_data = python_data
+            except Exception:
+                pass
+
         # Final attempt: try to parse as-is
         if lines_data is None:
             try:
@@ -2183,6 +2192,15 @@ def _inference_server_page_ocr_predict(
 
                 if combined_data:
                     lines_data = combined_data
+            except Exception:
+                pass
+
+        # If that fails, try to interpret the response as a Python literal (handles single-quoted lists/dicts)
+        if lines_data is None:
+            try:
+                python_data = ast.literal_eval(extracted_text)
+                if isinstance(python_data, list):
+                    lines_data = python_data
             except Exception:
                 pass
 
