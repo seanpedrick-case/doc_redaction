@@ -803,25 +803,27 @@ If the SHOW_HYBRID_MODELS environment variable is set to 'True' in your app_conf
 
 ### Inference server options
 
-If using a local inference server, I would suggest using (llama.cpp)[https://github.com/ggml-org/llama.cpp] as it is much faster than transformers/torch inference, and it will offload to cpu/ram automatically rather than failing as vllm tends to do. Here is the run command I use for my llama server locally ion a wsl or linux environment) to get good results (need at least 12GB of VRAM to run with all gpu layers assigned to your graphics card):
+If using a local inference server, I would suggest using (llama.cpp)[https://github.com/ggml-org/llama.cpp] as it is much faster than transformers/torch inference, and it will offload to cpu/ram automatically rather than failing as vllm tends to do. Here is the run command I use for my llama server locally ion a wsl or linux environment) to get deterministic results (need at least 16GB of VRAM to run with all gpu layers assigned to your graphics card to use the following model):
 
 ```
 llama-server \
-    -hf unsloth/Qwen3-VL-8B-Instruct-GGUF:UD-Q4_K_XL \
-    --n-gpu-layers -1 \
+    -hf unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF:UD-Q4_K_XL \
+    --n-gpu-layers 99 \
     --jinja \
-    --top-p 0.8 \
-    --top-k -1 \
-    --temp 0.0 \
-    --min-p 0.0 \
+    --temp 0 \
+    --top-k 1 \
+    --top-p 1 \
+    --min-p 1 \
+    --frequency-penalty 1 \
+    --presence-penalty 1 \
     --flash-attn on \
-    --presence-penalty 1.5 \
     --ctx-size 8192 \
     --host 0.0.0.0 \
     --port 7862 \
-    --image-min-tokens 1024 \
+    --image-min-tokens 1600 \
     --image-max-tokens 2301 \
-    --no-warmup
+    --no-warmup \
+    --n-cpu-moe 13
 ```
 
 If running llama.cpp on the same computer as the doc redaction app, you can then set the following variable in config/app_config.env to run:

@@ -1070,6 +1070,12 @@ INFERENCE_SERVER_API_URL=http://localhost:7862
 
 The above setup with host = 0.0.0.0 allows you to access this server from other computers in your home network. Find your internal ip for the computer hosting llama server (e.g. using ipconfig in Windows), and then replace 'localhost' in the above variable with this value.
 
+### Identifying people and signatures with VLMs
+
+If VLM or inference server options are enabled, you can also use the VLM to identify photos of people's faces and signatures in the document, and redact them accordingly.
+
+On the 'Redaction Settings' tab, select the CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people's faces and signatures in the document, and redact them accordingly if a redaction option is selected.
+
 
 ## Command Line Interface (CLI)
 
