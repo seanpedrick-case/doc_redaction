@@ -334,6 +334,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
+            "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
         }
@@ -361,6 +362,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
+            "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
         }
@@ -391,9 +393,11 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
+            "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
         }
+
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
         else:
@@ -620,9 +624,38 @@ def extract_text_from_image_vlm(
         messages, tokenize=False, add_generation_prompt=True
     )
 
+    # MAX_TILES = 12  # similar to 2300 max tokens in llama.cpp inference
+
+    # # Adjust vision size based on image dimensions
+    # w, h = image.size
+    # short = min(w, h)
+
+    # if short < 200:
+    #     VISION_SIZE = 512
+    # elif short < 800:
+    #     VISION_SIZE = 896
+    # else:
+    #     VISION_SIZE = 1024
+
+    TARGET_SHORTEST = 512
+    TARGET_LONGEST = 1536   # closest to llama.cpp 1600–2300 tokens
+
+    short = min(image.width, image.height)
+    long = max(image.width, image.height)
+
     inputs = processor(
-        text=[prompt_full], images=[image], return_tensors="pt", padding=True
+        text=prompt_full,
+        images=image,
+        size={
+            "shortest_edge": min(max(short, TARGET_SHORTEST), TARGET_LONGEST),
+            "longest_edge":  min(max(long,  TARGET_SHORTEST), TARGET_LONGEST),
+        },
+        return_tensors="pt",
     ).to(device)
+
+    # inputs = processor(
+    #     text=[prompt_full], images=[image], return_tensors="pt", padding=True
+    # ).to(device)
 
     streamer = TextIteratorStreamer(
         processor, skip_prompt=True, skip_special_tokens=True
