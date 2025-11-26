@@ -725,8 +725,12 @@ MAX_INPUT_TOKEN_LENGTH = int(
 )  # Maximum number of tokens to input to the VLM
 
 VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "800000")
-)  # Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. Default is 800000 (approx 895x895).
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "819200")
+)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with more pixels will be resized while maintaining aspect ratio. Default is 819200 (800*32*32).
+
+VLM_MIN_IMAGE_SIZE = int(
+    get_or_create_env_var("VLM_MIN_IMAGE_SIZE", "614400")
+)  # Minimum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with less pixels will be resized while maintaining aspect ratio. Default is 614400 (600*32*32).
 
 VLM_MAX_DPI = float(
     get_or_create_env_var("VLM_MAX_DPI", "300.0")

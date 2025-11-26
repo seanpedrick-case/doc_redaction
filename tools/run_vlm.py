@@ -25,6 +25,8 @@ from tools.config import (
     VLM_DEFAULT_TEMPERATURE,
     VLM_DEFAULT_TOP_K,
     VLM_DEFAULT_TOP_P,
+    VLM_MAX_IMAGE_SIZE,
+    VLM_MIN_IMAGE_SIZE,
     VLM_SEED,
 )
 from tools.helper_functions import get_system_font_path
@@ -398,6 +400,12 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
 
+        # budget for image processor, since the compression ratio is 32 for Qwen3-VL, we can set the number of visual tokens of a single image to 256-1280
+        processor.image_processor.size = {
+            "longest_edge": VLM_MAX_IMAGE_SIZE,
+            "shortest_edge": VLM_MIN_IMAGE_SIZE,
+        }
+
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
         else:
@@ -624,38 +632,9 @@ def extract_text_from_image_vlm(
         messages, tokenize=False, add_generation_prompt=True
     )
 
-    # MAX_TILES = 12  # similar to 2300 max tokens in llama.cpp inference
-
-    # # Adjust vision size based on image dimensions
-    # w, h = image.size
-    # short = min(w, h)
-
-    # if short < 200:
-    #     VISION_SIZE = 512
-    # elif short < 800:
-    #     VISION_SIZE = 896
-    # else:
-    #     VISION_SIZE = 1024
-
-    TARGET_SHORTEST = 512
-    TARGET_LONGEST = 1536   # closest to llama.cpp 1600–2300 tokens
-
-    short = min(image.width, image.height)
-    long = max(image.width, image.height)
-
     inputs = processor(
-        text=prompt_full,
-        images=image,
-        size={
-            "shortest_edge": min(max(short, TARGET_SHORTEST), TARGET_LONGEST),
-            "longest_edge":  min(max(long,  TARGET_SHORTEST), TARGET_LONGEST),
-        },
-        return_tensors="pt",
+        text=[prompt_full], images=[image], return_tensors="pt", padding=True
     ).to(device)
-
-    # inputs = processor(
-    #     text=[prompt_full], images=[image], return_tensors="pt", padding=True
-    # ).to(device)
 
     streamer = TextIteratorStreamer(
         processor, skip_prompt=True, skip_special_tokens=True
