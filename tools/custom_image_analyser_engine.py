@@ -1157,6 +1157,7 @@ def plot_text_bounding_boxes(
     image_name: str = "initial_vlm_output_bounding_boxes.png",
     image_folder: str = "inference_server_visualisations",
     output_folder: str = OUTPUT_FOLDER,
+    task_type: str = "ocr",
 ):
     """
     Plots bounding boxes on an image with markers for each a name, using PIL, normalised coordinates, and different colors.
@@ -1168,6 +1169,7 @@ def plot_text_bounding_boxes(
         image_name: The name of the image for debugging.
         image_folder: The folder name (relative to output_folder) where the image will be saved.
         output_folder: The folder where the image will be saved.
+        task_type: The type of task the bounding boxes are for ("ocr", "person", "signature").
     """
 
     # Load the image
@@ -1262,14 +1264,14 @@ def plot_text_bounding_boxes(
 
         image_name_safe = safe_sanitize_text(incremented_image_name)
         image_name_shortened = image_name_safe[:50]
-        filename = f"{image_name_shortened}_initial_bounding_box_output.png"
+        task_type_suffix = f"_{task_type}" if task_type != "ocr" else ""
+        filename = (
+            f"{image_name_shortened}_initial_bounding_box_output{task_type_suffix}.png"
+        )
         filepath = os.path.join(normalized_debug_dir, filename)
         img.save(filepath)
     except Exception as e:
         print(f"Error saving image with bounding boxes: {e}")
-
-    # Display the image
-    # img.show()
 
 
 def parse_json(json_output):
@@ -1575,11 +1577,14 @@ def _vlm_page_ocr_predict(
         if detect_people_only:
             progress(0.5, "Detecting people on page...")
             prompt = full_page_ocr_people_vlm_prompt
+            task_type = "person"
         elif detect_signatures_only:
             progress(0.5, "Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
+            task_type = "signature"
         else:
             prompt = full_page_ocr_vlm_prompt
+            task_type = "ocr"
 
         # Use the VLM to extract structured text
         # Pass explicit model_default_* values for consistency with _inference_server_page_ocr_predict
@@ -1756,6 +1761,7 @@ def _vlm_page_ocr_predict(
                 image_name=image_name,
                 image_folder="vlm_visualisations",
                 output_folder=output_folder,
+                task_type=task_type,
             )
 
         # Store a copy of the processed image for debug visualization (before rescaling)
@@ -2066,11 +2072,14 @@ def _inference_server_page_ocr_predict(
         if detect_people_only:
             progress(0.5, "Detecting people on page...")
             prompt = full_page_ocr_people_vlm_prompt
+            task_type = "person"
         elif detect_signatures_only:
             progress(0.5, "Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
+            task_type = "signature"
         else:
             prompt = full_page_ocr_vlm_prompt
+            task_type = "ocr"
 
         # Use the inference-server API to extract structured text
         # Note: processed_width and processed_height were already captured on line 1921
@@ -2249,6 +2258,7 @@ def _inference_server_page_ocr_predict(
                 image_name=image_name,
                 image_folder="inference_server_visualisations",
                 output_folder=output_folder,
+                task_type=task_type,
             )
 
         # Store a copy of the processed image for debug visualization (before rescaling)
