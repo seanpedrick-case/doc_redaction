@@ -1996,7 +1996,7 @@ with blocks:
                                 value="Undo last element removal", variant="primary"
                             )
 
-                    with gr.Tab("Search text for new redactions", id=7):
+                    with gr.Tab("Search text and redact", id=7):
                         with gr.Accordion("Search text", open=True):
                             with gr.Row(equal_height=True):
                                 page_entity_dropdown_redaction = gr.Dropdown(
