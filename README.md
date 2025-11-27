@@ -11,7 +11,7 @@ short_description: OCR / redact PDF documents and tabular data
 ---
 # Document redaction
 
-version: 1.6.1
+version: 1.6.2
 
 Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
@@ -401,7 +401,7 @@ Additionally, if the option is enabled by your system administrator, on this tab
 
 ### Downloading output files from previous redaction tasks
 
-If you are logged in via AWS Cognito and you lose your app page for some reason (e.g. from a crash, reloading), it is possible recover your previous output files, provided the server has not been shut down since you redacted the document. Go to 'Redaction settings', then scroll to the bottom to see 'View all output files from this session'.
+If you are logged in via AWS Cognito and you lose your app page for some reason (e.g. from a crash, reloading), it is possible recover your previous output files, provided the server has not been shut down since you redacted the document. If enabled, this feature can be found at the bottom of the front tab, called 'View and download all output files from this session'. If you open this and click on 'Refresh files in output folder' you should see a file directory of all files. If you click on the box next to a given file, it should appear below for you to download.
 
 ![View all output files](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/view_all_output_files.PNG)
 
@@ -592,7 +592,7 @@ If you made a mistake, click the 'Undo last element removal' button to restore t
 
 ### Searching and Adding Custom Redactions
 
-After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The **"Search text to make new redactions"** tab gives you the power to find and redact any text within your document manually.
+After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The **"Search text and redact"** tab gives you the power to find and redact any text within your document manually.
 
 #### How to Use the Search and Redact Feature
 
@@ -602,7 +602,7 @@ The workflow is designed to be simple: **Search → Select → Redact**.
 
 #### **Step 1: Search for Text**
 
-1.  Navigate to the **"Search text to make new redactions"** tab.
+1.  Navigate to the **"Search text and redact"** tab.
 2.  The main table will initially be populated with all the text extracted from the document for a page, broken down by word.
 3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below (Note this will only be able to search for patterns in text within each cell).
 4.  Click the **"Search"** button or press Enter.

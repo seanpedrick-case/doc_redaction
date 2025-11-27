@@ -679,6 +679,18 @@ Settings for multi-language support.
     * **Default Value:** `"False"`
     * **Warning:** On low memory systems, the compression options in PyMuPDF can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to `"False"` will save the PDF only with a basic cleaning option enabled, which is more memory-efficient.
 
+* **`SAVE_OUTPUTS_TO_S3`**
+    * **Description:** If set to `'True'`, the application will automatically upload redaction outputs (PDFs, text/tabular outputs, duplicate-analysis files, and Adobe XFDF review files) to Amazon S3 when `RUN_AWS_FUNCTIONS` is also enabled. Uploads use the `S3_OUTPUTS_FOLDER` prefix within the `DOCUMENT_REDACTION_BUCKET`, optionally with a per-session subfolder when `SESSION_OUTPUT_FOLDER` is enabled.
+    * **Default Value:** `'False'`
+
+* **`S3_OUTPUTS_FOLDER`**
+    * **Description:** Base S3 key prefix (folder path) within `DOCUMENT_REDACTION_BUCKET` where redaction outputs are stored, for example `'outputs/'` or `'redaction/outputs/'`. When `SESSION_OUTPUT_FOLDER` is `'True'`, a session-specific subfolder (based on `session_hash`) is appended to this path so each user/session writes to its own S3 subdirectory. If left blank, outputs will not be uploaded to S3 even if `SAVE_OUTPUTS_TO_S3` is `'True'`.
+    * **Default Value:** `''`
+
+* **`S3_OUTPUTS_BUCKET`**
+    * **Description:** Name of the S3 bucket where redaction outputs are stored.
+    * **Default Value:** `'DOCUMENT_REDACTION_BUCKET'`
+
 ## Direct Mode & Lambda Configuration
 
 Settings for running the application from the command line (Direct Mode) or as an AWS Lambda function.

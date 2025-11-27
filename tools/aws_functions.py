@@ -8,6 +8,7 @@ from tools.config import (
     AWS_REGION,
     DOCUMENT_REDACTION_BUCKET,
     RUN_AWS_FUNCTIONS,
+    S3_OUTPUTS_BUCKET,
     SAVE_LOGS_TO_CSV,
 )
 from tools.secure_path_utils import secure_join
@@ -202,13 +203,12 @@ def upload_file_to_s3(
                             file_name = os.path.basename(file)
 
                             s3_key_full = s3_key + file_name
-                            print("S3 key: ", s3_key_full)
+                            # print("S3 key: ", s3_bucket, "/", s3_key_full, sep="")
 
                             s3_client.upload_file(file, s3_bucket, s3_key_full)
                             out_message = (
                                 "File " + file_name + " uploaded successfully!"
                             )
-                            print(out_message)
 
                         except Exception as e:
                             out_message = f"Error uploading file(s): {e}"
@@ -297,3 +297,111 @@ def upload_log_file_to_s3(
         final_out_message_str = "App not set to run AWS functions"
 
     return final_out_message_str
+
+
+# Helper to upload outputs to S3 when enabled in config.
+def export_outputs_to_s3(
+    file_list_state,
+    s3_output_folder_state_value: str,
+    save_outputs_to_s3_flag: bool,
+    base_file_state=None,
+    s3_bucket: str = S3_OUTPUTS_BUCKET,
+):
+    """
+    Upload a list of local output files to the configured S3 outputs folder.
+
+    - file_list_state: Gradio dropdown state that holds a list of file paths or a
+        single path/string. If blank/empty, no action is taken.
+    - s3_output_folder_state_value: Final S3 key prefix (including any session hash)
+        to use as the destination folder for uploads.
+    - s3_bucket: Name of the S3 bucket.
+    """
+    try:
+
+        # Respect the runtime toggle as well as environment configuration
+        if not save_outputs_to_s3_flag:
+            return
+
+        if not s3_output_folder_state_value:
+            # No configured S3 outputs folder – nothing to do
+            return
+
+        # Normalise input to a Python list of strings
+        file_paths = file_list_state
+        if not file_paths:
+            return
+
+        # Gradio dropdown may return a single string or a list
+        if isinstance(file_paths, str):
+            file_paths = [file_paths]
+
+        # Filter out any non-truthy values
+        file_paths = [p for p in file_paths if p]
+        if not file_paths:
+            return
+
+        # Derive a base file stem (name without extension) from the original
+        # file(s) being analysed, if provided. This is used to create an
+        # additional subfolder layer so that outputs are grouped under the
+        # analysed file name rather than under each output file name.
+        base_stem = None
+        if base_file_state:
+            base_path = None
+
+            # Gradio File components typically provide a list of objects with a `.name` attribute
+            if isinstance(base_file_state, str):
+                base_path = base_file_state
+            elif isinstance(base_file_state, list) and base_file_state:
+                first_item = base_file_state[0]
+                base_path = getattr(first_item, "name", None) or str(first_item)
+            else:
+                base_path = getattr(base_file_state, "name", None) or str(
+                    base_file_state
+                )
+
+            if base_path:
+                base_name = os.path.basename(base_path)
+                base_stem, _ = os.path.splitext(base_name)
+
+        # Ensure base S3 prefix (session/date) ends with a trailing slash
+        base_prefix = s3_output_folder_state_value
+        if not base_prefix.endswith("/"):
+            base_prefix = base_prefix + "/"
+
+        # For each file, append a subfolder. If we have a derived base_stem
+        # from the input being analysed, use that; otherwise, fall back to
+        # the individual output file name stem. Final pattern:
+        #   <session_output_folder>/<date>/<base_file_stem>/<file_name>
+        # or, if base_file_stem is not available:
+        #   <session_output_folder>/<date>/<output_file_stem>/<file_name>
+        for file in file_paths:
+            file_name = os.path.basename(file)
+
+            if base_stem:
+                folder_stem = base_stem
+            else:
+                folder_stem, _ = os.path.splitext(file_name)
+
+            per_file_prefix = base_prefix + folder_stem + "/"
+
+            out_message = upload_file_to_s3(
+                local_file_paths=[file],
+                s3_key=per_file_prefix,
+                s3_bucket=s3_bucket,
+            )
+
+            # Log any issues to console so failures are visible in logs/stdout
+            if (
+                "Error uploading file" in out_message
+                or "could not upload" in out_message.lower()
+            ):
+                print("export_outputs_to_s3 encountered issues:", out_message)
+
+        print("Successfully uploaded outputs to S3")
+
+    except Exception as e:
+        # Do not break the app flow if S3 upload fails – just report to console
+        print(f"export_outputs_to_s3 failed with error: {e}")
+
+    # No GUI outputs to update
+    return

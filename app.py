@@ -12,7 +12,11 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from gradio_image_annotation import image_annotator
 
 from tools.auth import authenticate_user
-from tools.aws_functions import download_file_from_s3, upload_log_file_to_s3
+from tools.aws_functions import (
+    download_file_from_s3,
+    export_outputs_to_s3,
+    upload_log_file_to_s3,
+)
 from tools.config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACCESS_LOGS_FOLDER,
@@ -132,9 +136,11 @@ from tools.config import (
     S3_ALLOW_LIST_PATH,
     S3_COST_CODES_PATH,
     S3_FEEDBACK_LOGS_FOLDER,
+    S3_OUTPUTS_FOLDER,
     S3_USAGE_LOGS_FOLDER,
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
+    SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
     SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
     SHOW_AWS_EXAMPLES,
@@ -366,8 +372,6 @@ in_deny_list_state = gr.Dataframe(
     visible=True,
     type="pandas",
     interactive=True,
-    show_fullscreen_button=True,
-    show_copy_button=True,
     wrap=True,
 )
 
@@ -386,8 +390,6 @@ in_fully_redacted_list_state = gr.Dataframe(
     visible=True,
     type="pandas",
     interactive=True,
-    show_fullscreen_button=True,
-    show_copy_button=True,
     wrap=True,
 )
 
@@ -522,9 +524,12 @@ div[class*="tab-nav"] button {
 # Create the gradio interface
 blocks = gr.Blocks(
     theme=gr.themes.Default(primary_hue="blue"),
-    fill_width=True,
     head=head_html,
     css=css,
+    analytics_enabled=False,
+    title="Document Redaction App",
+    delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
+    fill_width=True,
 )
 
 with blocks:
@@ -536,7 +541,10 @@ with blocks:
     # Pymupdf doc needs to be stored as State objects as they do not have a standard Gradio component equivalent
     pdf_doc_state = gr.State(list())
     all_image_annotations_state = gr.Dropdown(
-        "", label="all_image_annotations_state", allow_custom_value=True, visible=False
+        "",
+        label="all_image_annotations_state",
+        allow_custom_value=True,
+        visible=False,
     )
 
     all_decision_process_table_state = gr.Dataframe(
@@ -568,7 +576,7 @@ with blocks:
         label="host_name_textbox", value=HOST_NAME, visible=False
     )
     s3_output_folder_state = gr.Textbox(
-        label="s3_output_folder_state", value="", visible=False
+        label="s3_output_folder_state", value=S3_OUTPUTS_FOLDER, visible=False
     )
     session_output_folder_textbox = gr.Textbox(
         value=str(SESSION_OUTPUT_FOLDER),
@@ -604,7 +612,10 @@ with blocks:
         label="images_pdf_list", value="", allow_custom_value=True, visible=False
     )
     all_img_details_state = gr.Dropdown(
-        label="all_img_details_state", value="", allow_custom_value=True, visible=False
+        label="all_img_details_state",
+        value="",
+        allow_custom_value=True,
+        visible=False,
     )
 
     output_image_files_state = gr.Dropdown(
@@ -617,10 +628,16 @@ with blocks:
         label="output_file_list", value="", allow_custom_value=True, visible=False
     )
     text_output_file_list_state = gr.Dropdown(
-        label="text_output_file_list", value="", allow_custom_value=True, visible=False
+        label="text_output_file_list",
+        value="",
+        allow_custom_value=True,
+        visible=False,
     )
     log_files_output_list_state = gr.Dropdown(
-        label="log_files_output_list", value="", allow_custom_value=True, visible=False
+        label="log_files_output_list",
+        value="",
+        allow_custom_value=True,
+        visible=False,
     )
     duplication_file_path_outputs_list_state = gr.Dropdown(
         label="duplication_file_path_outputs_list",
@@ -651,7 +668,9 @@ with blocks:
         visible=False,
     )
     feedback_s3_logs_loc_state = gr.Textbox(
-        label="feedback_s3_logs_loc_state", value=S3_FEEDBACK_LOGS_FOLDER, visible=False
+        label="feedback_s3_logs_loc_state",
+        value=S3_FEEDBACK_LOGS_FOLDER,
+        visible=False,
     )
     usage_logs_state = gr.Textbox(
         label="usage_logs_state",
@@ -781,7 +800,9 @@ with blocks:
         label="Default allow list file", value=S3_ALLOW_LIST_PATH, visible=False
     )
     default_allow_list_output_folder_location = gr.Textbox(
-        label="Output default allow list location", value=ALLOW_LIST_PATH, visible=False
+        label="Output default allow list location",
+        value=ALLOW_LIST_PATH,
+        visible=False,
     )
 
     s3_whole_document_textract_default_bucket = gr.Textbox(
@@ -850,12 +871,30 @@ with blocks:
     )
     all_page_line_level_ocr_results_df_base = gr.State(
         pd.DataFrame(
-            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+            columns=[
+                "page",
+                "text",
+                "left",
+                "top",
+                "width",
+                "height",
+                "line",
+                "conf",
+            ]
         )
     )
     all_line_level_ocr_results_df_placeholder = gr.State(
         pd.DataFrame(
-            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+            columns=[
+                "page",
+                "text",
+                "left",
+                "top",
+                "width",
+                "height",
+                "line",
+                "conf",
+            ]
         )
     )
 
@@ -880,7 +919,6 @@ with blocks:
         type="pandas",
         label="Table rows with same text",
         headers=["page", "label", "text", "id"],
-        show_fullscreen_button=True,
         wrap=True,
         max_height=400,
         static_columns=[0, 1, 2, 3],
@@ -963,8 +1001,6 @@ with blocks:
         label="Cost codes",
         type="pandas",
         interactive=True,
-        show_fullscreen_button=True,
-        show_copy_button=True,
         show_search="filter",
         wrap=True,
         max_height=200,
@@ -1080,7 +1116,9 @@ with blocks:
         value="", label="Textract call outputs", visible=False
     )
     job_input_textbox = gr.Textbox(
-        value=TEXTRACT_JOBS_S3_INPUT_LOC, label="Textract call outputs", visible=False
+        value=TEXTRACT_JOBS_S3_INPUT_LOC,
+        label="Textract call outputs",
+        visible=False,
     )
 
     textract_job_output_file = gr.File(
@@ -1114,179 +1152,159 @@ with blocks:
 
     gr.Markdown(INTRO_TEXT)
 
-    ###
-    # REDACTION PDF/IMAGES TABLE
-    ###
-    with gr.Tab("Redact PDFs/images", elem_id="app_tab"):
+    with gr.Tabs() as tabs:
+        ###
+        # REDACTION PDF/IMAGES TABLE
+        ###
+        with gr.Tab("Redact PDFs/images", id=1):
 
-        # Examples for PDF/image redaction
-        if SHOW_EXAMPLES:
-            gr.Markdown(
-                "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
-            )
-
-            # Check which example files exist and create examples only for available files
-            example_files = [
-                "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
-                "example_data/example_complaint_letter.jpg",
-                "example_data/graduate-job-example-cover-letter.pdf",
-                "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-                "example_data/partnership_toolkit_redact_custom_deny_list.csv",
-                "example_data/partnership_toolkit_redact_some_pages.csv",
-            ]
-
-            available_examples = list()
-            example_labels = list()
-
-            # Check each example file and add to examples if it exists
-            if os.path.exists(example_files[0]):
-                available_examples.append(
-                    [
-                        [example_files[0]],
-                        "Local model - selectable text",
-                        "Local",
-                        [],
-                        CHOSEN_REDACT_ENTITIES,
-                        CHOSEN_COMPREHEND_ENTITIES,
-                        [example_files[0]],
-                        example_files[0],
-                        [],
-                        pd.DataFrame(),
-                        [],
-                        pd.DataFrame(),
-                        2,
-                    ]
-                )
-                example_labels.append("PDF with selectable text redaction")
-
-            if os.path.exists(example_files[1]):
-                available_examples.append(
-                    [
-                        [example_files[1]],
-                        "Local OCR model - PDFs without selectable text",
-                        "Local",
-                        [],
-                        CHOSEN_REDACT_ENTITIES,
-                        CHOSEN_COMPREHEND_ENTITIES,
-                        [example_files[1]],
-                        example_files[1],
-                        [],
-                        pd.DataFrame(),
-                        [],
-                        pd.DataFrame(),
-                        1,
-                    ]
-                )
-                example_labels.append("Image redaction with local OCR")
-
-            if os.path.exists(example_files[2]):
-                available_examples.append(
-                    [
-                        [example_files[2]],
-                        "Local OCR model - PDFs without selectable text",
-                        "Local",
-                        [],
-                        ["TITLES", "PERSON", "DATE_TIME"],
-                        CHOSEN_COMPREHEND_ENTITIES,
-                        [example_files[2]],
-                        example_files[2],
-                        [],
-                        pd.DataFrame(),
-                        [],
-                        pd.DataFrame(),
-                        1,
-                    ]
-                )
-                example_labels.append(
-                    "PDF redaction with custom entities (Titles, Person, Dates)"
+            # Examples for PDF/image redaction
+            if SHOW_EXAMPLES:
+                gr.Markdown(
+                    "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
                 )
 
-            if os.path.exists(example_files[3]):
-                if SHOW_AWS_EXAMPLES:
+                # Check which example files exist and create examples only for available files
+                example_files = [
+                    "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
+                    "example_data/example_complaint_letter.jpg",
+                    "example_data/graduate-job-example-cover-letter.pdf",
+                    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+                    "example_data/partnership_toolkit_redact_custom_deny_list.csv",
+                    "example_data/partnership_toolkit_redact_some_pages.csv",
+                ]
+
+                available_examples = list()
+                example_labels = list()
+
+                # Check each example file and add to examples if it exists
+                if os.path.exists(example_files[0]):
                     available_examples.append(
                         [
-                            [example_files[3]],
-                            "AWS Textract service - all PDF types",
-                            "AWS Comprehend",
-                            ["Extract handwriting", "Extract signatures"],
+                            [example_files[0]],
+                            "Local model - selectable text",
+                            "Local",
+                            [],
                             CHOSEN_REDACT_ENTITIES,
                             CHOSEN_COMPREHEND_ENTITIES,
-                            [example_files[3]],
-                            example_files[3],
+                            [example_files[0]],
+                            example_files[0],
                             [],
                             pd.DataFrame(),
                             [],
                             pd.DataFrame(),
-                            7,
+                            2,
+                        ]
+                    )
+                    example_labels.append("PDF with selectable text redaction")
+
+                if os.path.exists(example_files[1]):
+                    available_examples.append(
+                        [
+                            [example_files[1]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            [],
+                            CHOSEN_REDACT_ENTITIES,
+                            CHOSEN_COMPREHEND_ENTITIES,
+                            [example_files[1]],
+                            example_files[1],
+                            [],
+                            pd.DataFrame(),
+                            [],
+                            pd.DataFrame(),
+                            1,
+                        ]
+                    )
+                    example_labels.append("Image redaction with local OCR")
+
+                if os.path.exists(example_files[2]):
+                    available_examples.append(
+                        [
+                            [example_files[2]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            [],
+                            ["TITLES", "PERSON", "DATE_TIME"],
+                            CHOSEN_COMPREHEND_ENTITIES,
+                            [example_files[2]],
+                            example_files[2],
+                            [],
+                            pd.DataFrame(),
+                            [],
+                            pd.DataFrame(),
+                            1,
                         ]
                     )
                     example_labels.append(
-                        "PDF redaction with AWS services and signature detection"
+                        "PDF redaction with custom entities (Titles, Person, Dates)"
                     )
 
-            # Add new example for custom deny list and whole page redaction
-            if (
-                os.path.exists(example_files[3])
-                and os.path.exists(example_files[4])
-                and os.path.exists(example_files[5])
-            ):
-                available_examples.append(
-                    [
-                        [example_files[3]],
-                        "Local OCR model - PDFs without selectable text",
-                        "Local",
-                        [],
-                        [
-                            "CUSTOM"
-                        ],  # Use CUSTOM entity to enable deny list functionality
-                        CHOSEN_COMPREHEND_ENTITIES,
-                        [example_files[3]],
-                        example_files[3],
-                        [example_files[4]],
-                        pd.DataFrame(
-                            data={
-                                "deny_list": [
-                                    "Sister",
-                                    "Sister City",
-                                    "Sister Cities",
-                                    "Friendship City",
-                                ]
-                            }
-                        ),
-                        [example_files[5]],
-                        pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
-                        7,
-                    ],
-                )
-                example_labels.append(
-                    "PDF redaction with custom deny list and whole page redaction"
-                )
+                if os.path.exists(example_files[3]):
+                    if SHOW_AWS_EXAMPLES:
+                        available_examples.append(
+                            [
+                                [example_files[3]],
+                                "AWS Textract service - all PDF types",
+                                "AWS Comprehend",
+                                ["Extract handwriting", "Extract signatures"],
+                                CHOSEN_REDACT_ENTITIES,
+                                CHOSEN_COMPREHEND_ENTITIES,
+                                [example_files[3]],
+                                example_files[3],
+                                [],
+                                pd.DataFrame(),
+                                [],
+                                pd.DataFrame(),
+                                7,
+                            ]
+                        )
+                        example_labels.append(
+                            "PDF redaction with AWS services and signature detection"
+                        )
 
-            # Only create examples if we have available files
-            if available_examples:
-
-                def show_info_box_on_click(
-                    in_doc_files,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    handwrite_signature_checkbox,
-                    in_redact_entities,
-                    in_redact_comprehend_entities,
-                    prepared_pdf_state,
-                    doc_full_file_name_textbox,
-                    in_deny_list,
-                    in_deny_list_state,
-                    in_fully_redacted_list,
-                    in_fully_redacted_list_state,
-                    total_pdf_page_count,
+                # Add new example for custom deny list and whole page redaction
+                if (
+                    os.path.exists(example_files[3])
+                    and os.path.exists(example_files[4])
+                    and os.path.exists(example_files[5])
                 ):
-                    gr.Info(
-                        "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
+                    available_examples.append(
+                        [
+                            [example_files[3]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            [],
+                            [
+                                "CUSTOM"
+                            ],  # Use CUSTOM entity to enable deny list functionality
+                            CHOSEN_COMPREHEND_ENTITIES,
+                            [example_files[3]],
+                            example_files[3],
+                            [example_files[4]],
+                            pd.DataFrame(
+                                data={
+                                    "deny_list": [
+                                        "Sister",
+                                        "Sister City",
+                                        "Sister Cities",
+                                        "Friendship City",
+                                    ]
+                                }
+                            ),
+                            [example_files[5]],
+                            pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
+                            7,
+                        ],
+                    )
+                    example_labels.append(
+                        "PDF redaction with custom deny list and whole page redaction"
                     )
 
-                redaction_examples = gr.Examples(
-                    examples=available_examples,
-                    inputs=[
+                # Only create examples if we have available files
+                if available_examples:
+
+                    def show_info_box_on_click(
                         in_doc_files,
                         text_extract_method_radio,
                         pii_identification_method_drop,
@@ -1300,116 +1318,118 @@ with blocks:
                         in_fully_redacted_list,
                         in_fully_redacted_list_state,
                         total_pdf_page_count,
-                    ],
-                    example_labels=example_labels,
-                    fn=show_info_box_on_click,
-                    run_on_click=True,
-                )
-        if SHOW_DIFFICULT_OCR_EXAMPLES:
-            gr.Markdown(
-                "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
-            )
-            ocr_example_files = [
-                "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-                "example_data/Difficult handwritten note.jpg",
-                "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
-            ]
-            available_ocr_examples = list()
-            ocr_example_labels = list()
-            if os.path.exists(ocr_example_files[0]):
-                available_ocr_examples.append(
-                    [
-                        [ocr_example_files[0]],
-                        "Local OCR model - PDFs without selectable text",
-                        "Only extract text (no redaction)",
-                        ["Extract handwriting", "Extract signatures"],
-                        [ocr_example_files[0]],
-                        ocr_example_files[0],
-                        7,
-                        1,
-                        1,
-                        "paddle",
-                        CHOSEN_REDACT_ENTITIES,
-                    ],
-                )
-                ocr_example_labels.append("Baseline 'easy' document page")
+                    ):
+                        gr.Info(
+                            "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
+                        )
 
-                available_ocr_examples.append(
-                    [
-                        [ocr_example_files[0]],
-                        "Local OCR model - PDFs without selectable text",
-                        "Local",
-                        ["Extract handwriting", "Extract signatures"],
-                        [ocr_example_files[0]],
-                        ocr_example_files[0],
-                        7,
-                        6,
-                        6,
-                        "hybrid-paddle-vlm",
-                        CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
-                    ],
-                )
-                ocr_example_labels.append("Scanned document page with signatures")
-
-            if os.path.exists(ocr_example_files[1]):
-                available_ocr_examples.append(
-                    [
-                        [ocr_example_files[1]],
-                        "Local OCR model - PDFs without selectable text",
-                        "Only extract text (no redaction)",
-                        ["Extract handwriting", "Extract signatures"],
-                        [ocr_example_files[1]],
-                        ocr_example_files[1],
-                        1,
-                        0,
-                        0,
-                        "vlm",
-                        CHOSEN_REDACT_ENTITIES,
-                    ],
-                )
-                ocr_example_labels.append("Unclear text on handwritten note")
-
-            if os.path.exists(ocr_example_files[2]):
-                available_ocr_examples.append(
-                    [
-                        [ocr_example_files[2]],
-                        "Local OCR model - PDFs without selectable text",
-                        "Local",
-                        ["Extract handwriting", "Extract signatures"],
-                        [ocr_example_files[2]],
-                        ocr_example_files[2],
-                        1,
-                        0,
-                        0,
-                        "hybrid-paddle-vlm",
-                        CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
-                    ],
-                )
-                ocr_example_labels.append("CV with photo")
-
-            # Only create examples if we have available files
-            if available_ocr_examples:
-
-                def show_info_box_on_click(
-                    in_doc_files,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    handwrite_signature_checkbox,
-                    prepared_pdf_state,
-                    doc_full_file_name_textbox,
-                    total_pdf_page_count,
-                    page_min,
-                    page_max,
-                    local_ocr_method_radio,
-                    in_redact_entities,
-                ):
-                    gr.Info(
-                        "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
+                    redaction_examples = gr.Examples(
+                        examples=available_examples,
+                        inputs=[
+                            in_doc_files,
+                            text_extract_method_radio,
+                            pii_identification_method_drop,
+                            handwrite_signature_checkbox,
+                            in_redact_entities,
+                            in_redact_comprehend_entities,
+                            prepared_pdf_state,
+                            doc_full_file_name_textbox,
+                            in_deny_list,
+                            in_deny_list_state,
+                            in_fully_redacted_list,
+                            in_fully_redacted_list_state,
+                            total_pdf_page_count,
+                        ],
+                        example_labels=example_labels,
+                        fn=show_info_box_on_click,
+                        run_on_click=True,
                     )
+            if SHOW_DIFFICULT_OCR_EXAMPLES:
+                gr.Markdown(
+                    "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
+                )
+                ocr_example_files = [
+                    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+                    "example_data/Difficult handwritten note.jpg",
+                    "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
+                ]
+                available_ocr_examples = list()
+                ocr_example_labels = list()
+                if os.path.exists(ocr_example_files[0]):
+                    available_ocr_examples.append(
+                        [
+                            [ocr_example_files[0]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Only extract text (no redaction)",
+                            ["Extract handwriting", "Extract signatures"],
+                            [ocr_example_files[0]],
+                            ocr_example_files[0],
+                            7,
+                            1,
+                            1,
+                            "paddle",
+                            CHOSEN_REDACT_ENTITIES,
+                        ],
+                    )
+                    ocr_example_labels.append("Baseline 'easy' document page")
 
-                ocr_examples = gr.Examples(
-                    examples=available_ocr_examples,
-                    inputs=[
+                    available_ocr_examples.append(
+                        [
+                            [ocr_example_files[0]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            ["Extract handwriting", "Extract signatures"],
+                            [ocr_example_files[0]],
+                            ocr_example_files[0],
+                            7,
+                            6,
+                            6,
+                            "hybrid-paddle-vlm",
+                            CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
+                        ],
+                    )
+                    ocr_example_labels.append("Scanned document page with signatures")
+
+                if os.path.exists(ocr_example_files[1]):
+                    available_ocr_examples.append(
+                        [
+                            [ocr_example_files[1]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Only extract text (no redaction)",
+                            ["Extract handwriting", "Extract signatures"],
+                            [ocr_example_files[1]],
+                            ocr_example_files[1],
+                            1,
+                            0,
+                            0,
+                            "vlm",
+                            CHOSEN_REDACT_ENTITIES,
+                        ],
+                    )
+                    ocr_example_labels.append("Unclear text on handwritten note")
+
+                if os.path.exists(ocr_example_files[2]):
+                    available_ocr_examples.append(
+                        [
+                            [ocr_example_files[2]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            ["Extract handwriting", "Extract signatures"],
+                            [ocr_example_files[2]],
+                            ocr_example_files[2],
+                            1,
+                            0,
+                            0,
+                            "hybrid-paddle-vlm",
+                            CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
+                        ],
+                    )
+                    ocr_example_labels.append("CV with photo")
+
+                # Only create examples if we have available files
+                if available_ocr_examples:
+
+                    def show_info_box_on_click(
                         in_doc_files,
                         text_extract_method_radio,
                         pii_identification_method_drop,
@@ -1421,253 +1441,322 @@ with blocks:
                         page_max,
                         local_ocr_method_radio,
                         in_redact_entities,
-                    ],
-                    example_labels=ocr_example_labels,
-                    fn=show_info_box_on_click,
-                    run_on_click=True,
+                    ):
+                        gr.Info(
+                            "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
+                        )
+
+                    ocr_examples = gr.Examples(
+                        examples=available_ocr_examples,
+                        inputs=[
+                            in_doc_files,
+                            text_extract_method_radio,
+                            pii_identification_method_drop,
+                            handwrite_signature_checkbox,
+                            prepared_pdf_state,
+                            doc_full_file_name_textbox,
+                            total_pdf_page_count,
+                            page_min,
+                            page_max,
+                            local_ocr_method_radio,
+                            in_redact_entities,
+                        ],
+                        example_labels=ocr_example_labels,
+                        fn=show_info_box_on_click,
+                        run_on_click=True,
+                    )
+
+            with gr.Accordion("Extract text and redact document", open=True):
+                in_doc_files.render()
+                open_tab_text = ""
+                default_text = ""
+                textract_text = ""
+                comprehend_text = ""
+                if DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION:
+                    textract_text = " AWS Textract has a cost per page."
+                else:
+                    textract_text = ""
+                if DEFAULT_PII_DETECTION_MODEL == AWS_PII_OPTION:
+                    comprehend_text = (
+                        " AWS Comprehend has a cost per character processed."
+                    )
+                else:
+                    comprehend_text = ""
+                if textract_text or comprehend_text:
+                    open_tab_text = " Open tab to see more details."
+                if textract_text and comprehend_text:
+                    default_text = ""
+                else:
+                    default_text = f" The default text extraction method is {DEFAULT_TEXT_EXTRACTION_MODEL}, and the default personal information detection method is {DEFAULT_PII_DETECTION_MODEL}. "
+
+                with gr.Accordion(
+                    label=f"Change default redaction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
+                    open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                ):
+                    text_extract_method_radio.render()
+
+                    if SHOW_LOCAL_OCR_MODEL_OPTIONS:
+                        with gr.Accordion(
+                            label="Change default local OCR model",
+                            open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                        ):
+                            local_ocr_method_radio.render()
+                    else:
+                        local_ocr_method_radio.render()
+
+                    if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
+                        with gr.Accordion(
+                            "Enable AWS Textract signature detection (default is off)",
+                            open=False,
+                        ):
+                            handwrite_signature_checkbox.render()
+                    else:
+                        handwrite_signature_checkbox.render()
+
+                    with gr.Row(equal_height=True):
+                        pii_identification_method_drop.render()
+
+                if SHOW_COSTS:
+                    with gr.Accordion(
+                        "Estimated costs and time taken. Note that costs shown only include direct usage of AWS services and do not include other running costs (e.g. storage, run-time costs)",
+                        open=True,
+                        visible=True,
+                    ):
+                        with gr.Row(equal_height=True):
+                            with gr.Column(scale=1):
+                                textract_output_found_checkbox = gr.Checkbox(
+                                    value=False,
+                                    label="Existing Textract output file found",
+                                    interactive=False,
+                                    visible=True,
+                                )
+                                relevant_ocr_output_with_words_found_checkbox = (
+                                    gr.Checkbox(
+                                        value=False,
+                                        label="Existing local OCR output file found",
+                                        interactive=False,
+                                        visible=True,
+                                    )
+                                )
+                            with gr.Column(scale=4):
+                                with gr.Row(equal_height=True):
+                                    total_pdf_page_count.render()
+                                    estimated_aws_costs_number = gr.Number(
+                                        label="Approximate AWS Textract and/or Comprehend cost (£)",
+                                        value=0.00,
+                                        precision=2,
+                                        visible=True,
+                                        interactive=False,
+                                    )
+                                    estimated_time_taken_number = gr.Number(
+                                        label="Approximate time taken to extract text/redact (minutes)",
+                                        value=0,
+                                        visible=True,
+                                        precision=2,
+                                        interactive=False,
+                                    )
+                else:
+                    total_pdf_page_count.render()  # Need to render in both cases, as included in examples
+
+                if GET_COST_CODES or ENFORCE_COST_CODES:
+                    with gr.Accordion(
+                        "Assign task to cost code", open=True, visible=True
+                    ):
+                        gr.Markdown(
+                            "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
+                        )
+                        with gr.Row():
+                            with gr.Column():
+                                with gr.Accordion(
+                                    "View and filter cost code table",
+                                    open=False,
+                                    visible=True,
+                                ):
+                                    cost_code_dataframe = gr.Dataframe(
+                                        value=pd.DataFrame(
+                                            columns=["Cost code", "Description"]
+                                        ),
+                                        row_count=(0, "dynamic"),
+                                        label="Existing cost codes",
+                                        type="pandas",
+                                        interactive=True,
+                                        show_search="filter",
+                                        visible=True,
+                                        wrap=True,
+                                        max_height=200,
+                                    )
+                                    reset_cost_code_dataframe_button = gr.Button(
+                                        value="Reset code code table filter"
+                                    )
+                            with gr.Column():
+                                cost_code_choice_drop = gr.Dropdown(
+                                    value=DEFAULT_COST_CODE,
+                                    label="Choose cost code for analysis",
+                                    choices=[DEFAULT_COST_CODE],
+                                    allow_custom_value=False,
+                                    visible=True,
+                                )
+
+                if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
+                    with gr.Accordion(
+                        "Submit whole document to AWS Textract API (quickest text extraction for large documents)",
+                        open=False,
+                        visible=True,
+                    ):
+                        with gr.Row(equal_height=True):
+                            gr.Markdown(
+                                """Document will be submitted to AWS Textract API service to extract all text in the document. Processing will take place on (secure) AWS servers, and outputs will be stored on S3 for up to 7 days. To download the results, click 'Check status' below and they will be downloaded if ready."""
+                            )
+                        with gr.Row(equal_height=True):
+                            send_document_to_textract_api_btn = gr.Button(
+                                "Analyse document with AWS Textract API call",
+                                variant="primary",
+                                visible=True,
+                            )
+                        with gr.Row(equal_height=False):
+                            with gr.Column(scale=2):
+                                textract_job_detail_df = gr.Dataframe(
+                                    pd.DataFrame(
+                                        columns=[
+                                            "job_id",
+                                            "file_name",
+                                            "job_type",
+                                            "signature_extraction",
+                                            "job_date_time",
+                                        ]
+                                    ),
+                                    label="Previous job details",
+                                    visible=True,
+                                    type="pandas",
+                                    wrap=True,
+                                )
+                            with gr.Column(scale=1):
+                                job_id_textbox = gr.Textbox(
+                                    label="Job ID to check status",
+                                    value="",
+                                    visible=True,
+                                    lines=2,
+                                )
+                                check_state_of_textract_api_call_btn = gr.Button(
+                                    "Check status of Textract job and download",
+                                    variant="secondary",
+                                    visible=True,
+                                )
+                        with gr.Row():
+                            with gr.Column():
+                                textract_job_output_file = gr.File(
+                                    label="Textract job output files",
+                                    height=100,
+                                    visible=True,
+                                )
+                            with gr.Column():
+                                job_current_status = gr.Textbox(
+                                    value="",
+                                    label="Analysis job current status",
+                                    visible=True,
+                                )
+                                convert_textract_outputs_to_ocr_results = gr.Button(
+                                    "Convert Textract job outputs to OCR results",
+                                    variant="secondary",
+                                    visible=True,
+                                )
+
+                gr.Markdown(
+                    """If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the Redaction Settings tab."""
+                )
+                document_redact_btn = gr.Button(
+                    "Extract text and redact document", variant="primary", scale=4
                 )
 
-        with gr.Accordion("Extract text and redact document", open=True):
-            in_doc_files.render()
-            open_tab_text = ""
-            default_text = ""
-            textract_text = ""
-            comprehend_text = ""
-            if DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION:
-                textract_text = " AWS Textract has a cost per page."
-            else:
-                textract_text = ""
-            if DEFAULT_PII_DETECTION_MODEL == AWS_PII_OPTION:
-                comprehend_text = " AWS Comprehend has a cost per character processed."
-            else:
-                comprehend_text = ""
-            if textract_text or comprehend_text:
-                open_tab_text = " Open tab to see more details."
-            if textract_text and comprehend_text:
-                default_text = ""
-            else:
-                default_text = f" The default text extraction method is {DEFAULT_TEXT_EXTRACTION_MODEL}, and the default personal information detection method is {DEFAULT_PII_DETECTION_MODEL}. "
-
-            with gr.Accordion(
-                label=f"Change default redaction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
-                open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
-            ):
-                text_extract_method_radio.render()
-
-                if SHOW_LOCAL_OCR_MODEL_OPTIONS:
-                    with gr.Accordion(
-                        label="Change default local OCR model",
-                        open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
-                    ):
-                        local_ocr_method_radio.render()
-                else:
-                    local_ocr_method_radio.render()
-
-                if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
-                    with gr.Accordion(
-                        "Enable AWS Textract signature detection (default is off)",
-                        open=False,
-                    ):
-                        handwrite_signature_checkbox.render()
-                else:
-                    handwrite_signature_checkbox.render()
-
-                with gr.Row(equal_height=True):
-                    pii_identification_method_drop.render()
-
-            if SHOW_COSTS:
-                with gr.Accordion(
-                    "Estimated costs and time taken. Note that costs shown only include direct usage of AWS services and do not include other running costs (e.g. storage, run-time costs)",
-                    open=True,
-                    visible=True,
-                ):
-                    with gr.Row(equal_height=True):
-                        with gr.Column(scale=1):
-                            textract_output_found_checkbox = gr.Checkbox(
-                                value=False,
-                                label="Existing Textract output file found",
-                                interactive=False,
-                                visible=True,
-                            )
-                            relevant_ocr_output_with_words_found_checkbox = gr.Checkbox(
-                                value=False,
-                                label="Existing local OCR output file found",
-                                interactive=False,
-                                visible=True,
-                            )
-                        with gr.Column(scale=4):
-                            with gr.Row(equal_height=True):
-                                total_pdf_page_count.render()
-                                estimated_aws_costs_number = gr.Number(
-                                    label="Approximate AWS Textract and/or Comprehend cost (£)",
-                                    value=0.00,
-                                    precision=2,
-                                    visible=True,
-                                    interactive=False,
-                                )
-                                estimated_time_taken_number = gr.Number(
-                                    label="Approximate time taken to extract text/redact (minutes)",
-                                    value=0,
-                                    visible=True,
-                                    precision=2,
-                                    interactive=False,
-                                )
-            else:
-                total_pdf_page_count.render()  # Need to render in both cases, as included in examples
-
-            if GET_COST_CODES or ENFORCE_COST_CODES:
-                with gr.Accordion("Assign task to cost code", open=True, visible=True):
-                    gr.Markdown(
-                        "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
+            with gr.Row():
+                with gr.Column(scale=1):
+                    redaction_output_summary_textbox = gr.Textbox(
+                        label="Output summary", scale=1, lines=4
                     )
-                    with gr.Row():
-                        with gr.Column():
-                            with gr.Accordion(
-                                "View and filter cost code table",
-                                open=False,
-                                visible=True,
-                            ):
-                                cost_code_dataframe = gr.Dataframe(
-                                    value=pd.DataFrame(
-                                        columns=["Cost code", "Description"]
-                                    ),
-                                    row_count=(0, "dynamic"),
-                                    label="Existing cost codes",
-                                    type="pandas",
-                                    interactive=True,
-                                    show_fullscreen_button=True,
-                                    show_copy_button=True,
-                                    show_search="filter",
-                                    visible=True,
-                                    wrap=True,
-                                    max_height=200,
-                                )
-                                reset_cost_code_dataframe_button = gr.Button(
-                                    value="Reset code code table filter"
-                                )
-                        with gr.Column():
-                            cost_code_choice_drop = gr.Dropdown(
-                                value=DEFAULT_COST_CODE,
-                                label="Choose cost code for analysis",
-                                choices=[DEFAULT_COST_CODE],
-                                allow_custom_value=False,
-                                visible=True,
-                            )
+                    go_to_review_redactions_tab_btn = gr.Button(
+                        "Go to review redactions tab", variant="secondary", scale=1
+                    )
+                with gr.Column(scale=2):
+                    output_file = gr.File(
+                        label="Output files", scale=2
+                    )  # , height=FILE_INPUT_HEIGHT)
 
-            if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
-                with gr.Accordion(
-                    "Submit whole document to AWS Textract API (quickest text extraction for large documents)",
-                    open=False,
-                    visible=True,
-                ):
-                    with gr.Row(equal_height=True):
-                        gr.Markdown(
-                            """Document will be submitted to AWS Textract API service to extract all text in the document. Processing will take place on (secure) AWS servers, and outputs will be stored on S3 for up to 7 days. To download the results, click 'Check status' below and they will be downloaded if ready."""
-                        )
-                    with gr.Row(equal_height=True):
-                        send_document_to_textract_api_btn = gr.Button(
-                            "Analyse document with AWS Textract API call",
-                            variant="primary",
-                            visible=True,
-                        )
-                    with gr.Row(equal_height=False):
-                        with gr.Column(scale=2):
-                            textract_job_detail_df = gr.Dataframe(
-                                pd.DataFrame(
-                                    columns=[
-                                        "job_id",
-                                        "file_name",
-                                        "job_type",
-                                        "signature_extraction",
-                                        "job_date_time",
-                                    ]
-                                ),
-                                label="Previous job details",
-                                visible=True,
-                                type="pandas",
-                                wrap=True,
-                            )
-                        with gr.Column(scale=1):
-                            job_id_textbox = gr.Textbox(
-                                label="Job ID to check status",
-                                value="",
-                                visible=True,
-                                lines=2,
-                            )
-                            check_state_of_textract_api_call_btn = gr.Button(
-                                "Check status of Textract job and download",
-                                variant="secondary",
-                                visible=True,
-                            )
-                    with gr.Row():
-                        with gr.Column():
-                            textract_job_output_file = gr.File(
-                                label="Textract job output files",
-                                height=100,
-                                visible=True,
-                            )
-                        with gr.Column():
-                            job_current_status = gr.Textbox(
-                                value="",
-                                label="Analysis job current status",
-                                visible=True,
-                            )
-                            convert_textract_outputs_to_ocr_results = gr.Button(
-                                "Convert Textract job outputs to OCR results",
-                                variant="secondary",
-                                visible=True,
-                            )
+                latest_file_completed_num = gr.Number(
+                    value=0,
+                    label="Number of documents redacted",
+                    interactive=False,
+                    visible=False,
+                )
 
-            gr.Markdown(
-                """If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the Redaction Settings tab."""
+            # Feedback elements are invisible until revealed by redaction action
+            pdf_feedback_title = gr.Markdown(
+                value="## Please give feedback", visible=False
             )
-            document_redact_btn = gr.Button(
-                "Extract text and redact document", variant="primary", scale=4
-            )
-
-        with gr.Row():
-            redaction_output_summary_textbox = gr.Textbox(
-                label="Output summary", scale=1, lines=4
-            )
-            output_file = gr.File(
-                label="Output files", scale=2
-            )  # , height=FILE_INPUT_HEIGHT)
-            latest_file_completed_num = gr.Number(
-                value=0,
-                label="Number of documents redacted",
-                interactive=False,
+            pdf_feedback_radio = gr.Radio(
+                label="Quality of results",
+                choices=["The results were good", "The results were not good"],
                 visible=False,
             )
+            pdf_further_details_text = gr.Textbox(
+                label="Please give more detailed feedback about the results:",
+                visible=False,
+            )
+            pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
-        # Feedback elements are invisible until revealed by redaction action
-        pdf_feedback_title = gr.Markdown(value="## Please give feedback", visible=False)
-        pdf_feedback_radio = gr.Radio(
-            label="Quality of results",
-            choices=["The results were good", "The results were not good"],
-            visible=False,
-        )
-        pdf_further_details_text = gr.Textbox(
-            label="Please give more detailed feedback about the results:", visible=False
-        )
-        pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
+            # Feedback elements are invisible until revealed by redaction action
+            # all_outputs_in_output_folder_title = gr.Markdown(value="## All outputs in output folder", visible=False)
+            # all_outputs_in_output_folder_dataframe = gr.FileExplorer(
+            #     root_dir=OUTPUT_FOLDER,
+            #     label="All outputs in output folder",
+            #     file_count="multiple",
+            #     visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+            #     interactive=True,
+            # )
 
-        # Feedback elements are invisible until revealed by redaction action
-        # all_outputs_in_output_folder_title = gr.Markdown(value="## All outputs in output folder", visible=False)
-        # all_outputs_in_output_folder_dataframe = gr.FileExplorer(
-        #     root_dir=OUTPUT_FOLDER,
-        #     label="All outputs in output folder",
-        #     file_count="multiple",
-        #     visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-        #     interactive=True,
-        # )
+            if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
+                with gr.Accordion(
+                    "View all and download all output files from this session",
+                    open=False,
+                ):
+                    all_output_files_btn = gr.Button(
+                        "Refresh files in output folder", variant="secondary"
+                    )
+                    all_output_files = gr.FileExplorer(
+                        root_dir=OUTPUT_FOLDER,
+                        label="Choose output files for download",
+                        file_count="multiple",
+                        visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                        interactive=True,
+                        max_height=400,
+                    )
 
-        if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
-            with gr.Accordion(
-                "View all and download all output files from this session", open=False
-            ):
+                    all_outputs_file_download = gr.File(
+                        label="Download output files",
+                        file_count="multiple",
+                        file_types=[
+                            ".pdf",
+                            ".jpg",
+                            ".jpeg",
+                            ".png",
+                            ".csv",
+                            ".xlsx",
+                            ".xls",
+                            ".txt",
+                            ".doc",
+                            ".docx",
+                            ".json",
+                        ],
+                        interactive=False,
+                        visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+                        height=200,
+                    )
+            else:
                 all_output_files_btn = gr.Button(
-                    "Refresh files in output folder", variant="secondary"
+                    "Update files in output folder",
+                    variant="secondary",
+                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
                 )
+
                 all_output_files = gr.FileExplorer(
                     root_dir=OUTPUT_FOLDER,
                     label="Choose output files for download",
@@ -1697,226 +1786,168 @@ with blocks:
                     visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
                     height=200,
                 )
-        else:
-            all_output_files_btn = gr.Button(
-                "Update files in output folder",
-                variant="secondary",
-                visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+
+        ###
+        # REVIEW REDACTIONS TAB
+        ###
+        with gr.Tab("Review redactions", id=2):
+
+            all_page_line_level_ocr_results_with_words_df_base = gr.Dataframe(
+                type="pandas",
+                label="all_page_line_level_ocr_results_with_words_df_base",
+                wrap=False,
+                show_search="filter",
+                visible=False,
             )
 
-            all_output_files = gr.FileExplorer(
-                root_dir=OUTPUT_FOLDER,
-                label="Choose output files for download",
-                file_count="multiple",
-                visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                interactive=True,
-                max_height=400,
-            )
+            with gr.Accordion(label="Review PDF redactions", open=True):
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=2):
+                        input_pdf_for_review = gr.File(
+                            label="Upload original or '..._for_review.pdf' PDF to begin review process.",
+                            file_count="multiple",
+                            height=FILE_INPUT_HEIGHT,
+                        )
+                        upload_pdf_for_review_btn = gr.Button(
+                            "1. Load in original PDF or review PDF with redactions",
+                            variant="secondary",
+                        )
+                    with gr.Column(scale=1):
+                        input_review_files = gr.File(
+                            label="Upload review files here to review suggested redactions. 'review_file' csv The 'ocr_results with words' file can also be provided for searching text and making new redactions.",
+                            file_count="multiple",
+                            height=FILE_INPUT_HEIGHT,
+                        )
+                        upload_review_files_btn = gr.Button(
+                            "2. Upload review or OCR csv files", variant="secondary"
+                        )
+            with gr.Row():
+                annotate_zoom_in = gr.Button("Zoom in", visible=False)
+                annotate_zoom_out = gr.Button("Zoom out", visible=False)
+            with gr.Row():
+                clear_all_redactions_on_page_btn = gr.Button(
+                    "Clear all redactions on page", visible=False
+                )
 
-            all_outputs_file_download = gr.File(
-                label="Download output files",
-                file_count="multiple",
-                file_types=[
-                    ".pdf",
-                    ".jpg",
-                    ".jpeg",
-                    ".png",
-                    ".csv",
-                    ".xlsx",
-                    ".xls",
-                    ".txt",
-                    ".doc",
-                    ".docx",
-                    ".json",
-                ],
-                interactive=False,
-                visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                height=200,
-            )
+            with gr.Accordion(label="View and edit review file data", open=False):
+                review_file_df = gr.Dataframe(
+                    value=pd.DataFrame(),
+                    headers=[
+                        "image",
+                        "page",
+                        "label",
+                        "color",
+                        "xmin",
+                        "ymin",
+                        "xmax",
+                        "ymax",
+                        "text",
+                        "id",
+                    ],
+                    row_count=(0, "dynamic"),
+                    label="Review file data",
+                    visible=True,
+                    type="pandas",
+                    wrap=True,
+                    show_search=True,
+                )
 
-    ###
-    # REVIEW REDACTIONS TAB
-    ###
-    with gr.Tab("Review redactions", elem_id="app_tab"):
-
-        all_page_line_level_ocr_results_with_words_df_base = gr.Dataframe(
-            type="pandas",
-            label="all_page_line_level_ocr_results_with_words_df_base",
-            show_fullscreen_button=True,
-            wrap=False,
-            show_search="filter",
-            visible=False,
-        )
-
-        with gr.Accordion(label="Review PDF redactions", open=True):
-            with gr.Row(equal_height=True):
+            with gr.Row():
                 with gr.Column(scale=2):
-                    input_pdf_for_review = gr.File(
-                        label="Upload original or '..._for_review.pdf' PDF to begin review process.",
-                        file_count="multiple",
-                        height=FILE_INPUT_HEIGHT,
+                    with gr.Row(equal_height=True):
+                        annotation_last_page_button = gr.Button(
+                            "Previous page", scale=4
+                        )
+                        annotate_current_page = gr.Number(
+                            value=1,
+                            label="Current page",
+                            precision=0,
+                            scale=2,
+                            min_width=50,
+                            minimum=1,
+                        )
+                        annotate_max_pages = gr.Number(
+                            value=1,
+                            label="Total pages",
+                            precision=0,
+                            interactive=False,
+                            scale=2,
+                            min_width=50,
+                            minimum=1,
+                        )
+                        annotation_next_page_button = gr.Button("Next page", scale=4)
+
+                    zoom_str = str(annotator_zoom_number) + "%"
+
+                    annotator = image_annotator(
+                        label="Modify redaction boxes",
+                        label_list=["Redaction"],
+                        label_colors=[(0, 0, 0)],
+                        show_label=False,
+                        height=zoom_str,
+                        width=zoom_str,
+                        box_min_size=1,
+                        box_selected_thickness=2,
+                        handle_size=4,
+                        sources=None,  # ["upload"],
+                        show_clear_button=False,
+                        show_share_button=False,
+                        show_remove_button=False,
+                        handles_cursor=True,
+                        interactive=False,
                     )
-                    upload_pdf_for_review_btn = gr.Button(
-                        "1. Load in original PDF or review PDF with redactions",
+
+                    with gr.Row(equal_height=True):
+                        annotation_last_page_button_bottom = gr.Button(
+                            "Previous page", scale=4
+                        )
+                        annotate_current_page_bottom = gr.Number(
+                            value=1,
+                            label="Current page",
+                            precision=0,
+                            interactive=True,
+                            scale=2,
+                            min_width=50,
+                            minimum=1,
+                        )
+                        annotate_max_pages_bottom = gr.Number(
+                            value=1,
+                            label="Total pages",
+                            precision=0,
+                            interactive=False,
+                            scale=2,
+                            min_width=50,
+                            minimum=1,
+                        )
+                        annotation_next_page_button_bottom = gr.Button(
+                            "Next page", scale=4
+                        )
+
+                with gr.Column(scale=1):
+                    annotation_button_apply = gr.Button(
+                        "Apply revised redactions to PDF", variant="primary"
+                    )
+                    update_current_page_redactions_btn = gr.Button(
+                        value="Save changes on current page to file",
                         variant="secondary",
                     )
-                with gr.Column(scale=1):
-                    input_review_files = gr.File(
-                        label="Upload review files here to review suggested redactions. 'review_file' csv The 'ocr_results with words' file can also be provided for searching text and making new redactions.",
-                        file_count="multiple",
-                        height=FILE_INPUT_HEIGHT,
-                    )
-                    upload_review_files_btn = gr.Button(
-                        "2. Upload review or OCR csv files", variant="secondary"
-                    )
-        with gr.Row():
-            annotate_zoom_in = gr.Button("Zoom in", visible=False)
-            annotate_zoom_out = gr.Button("Zoom out", visible=False)
-        with gr.Row():
-            clear_all_redactions_on_page_btn = gr.Button(
-                "Clear all redactions on page", visible=False
-            )
 
-        with gr.Accordion(label="View and edit review file data", open=False):
-            review_file_df = gr.Dataframe(
-                value=pd.DataFrame(),
-                headers=[
-                    "image",
-                    "page",
-                    "label",
-                    "color",
-                    "xmin",
-                    "ymin",
-                    "xmax",
-                    "ymax",
-                    "text",
-                    "id",
-                ],
-                row_count=(0, "dynamic"),
-                label="Review file data",
-                visible=True,
-                type="pandas",
-                wrap=True,
-                show_search=True,
-                show_fullscreen_button=True,
-                show_copy_button=True,
-            )
-
-        with gr.Row():
-            with gr.Column(scale=2):
-                with gr.Row(equal_height=True):
-                    annotation_last_page_button = gr.Button("Previous page", scale=4)
-                    annotate_current_page = gr.Number(
-                        value=1,
-                        label="Current page",
-                        precision=0,
-                        scale=2,
-                        min_width=50,
-                        minimum=1,
-                    )
-                    annotate_max_pages = gr.Number(
-                        value=1,
-                        label="Total pages",
-                        precision=0,
-                        interactive=False,
-                        scale=2,
-                        min_width=50,
-                        minimum=1,
-                    )
-                    annotation_next_page_button = gr.Button("Next page", scale=4)
-
-                zoom_str = str(annotator_zoom_number) + "%"
-
-                annotator = image_annotator(
-                    label="Modify redaction boxes",
-                    label_list=["Redaction"],
-                    label_colors=[(0, 0, 0)],
-                    show_label=False,
-                    height=zoom_str,
-                    width=zoom_str,
-                    box_min_size=1,
-                    box_selected_thickness=2,
-                    handle_size=4,
-                    sources=None,  # ["upload"],
-                    show_clear_button=False,
-                    show_share_button=False,
-                    show_remove_button=False,
-                    handles_cursor=True,
-                    interactive=False,
-                )
-
-                with gr.Row(equal_height=True):
-                    annotation_last_page_button_bottom = gr.Button(
-                        "Previous page", scale=4
-                    )
-                    annotate_current_page_bottom = gr.Number(
-                        value=1,
-                        label="Current page",
-                        precision=0,
-                        interactive=True,
-                        scale=2,
-                        min_width=50,
-                        minimum=1,
-                    )
-                    annotate_max_pages_bottom = gr.Number(
-                        value=1,
-                        label="Total pages",
-                        precision=0,
-                        interactive=False,
-                        scale=2,
-                        min_width=50,
-                        minimum=1,
-                    )
-                    annotation_next_page_button_bottom = gr.Button("Next page", scale=4)
-
-            with gr.Column(scale=1):
-                annotation_button_apply = gr.Button(
-                    "Apply revised redactions to PDF", variant="primary"
-                )
-                update_current_page_redactions_btn = gr.Button(
-                    value="Save changes on current page to file", variant="primary"
-                )
-
-                with gr.Tab("Modify existing redactions", elem_id="app_tab"):
-                    with gr.Accordion("Search suggested redactions", open=True):
-                        with gr.Row(equal_height=True):
-                            recogniser_entity_dropdown = gr.Dropdown(
-                                label="Redaction category",
-                                value="ALL",
-                                allow_custom_value=True,
+                    with gr.Tab("Modify existing redactions", id=3):
+                        with gr.Accordion("Search suggested redactions", open=True):
+                            with gr.Row(equal_height=True):
+                                recogniser_entity_dropdown = gr.Dropdown(
+                                    label="Redaction category",
+                                    value="ALL",
+                                    allow_custom_value=True,
+                                )
+                                page_entity_dropdown = gr.Dropdown(
+                                    label="Page", value="ALL", allow_custom_value=True
+                                )
+                            text_entity_dropdown = gr.Dropdown(
+                                label="Text", value="ALL", allow_custom_value=True
                             )
-                            page_entity_dropdown = gr.Dropdown(
-                                label="Page", value="ALL", allow_custom_value=True
-                            )
-                        text_entity_dropdown = gr.Dropdown(
-                            label="Text", value="ALL", allow_custom_value=True
-                        )
-                        reset_dropdowns_btn = gr.Button(value="Reset filters")
-                        recogniser_entity_dataframe = gr.Dataframe(
-                            pd.DataFrame(
-                                data={
-                                    "page": list(),
-                                    "label": list(),
-                                    "text": list(),
-                                    "id": list(),
-                                }
-                            ),
-                            row_count=(0, "dynamic"),
-                            type="pandas",
-                            label="Click table row to select and go to page",
-                            headers=["page", "label", "text", "id"],
-                            show_fullscreen_button=True,
-                            wrap=True,
-                            max_height=400,
-                        )
-
-                        with gr.Row(equal_height=True):
-                            exclude_selected_btn = gr.Button(
-                                value="Exclude all redactions in table"
-                            )
-
-                        with gr.Accordion("Selected redaction row", open=True):
-                            selected_entity_dataframe_row = gr.Dataframe(
+                            reset_dropdowns_btn = gr.Button(value="Reset filters")
+                            recogniser_entity_dataframe = gr.Dataframe(
                                 pd.DataFrame(
                                     data={
                                         "page": list(),
@@ -1927,438 +1958,437 @@ with blocks:
                                 ),
                                 row_count=(0, "dynamic"),
                                 type="pandas",
-                                visible=True,
+                                label="Click table row to select and go to page",
                                 headers=["page", "label", "text", "id"],
                                 wrap=True,
-                            )
-                            exclude_selected_row_btn = gr.Button(
-                                value="Exclude specific redaction row"
-                            )
-                            exclude_text_with_same_as_selected_row_btn = gr.Button(
-                                value="Exclude all redactions with same text as selected row"
+                                max_height=400,
                             )
 
-                        undo_last_removal_btn = gr.Button(
-                            value="Undo last element removal", variant="primary"
-                        )
+                            with gr.Row(equal_height=True):
+                                exclude_selected_btn = gr.Button(
+                                    value="Exclude all redactions in table"
+                                )
 
-                with gr.Tab("Search text to make new redactions", elem_id="app_tab"):
-                    with gr.Accordion("Search text", open=True):
-                        with gr.Row(equal_height=True):
-                            page_entity_dropdown_redaction = gr.Dropdown(
-                                label="Page",
-                                value="1",
-                                allow_custom_value=True,
-                                scale=4,
+                            with gr.Accordion("Selected redaction row", open=True):
+                                selected_entity_dataframe_row = gr.Dataframe(
+                                    pd.DataFrame(
+                                        data={
+                                            "page": list(),
+                                            "label": list(),
+                                            "text": list(),
+                                            "id": list(),
+                                        }
+                                    ),
+                                    row_count=(0, "dynamic"),
+                                    type="pandas",
+                                    visible=True,
+                                    headers=["page", "label", "text", "id"],
+                                    wrap=True,
+                                )
+                                exclude_selected_row_btn = gr.Button(
+                                    value="Exclude specific redaction row"
+                                )
+                                exclude_text_with_same_as_selected_row_btn = gr.Button(
+                                    value="Exclude all redactions with same text as selected row"
+                                )
+
+                            undo_last_removal_btn = gr.Button(
+                                value="Undo last element removal", variant="primary"
                             )
-                            reset_dropdowns_btn_new = gr.Button(
-                                value="Reset page filter", scale=1
+
+                    with gr.Tab("Search text and redact", id=7):
+                        with gr.Accordion("Search text", open=True):
+                            with gr.Row(equal_height=True):
+                                page_entity_dropdown_redaction = gr.Dropdown(
+                                    label="Page",
+                                    value="1",
+                                    allow_custom_value=True,
+                                    scale=4,
+                                )
+                                reset_dropdowns_btn_new = gr.Button(
+                                    value="Reset page filter", scale=1
+                                )
+
+                            with gr.Row(equal_height=True):
+                                multi_word_search_text = gr.Textbox(
+                                    label="Multi-word text search (regex enabled below)",
+                                    value="",
+                                    scale=4,
+                                )
+                                multi_word_search_text_btn = gr.Button(
+                                    value="Search", scale=1
+                                )
+
+                            with gr.Accordion("Search options", open=False):
+                                similarity_search_score_minimum = gr.Number(
+                                    value=1.0,
+                                    minimum=0.4,
+                                    maximum=1.0,
+                                    label="Minimum similarity score for match (max=1)",
+                                    visible=False,
+                                )  # Not used anymore for this exact search
+
+                                with gr.Row():
+                                    with gr.Column():
+                                        new_redaction_text_label = gr.Textbox(
+                                            label="Label for new redactions",
+                                            value="Redaction",
+                                        )
+                                        colour_label = gr.Textbox(
+                                            label="Colour for labels (three number RGB format, max 255 with brackets)",
+                                            value=CUSTOM_BOX_COLOUR,
+                                        )
+                                    with gr.Column():
+                                        use_regex_search = gr.Checkbox(
+                                            label="Enable regex pattern matching",
+                                            value=False,
+                                            info="When enabled, the search text will be treated as a regular expression pattern instead of literal text",
+                                        )
+
+                            all_page_line_level_ocr_results_with_words_df = (
+                                gr.Dataframe(
+                                    pd.DataFrame(
+                                        data={
+                                            "page": list(),
+                                            "line": list(),
+                                            "word_text": list(),
+                                            "word_x0": list(),
+                                            "word_y0": list(),
+                                            "word_x1": list(),
+                                            "word_y1": list(),
+                                        }
+                                    ),
+                                    row_count=(0, "dynamic"),
+                                    type="pandas",
+                                    label="Click table row to select and go to page",
+                                    headers=[
+                                        "page",
+                                        "line",
+                                        "word_text",
+                                        "word_x0",
+                                        "word_y0",
+                                        "word_x1",
+                                        "word_y1",
+                                    ],
+                                    wrap=False,
+                                    max_height=400,
+                                    show_search="filter",
+                                )
                             )
 
-                        with gr.Row(equal_height=True):
-                            multi_word_search_text = gr.Textbox(
-                                label="Multi-word text search (regex enabled below)",
-                                value="",
-                                scale=4,
+                            redact_selected_btn = gr.Button(
+                                value="Redact all text in table"
                             )
-                            multi_word_search_text_btn = gr.Button(
-                                value="Search", scale=1
+                            reset_ocr_with_words_df_btn = gr.Button(
+                                value="Reset table to original state"
                             )
 
-                        with gr.Accordion("Search options", open=False):
-                            similarity_search_score_minimum = gr.Number(
-                                value=1.0,
-                                minimum=0.4,
-                                maximum=1.0,
-                                label="Minimum similarity score for match (max=1)",
-                                visible=False,
-                            )  # Not used anymore for this exact search
+                            with gr.Accordion("Selected row", open=True):
+                                selected_entity_dataframe_row_redact = gr.Dataframe(
+                                    pd.DataFrame(
+                                        data={
+                                            "page": list(),
+                                            "line": list(),
+                                            "word_text": list(),
+                                            "word_x0": list(),
+                                            "word_y0": list(),
+                                            "word_x1": list(),
+                                            "word_y1": list(),
+                                        }
+                                    ),
+                                    row_count=(0, "dynamic"),
+                                    type="pandas",
+                                    headers=[
+                                        "page",
+                                        "line",
+                                        "word_text",
+                                        "word_x0",
+                                        "word_y0",
+                                        "word_x1",
+                                        "word_y1",
+                                    ],
+                                    wrap=False,
+                                )
+                                redact_selected_row_btn = gr.Button(
+                                    value="Redact specific text row"
+                                )
+                                redact_text_with_same_as_selected_row_btn = gr.Button(
+                                    value="Redact all words with same text as selected row"
+                                )
 
-                            with gr.Row():
-                                with gr.Column():
-                                    new_redaction_text_label = gr.Textbox(
-                                        label="Label for new redactions",
-                                        value="Redaction",
-                                    )
-                                    colour_label = gr.Textbox(
-                                        label="Colour for labels (three number RGB format, max 255 with brackets)",
-                                        value=CUSTOM_BOX_COLOUR,
-                                    )
-                                with gr.Column():
-                                    use_regex_search = gr.Checkbox(
-                                        label="Enable regex pattern matching",
-                                        value=False,
-                                        info="When enabled, the search text will be treated as a regular expression pattern instead of literal text",
-                                    )
+                            undo_last_redact_btn = gr.Button(
+                                value="Undo latest redaction", variant="primary"
+                            )
 
-                        all_page_line_level_ocr_results_with_words_df = gr.Dataframe(
-                            pd.DataFrame(
-                                data={
-                                    "page": list(),
-                                    "line": list(),
-                                    "word_text": list(),
-                                    "word_x0": list(),
-                                    "word_y0": list(),
-                                    "word_x1": list(),
-                                    "word_y1": list(),
-                                }
-                            ),
+                    with gr.Accordion("Search extracted text", open=True):
+                        all_page_line_level_ocr_results_df = gr.Dataframe(
+                            value=pd.DataFrame(columns=["page", "line", "text"]),
+                            headers=["page", "line", "text"],
                             row_count=(0, "dynamic"),
+                            label="All OCR results",
+                            visible=True,
                             type="pandas",
-                            label="Click table row to select and go to page",
-                            headers=[
-                                "page",
-                                "line",
-                                "word_text",
-                                "word_x0",
-                                "word_y0",
-                                "word_x1",
-                                "word_y1",
-                            ],
-                            show_fullscreen_button=True,
-                            wrap=False,
-                            max_height=400,
+                            wrap=True,
                             show_search="filter",
+                            show_label=False,
+                            column_widths=["15%", "15%", "70%"],
+                            max_height=400,
+                        )
+                        reset_all_ocr_results_btn = gr.Button(
+                            value="Reset OCR output table filter"
+                        )
+                        selected_ocr_dataframe_row = gr.Dataframe(
+                            pd.DataFrame(
+                                data={"page": list(), "line": list(), "text": list()}
+                            ),
+                            col_count=3,
+                            type="pandas",
+                            visible=False,
+                            headers=["page", "line", "text"],
+                            wrap=True,
                         )
 
-                        redact_selected_btn = gr.Button(
-                            value="Redact all text in table"
-                        )
-                        reset_ocr_with_words_df_btn = gr.Button(
-                            value="Reset table to original state"
-                        )
+            with gr.Accordion(
+                "Convert review files loaded above to Adobe format, or convert from Adobe format to review file",
+                open=False,
+            ):
+                convert_review_file_to_adobe_btn = gr.Button(
+                    "Convert review file to Adobe comment format", variant="primary"
+                )
+                adobe_review_files_out = gr.File(
+                    label="Output Adobe comment files will appear here. If converting from .xfdf file to review_file.csv, upload the original pdf with the xfdf file here then click Convert below.",
+                    file_count="multiple",
+                    file_types=[".csv", ".xfdf", ".pdf"],
+                )
+                convert_adobe_to_review_file_btn = gr.Button(
+                    "Convert Adobe .xfdf comment file to review_file.csv",
+                    variant="secondary",
+                )
 
-                        with gr.Accordion("Selected row", open=True):
-                            selected_entity_dataframe_row_redact = gr.Dataframe(
-                                pd.DataFrame(
-                                    data={
-                                        "page": list(),
-                                        "line": list(),
-                                        "word_text": list(),
-                                        "word_x0": list(),
-                                        "word_y0": list(),
-                                        "word_x1": list(),
-                                        "word_y1": list(),
-                                    }
-                                ),
-                                row_count=(0, "dynamic"),
-                                type="pandas",
-                                headers=[
-                                    "page",
-                                    "line",
-                                    "word_text",
-                                    "word_x0",
-                                    "word_y0",
-                                    "word_x1",
-                                    "word_y1",
-                                ],
-                                wrap=False,
-                            )
-                            redact_selected_row_btn = gr.Button(
-                                value="Redact specific text row"
-                            )
-                            redact_text_with_same_as_selected_row_btn = gr.Button(
-                                value="Redact all words with same text as selected row"
-                            )
-
-                        undo_last_redact_btn = gr.Button(
-                            value="Undo latest redaction", variant="primary"
-                        )
-
-                with gr.Accordion("Search extracted text", open=True):
-                    all_page_line_level_ocr_results_df = gr.Dataframe(
-                        value=pd.DataFrame(columns=["page", "line", "text"]),
-                        headers=["page", "line", "text"],
-                        row_count=(0, "dynamic"),
-                        label="All OCR results",
-                        visible=True,
-                        type="pandas",
-                        wrap=True,
-                        show_fullscreen_button=True,
-                        show_search="filter",
-                        show_label=False,
-                        show_copy_button=True,
-                        column_widths=["15%", "15%", "70%"],
-                        max_height=400,
-                    )
-                    reset_all_ocr_results_btn = gr.Button(
-                        value="Reset OCR output table filter"
-                    )
-                    selected_ocr_dataframe_row = gr.Dataframe(
-                        pd.DataFrame(
-                            data={"page": list(), "line": list(), "text": list()}
-                        ),
-                        col_count=3,
-                        type="pandas",
-                        visible=False,
-                        headers=["page", "line", "text"],
-                        wrap=True,
-                    )
-
-        with gr.Accordion(
-            "Convert review files loaded above to Adobe format, or convert from Adobe format to review file",
-            open=False,
-        ):
-            convert_review_file_to_adobe_btn = gr.Button(
-                "Convert review file to Adobe comment format", variant="primary"
-            )
-            adobe_review_files_out = gr.File(
-                label="Output Adobe comment files will appear here. If converting from .xfdf file to review_file.csv, upload the original pdf with the xfdf file here then click Convert below.",
-                file_count="multiple",
-                file_types=[".csv", ".xfdf", ".pdf"],
-            )
-            convert_adobe_to_review_file_btn = gr.Button(
-                "Convert Adobe .xfdf comment file to review_file.csv",
-                variant="secondary",
-            )
-
-    ###
-    # IDENTIFY DUPLICATE PAGES TAB
-    ###
-    with gr.Tab(label="Identify duplicate pages", elem_id="app_tab"):
-        gr.Markdown(
-            "Search for duplicate pages/subdocuments in your ocr_output files. By default, this function will search for duplicate text across multiple pages, and then join consecutive matching pages together into matched 'subdocuments'. The results can be reviewed below, false positives removed, and then the verified results applied to a document you have loaded in on the 'Review redactions' tab."
-        )
-
-        # Examples for duplicate page detection
-        if SHOW_EXAMPLES:
+        ###
+        # IDENTIFY DUPLICATE PAGES TAB
+        ###
+        with gr.Tab(label="Identify duplicate pages", id=4):
             gr.Markdown(
-                "### Try an example - Click on an example below and then the 'Identify duplicate pages/subdocuments' button:"
+                "Search for duplicate pages/subdocuments in your ocr_output files. By default, this function will search for duplicate text across multiple pages, and then join consecutive matching pages together into matched 'subdocuments'. The results can be reviewed below, false positives removed, and then the verified results applied to a document you have loaded in on the 'Review redactions' tab."
             )
 
-            # Check if duplicate example file exists
-            duplicate_example_file = (
-                "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
-            )
+            # Examples for duplicate page detection
+            if SHOW_EXAMPLES:
+                gr.Markdown(
+                    "### Try an example - Click on an example below and then the 'Identify duplicate pages/subdocuments' button:"
+                )
 
-            if os.path.exists(duplicate_example_file):
+                # Check if duplicate example file exists
+                duplicate_example_file = "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
 
-                def show_duplicate_info_box_on_click(
-                    in_duplicate_pages,
-                    duplicate_threshold_input,
-                    min_word_count_input,
-                    combine_page_text_for_duplicates_bool,
-                ):
-                    gr.Info(
-                        "Example data loaded. Now click on 'Identify duplicate pages/subdocuments' below to run the example duplicate detection."
-                    )
+                if os.path.exists(duplicate_example_file):
 
-                duplicate_examples = gr.Examples(
-                    examples=[
-                        [
-                            [duplicate_example_file],
-                            0.95,
-                            10,
-                            True,
-                        ],
-                        [
-                            [duplicate_example_file],
-                            0.95,
-                            3,
-                            False,
-                        ],
-                    ],
-                    inputs=[
+                    def show_duplicate_info_box_on_click(
                         in_duplicate_pages,
                         duplicate_threshold_input,
                         min_word_count_input,
                         combine_page_text_for_duplicates_bool,
-                    ],
-                    example_labels=[
-                        "Find duplicate pages of text in document OCR outputs",
-                        "Find duplicate text lines in document OCR outputs",
-                    ],
-                    fn=show_duplicate_info_box_on_click,
-                    run_on_click=True,
-                )
+                    ):
+                        gr.Info(
+                            "Example data loaded. Now click on 'Identify duplicate pages/subdocuments' below to run the example duplicate detection."
+                        )
 
-        with gr.Accordion("Step 1: Configure and run analysis", open=True):
-            in_duplicate_pages.render()
-
-            with gr.Accordion("Duplicate matching parameters", open=False):
-                with gr.Row():
-                    duplicate_threshold_input.render()
-
-                    min_word_count_input.render()
-
-                    combine_page_text_for_duplicates_bool.render()
-
-                gr.Markdown("#### Matching Strategy")
-                greedy_match_input = gr.Checkbox(
-                    label="Enable 'subdocument' matching",
-                    value=USE_GREEDY_DUPLICATE_DETECTION,
-                    info="If checked, finds the longest possible sequence of matching pages (subdocuments), minimum length one page. Overrides the slider below.",
-                )
-                min_consecutive_pages_input = gr.Slider(
-                    minimum=1,
-                    maximum=20,
-                    value=DEFAULT_MIN_CONSECUTIVE_PAGES,
-                    step=1,
-                    label="Minimum consecutive pages (modified subdocument match)",
-                    info="If greedy matching option above is unticked, use this to find only subdocuments of a minimum number of consecutive pages.",
-                )
-
-            find_duplicate_pages_btn = gr.Button(
-                value="Identify duplicate pages/subdocuments", variant="primary"
-            )
-
-        with gr.Accordion("Step 2: Review and refine results", open=True):
-            gr.Markdown(
-                "### Analysis summary\nClick on a row to select it for preview or exclusion."
-            )
-
-            with gr.Row():
-                results_df_preview = gr.Dataframe(
-                    label="Similarity Results",
-                    headers=[
-                        "Page1_File",
-                        "Page1_Start_Page",
-                        "Page1_End_Page",
-                        "Page2_File",
-                        "Page2_Start_Page",
-                        "Page2_End_Page",
-                        "Match_Length",
-                        "Avg_Similarity",
-                        "Page1_Text",
-                        "Page2_Text",
-                    ],
-                    wrap=True,
-                    show_fullscreen_button=True,
-                    show_search=True,
-                    show_copy_button=True,
-                )
-            with gr.Row():
-                exclude_match_btn = gr.Button(
-                    value="❌ Exclude Selected Match", variant="stop"
-                )
-                gr.Markdown(
-                    "Click a row in the table, then click this button to remove it from the results and update the downloadable files."
-                )
-
-            gr.Markdown("### Full Text Preview of Selected Match")
-            with gr.Row():
-                page1_text_preview = gr.Dataframe(
-                    label="Match Source (Document 1)",
-                    wrap=True,
-                    headers=["page", "text"],
-                    show_fullscreen_button=True,
-                    show_search=True,
-                    show_copy_button=True,
-                )
-                page2_text_preview = gr.Dataframe(
-                    label="Match Duplicate (Document 2)",
-                    wrap=True,
-                    headers=["page", "text"],
-                    show_fullscreen_button=True,
-                    show_search=True,
-                    show_copy_button=True,
-                )
-
-            gr.Markdown("### Downloadable Files")
-            duplicate_files_out = gr.File(
-                label="Download analysis summary and redaction lists (.csv)",
-                file_count="multiple",
-                height=FILE_INPUT_HEIGHT,
-            )
-
-            with gr.Row():
-                apply_match_btn = gr.Button(
-                    value="Apply relevant duplicate page output to document currently under review",
-                    variant="secondary",
-                )
-
-    ###
-    # WORD / TABULAR DATA TAB
-    ###
-    with gr.Tab(label="Word or Excel/csv files", elem_id="app_tab"):
-        gr.Markdown(
-            """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
-        )
-
-        # Examples for Word/Excel/csv redaction and tabular duplicate detection
-        if SHOW_EXAMPLES:
-            gr.Markdown(
-                "### Try an example - Click on an example below and then the 'Redact text/data files' button for redaction, or the 'Find duplicate cells/rows' button for duplicate detection:"
-            )
-
-            # Check which tabular example files exist
-            tabular_example_files = [
-                "example_data/combined_case_notes.csv",
-                "example_data/Bold minimalist professional cover letter.docx",
-                "example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv",
-            ]
-
-            available_tabular_examples = list()
-            tabular_example_labels = list()
-
-            # Check each tabular example file and add to examples if it exists
-            if os.path.exists(tabular_example_files[0]):
-                available_tabular_examples.append(
-                    [
-                        [tabular_example_files[0]],
-                        ["Case Note", "Client"],
-                        "Local",
-                        "replace with 'REDACTED'",
-                        [tabular_example_files[0]],
-                        ["Case Note"],
-                        3,
-                    ]
-                )
-                tabular_example_labels.append(
-                    "CSV file redaction with specific columns - remove text"
-                )
-
-            if os.path.exists(tabular_example_files[1]):
-                available_tabular_examples.append(
-                    [
-                        [tabular_example_files[1]],
-                        [],
-                        "Local",
-                        "replace with 'REDACTED'",
-                        [],
-                        [],
-                        3,
-                    ]
-                )
-                tabular_example_labels.append(
-                    "Word document redaction - replace with REDACTED"
-                )
-
-            if os.path.exists(tabular_example_files[2]):
-                available_tabular_examples.append(
-                    [
-                        [tabular_example_files[2]],
-                        ["text"],
-                        "Local",
-                        "replace with 'REDACTED'",
-                        [tabular_example_files[2]],
-                        ["text"],
-                        3,
-                    ]
-                )
-                tabular_example_labels.append(
-                    "Tabular duplicate detection in CSV files"
-                )
-
-            # Only create examples if we have available files
-            if available_tabular_examples:
-
-                def show_tabular_info_box_on_click(
-                    in_data_files,
-                    in_colnames,
-                    pii_identification_method_drop_tabular,
-                    anon_strategy,
-                    in_tabular_duplicate_files,
-                    tabular_text_columns,
-                    tabular_min_word_count,
-                ):
-                    gr.Info(
-                        "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' below to run the example."
+                    duplicate_examples = gr.Examples(
+                        examples=[
+                            [
+                                [duplicate_example_file],
+                                0.95,
+                                10,
+                                True,
+                            ],
+                            [
+                                [duplicate_example_file],
+                                0.95,
+                                3,
+                                False,
+                            ],
+                        ],
+                        inputs=[
+                            in_duplicate_pages,
+                            duplicate_threshold_input,
+                            min_word_count_input,
+                            combine_page_text_for_duplicates_bool,
+                        ],
+                        example_labels=[
+                            "Find duplicate pages of text in document OCR outputs",
+                            "Find duplicate text lines in document OCR outputs",
+                        ],
+                        fn=show_duplicate_info_box_on_click,
+                        run_on_click=True,
                     )
 
-                tabular_examples = gr.Examples(
-                    examples=available_tabular_examples,
-                    inputs=[
+            with gr.Accordion("Step 1: Configure and run analysis", open=True):
+                in_duplicate_pages.render()
+
+                with gr.Accordion("Duplicate matching parameters", open=False):
+                    with gr.Row():
+                        duplicate_threshold_input.render()
+
+                        min_word_count_input.render()
+
+                        combine_page_text_for_duplicates_bool.render()
+
+                    gr.Markdown("#### Matching Strategy")
+                    greedy_match_input = gr.Checkbox(
+                        label="Enable 'subdocument' matching",
+                        value=USE_GREEDY_DUPLICATE_DETECTION,
+                        info="If checked, finds the longest possible sequence of matching pages (subdocuments), minimum length one page. Overrides the slider below.",
+                    )
+                    min_consecutive_pages_input = gr.Slider(
+                        minimum=1,
+                        maximum=20,
+                        value=DEFAULT_MIN_CONSECUTIVE_PAGES,
+                        step=1,
+                        label="Minimum consecutive pages (modified subdocument match)",
+                        info="If greedy matching option above is unticked, use this to find only subdocuments of a minimum number of consecutive pages.",
+                    )
+
+                find_duplicate_pages_btn = gr.Button(
+                    value="Identify duplicate pages/subdocuments", variant="primary"
+                )
+
+            with gr.Accordion("Step 2: Review and refine results", open=True):
+                gr.Markdown(
+                    "### Analysis summary\nClick on a row to select it for preview or exclusion."
+                )
+
+                with gr.Row():
+                    results_df_preview = gr.Dataframe(
+                        label="Similarity Results",
+                        headers=[
+                            "Page1_File",
+                            "Page1_Start_Page",
+                            "Page1_End_Page",
+                            "Page2_File",
+                            "Page2_Start_Page",
+                            "Page2_End_Page",
+                            "Match_Length",
+                            "Avg_Similarity",
+                            "Page1_Text",
+                            "Page2_Text",
+                        ],
+                        wrap=True,
+                        show_search=True,
+                    )
+                with gr.Row():
+                    exclude_match_btn = gr.Button(
+                        value="❌ Exclude Selected Match", variant="stop"
+                    )
+                    gr.Markdown(
+                        "Click a row in the table, then click this button to remove it from the results and update the downloadable files."
+                    )
+
+                gr.Markdown("### Full Text Preview of Selected Match")
+                with gr.Row():
+                    page1_text_preview = gr.Dataframe(
+                        label="Match Source (Document 1)",
+                        wrap=True,
+                        headers=["page", "text"],
+                        show_search=True,
+                    )
+                    page2_text_preview = gr.Dataframe(
+                        label="Match Duplicate (Document 2)",
+                        wrap=True,
+                        headers=["page", "text"],
+                        show_search=True,
+                    )
+
+                gr.Markdown("### Downloadable Files")
+                duplicate_files_out = gr.File(
+                    label="Download analysis summary and redaction lists (.csv)",
+                    file_count="multiple",
+                    height=FILE_INPUT_HEIGHT,
+                )
+
+                with gr.Row():
+                    apply_match_btn = gr.Button(
+                        value="Apply relevant duplicate page output to document currently under review",
+                        variant="secondary",
+                    )
+
+        ###
+        # WORD / TABULAR DATA TAB
+        ###
+        with gr.Tab(label="Word or Excel/csv files", id=5):
+            gr.Markdown(
+                """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
+            )
+
+            # Examples for Word/Excel/csv redaction and tabular duplicate detection
+            if SHOW_EXAMPLES:
+                gr.Markdown(
+                    "### Try an example - Click on an example below and then the 'Redact text/data files' button for redaction, or the 'Find duplicate cells/rows' button for duplicate detection:"
+                )
+
+                # Check which tabular example files exist
+                tabular_example_files = [
+                    "example_data/combined_case_notes.csv",
+                    "example_data/Bold minimalist professional cover letter.docx",
+                    "example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv",
+                ]
+
+                available_tabular_examples = list()
+                tabular_example_labels = list()
+
+                # Check each tabular example file and add to examples if it exists
+                if os.path.exists(tabular_example_files[0]):
+                    available_tabular_examples.append(
+                        [
+                            [tabular_example_files[0]],
+                            ["Case Note", "Client"],
+                            "Local",
+                            "replace with 'REDACTED'",
+                            [tabular_example_files[0]],
+                            ["Case Note"],
+                            3,
+                        ]
+                    )
+                    tabular_example_labels.append(
+                        "CSV file redaction with specific columns - remove text"
+                    )
+
+                if os.path.exists(tabular_example_files[1]):
+                    available_tabular_examples.append(
+                        [
+                            [tabular_example_files[1]],
+                            [],
+                            "Local",
+                            "replace with 'REDACTED'",
+                            [],
+                            [],
+                            3,
+                        ]
+                    )
+                    tabular_example_labels.append(
+                        "Word document redaction - replace with REDACTED"
+                    )
+
+                if os.path.exists(tabular_example_files[2]):
+                    available_tabular_examples.append(
+                        [
+                            [tabular_example_files[2]],
+                            ["text"],
+                            "Local",
+                            "replace with 'REDACTED'",
+                            [tabular_example_files[2]],
+                            ["text"],
+                            3,
+                        ]
+                    )
+                    tabular_example_labels.append(
+                        "Tabular duplicate detection in CSV files"
+                    )
+
+                # Only create examples if we have available files
+                if available_tabular_examples:
+
+                    def show_tabular_info_box_on_click(
                         in_data_files,
                         in_colnames,
                         pii_identification_method_drop_tabular,
@@ -2366,317 +2396,346 @@ with blocks:
                         in_tabular_duplicate_files,
                         tabular_text_columns,
                         tabular_min_word_count,
-                    ],
-                    example_labels=tabular_example_labels,
-                    fn=show_tabular_info_box_on_click,
-                    run_on_click=True,
-                )
-
-        with gr.Accordion("Redact Word or Excel/csv files", open=True):
-            with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
-                in_data_files.render()
-            with gr.Accordion("Redact open text", open=False):
-                in_text = gr.Textbox(
-                    label="Enter open text",
-                    lines=10,
-                    max_length=MAX_OPEN_TEXT_CHARACTERS,
-                )
-
-            in_excel_sheets = gr.Dropdown(
-                choices=["Choose Excel sheets to anonymise"],
-                multiselect=True,
-                label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).",
-                visible=False,
-                allow_custom_value=True,
-            )
-
-            in_colnames.render()
-
-            pii_identification_method_drop_tabular.render()
-
-            with gr.Accordion(
-                "Anonymisation output format - by default will replace PII with a blank space",
-                open=False,
-            ):
-                with gr.Row():
-                    anon_strategy.render()
-
-                    do_initial_clean = gr.Checkbox(
-                        label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
-                        value=DO_INITIAL_TABULAR_DATA_CLEAN,
-                    )
-
-            tabular_data_redact_btn = gr.Button(
-                "Redact text/data files", variant="primary"
-            )
-
-        with gr.Row():
-            text_output_summary = gr.Textbox(label="Output result", lines=4)
-            text_output_file = gr.File(label="Output files")
-            text_tabular_files_done = gr.Number(
-                value=0,
-                label="Number of tabular files redacted",
-                interactive=False,
-                visible=False,
-            )
-
-        ###
-        # TABULAR DUPLICATE DETECTION
-        ###
-        with gr.Accordion(label="Find duplicate cells in tabular data", open=False):
-            gr.Markdown(
-                """Find duplicate cells or rows in CSV, Excel, or Parquet files. This tool analyses text content across all columns to identify similar or identical entries that may be duplicates. You can review the results and choose to remove duplicate rows from your files."""
-            )
-
-            with gr.Accordion("Step 1: Upload files and configure analysis", open=True):
-                in_tabular_duplicate_files.render()
-
-                with gr.Row(equal_height=True):
-                    tabular_duplicate_threshold = gr.Number(
-                        value=DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
-                        label="Similarity threshold",
-                        info="Score (0-1) to consider cells a match. 1 = perfect match.",
-                    )
-
-                    tabular_min_word_count.render()
-
-                    do_initial_clean_dup = gr.Checkbox(
-                        label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
-                        value=DO_INITIAL_TABULAR_DATA_CLEAN,
-                    )
-                    remove_duplicate_rows = gr.Checkbox(
-                        label="Remove duplicate rows from deduplicated files",
-                        value=REMOVE_DUPLICATE_ROWS,
-                    )
-
-                with gr.Row():
-                    in_excel_tabular_sheets = gr.Dropdown(
-                        choices=list(),
-                        multiselect=True,
-                        label="Select Excel sheet names that you want to deduplicate (showing sheets present across all Excel files).",
-                        visible=True,
-                        allow_custom_value=True,
-                    )
-
-                    tabular_text_columns.render()
-
-                find_tabular_duplicates_btn = gr.Button(
-                    value="Find duplicate cells/rows", variant="primary"
-                )
-
-            with gr.Accordion("Step 2: Review results", open=True):
-                gr.Markdown(
-                    "### Duplicate Analysis Results\nClick on a row to see more details about the duplicate match."
-                )
-
-                tabular_results_df = gr.Dataframe(
-                    label="Duplicate Cell Matches",
-                    headers=[
-                        "File1",
-                        "Row1",
-                        "File2",
-                        "Row2",
-                        "Similarity_Score",
-                        "Text1",
-                        "Text2",
-                    ],
-                    wrap=True,
-                    show_fullscreen_button=True,
-                    show_search=True,
-                    show_copy_button=True,
-                )
-
-                with gr.Row(equal_height=True):
-                    tabular_selected_row_index = gr.Number(value=None, visible=False)
-                    tabular_text1_preview = gr.Textbox(
-                        label="Text from File 1", lines=3, interactive=False
-                    )
-                    tabular_text2_preview = gr.Textbox(
-                        label="Text from File 2", lines=3, interactive=False
-                    )
-
-            with gr.Accordion("Step 3: Remove duplicates", open=True):
-                gr.Markdown(
-                    "### Remove Duplicate Rows\nSelect a file and click to remove duplicate rows based on the analysis above."
-                )
-
-                with gr.Row():
-                    tabular_file_to_clean = gr.Dropdown(
-                        choices=list(),
-                        label="Select file to clean",
-                        info="Choose which file to remove duplicates from",
-                        visible=False,
-                    )
-                    clean_duplicates_btn = gr.Button(
-                        value="Remove duplicate rows from selected file",
-                        variant="secondary",
-                        visible=False,
-                    )
-
-                tabular_cleaned_file = gr.File(
-                    label="Download cleaned file (duplicates removed)",
-                    visible=True,
-                    interactive=False,
-                )
-
-        # Feedback elements are invisible until revealed by redaction action
-        data_feedback_title = gr.Markdown(
-            value="## Please give feedback", visible=False
-        )
-        data_feedback_radio = gr.Radio(
-            label="Please give some feedback about the results of the redaction.",
-            choices=["The results were good", "The results were not good"],
-            visible=False,
-            show_label=True,
-        )
-        data_further_details_text = gr.Textbox(
-            label="Please give more detailed feedback about the results:", visible=False
-        )
-        data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
-
-    ###
-    # SETTINGS TAB
-    ###
-    with gr.Tab(label="Redaction settings", elem_id="app_tab"):
-        with gr.Accordion(
-            "Custom allow, deny, and full page redaction lists", open=True
-        ):
-            with gr.Row():
-                with gr.Column():
-                    in_allow_list = gr.File(
-                        label="Import allow list file - csv table with one column of a different word/phrase on each row (case insensitive). Terms in this file will not be redacted.",
-                        file_count="multiple",
-                        height=FILE_INPUT_HEIGHT,
-                    )
-                    in_allow_list_text = gr.Textbox(
-                        label="Custom allow list load status"
-                    )
-                with gr.Column():
-                    in_deny_list.render()  # Defined at beginning of file
-                    in_deny_list_text = gr.Textbox(label="Custom deny list load status")
-                with gr.Column():
-                    in_fully_redacted_list.render()  # Defined at beginning of file
-                    in_fully_redacted_list_text = gr.Textbox(
-                        label="Fully redacted page list load status"
-                    )
-            with gr.Accordion(
-                "Manually modify custom allow, deny, and full page redaction lists (NOTE: you need to press Enter after modifying/adding an entry to the lists to apply them)",
-                open=False,
-            ):
-                with gr.Row():
-                    in_allow_list_state = gr.Dataframe(
-                        value=pd.DataFrame(),
-                        headers=["allow_list"],
-                        col_count=(1, "fixed"),
-                        row_count=(0, "dynamic"),
-                        label="Allow list",
-                        visible=True,
-                        type="pandas",
-                        interactive=True,
-                        show_fullscreen_button=True,
-                        show_copy_button=True,
-                        wrap=True,
-                    )
-
-                    in_deny_list_state.render()  # Defined at beginning of file
-
-                    in_fully_redacted_list_state.render()  # Defined at beginning of file
-                with gr.Row():
-                    with gr.Column(scale=2):
-                        markdown_placeholder = gr.Markdown("")
-                    with gr.Column(scale=1):
-                        apply_fully_redacted_list_btn = gr.Button(
-                            value="Apply whole page redaction list to document currently under review",
-                            variant="secondary",
+                    ):
+                        gr.Info(
+                            "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' below to run the example."
                         )
 
-        with gr.Accordion("Select entity types to redact", open=True):
-            in_redact_entities.render()
-            in_redact_comprehend_entities.render()
-
-            with gr.Row():
-                max_fuzzy_spelling_mistakes_num = gr.Number(
-                    label="Maximum number of spelling mistakes allowed for fuzzy matching (CUSTOM_FUZZY entity).",
-                    value=DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
-                    minimum=0,
-                    maximum=9,
-                    precision=0,
-                )
-                match_fuzzy_whole_phrase_bool = gr.Checkbox(
-                    label="Should fuzzy search match on entire phrases in deny list (as opposed to each word individually)?",
-                    value=True,
-                )
-
-        with gr.Accordion("Redact only selected pages", open=False):
-            with gr.Row():
-                page_min.render()
-                page_max.render()
-
-        if SHOW_LANGUAGE_SELECTION:
-            with gr.Accordion("Language selection", open=False):
-                gr.Markdown(
-                    """Note that AWS Textract is compatible with English, Spanish, Italian, Portuguese, French, and German, and handwriting detection is only available in English. AWS Comprehend for detecting PII is only compatible with English and Spanish.
-                The local models (Tesseract and SpaCy) are compatible with the other languages in the list below. However, the language packs for these models need to be installed on your system. When you first run a document through the app, the language packs will be downloaded automatically, but please expect a delay as the models are large."""
-                )
-                with gr.Row():
-                    chosen_language_full_name_drop = gr.Dropdown(
-                        value=DEFAULT_LANGUAGE_FULL_NAME,
-                        choices=MAPPED_LANGUAGE_CHOICES,
-                        label="Chosen language",
-                        multiselect=False,
-                        visible=True,
+                    tabular_examples = gr.Examples(
+                        examples=available_tabular_examples,
+                        inputs=[
+                            in_data_files,
+                            in_colnames,
+                            pii_identification_method_drop_tabular,
+                            anon_strategy,
+                            in_tabular_duplicate_files,
+                            tabular_text_columns,
+                            tabular_min_word_count,
+                        ],
+                        example_labels=tabular_example_labels,
+                        fn=show_tabular_info_box_on_click,
+                        run_on_click=True,
                     )
-                    chosen_language_drop = gr.Dropdown(
-                        value=DEFAULT_LANGUAGE,
-                        choices=LANGUAGE_CHOICES,
-                        label="Chosen language short code",
-                        multiselect=False,
+
+            with gr.Accordion("Redact Word or Excel/csv files", open=True):
+                with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
+                    in_data_files.render()
+                with gr.Accordion("Redact open text", open=False):
+                    in_text = gr.Textbox(
+                        label="Enter open text",
+                        lines=10,
+                        max_length=MAX_OPEN_TEXT_CHARACTERS,
+                    )
+
+                in_excel_sheets = gr.Dropdown(
+                    choices=["Choose Excel sheets to anonymise"],
+                    multiselect=True,
+                    label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).",
+                    visible=False,
+                    allow_custom_value=True,
+                )
+
+                in_colnames.render()
+
+                pii_identification_method_drop_tabular.render()
+
+                with gr.Accordion(
+                    "Anonymisation output format - by default will replace PII with a blank space",
+                    open=False,
+                ):
+                    with gr.Row():
+                        anon_strategy.render()
+
+                        do_initial_clean = gr.Checkbox(
+                            label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
+                            value=DO_INITIAL_TABULAR_DATA_CLEAN,
+                        )
+
+                tabular_data_redact_btn = gr.Button(
+                    "Redact text/data files", variant="primary"
+                )
+
+            with gr.Row():
+                text_output_summary = gr.Textbox(label="Output result", lines=4)
+                text_output_file = gr.File(label="Output files")
+                text_tabular_files_done = gr.Number(
+                    value=0,
+                    label="Number of tabular files redacted",
+                    interactive=False,
+                    visible=False,
+                )
+
+            ###
+            # TABULAR DUPLICATE DETECTION
+            ###
+            with gr.Accordion(label="Find duplicate cells in tabular data", open=False):
+                gr.Markdown(
+                    """Find duplicate cells or rows in CSV, Excel, or Parquet files. This tool analyses text content across all columns to identify similar or identical entries that may be duplicates. You can review the results and choose to remove duplicate rows from your files."""
+                )
+
+                with gr.Accordion(
+                    "Step 1: Upload files and configure analysis", open=True
+                ):
+                    in_tabular_duplicate_files.render()
+
+                    with gr.Row(equal_height=True):
+                        tabular_duplicate_threshold = gr.Number(
+                            value=DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
+                            label="Similarity threshold",
+                            info="Score (0-1) to consider cells a match. 1 = perfect match.",
+                        )
+
+                        tabular_min_word_count.render()
+
+                        do_initial_clean_dup = gr.Checkbox(
+                            label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
+                            value=DO_INITIAL_TABULAR_DATA_CLEAN,
+                        )
+                        remove_duplicate_rows = gr.Checkbox(
+                            label="Remove duplicate rows from deduplicated files",
+                            value=REMOVE_DUPLICATE_ROWS,
+                        )
+
+                    with gr.Row():
+                        in_excel_tabular_sheets = gr.Dropdown(
+                            choices=list(),
+                            multiselect=True,
+                            label="Select Excel sheet names that you want to deduplicate (showing sheets present across all Excel files).",
+                            visible=True,
+                            allow_custom_value=True,
+                        )
+
+                        tabular_text_columns.render()
+
+                    find_tabular_duplicates_btn = gr.Button(
+                        value="Find duplicate cells/rows", variant="primary"
+                    )
+
+                with gr.Accordion("Step 2: Review results", open=True):
+                    gr.Markdown(
+                        "### Duplicate Analysis Results\nClick on a row to see more details about the duplicate match."
+                    )
+
+                    tabular_results_df = gr.Dataframe(
+                        label="Duplicate Cell Matches",
+                        headers=[
+                            "File1",
+                            "Row1",
+                            "File2",
+                            "Row2",
+                            "Similarity_Score",
+                            "Text1",
+                            "Text2",
+                        ],
+                        wrap=True,
+                        show_search=True,
+                    )
+
+                    with gr.Row(equal_height=True):
+                        tabular_selected_row_index = gr.Number(
+                            value=None, visible=False
+                        )
+                        tabular_text1_preview = gr.Textbox(
+                            label="Text from File 1", lines=3, interactive=False
+                        )
+                        tabular_text2_preview = gr.Textbox(
+                            label="Text from File 2", lines=3, interactive=False
+                        )
+
+                with gr.Accordion("Step 3: Remove duplicates", open=True):
+                    gr.Markdown(
+                        "### Remove Duplicate Rows\nSelect a file and click to remove duplicate rows based on the analysis above."
+                    )
+
+                    with gr.Row():
+                        tabular_file_to_clean = gr.Dropdown(
+                            choices=list(),
+                            label="Select file to clean",
+                            info="Choose which file to remove duplicates from",
+                            visible=False,
+                        )
+                        clean_duplicates_btn = gr.Button(
+                            value="Remove duplicate rows from selected file",
+                            variant="secondary",
+                            visible=False,
+                        )
+
+                    tabular_cleaned_file = gr.File(
+                        label="Download cleaned file (duplicates removed)",
                         visible=True,
                         interactive=False,
                     )
-        else:
-            chosen_language_full_name_drop = gr.Dropdown(
-                value=DEFAULT_LANGUAGE_FULL_NAME,
-                choices=MAPPED_LANGUAGE_CHOICES,
-                label="Chosen language",
-                multiselect=False,
+
+            # Feedback elements are invisible until revealed by redaction action
+            data_feedback_title = gr.Markdown(
+                value="## Please give feedback", visible=False
+            )
+            data_feedback_radio = gr.Radio(
+                label="Please give some feedback about the results of the redaction.",
+                choices=["The results were good", "The results were not good"],
+                visible=False,
+                show_label=True,
+            )
+            data_further_details_text = gr.Textbox(
+                label="Please give more detailed feedback about the results:",
                 visible=False,
             )
-            chosen_language_drop = gr.Dropdown(
-                value=DEFAULT_LANGUAGE,
-                choices=LANGUAGE_CHOICES,
-                label="Chosen language short code",
-                multiselect=False,
-                visible=False,
-            )
+            data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
-        with gr.Accordion("Use API keys for AWS services", open=False):
-            with gr.Row():
-                aws_access_key_textbox = gr.Textbox(
-                    value="",
-                    label="AWS access key for account with permissions for AWS Textract and Comprehend",
-                    visible=True,
-                    type="password",
+        ###
+        # SETTINGS TAB
+        ###
+        with gr.Tab(label="Redaction settings", id=6):
+            with gr.Accordion(
+                "Custom allow, deny, and full page redaction lists", open=True
+            ):
+                with gr.Row():
+                    with gr.Column():
+                        in_allow_list = gr.File(
+                            label="Import allow list file - csv table with one column of a different word/phrase on each row (case insensitive). Terms in this file will not be redacted.",
+                            file_count="multiple",
+                            height=FILE_INPUT_HEIGHT,
+                        )
+                        in_allow_list_text = gr.Textbox(
+                            label="Custom allow list load status"
+                        )
+                    with gr.Column():
+                        in_deny_list.render()  # Defined at beginning of file
+                        in_deny_list_text = gr.Textbox(
+                            label="Custom deny list load status"
+                        )
+                    with gr.Column():
+                        in_fully_redacted_list.render()  # Defined at beginning of file
+                        in_fully_redacted_list_text = gr.Textbox(
+                            label="Fully redacted page list load status"
+                        )
+                with gr.Accordion(
+                    "Manually modify custom allow, deny, and full page redaction lists (NOTE: you need to press Enter after modifying/adding an entry to the lists to apply them)",
+                    open=False,
+                ):
+                    with gr.Row():
+                        in_allow_list_state = gr.Dataframe(
+                            value=pd.DataFrame(),
+                            headers=["allow_list"],
+                            col_count=(1, "fixed"),
+                            row_count=(0, "dynamic"),
+                            label="Allow list",
+                            visible=True,
+                            type="pandas",
+                            interactive=True,
+                            wrap=True,
+                        )
+
+                        in_deny_list_state.render()  # Defined at beginning of file
+
+                        in_fully_redacted_list_state.render()  # Defined at beginning of file
+                    with gr.Row():
+                        with gr.Column(scale=2):
+                            markdown_placeholder = gr.Markdown("")
+                        with gr.Column(scale=1):
+                            apply_fully_redacted_list_btn = gr.Button(
+                                value="Apply whole page redaction list to document currently under review",
+                                variant="secondary",
+                            )
+
+            with gr.Accordion("Select entity types to redact", open=True):
+                in_redact_entities.render()
+                in_redact_comprehend_entities.render()
+
+                with gr.Row():
+                    max_fuzzy_spelling_mistakes_num = gr.Number(
+                        label="Maximum number of spelling mistakes allowed for fuzzy matching (CUSTOM_FUZZY entity).",
+                        value=DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+                        minimum=0,
+                        maximum=9,
+                        precision=0,
+                    )
+                    match_fuzzy_whole_phrase_bool = gr.Checkbox(
+                        label="Should fuzzy search match on entire phrases in deny list (as opposed to each word individually)?",
+                        value=True,
+                    )
+
+            with gr.Accordion("Redact only selected pages", open=False):
+                with gr.Row():
+                    page_min.render()
+                    page_max.render()
+
+            if SHOW_LANGUAGE_SELECTION:
+                with gr.Accordion("Language selection", open=False):
+                    gr.Markdown(
+                        """Note that AWS Textract is compatible with English, Spanish, Italian, Portuguese, French, and German, and handwriting detection is only available in English. AWS Comprehend for detecting PII is only compatible with English and Spanish.
+                    The local models (Tesseract and SpaCy) are compatible with the other languages in the list below. However, the language packs for these models need to be installed on your system. When you first run a document through the app, the language packs will be downloaded automatically, but please expect a delay as the models are large."""
+                    )
+                    with gr.Row():
+                        chosen_language_full_name_drop = gr.Dropdown(
+                            value=DEFAULT_LANGUAGE_FULL_NAME,
+                            choices=MAPPED_LANGUAGE_CHOICES,
+                            label="Chosen language",
+                            multiselect=False,
+                            visible=True,
+                        )
+                        chosen_language_drop = gr.Dropdown(
+                            value=DEFAULT_LANGUAGE,
+                            choices=LANGUAGE_CHOICES,
+                            label="Chosen language short code",
+                            multiselect=False,
+                            visible=True,
+                            interactive=False,
+                        )
+            else:
+                chosen_language_full_name_drop = gr.Dropdown(
+                    value=DEFAULT_LANGUAGE_FULL_NAME,
+                    choices=MAPPED_LANGUAGE_CHOICES,
+                    label="Chosen language",
+                    multiselect=False,
+                    visible=False,
                 )
-                aws_secret_key_textbox = gr.Textbox(
-                    value="",
-                    label="AWS secret key for account with permissions for AWS Textract and Comprehend",
-                    visible=True,
-                    type="password",
+                chosen_language_drop = gr.Dropdown(
+                    value=DEFAULT_LANGUAGE,
+                    choices=LANGUAGE_CHOICES,
+                    label="Chosen language short code",
+                    multiselect=False,
+                    visible=False,
                 )
 
-        with gr.Accordion("Log file outputs", open=False):
-            log_files_output = gr.File(label="Log file output", interactive=False)
+            with gr.Accordion("Use API keys for AWS services", open=False):
+                with gr.Row():
+                    aws_access_key_textbox = gr.Textbox(
+                        value="",
+                        label="AWS access key for account with permissions for AWS Textract and Comprehend",
+                        visible=True,
+                        type="password",
+                    )
+                    aws_secret_key_textbox = gr.Textbox(
+                        value="",
+                        label="AWS secret key for account with permissions for AWS Textract and Comprehend",
+                        visible=True,
+                        type="password",
+                    )
 
-        with gr.Accordion("Combine multiple review files", open=False):
-            multiple_review_files_in_out = gr.File(
-                label="Combine multiple review_file.csv files together here.",
-                file_count="multiple",
-                file_types=[".csv"],
-            )
-            merge_multiple_review_files_btn = gr.Button(
-                "Merge multiple review files into one", variant="primary"
-            )
+            with gr.Accordion("Log file outputs", open=False):
+                log_files_output = gr.File(label="Log file output", interactive=False)
+
+            with gr.Accordion("S3 output settings", open=False):
+                save_outputs_to_s3_checkbox = gr.Checkbox(
+                    label="Save redaction outputs to S3 (requires RUN_AWS_FUNCTIONS=True and S3_OUTPUTS_FOLDER set)",
+                    value=SAVE_OUTPUTS_TO_S3,
+                )
+                s3_output_folder_display = gr.Textbox(
+                    label="Resolved S3 outputs folder",
+                    value="",
+                    interactive=False,
+                )
+
+            with gr.Accordion("Combine multiple review files", open=False):
+                multiple_review_files_in_out = gr.File(
+                    label="Combine multiple review_file.csv files together here.",
+                    file_count="multiple",
+                    file_types=[".csv"],
+                )
+                merge_multiple_review_files_btn = gr.Button(
+                    "Merge multiple review files into one", variant="primary"
+                )
 
     ###
     # UI INTERACTION
@@ -3103,6 +3162,15 @@ with blocks:
         api_name="redact_doc",
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_doc_files,
+        ],
+        outputs=None,
+    ).success(
         fn=update_annotator_object_and_filter_df,
         inputs=[
             all_image_annotations_state,
@@ -3226,6 +3294,15 @@ with blocks:
         ],
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_doc_files,
+        ],
+        outputs=None,
+    ).success(
         fn=update_annotator_object_and_filter_df,
         inputs=[
             all_image_annotations_state,
@@ -3281,7 +3358,8 @@ with blocks:
             pdf_feedback_title,
         ],
     ).success(
-        fn=reset_aws_call_vars, outputs=[comprehend_query_number, textract_query_number]
+        fn=reset_aws_call_vars,
+        outputs=[comprehend_query_number, textract_query_number],
     )
 
     # If the line level ocr results are changed by load in by user or by a new redaction task, replace the ocr results displayed in the table
@@ -3608,6 +3686,15 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+    )
+
+    def change_tab():
+        return gr.Tabs(selected=2)
+
+    go_to_review_redactions_tab_btn.click(
+        fn=change_tab,
+        inputs=None,
+        outputs=tabs,
     )
 
     ###
@@ -4693,7 +4780,10 @@ with blocks:
         outputs=[review_file_df],
     ).success(
         get_all_rows_with_same_text,
-        inputs=[recogniser_entity_dataframe_base, selected_entity_dataframe_row_text],
+        inputs=[
+            recogniser_entity_dataframe_base,
+            selected_entity_dataframe_row_text,
+        ],
         outputs=[recogniser_entity_dataframe_same_text],
     ).success(
         exclude_selected_items_from_redaction,
@@ -5614,6 +5704,15 @@ with blocks:
             page_sizes,
         ],
         outputs=[adobe_review_files_out],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            adobe_review_files_out,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            input_pdf_for_review,
+        ],
+        outputs=None,
     )
 
     # Convert xfdf Adobe file back to review_file.csv
@@ -5745,6 +5844,15 @@ with blocks:
         ],
         api_name="redact_data",
         show_progress_on=[text_output_summary],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            text_output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
     )
 
     # If the output file count text box changes, keep going with redacting each data file until done
@@ -5787,6 +5895,15 @@ with blocks:
         ],
         show_progress_on=[text_output_summary],
     ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            text_output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
+    ).success(
         fn=reveal_feedback_buttons,
         outputs=[
             data_feedback_radio,
@@ -5819,6 +5936,16 @@ with blocks:
             task_textbox,
         ],
         show_progress_on=[results_df_preview],
+    ).success(
+        fn=export_outputs_to_s3,
+        # duplicate_files_out returns a single file path; export helper will normalise it
+        inputs=[
+            duplicate_files_out,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_duplicate_pages,
+        ],
+        outputs=None,
     )
 
     # full_duplicated_data_df,
@@ -5998,7 +6125,9 @@ with blocks:
 
     # The following allows for more reliable updates of the data in the custom list dataframes
     in_allow_list_state.input(
-        update_dataframe, inputs=[in_allow_list_state], outputs=[in_allow_list_state]
+        update_dataframe,
+        inputs=[in_allow_list_state],
+        outputs=[in_allow_list_state],
     )
     in_deny_list_state.input(
         update_dataframe, inputs=[in_deny_list_state], outputs=[in_deny_list_state]
@@ -6089,7 +6218,9 @@ with blocks:
         inputs=None,
         outputs=all_output_files,
     ).success(
-        fn=load_all_output_files, inputs=output_folder_textbox, outputs=all_output_files
+        fn=load_all_output_files,
+        inputs=output_folder_textbox,
+        outputs=all_output_files,
     )
 
     all_output_files.change(
@@ -6118,6 +6249,7 @@ with blocks:
                 output_folder_textbox,
                 input_folder_textbox,
                 session_output_folder_textbox,
+                s3_output_folder_state,
                 s3_whole_document_textract_input_subfolder,
                 s3_whole_document_textract_output_subfolder,
                 s3_whole_document_textract_logs_subfolder,
@@ -6132,6 +6264,7 @@ with blocks:
                 s3_whole_document_textract_output_subfolder,
                 s3_whole_document_textract_logs_subfolder,
                 local_whole_document_textract_logs_subfolder,
+                s3_output_folder_state,
             ],
         ).success(
             load_in_textract_job_details,
@@ -6154,6 +6287,7 @@ with blocks:
                 output_folder_textbox,
                 input_folder_textbox,
                 session_output_folder_textbox,
+                s3_output_folder_state,
                 s3_whole_document_textract_input_subfolder,
                 s3_whole_document_textract_output_subfolder,
                 s3_whole_document_textract_logs_subfolder,
@@ -6168,6 +6302,7 @@ with blocks:
                 s3_whole_document_textract_output_subfolder,
                 s3_whole_document_textract_logs_subfolder,
                 local_whole_document_textract_logs_subfolder,
+                s3_output_folder_state,
             ],
         ).success(
             fn=load_all_output_files,
