@@ -3,6 +3,7 @@ import platform
 import random
 import string
 import unicodedata
+from datetime import datetime
 from math import ceil
 from pathlib import Path
 from typing import List, Set
@@ -30,6 +31,8 @@ from tools.config import (
     LANGUAGE_MAP,
     NO_REDACTION_PII_OPTION,
     OUTPUT_FOLDER,
+    S3_OUTPUTS_FOLDER,
+    SAVE_OUTPUTS_TO_S3,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     SESSION_OUTPUT_FOLDER,
     SHOW_FEEDBACK_BUTTONS,
@@ -508,6 +511,7 @@ async def get_connection_params(
     output_folder_textbox: str = OUTPUT_FOLDER,
     input_folder_textbox: str = INPUT_FOLDER,
     session_output_folder: bool = SESSION_OUTPUT_FOLDER,
+    s3_outputs_folder_textbox: str = S3_OUTPUTS_FOLDER,
     textract_document_upload_input_folder: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     textract_document_upload_output_folder: str = TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
     s3_textract_document_logs_subfolder: str = TEXTRACT_JOBS_S3_LOC,
@@ -584,6 +588,14 @@ async def get_connection_params(
         output_folder = output_folder_textbox + out_session_hash + "/"
         input_folder = input_folder_textbox + out_session_hash + "/"
 
+        # If configured, create a session-specific S3 outputs folder using the same pattern
+        if SAVE_OUTPUTS_TO_S3 and s3_outputs_folder_textbox:
+            s3_outputs_folder = (
+                s3_outputs_folder_textbox.rstrip("/") + "/" + out_session_hash + "/"
+            )
+        else:
+            s3_outputs_folder = s3_outputs_folder_textbox
+
         textract_document_upload_input_folder = (
             textract_document_upload_input_folder + "/" + out_session_hash
         )
@@ -601,6 +613,13 @@ async def get_connection_params(
     else:
         output_folder = output_folder_textbox
         input_folder = input_folder_textbox
+        # Keep S3 outputs folder as configured (no per-session subfolder)
+        s3_outputs_folder = s3_outputs_folder_textbox
+
+    # Append today's date (YYYYMMDD/) to the final S3 outputs folder when enabled
+    if SAVE_OUTPUTS_TO_S3 and s3_outputs_folder:
+        today_suffix = datetime.now().strftime("%Y%m%d") + "/"
+        s3_outputs_folder = s3_outputs_folder.rstrip("/") + "/" + today_suffix
 
     if not os.path.exists(output_folder):
         os.mkdir(output_folder)
@@ -616,6 +635,7 @@ async def get_connection_params(
         textract_document_upload_output_folder,
         s3_textract_document_logs_subfolder,
         local_textract_document_logs_subfolder,
+        s3_outputs_folder,
     )
 
 

@@ -164,7 +164,7 @@ Additionally, if the option is enabled by your system administrator, on this tab
 
 ### Downloading output files from previous redaction tasks
 
-If you are logged in via AWS Cognito and you lose your app page for some reason (e.g. from a crash, reloading), it is possible recover your previous output files, provided the server has not been shut down since you redacted the document. Go to 'Redaction settings', then scroll to the bottom to see 'View all output files from this session'.
+If you are logged in via AWS Cognito and you lose your app page for some reason (e.g. from a crash, reloading), it is possible recover your previous output files, provided the server has not been shut down since you redacted the document. If enabled, this feature can be found at the bottom of the front tab, called 'View and download all output files from this session'. If you open this and click on 'Refresh files in output folder' you should see a file directory of all files. If you click on the box next to a given file, it should appear below for you to download.
 
 ![View all output files](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/view_all_output_files.PNG)
 

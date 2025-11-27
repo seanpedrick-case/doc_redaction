@@ -25,7 +25,7 @@ ARG INSTALL_PADDLEOCR=False
 ENV INSTALL_PADDLEOCR=${INSTALL_PADDLEOCR}
 
 RUN if [ "$INSTALL_PADDLEOCR" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install paddlepaddle==3.2.1 \
+    pip install --verbose --no-cache-dir --target=/install paddlepaddle==3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/ \
     pip install --verbose --no-cache-dir --target=/install paddleocr==3.3.0; \
 fi
 

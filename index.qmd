@@ -2,7 +2,7 @@
 title: "Home"
 ---
 
-version: 1.6.0
+version: 1.6.2
 
 Welcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.
 
