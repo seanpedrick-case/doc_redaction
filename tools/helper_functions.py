@@ -521,8 +521,6 @@ async def get_connection_params(
     if isinstance(session_output_folder, str):
         session_output_folder = convert_string_to_boolean(session_output_folder)
 
-    # print("Session hash:", request.session_hash)
-
     if CUSTOM_HEADER and CUSTOM_HEADER_VALUE:
         if CUSTOM_HEADER in request.headers:
             supplied_custom_header_value = request.headers[CUSTOM_HEADER]

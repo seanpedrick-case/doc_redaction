@@ -357,7 +357,7 @@ If you made a mistake, click the 'Undo last element removal' button to restore t
 
 ### Searching and Adding Custom Redactions
 
-After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The **"Search text to make new redactions"** tab gives you the power to find and redact any text within your document manually.
+After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The **"Search text for new redaction"** tab gives you the power to find and redact any text within your document manually.
 
 #### How to Use the Search and Redact Feature
 
@@ -367,7 +367,7 @@ The workflow is designed to be simple: **Search → Select → Redact**.
 
 #### **Step 1: Search for Text**
 
-1.  Navigate to the **"Search text to make new redactions"** tab.
+1.  Navigate to the **"Search text for new redaction"** tab.
 2.  The main table will initially be populated with all the text extracted from the document for a page, broken down by word.
 3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below.
 4.  Click the **"Search"** button or press Enter.

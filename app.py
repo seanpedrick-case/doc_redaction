@@ -372,8 +372,6 @@ in_deny_list_state = gr.Dataframe(
     visible=True,
     type="pandas",
     interactive=True,
-    show_fullscreen_button=True,
-    show_copy_button=True,
     wrap=True,
 )
 
@@ -392,8 +390,6 @@ in_fully_redacted_list_state = gr.Dataframe(
     visible=True,
     type="pandas",
     interactive=True,
-    show_fullscreen_button=True,
-    show_copy_button=True,
     wrap=True,
 )
 
@@ -528,655 +524,635 @@ div[class*="tab-nav"] button {
 # Create the gradio interface
 blocks = gr.Blocks(
     theme=gr.themes.Default(primary_hue="blue"),
-    fill_width=True,
     head=head_html,
     css=css,
+    analytics_enabled=False,
+    title="Document Redaction App",
+    delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
+    fill_width=True,
 )
 
 with blocks:
-    with gr.Tabs() as tabs:
 
-        ###
-        # STATE VARIABLES
-        ###
+    ###
+    # STATE VARIABLES
+    ###
 
-        # Pymupdf doc needs to be stored as State objects as they do not have a standard Gradio component equivalent
-        pdf_doc_state = gr.State(list())
-        all_image_annotations_state = gr.Dropdown(
-            "",
-            label="all_image_annotations_state",
-            allow_custom_value=True,
-            visible=False,
-        )
+    # Pymupdf doc needs to be stored as State objects as they do not have a standard Gradio component equivalent
+    pdf_doc_state = gr.State(list())
+    all_image_annotations_state = gr.Dropdown(
+        "",
+        label="all_image_annotations_state",
+        allow_custom_value=True,
+        visible=False,
+    )
 
-        all_decision_process_table_state = gr.Dataframe(
-            value=pd.DataFrame(),
-            headers=None,
-            col_count=0,
-            row_count=(0, "dynamic"),
-            label="all_decision_process_table",
-            visible=False,
-            type="pandas",
-            wrap=True,
-        )
+    all_decision_process_table_state = gr.Dataframe(
+        value=pd.DataFrame(),
+        headers=None,
+        col_count=0,
+        row_count=(0, "dynamic"),
+        label="all_decision_process_table",
+        visible=False,
+        type="pandas",
+        wrap=True,
+    )
 
-        all_page_line_level_ocr_results = gr.Dropdown(
-            "",
-            label="all_page_line_level_ocr_results",
-            allow_custom_value=True,
-            visible=False,
-        )
-        all_page_line_level_ocr_results_with_words = gr.Dropdown(
-            "",
-            label="all_page_line_level_ocr_results_with_words",
-            allow_custom_value=True,
-            visible=False,
-        )
+    all_page_line_level_ocr_results = gr.Dropdown(
+        "",
+        label="all_page_line_level_ocr_results",
+        allow_custom_value=True,
+        visible=False,
+    )
+    all_page_line_level_ocr_results_with_words = gr.Dropdown(
+        "",
+        label="all_page_line_level_ocr_results_with_words",
+        allow_custom_value=True,
+        visible=False,
+    )
 
-        session_hash_state = gr.Textbox(
-            label="session_hash_state", value="", visible=False
-        )
-        host_name_textbox = gr.Textbox(
-            label="host_name_textbox", value=HOST_NAME, visible=False
-        )
-        s3_output_folder_state = gr.Textbox(
-            label="s3_output_folder_state", value=S3_OUTPUTS_FOLDER, visible=False
-        )
-        session_output_folder_textbox = gr.Textbox(
-            value=str(SESSION_OUTPUT_FOLDER),
-            label="session_output_folder_textbox",
-            visible=False,
-        )
-        output_folder_textbox = gr.Textbox(
-            value=OUTPUT_FOLDER, label="output_folder_textbox", visible=False
-        )
-        input_folder_textbox = gr.Textbox(
-            value=INPUT_FOLDER, label="input_folder_textbox", visible=False
-        )
+    session_hash_state = gr.Textbox(label="session_hash_state", value="", visible=False)
+    host_name_textbox = gr.Textbox(
+        label="host_name_textbox", value=HOST_NAME, visible=False
+    )
+    s3_output_folder_state = gr.Textbox(
+        label="s3_output_folder_state", value=S3_OUTPUTS_FOLDER, visible=False
+    )
+    session_output_folder_textbox = gr.Textbox(
+        value=str(SESSION_OUTPUT_FOLDER),
+        label="session_output_folder_textbox",
+        visible=False,
+    )
+    output_folder_textbox = gr.Textbox(
+        value=OUTPUT_FOLDER, label="output_folder_textbox", visible=False
+    )
+    input_folder_textbox = gr.Textbox(
+        value=INPUT_FOLDER, label="input_folder_textbox", visible=False
+    )
 
-        first_loop_state = gr.Checkbox(
-            label="first_loop_state", value=True, visible=False
-        )
-        second_loop_state = gr.Checkbox(
-            label="second_loop_state", value=False, visible=False
-        )
-        do_not_save_pdf_state = gr.Checkbox(
-            label="do_not_save_pdf_state", value=False, visible=False
-        )
-        save_pdf_state = gr.Checkbox(label="save_pdf_state", value=True, visible=False)
+    first_loop_state = gr.Checkbox(label="first_loop_state", value=True, visible=False)
+    second_loop_state = gr.Checkbox(
+        label="second_loop_state", value=False, visible=False
+    )
+    do_not_save_pdf_state = gr.Checkbox(
+        label="do_not_save_pdf_state", value=False, visible=False
+    )
+    save_pdf_state = gr.Checkbox(label="save_pdf_state", value=True, visible=False)
 
-        prepared_pdf_state = gr.Dropdown(
-            label="prepared_pdf_list", value="", allow_custom_value=True, visible=False
-        )
-        document_cropboxes = gr.Dropdown(
-            label="document_cropboxes", value="", allow_custom_value=True, visible=False
-        )
-        page_sizes = gr.Dropdown(
-            label="page_sizes", value="", allow_custom_value=True, visible=False
-        )
-        images_pdf_state = gr.Dropdown(
-            label="images_pdf_list", value="", allow_custom_value=True, visible=False
-        )
-        all_img_details_state = gr.Dropdown(
-            label="all_img_details_state",
-            value="",
-            allow_custom_value=True,
-            visible=False,
-        )
+    prepared_pdf_state = gr.Dropdown(
+        label="prepared_pdf_list", value="", allow_custom_value=True, visible=False
+    )
+    document_cropboxes = gr.Dropdown(
+        label="document_cropboxes", value="", allow_custom_value=True, visible=False
+    )
+    page_sizes = gr.Dropdown(
+        label="page_sizes", value="", allow_custom_value=True, visible=False
+    )
+    images_pdf_state = gr.Dropdown(
+        label="images_pdf_list", value="", allow_custom_value=True, visible=False
+    )
+    all_img_details_state = gr.Dropdown(
+        label="all_img_details_state",
+        value="",
+        allow_custom_value=True,
+        visible=False,
+    )
 
-        output_image_files_state = gr.Dropdown(
-            label="output_image_files_list",
-            value="",
-            allow_custom_value=True,
-            visible=False,
-        )
-        output_file_list_state = gr.Dropdown(
-            label="output_file_list", value="", allow_custom_value=True, visible=False
-        )
-        text_output_file_list_state = gr.Dropdown(
-            label="text_output_file_list",
-            value="",
-            allow_custom_value=True,
-            visible=False,
-        )
-        log_files_output_list_state = gr.Dropdown(
-            label="log_files_output_list",
-            value="",
-            allow_custom_value=True,
-            visible=False,
-        )
-        duplication_file_path_outputs_list_state = gr.Dropdown(
-            label="duplication_file_path_outputs_list",
-            value=list(),
-            multiselect=True,
-            allow_custom_value=True,
-            visible=False,
-        )
+    output_image_files_state = gr.Dropdown(
+        label="output_image_files_list",
+        value="",
+        allow_custom_value=True,
+        visible=False,
+    )
+    output_file_list_state = gr.Dropdown(
+        label="output_file_list", value="", allow_custom_value=True, visible=False
+    )
+    text_output_file_list_state = gr.Dropdown(
+        label="text_output_file_list",
+        value="",
+        allow_custom_value=True,
+        visible=False,
+    )
+    log_files_output_list_state = gr.Dropdown(
+        label="log_files_output_list",
+        value="",
+        allow_custom_value=True,
+        visible=False,
+    )
+    duplication_file_path_outputs_list_state = gr.Dropdown(
+        label="duplication_file_path_outputs_list",
+        value=list(),
+        multiselect=True,
+        allow_custom_value=True,
+        visible=False,
+    )
 
-        # Backup versions of these objects in case you make a mistake
-        backup_review_state = gr.State(pd.DataFrame())
-        backup_image_annotations_state = gr.State(list())
-        backup_recogniser_entity_dataframe_base = gr.State(pd.DataFrame())
-        backup_all_page_line_level_ocr_results_with_words_df_base = gr.State(
-            pd.DataFrame()
-        )
+    # Backup versions of these objects in case you make a mistake
+    backup_review_state = gr.State(pd.DataFrame())
+    backup_image_annotations_state = gr.State(list())
+    backup_recogniser_entity_dataframe_base = gr.State(pd.DataFrame())
+    backup_all_page_line_level_ocr_results_with_words_df_base = gr.State(pd.DataFrame())
 
-        # Logging variables
-        access_logs_state = gr.Textbox(
-            label="access_logs_state",
-            value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME,
-            visible=False,
-        )
-        access_s3_logs_loc_state = gr.Textbox(
-            label="access_s3_logs_loc_state", value=S3_ACCESS_LOGS_FOLDER, visible=False
-        )
-        feedback_logs_state = gr.Textbox(
-            label="feedback_logs_state",
-            value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME,
-            visible=False,
-        )
-        feedback_s3_logs_loc_state = gr.Textbox(
-            label="feedback_s3_logs_loc_state",
-            value=S3_FEEDBACK_LOGS_FOLDER,
-            visible=False,
-        )
-        usage_logs_state = gr.Textbox(
-            label="usage_logs_state",
-            value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME,
-            visible=False,
-        )
-        usage_s3_logs_loc_state = gr.Textbox(
-            label="usage_s3_logs_loc_state", value=S3_USAGE_LOGS_FOLDER, visible=False
-        )
+    # Logging variables
+    access_logs_state = gr.Textbox(
+        label="access_logs_state",
+        value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME,
+        visible=False,
+    )
+    access_s3_logs_loc_state = gr.Textbox(
+        label="access_s3_logs_loc_state", value=S3_ACCESS_LOGS_FOLDER, visible=False
+    )
+    feedback_logs_state = gr.Textbox(
+        label="feedback_logs_state",
+        value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME,
+        visible=False,
+    )
+    feedback_s3_logs_loc_state = gr.Textbox(
+        label="feedback_s3_logs_loc_state",
+        value=S3_FEEDBACK_LOGS_FOLDER,
+        visible=False,
+    )
+    usage_logs_state = gr.Textbox(
+        label="usage_logs_state",
+        value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME,
+        visible=False,
+    )
+    usage_s3_logs_loc_state = gr.Textbox(
+        label="usage_s3_logs_loc_state", value=S3_USAGE_LOGS_FOLDER, visible=False
+    )
 
-        session_hash_textbox = gr.Textbox(
-            label="session_hash_textbox", value="", visible=False
-        )
-        textract_metadata_textbox = gr.Textbox(
-            label="textract_metadata_textbox", value="", visible=False
-        )
-        comprehend_query_number = gr.Number(
-            label="comprehend_query_number", value=0, visible=False
-        )
-        textract_query_number = gr.Number(
-            label="textract_query_number", value=0, visible=False
-        )
+    session_hash_textbox = gr.Textbox(
+        label="session_hash_textbox", value="", visible=False
+    )
+    textract_metadata_textbox = gr.Textbox(
+        label="textract_metadata_textbox", value="", visible=False
+    )
+    comprehend_query_number = gr.Number(
+        label="comprehend_query_number", value=0, visible=False
+    )
+    textract_query_number = gr.Number(
+        label="textract_query_number", value=0, visible=False
+    )
 
-        doc_full_file_name_textbox = gr.Textbox(
-            label="doc_full_file_name_textbox", value="", visible=False
-        )
-        doc_file_name_no_extension_textbox = gr.Textbox(
-            label="doc_full_file_name_textbox", value="", visible=False
-        )
-        blank_doc_file_name_no_extension_textbox_for_logs = gr.Textbox(
-            label="doc_full_file_name_textbox", value="", visible=False
-        )
-        blank_data_file_name_no_extension_textbox_for_logs = gr.Textbox(
-            label="data_full_file_name_textbox", value="", visible=False
-        )
-        placeholder_doc_file_name_no_extension_textbox_for_logs = gr.Textbox(
-            label="doc_full_file_name_textbox", value="document", visible=False
-        )
-        placeholder_data_file_name_no_extension_textbox_for_logs = gr.Textbox(
-            label="data_full_file_name_textbox", value="data_file", visible=False
-        )
+    doc_full_file_name_textbox = gr.Textbox(
+        label="doc_full_file_name_textbox", value="", visible=False
+    )
+    doc_file_name_no_extension_textbox = gr.Textbox(
+        label="doc_full_file_name_textbox", value="", visible=False
+    )
+    blank_doc_file_name_no_extension_textbox_for_logs = gr.Textbox(
+        label="doc_full_file_name_textbox", value="", visible=False
+    )
+    blank_data_file_name_no_extension_textbox_for_logs = gr.Textbox(
+        label="data_full_file_name_textbox", value="", visible=False
+    )
+    placeholder_doc_file_name_no_extension_textbox_for_logs = gr.Textbox(
+        label="doc_full_file_name_textbox", value="document", visible=False
+    )
+    placeholder_data_file_name_no_extension_textbox_for_logs = gr.Textbox(
+        label="data_full_file_name_textbox", value="data_file", visible=False
+    )
 
-        # Left blank for when user does not want to report file names
-        doc_file_name_with_extension_textbox = gr.Textbox(
-            label="doc_file_name_with_extension_textbox", value="", visible=False
-        )
-        doc_file_name_textbox_list = gr.Dropdown(
-            label="doc_file_name_textbox_list",
-            value="",
-            allow_custom_value=True,
-            visible=False,
-        )
-        latest_review_file_path = gr.Textbox(
-            label="latest_review_file_path", value="", visible=False
-        )  # Latest review file path output from redaction
-        latest_ocr_file_path = gr.Textbox(
-            label="latest_ocr_file_path", value="", visible=False
-        )  # Latest ocr file path output from text extraction
+    # Left blank for when user does not want to report file names
+    doc_file_name_with_extension_textbox = gr.Textbox(
+        label="doc_file_name_with_extension_textbox", value="", visible=False
+    )
+    doc_file_name_textbox_list = gr.Dropdown(
+        label="doc_file_name_textbox_list",
+        value="",
+        allow_custom_value=True,
+        visible=False,
+    )
+    latest_review_file_path = gr.Textbox(
+        label="latest_review_file_path", value="", visible=False
+    )  # Latest review file path output from redaction
+    latest_ocr_file_path = gr.Textbox(
+        label="latest_ocr_file_path", value="", visible=False
+    )  # Latest ocr file path output from text extraction
 
-        data_full_file_name_textbox = gr.Textbox(
-            label="data_full_file_name_textbox", value="", visible=False
-        )
-        data_file_name_no_extension_textbox = gr.Textbox(
-            label="data_full_file_name_textbox", value="", visible=False
-        )
-        data_file_name_with_extension_textbox = gr.Textbox(
-            label="data_file_name_with_extension_textbox", value="", visible=False
-        )
-        data_file_name_textbox_list = gr.Dropdown(
-            label="data_file_name_textbox_list",
-            value="",
-            allow_custom_value=True,
-            visible=False,
-        )
+    data_full_file_name_textbox = gr.Textbox(
+        label="data_full_file_name_textbox", value="", visible=False
+    )
+    data_file_name_no_extension_textbox = gr.Textbox(
+        label="data_full_file_name_textbox", value="", visible=False
+    )
+    data_file_name_with_extension_textbox = gr.Textbox(
+        label="data_file_name_with_extension_textbox", value="", visible=False
+    )
+    data_file_name_textbox_list = gr.Dropdown(
+        label="data_file_name_textbox_list",
+        value="",
+        allow_custom_value=True,
+        visible=False,
+    )
 
-        # Constants just to use with the review dropdowns for filtering by various columns
-        label_name_const = gr.Textbox(
-            label="label_name_const", value="label", visible=False
-        )
-        text_name_const = gr.Textbox(
-            label="text_name_const", value="text", visible=False
-        )
-        page_name_const = gr.Textbox(
-            label="page_name_const", value="page", visible=False
-        )
+    # Constants just to use with the review dropdowns for filtering by various columns
+    label_name_const = gr.Textbox(
+        label="label_name_const", value="label", visible=False
+    )
+    text_name_const = gr.Textbox(label="text_name_const", value="text", visible=False)
+    page_name_const = gr.Textbox(label="page_name_const", value="page", visible=False)
 
-        actual_time_taken_number = gr.Number(
-            label="actual_time_taken_number", value=0.0, precision=1, visible=False
-        )  # This keeps track of the time taken to redact files for logging purposes.
-        annotate_previous_page = gr.Number(
-            value=0, label="Previous page", precision=0, visible=False
-        )  # Keeps track of the last page that the annotator was on
-        s3_logs_output_textbox = gr.Textbox(
-            label="Feedback submission logs", visible=False
-        )
+    actual_time_taken_number = gr.Number(
+        label="actual_time_taken_number", value=0.0, precision=1, visible=False
+    )  # This keeps track of the time taken to redact files for logging purposes.
+    annotate_previous_page = gr.Number(
+        value=0, label="Previous page", precision=0, visible=False
+    )  # Keeps track of the last page that the annotator was on
+    s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
 
-        ## Annotator zoom value
-        annotator_zoom_number = gr.Number(
-            label="Current annotator zoom level", value=100, precision=0, visible=False
-        )
-        zoom_true_bool = gr.Checkbox(label="zoom_true_bool", value=True, visible=False)
-        zoom_false_bool = gr.Checkbox(
-            label="zoom_false_bool", value=False, visible=False
-        )
+    ## Annotator zoom value
+    annotator_zoom_number = gr.Number(
+        label="Current annotator zoom level", value=100, precision=0, visible=False
+    )
+    zoom_true_bool = gr.Checkbox(label="zoom_true_bool", value=True, visible=False)
+    zoom_false_bool = gr.Checkbox(label="zoom_false_bool", value=False, visible=False)
 
-        clear_all_page_redactions = gr.Checkbox(
-            label="clear_all_page_redactions", value=True, visible=False
-        )
-        prepare_for_review_bool = gr.Checkbox(
-            label="prepare_for_review_bool", value=True, visible=False
-        )
-        prepare_for_review_bool_false = gr.Checkbox(
-            label="prepare_for_review_bool_false", value=False, visible=False
-        )
-        prepare_images_bool_false = gr.Checkbox(
-            label="prepare_images_bool_false", value=False, visible=False
-        )
+    clear_all_page_redactions = gr.Checkbox(
+        label="clear_all_page_redactions", value=True, visible=False
+    )
+    prepare_for_review_bool = gr.Checkbox(
+        label="prepare_for_review_bool", value=True, visible=False
+    )
+    prepare_for_review_bool_false = gr.Checkbox(
+        label="prepare_for_review_bool_false", value=False, visible=False
+    )
+    prepare_images_bool_false = gr.Checkbox(
+        label="prepare_images_bool_false", value=False, visible=False
+    )
 
-        ## Settings page variables
-        default_deny_list_file_name = "default_deny_list.csv"
-        default_deny_list_loc = OUTPUT_FOLDER + "/" + default_deny_list_file_name
-        in_deny_list_text_in = gr.Textbox(value="deny_list", visible=False)
+    ## Settings page variables
+    default_deny_list_file_name = "default_deny_list.csv"
+    default_deny_list_loc = OUTPUT_FOLDER + "/" + default_deny_list_file_name
+    in_deny_list_text_in = gr.Textbox(value="deny_list", visible=False)
 
-        fully_redacted_list_file_name = "default_fully_redacted_list.csv"
-        fully_redacted_list_loc = OUTPUT_FOLDER + "/" + fully_redacted_list_file_name
-        in_fully_redacted_text_in = gr.Textbox(
-            value="fully_redacted_pages_list", visible=False
-        )
+    fully_redacted_list_file_name = "default_fully_redacted_list.csv"
+    fully_redacted_list_loc = OUTPUT_FOLDER + "/" + fully_redacted_list_file_name
+    in_fully_redacted_text_in = gr.Textbox(
+        value="fully_redacted_pages_list", visible=False
+    )
 
-        # S3 settings for default allow list load
-        s3_default_bucket = gr.Textbox(
-            label="Default S3 bucket", value=DOCUMENT_REDACTION_BUCKET, visible=False
-        )
-        s3_default_allow_list_file = gr.Textbox(
-            label="Default allow list file", value=S3_ALLOW_LIST_PATH, visible=False
-        )
-        default_allow_list_output_folder_location = gr.Textbox(
-            label="Output default allow list location",
-            value=ALLOW_LIST_PATH,
-            visible=False,
-        )
+    # S3 settings for default allow list load
+    s3_default_bucket = gr.Textbox(
+        label="Default S3 bucket", value=DOCUMENT_REDACTION_BUCKET, visible=False
+    )
+    s3_default_allow_list_file = gr.Textbox(
+        label="Default allow list file", value=S3_ALLOW_LIST_PATH, visible=False
+    )
+    default_allow_list_output_folder_location = gr.Textbox(
+        label="Output default allow list location",
+        value=ALLOW_LIST_PATH,
+        visible=False,
+    )
 
-        s3_whole_document_textract_default_bucket = gr.Textbox(
-            label="Default Textract whole_document S3 bucket",
-            value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
-            visible=False,
-        )
-        s3_whole_document_textract_input_subfolder = gr.Textbox(
-            label="Default Textract whole_document S3 input folder",
-            value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
-            visible=False,
-        )
-        s3_whole_document_textract_output_subfolder = gr.Textbox(
-            label="Default Textract whole_document S3 output folder",
-            value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
-            visible=False,
-        )
-        successful_textract_api_call_number = gr.Number(
-            precision=0, value=0, visible=False
-        )
-        no_redaction_method_drop = gr.Radio(
-            label="""Placeholder for no redaction method after downloading Textract outputs""",
-            value=NO_REDACTION_PII_OPTION,
-            choices=[NO_REDACTION_PII_OPTION],
-            visible=False,
-        )
-        textract_only_method_drop = gr.Radio(
-            label="""Placeholder for Textract method after downloading Textract outputs""",
-            value=TEXTRACT_TEXT_EXTRACT_OPTION,
-            choices=[TEXTRACT_TEXT_EXTRACT_OPTION],
-            visible=False,
-        )
+    s3_whole_document_textract_default_bucket = gr.Textbox(
+        label="Default Textract whole_document S3 bucket",
+        value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
+        visible=False,
+    )
+    s3_whole_document_textract_input_subfolder = gr.Textbox(
+        label="Default Textract whole_document S3 input folder",
+        value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
+        visible=False,
+    )
+    s3_whole_document_textract_output_subfolder = gr.Textbox(
+        label="Default Textract whole_document S3 output folder",
+        value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
+        visible=False,
+    )
+    successful_textract_api_call_number = gr.Number(precision=0, value=0, visible=False)
+    no_redaction_method_drop = gr.Radio(
+        label="""Placeholder for no redaction method after downloading Textract outputs""",
+        value=NO_REDACTION_PII_OPTION,
+        choices=[NO_REDACTION_PII_OPTION],
+        visible=False,
+    )
+    textract_only_method_drop = gr.Radio(
+        label="""Placeholder for Textract method after downloading Textract outputs""",
+        value=TEXTRACT_TEXT_EXTRACT_OPTION,
+        choices=[TEXTRACT_TEXT_EXTRACT_OPTION],
+        visible=False,
+    )
 
-        load_s3_whole_document_textract_logs_bool = gr.Textbox(
-            label="Load Textract logs or not",
-            value=LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
-            visible=False,
-        )
-        s3_whole_document_textract_logs_subfolder = gr.Textbox(
-            label="Default Textract whole_document S3 input folder",
-            value=TEXTRACT_JOBS_S3_LOC,
-            visible=False,
-        )
-        local_whole_document_textract_logs_subfolder = gr.Textbox(
-            label="Default Textract whole_document S3 output folder",
-            value=TEXTRACT_JOBS_LOCAL_LOC,
-            visible=False,
-        )
+    load_s3_whole_document_textract_logs_bool = gr.Textbox(
+        label="Load Textract logs or not",
+        value=LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
+        visible=False,
+    )
+    s3_whole_document_textract_logs_subfolder = gr.Textbox(
+        label="Default Textract whole_document S3 input folder",
+        value=TEXTRACT_JOBS_S3_LOC,
+        visible=False,
+    )
+    local_whole_document_textract_logs_subfolder = gr.Textbox(
+        label="Default Textract whole_document S3 output folder",
+        value=TEXTRACT_JOBS_LOCAL_LOC,
+        visible=False,
+    )
 
-        s3_default_cost_codes_file = gr.Textbox(
-            label="Default cost centre file", value=S3_COST_CODES_PATH, visible=False
-        )
-        default_cost_codes_output_folder_location = gr.Textbox(
-            label="Output default cost centre location",
-            value=OUTPUT_COST_CODES_PATH,
-            visible=False,
-        )
-        enforce_cost_code_textbox = gr.Textbox(
-            label="Enforce cost code textbox", value=ENFORCE_COST_CODES, visible=False
-        )
-        default_cost_code_textbox = gr.Textbox(
-            label="Default cost code textbox", value=DEFAULT_COST_CODE, visible=False
-        )
+    s3_default_cost_codes_file = gr.Textbox(
+        label="Default cost centre file", value=S3_COST_CODES_PATH, visible=False
+    )
+    default_cost_codes_output_folder_location = gr.Textbox(
+        label="Output default cost centre location",
+        value=OUTPUT_COST_CODES_PATH,
+        visible=False,
+    )
+    enforce_cost_code_textbox = gr.Textbox(
+        label="Enforce cost code textbox", value=ENFORCE_COST_CODES, visible=False
+    )
+    default_cost_code_textbox = gr.Textbox(
+        label="Default cost code textbox", value=DEFAULT_COST_CODE, visible=False
+    )
 
-        # Base tables that are not modified subsequent to load
-        recogniser_entity_dataframe_base = gr.State(
-            pd.DataFrame(columns=["page", "label", "text", "id"])
-        )
-        all_page_line_level_ocr_results_df_base = gr.State(
-            pd.DataFrame(
-                columns=[
-                    "page",
-                    "text",
-                    "left",
-                    "top",
-                    "width",
-                    "height",
-                    "line",
-                    "conf",
-                ]
-            )
-        )
-        all_line_level_ocr_results_df_placeholder = gr.State(
-            pd.DataFrame(
-                columns=[
-                    "page",
-                    "text",
-                    "left",
-                    "top",
-                    "width",
-                    "height",
-                    "line",
-                    "conf",
-                ]
-            )
-        )
-
-        # Placeholder for selected entity dataframe row
-        selected_entity_id = gr.Textbox(
-            value="", label="selected_entity_id", visible=False
-        )
-        selected_entity_colour = gr.Textbox(
-            value="", label="selected_entity_colour", visible=False
-        )
-        selected_entity_dataframe_row_text = gr.Textbox(
-            value="", label="selected_entity_dataframe_row_text", visible=False
-        )
-        selected_entity_dataframe_row_text_redact = gr.Textbox(
-            value="", label="selected_entity_dataframe_row_text_redact", visible=False
-        )
-
-        # This is an invisible dataframe that holds all items from the redaction outputs that have the same text as the selected row
-        recogniser_entity_dataframe_same_text = gr.Dataframe(
-            pd.DataFrame(
-                data={"page": list(), "label": list(), "text": list(), "id": list()}
-            ),
-            col_count=(4, "fixed"),
-            type="pandas",
-            label="Table rows with same text",
-            headers=["page", "label", "text", "id"],
-            show_fullscreen_button=True,
-            wrap=True,
-            max_height=400,
-            static_columns=[0, 1, 2, 3],
-            visible=False,
-        )
-
-        to_redact_dataframe_same_text = gr.Dataframe(
-            pd.DataFrame(
-                data={
-                    "page": list(),
-                    "line": list(),
-                    "word_text": list(),
-                    "word_x0": list(),
-                    "word_y0": list(),
-                    "word_x1": list(),
-                    "word_y1": list(),
-                    "index": list(),
-                }
-            ),
-            type="pandas",
-            headers=[
+    # Base tables that are not modified subsequent to load
+    recogniser_entity_dataframe_base = gr.State(
+        pd.DataFrame(columns=["page", "label", "text", "id"])
+    )
+    all_page_line_level_ocr_results_df_base = gr.State(
+        pd.DataFrame(
+            columns=[
                 "page",
+                "text",
+                "left",
+                "top",
+                "width",
+                "height",
                 "line",
-                "word_text",
-                "word_x0",
-                "word_y0",
-                "word_x1",
-                "word_y1",
-                "index",
-            ],
-            wrap=False,
-            visible=False,
+                "conf",
+            ]
         )
+    )
+    all_line_level_ocr_results_df_placeholder = gr.State(
+        pd.DataFrame(
+            columns=[
+                "page",
+                "text",
+                "left",
+                "top",
+                "width",
+                "height",
+                "line",
+                "conf",
+            ]
+        )
+    )
 
-        # Duplicate page detection
-        in_duplicate_pages_text = gr.Textbox(
-            label="in_duplicate_pages_text", visible=False
-        )
-        duplicate_pages_df = gr.Dataframe(
-            value=pd.DataFrame(),
-            headers=None,
-            col_count=0,
-            row_count=(0, "dynamic"),
-            label="duplicate_pages_df",
-            visible=False,
-            type="pandas",
-            wrap=True,
-        )
-        full_duplicated_data_df = gr.Dataframe(
-            value=pd.DataFrame(),
-            headers=None,
-            col_count=0,
-            row_count=(0, "dynamic"),
-            label="full_duplicated_data_df",
-            visible=False,
-            type="pandas",
-            wrap=True,
-        )
-        selected_duplicate_data_row_index = gr.Number(
-            value=None, label="selected_duplicate_data_row_index", visible=False
-        )
-        full_duplicate_data_by_file = (
-            gr.State()
-        )  # A dictionary of the full duplicate data indexed by file
+    # Placeholder for selected entity dataframe row
+    selected_entity_id = gr.Textbox(value="", label="selected_entity_id", visible=False)
+    selected_entity_colour = gr.Textbox(
+        value="", label="selected_entity_colour", visible=False
+    )
+    selected_entity_dataframe_row_text = gr.Textbox(
+        value="", label="selected_entity_dataframe_row_text", visible=False
+    )
+    selected_entity_dataframe_row_text_redact = gr.Textbox(
+        value="", label="selected_entity_dataframe_row_text_redact", visible=False
+    )
 
-        # Tracking variables for current page (not visible)
-        current_loop_page_number = gr.Number(
-            value=0,
-            precision=0,
-            interactive=False,
-            label="Last redacted page in document",
-            visible=False,
-        )
-        page_break_return = gr.Checkbox(
-            value=False, label="Page break reached", visible=False
-        )
+    # This is an invisible dataframe that holds all items from the redaction outputs that have the same text as the selected row
+    recogniser_entity_dataframe_same_text = gr.Dataframe(
+        pd.DataFrame(
+            data={"page": list(), "label": list(), "text": list(), "id": list()}
+        ),
+        col_count=(4, "fixed"),
+        type="pandas",
+        label="Table rows with same text",
+        headers=["page", "label", "text", "id"],
+        wrap=True,
+        max_height=400,
+        static_columns=[0, 1, 2, 3],
+        visible=False,
+    )
 
-        # Placeholders for elements that may be made visible later below depending on environment variables
-        cost_code_dataframe_base = gr.Dataframe(
-            value=pd.DataFrame(),
-            row_count=(0, "dynamic"),
-            label="Cost codes",
-            type="pandas",
-            interactive=True,
-            show_fullscreen_button=True,
-            show_copy_button=True,
-            show_search="filter",
-            wrap=True,
-            max_height=200,
-            visible=False,
-        )
-        cost_code_dataframe = gr.Dataframe(
-            value=pd.DataFrame(), type="pandas", visible=False, wrap=True
-        )
-        cost_code_choice_drop = gr.Dropdown(
-            value=DEFAULT_COST_CODE,
-            label="Choose cost code for analysis. Please contact Finance if you can't find your cost code in the given list.",
-            choices=[DEFAULT_COST_CODE],
-            allow_custom_value=False,
-            visible=False,
-        )
+    to_redact_dataframe_same_text = gr.Dataframe(
+        pd.DataFrame(
+            data={
+                "page": list(),
+                "line": list(),
+                "word_text": list(),
+                "word_x0": list(),
+                "word_y0": list(),
+                "word_x1": list(),
+                "word_y1": list(),
+                "index": list(),
+            }
+        ),
+        type="pandas",
+        headers=[
+            "page",
+            "line",
+            "word_text",
+            "word_x0",
+            "word_y0",
+            "word_x1",
+            "word_y1",
+            "index",
+        ],
+        wrap=False,
+        visible=False,
+    )
 
-        textract_output_found_checkbox = gr.Checkbox(
-            value=False,
-            label="Existing Textract output file found",
-            interactive=False,
-            visible=False,
-        )
-        relevant_ocr_output_with_words_found_checkbox = gr.Checkbox(
-            value=False,
-            label="Existing local OCR output file found",
-            interactive=False,
-            visible=False,
-        )
+    # Duplicate page detection
+    in_duplicate_pages_text = gr.Textbox(label="in_duplicate_pages_text", visible=False)
+    duplicate_pages_df = gr.Dataframe(
+        value=pd.DataFrame(),
+        headers=None,
+        col_count=0,
+        row_count=(0, "dynamic"),
+        label="duplicate_pages_df",
+        visible=False,
+        type="pandas",
+        wrap=True,
+    )
+    full_duplicated_data_df = gr.Dataframe(
+        value=pd.DataFrame(),
+        headers=None,
+        col_count=0,
+        row_count=(0, "dynamic"),
+        label="full_duplicated_data_df",
+        visible=False,
+        type="pandas",
+        wrap=True,
+    )
+    selected_duplicate_data_row_index = gr.Number(
+        value=None, label="selected_duplicate_data_row_index", visible=False
+    )
+    full_duplicate_data_by_file = (
+        gr.State()
+    )  # A dictionary of the full duplicate data indexed by file
 
-        estimated_aws_costs_number = gr.Number(
-            label="Approximate AWS Textract and/or Comprehend cost ($)",
-            value=0,
-            visible=False,
-            precision=2,
-        )
-        estimated_time_taken_number = gr.Number(
-            label="Approximate time taken to extract text/redact (minutes)",
-            value=0,
-            visible=False,
-            precision=2,
-        )
+    # Tracking variables for current page (not visible)
+    current_loop_page_number = gr.Number(
+        value=0,
+        precision=0,
+        interactive=False,
+        label="Last redacted page in document",
+        visible=False,
+    )
+    page_break_return = gr.Checkbox(
+        value=False, label="Page break reached", visible=False
+    )
 
-        only_extract_text_radio = gr.Checkbox(
-            value=False, label="Only extract text (no redaction)", visible=False
-        )
+    # Placeholders for elements that may be made visible later below depending on environment variables
+    cost_code_dataframe_base = gr.Dataframe(
+        value=pd.DataFrame(),
+        row_count=(0, "dynamic"),
+        label="Cost codes",
+        type="pandas",
+        interactive=True,
+        show_search="filter",
+        wrap=True,
+        max_height=200,
+        visible=False,
+    )
+    cost_code_dataframe = gr.Dataframe(
+        value=pd.DataFrame(), type="pandas", visible=False, wrap=True
+    )
+    cost_code_choice_drop = gr.Dropdown(
+        value=DEFAULT_COST_CODE,
+        label="Choose cost code for analysis. Please contact Finance if you can't find your cost code in the given list.",
+        choices=[DEFAULT_COST_CODE],
+        allow_custom_value=False,
+        visible=False,
+    )
 
-        # Textract API call placeholders in case option not selected in config
+    textract_output_found_checkbox = gr.Checkbox(
+        value=False,
+        label="Existing Textract output file found",
+        interactive=False,
+        visible=False,
+    )
+    relevant_ocr_output_with_words_found_checkbox = gr.Checkbox(
+        value=False,
+        label="Existing local OCR output file found",
+        interactive=False,
+        visible=False,
+    )
 
-        job_name_textbox = gr.Textbox(
-            value="", label="whole_document Textract call", visible=False
-        )
-        send_document_to_textract_api_btn = gr.Button(
-            "Analyse document with AWS Textract", variant="primary", visible=False
-        )
+    estimated_aws_costs_number = gr.Number(
+        label="Approximate AWS Textract and/or Comprehend cost ($)",
+        value=0,
+        visible=False,
+        precision=2,
+    )
+    estimated_time_taken_number = gr.Number(
+        label="Approximate time taken to extract text/redact (minutes)",
+        value=0,
+        visible=False,
+        precision=2,
+    )
 
-        job_id_textbox = gr.Textbox(
-            label="Latest job ID for whole_document document analysis",
-            value="",
-            visible=False,
-        )
-        check_state_of_textract_api_call_btn = gr.Button(
-            "Check state of Textract document job and download",
-            variant="secondary",
-            visible=False,
-        )
-        job_current_status = gr.Textbox(
-            value="", label="Analysis job current status", visible=False
-        )
-        job_type_dropdown = gr.Dropdown(
-            value="document_text_detection",
-            choices=["document_text_detection", "document_analysis"],
-            label="Job type of Textract analysis job",
-            allow_custom_value=False,
-            visible=False,
-        )
-        textract_job_detail_df = gr.Dataframe(
-            pd.DataFrame(
-                columns=[
-                    "job_id",
-                    "file_name",
-                    "job_type",
-                    "signature_extraction",
-                    "job_date_time",
-                ]
-            ),
-            label="Previous job details",
-            visible=False,
-            type="pandas",
-            wrap=True,
-        )
-        selected_job_id_row = gr.Dataframe(
-            pd.DataFrame(
-                columns=[
-                    "job_id",
-                    "file_name",
-                    "job_type",
-                    "signature_extraction",
-                    "job_date_time",
-                ]
-            ),
-            label="Selected job id row",
-            visible=False,
-            type="pandas",
-            wrap=True,
-        )
-        is_a_textract_api_call = gr.Checkbox(
-            value=False, label="is_this_a_textract_api_call", visible=False
-        )
-        task_textbox = gr.Textbox(
-            value="redact", label="task", visible=False
-        )  # Track the task being performed
-        job_output_textbox = gr.Textbox(
-            value="", label="Textract call outputs", visible=False
-        )
-        job_input_textbox = gr.Textbox(
-            value=TEXTRACT_JOBS_S3_INPUT_LOC,
-            label="Textract call outputs",
-            visible=False,
-        )
+    only_extract_text_radio = gr.Checkbox(
+        value=False, label="Only extract text (no redaction)", visible=False
+    )
 
-        textract_job_output_file = gr.File(
-            label="Textract job output files", height=FILE_INPUT_HEIGHT, visible=False
-        )
-        convert_textract_outputs_to_ocr_results = gr.Button(
-            "Placeholder - Convert Textract job outputs to OCR results (needs relevant document file uploaded above)",
-            variant="secondary",
-            visible=False,
-        )
+    # Textract API call placeholders in case option not selected in config
 
-        ## Duplicate search object
-        new_duplicate_search_annotation_object = gr.Dropdown(
-            value=None,
-            label="new_duplicate_search_annotation_object",
-            allow_custom_value=True,
-            visible=False,
-        )
+    job_name_textbox = gr.Textbox(
+        value="", label="whole_document Textract call", visible=False
+    )
+    send_document_to_textract_api_btn = gr.Button(
+        "Analyse document with AWS Textract", variant="primary", visible=False
+    )
 
-        # Spacy analyser state
-        updated_nlp_analyser_state = gr.State(list())
-        tesseract_lang_data_file_path = gr.Textbox("", visible=False)
+    job_id_textbox = gr.Textbox(
+        label="Latest job ID for whole_document document analysis",
+        value="",
+        visible=False,
+    )
+    check_state_of_textract_api_call_btn = gr.Button(
+        "Check state of Textract document job and download",
+        variant="secondary",
+        visible=False,
+    )
+    job_current_status = gr.Textbox(
+        value="", label="Analysis job current status", visible=False
+    )
+    job_type_dropdown = gr.Dropdown(
+        value="document_text_detection",
+        choices=["document_text_detection", "document_analysis"],
+        label="Job type of Textract analysis job",
+        allow_custom_value=False,
+        visible=False,
+    )
+    textract_job_detail_df = gr.Dataframe(
+        pd.DataFrame(
+            columns=[
+                "job_id",
+                "file_name",
+                "job_type",
+                "signature_extraction",
+                "job_date_time",
+            ]
+        ),
+        label="Previous job details",
+        visible=False,
+        type="pandas",
+        wrap=True,
+    )
+    selected_job_id_row = gr.Dataframe(
+        pd.DataFrame(
+            columns=[
+                "job_id",
+                "file_name",
+                "job_type",
+                "signature_extraction",
+                "job_date_time",
+            ]
+        ),
+        label="Selected job id row",
+        visible=False,
+        type="pandas",
+        wrap=True,
+    )
+    is_a_textract_api_call = gr.Checkbox(
+        value=False, label="is_this_a_textract_api_call", visible=False
+    )
+    task_textbox = gr.Textbox(
+        value="redact", label="task", visible=False
+    )  # Track the task being performed
+    job_output_textbox = gr.Textbox(
+        value="", label="Textract call outputs", visible=False
+    )
+    job_input_textbox = gr.Textbox(
+        value=TEXTRACT_JOBS_S3_INPUT_LOC,
+        label="Textract call outputs",
+        visible=False,
+    )
 
-        flag_value_placeholder = gr.Textbox(
-            value="", visible=False
-        )  # Placeholder for flag value
+    textract_job_output_file = gr.File(
+        label="Textract job output files", height=FILE_INPUT_HEIGHT, visible=False
+    )
+    convert_textract_outputs_to_ocr_results = gr.Button(
+        "Placeholder - Convert Textract job outputs to OCR results (needs relevant document file uploaded above)",
+        variant="secondary",
+        visible=False,
+    )
 
-        ###
-        # UI DESIGN
-        ###
+    ## Duplicate search object
+    new_duplicate_search_annotation_object = gr.Dropdown(
+        value=None,
+        label="new_duplicate_search_annotation_object",
+        allow_custom_value=True,
+        visible=False,
+    )
 
-        gr.Markdown(INTRO_TEXT)
+    # Spacy analyser state
+    updated_nlp_analyser_state = gr.State(list())
+    tesseract_lang_data_file_path = gr.Textbox("", visible=False)
 
+    flag_value_placeholder = gr.Textbox(
+        value="", visible=False
+    )  # Placeholder for flag value
+
+    ###
+    # UI DESIGN
+    ###
+
+    gr.Markdown(INTRO_TEXT)
+
+    with gr.Tabs() as tabs:
         ###
         # REDACTION PDF/IMAGES TABLE
         ###
@@ -1604,8 +1580,6 @@ with blocks:
                                         label="Existing cost codes",
                                         type="pandas",
                                         interactive=True,
-                                        show_fullscreen_button=True,
-                                        show_copy_button=True,
                                         show_search="filter",
                                         visible=True,
                                         wrap=True,
@@ -1821,7 +1795,6 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base = gr.Dataframe(
                 type="pandas",
                 label="all_page_line_level_ocr_results_with_words_df_base",
-                show_fullscreen_button=True,
                 wrap=False,
                 show_search="filter",
                 visible=False,
@@ -1877,8 +1850,6 @@ with blocks:
                     type="pandas",
                     wrap=True,
                     show_search=True,
-                    show_fullscreen_button=True,
-                    show_copy_button=True,
                 )
 
             with gr.Row():
@@ -1989,7 +1960,6 @@ with blocks:
                                 type="pandas",
                                 label="Click table row to select and go to page",
                                 headers=["page", "label", "text", "id"],
-                                show_fullscreen_button=True,
                                 wrap=True,
                                 max_height=400,
                             )
@@ -2026,7 +1996,7 @@ with blocks:
                                 value="Undo last element removal", variant="primary"
                             )
 
-                    with gr.Tab("Search text to make new redactions"):
+                    with gr.Tab("Search text for new redactions", id=7):
                         with gr.Accordion("Search text", open=True):
                             with gr.Row(equal_height=True):
                                 page_entity_dropdown_redaction = gr.Dropdown(
@@ -2100,7 +2070,6 @@ with blocks:
                                         "word_x1",
                                         "word_y1",
                                     ],
-                                    show_fullscreen_button=True,
                                     wrap=False,
                                     max_height=400,
                                     show_search="filter",
@@ -2160,10 +2129,8 @@ with blocks:
                             visible=True,
                             type="pandas",
                             wrap=True,
-                            show_fullscreen_button=True,
                             show_search="filter",
                             show_label=False,
-                            show_copy_button=True,
                             column_widths=["15%", "15%", "70%"],
                             max_height=400,
                         )
@@ -2307,9 +2274,7 @@ with blocks:
                             "Page2_Text",
                         ],
                         wrap=True,
-                        show_fullscreen_button=True,
                         show_search=True,
-                        show_copy_button=True,
                     )
                 with gr.Row():
                     exclude_match_btn = gr.Button(
@@ -2325,17 +2290,13 @@ with blocks:
                         label="Match Source (Document 1)",
                         wrap=True,
                         headers=["page", "text"],
-                        show_fullscreen_button=True,
                         show_search=True,
-                        show_copy_button=True,
                     )
                     page2_text_preview = gr.Dataframe(
                         label="Match Duplicate (Document 2)",
                         wrap=True,
                         headers=["page", "text"],
-                        show_fullscreen_button=True,
                         show_search=True,
-                        show_copy_button=True,
                     )
 
                 gr.Markdown("### Downloadable Files")
@@ -2567,9 +2528,7 @@ with blocks:
                             "Text2",
                         ],
                         wrap=True,
-                        show_fullscreen_button=True,
                         show_search=True,
-                        show_copy_button=True,
                     )
 
                     with gr.Row(equal_height=True):
@@ -2664,8 +2623,6 @@ with blocks:
                             visible=True,
                             type="pandas",
                             interactive=True,
-                            show_fullscreen_button=True,
-                            show_copy_button=True,
                             wrap=True,
                         )
 
@@ -2780,294 +2737,155 @@ with blocks:
                     "Merge multiple review files into one", variant="primary"
                 )
 
-        ###
-        # UI INTERACTION
-        ###
+    ###
+    # UI INTERACTION
+    ###
 
-        ###
-        # PDF/IMAGE REDACTION
-        ###
-        # Recalculate estimated costs based on changes to inputs
-        if SHOW_COSTS:
-            # Calculate costs
-            total_pdf_page_count.change(
-                calculate_aws_costs,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    handwrite_signature_checkbox,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                ],
-                outputs=[estimated_aws_costs_number],
-            )
-            text_extract_method_radio.input(
-                fn=check_for_relevant_ocr_output_with_words,
-                inputs=[
-                    doc_file_name_no_extension_textbox,
-                    text_extract_method_radio,
-                    output_folder_textbox,
-                ],
-                outputs=[relevant_ocr_output_with_words_found_checkbox],
-            ).success(
-                calculate_aws_costs,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    handwrite_signature_checkbox,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                ],
-                outputs=[estimated_aws_costs_number],
-            )
-            pii_identification_method_drop.input(
-                calculate_aws_costs,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    handwrite_signature_checkbox,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                ],
-                outputs=[estimated_aws_costs_number],
-            )
-            handwrite_signature_checkbox.input(
-                fn=check_for_existing_textract_file,
-                inputs=[
-                    doc_file_name_no_extension_textbox,
-                    output_folder_textbox,
-                    handwrite_signature_checkbox,
-                ],
-                outputs=[textract_output_found_checkbox],
-            ).then(
-                calculate_aws_costs,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    handwrite_signature_checkbox,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                ],
-                outputs=[estimated_aws_costs_number],
-            )
-            textract_output_found_checkbox.input(
-                calculate_aws_costs,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    handwrite_signature_checkbox,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                ],
-                outputs=[estimated_aws_costs_number],
-            )
-            only_extract_text_radio.input(
-                calculate_aws_costs,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    handwrite_signature_checkbox,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                ],
-                outputs=[estimated_aws_costs_number],
-            )
-            textract_output_found_checkbox.change(
-                calculate_aws_costs,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    handwrite_signature_checkbox,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                ],
-                outputs=[estimated_aws_costs_number],
-            )
-
-            # Calculate time taken
-            total_pdf_page_count.change(
-                calculate_time_taken,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                    relevant_ocr_output_with_words_found_checkbox,
-                ],
-                outputs=[estimated_time_taken_number],
-            )
-            text_extract_method_radio.input(
-                calculate_time_taken,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                    relevant_ocr_output_with_words_found_checkbox,
-                ],
-                outputs=[estimated_time_taken_number],
-            )
-            pii_identification_method_drop.input(
-                calculate_time_taken,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                    relevant_ocr_output_with_words_found_checkbox,
-                ],
-                outputs=[estimated_time_taken_number],
-            )
-            handwrite_signature_checkbox.input(
-                fn=check_for_existing_textract_file,
-                inputs=[
-                    doc_file_name_no_extension_textbox,
-                    output_folder_textbox,
-                    handwrite_signature_checkbox,
-                ],
-                outputs=[textract_output_found_checkbox],
-            ).then(
-                calculate_time_taken,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                    relevant_ocr_output_with_words_found_checkbox,
-                ],
-                outputs=[estimated_time_taken_number],
-            )
-            textract_output_found_checkbox.change(
-                calculate_time_taken,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    handwrite_signature_checkbox,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                    relevant_ocr_output_with_words_found_checkbox,
-                ],
-                outputs=[estimated_time_taken_number],
-            )
-            only_extract_text_radio.input(
-                calculate_time_taken,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                    relevant_ocr_output_with_words_found_checkbox,
-                ],
-                outputs=[estimated_time_taken_number],
-            )
-            textract_output_found_checkbox.change(
-                calculate_time_taken,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                    relevant_ocr_output_with_words_found_checkbox,
-                ],
-                outputs=[estimated_time_taken_number],
-            )
-            relevant_ocr_output_with_words_found_checkbox.change(
-                calculate_time_taken,
-                inputs=[
-                    total_pdf_page_count,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    textract_output_found_checkbox,
-                    only_extract_text_radio,
-                    relevant_ocr_output_with_words_found_checkbox,
-                ],
-                outputs=[estimated_time_taken_number],
-            )
-
-        # Allow user to select items from cost code dataframe for cost code
-        if SHOW_COSTS and (GET_COST_CODES or ENFORCE_COST_CODES):
-            cost_code_dataframe.select(
-                df_select_callback_cost,
-                inputs=[cost_code_dataframe],
-                outputs=[cost_code_choice_drop],
-            )
-            reset_cost_code_dataframe_button.click(
-                reset_base_dataframe,
-                inputs=[cost_code_dataframe_base],
-                outputs=[cost_code_dataframe],
-            )
-
-            cost_code_choice_drop.select(
-                update_cost_code_dataframe_from_dropdown_select,
-                inputs=[cost_code_choice_drop, cost_code_dataframe_base],
-                outputs=[cost_code_dataframe],
-            )
-
-        in_doc_files.upload(
-            fn=get_input_file_names,
-            inputs=[in_doc_files],
-            outputs=[
-                doc_file_name_no_extension_textbox,
-                doc_file_name_with_extension_textbox,
-                doc_full_file_name_textbox,
-                doc_file_name_textbox_list,
+    ###
+    # PDF/IMAGE REDACTION
+    ###
+    # Recalculate estimated costs based on changes to inputs
+    if SHOW_COSTS:
+        # Calculate costs
+        total_pdf_page_count.change(
+            calculate_aws_costs,
+            inputs=[
                 total_pdf_page_count,
-            ],
-        ).success(
-            fn=prepare_image_or_pdf,
-            inputs=[
-                in_doc_files,
                 text_extract_method_radio,
-                all_page_line_level_ocr_results_df_base,
-                all_page_line_level_ocr_results_with_words_df_base,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                first_loop_state,
-                annotate_max_pages,
-                all_image_annotations_state,
-                prepare_for_review_bool_false,
-                in_fully_redacted_list_state,
-                output_folder_textbox,
-                input_folder_textbox,
-                prepare_images_bool_false,
-                page_sizes,
-                pdf_doc_state,
-                page_min,
-                page_max,
-            ],
-            outputs=[
-                redaction_output_summary_textbox,
-                prepared_pdf_state,
-                images_pdf_state,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                pdf_doc_state,
-                all_image_annotations_state,
-                review_file_df,
-                document_cropboxes,
-                page_sizes,
+                handwrite_signature_checkbox,
+                pii_identification_method_drop,
                 textract_output_found_checkbox,
-                all_img_details_state,
-                all_page_line_level_ocr_results_df_base,
+                only_extract_text_radio,
+            ],
+            outputs=[estimated_aws_costs_number],
+        )
+        text_extract_method_radio.input(
+            fn=check_for_relevant_ocr_output_with_words,
+            inputs=[
+                doc_file_name_no_extension_textbox,
+                text_extract_method_radio,
+                output_folder_textbox,
+            ],
+            outputs=[relevant_ocr_output_with_words_found_checkbox],
+        ).success(
+            calculate_aws_costs,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                handwrite_signature_checkbox,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+            ],
+            outputs=[estimated_aws_costs_number],
+        )
+        pii_identification_method_drop.input(
+            calculate_aws_costs,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                handwrite_signature_checkbox,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+            ],
+            outputs=[estimated_aws_costs_number],
+        )
+        handwrite_signature_checkbox.input(
+            fn=check_for_existing_textract_file,
+            inputs=[
+                doc_file_name_no_extension_textbox,
+                output_folder_textbox,
+                handwrite_signature_checkbox,
+            ],
+            outputs=[textract_output_found_checkbox],
+        ).then(
+            calculate_aws_costs,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                handwrite_signature_checkbox,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+            ],
+            outputs=[estimated_aws_costs_number],
+        )
+        textract_output_found_checkbox.input(
+            calculate_aws_costs,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                handwrite_signature_checkbox,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+            ],
+            outputs=[estimated_aws_costs_number],
+        )
+        only_extract_text_radio.input(
+            calculate_aws_costs,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                handwrite_signature_checkbox,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+            ],
+            outputs=[estimated_aws_costs_number],
+        )
+        textract_output_found_checkbox.change(
+            calculate_aws_costs,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                handwrite_signature_checkbox,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+            ],
+            outputs=[estimated_aws_costs_number],
+        )
+
+        # Calculate time taken
+        total_pdf_page_count.change(
+            calculate_time_taken,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
                 relevant_ocr_output_with_words_found_checkbox,
-                all_page_line_level_ocr_results_with_words_df_base,
             ],
-            show_progress_on=[redaction_output_summary_textbox],
-        ).success(
+            outputs=[estimated_time_taken_number],
+        )
+        text_extract_method_radio.input(
+            calculate_time_taken,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+                relevant_ocr_output_with_words_found_checkbox,
+            ],
+            outputs=[estimated_time_taken_number],
+        )
+        pii_identification_method_drop.input(
+            calculate_time_taken,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+                relevant_ocr_output_with_words_found_checkbox,
+            ],
+            outputs=[estimated_time_taken_number],
+        )
+        handwrite_signature_checkbox.input(
             fn=check_for_existing_textract_file,
             inputs=[
                 doc_file_name_no_extension_textbox,
@@ -3075,3902 +2893,4039 @@ with blocks:
                 handwrite_signature_checkbox,
             ],
             outputs=[textract_output_found_checkbox],
-        ).success(
-            fn=check_for_relevant_ocr_output_with_words,
+        ).then(
+            calculate_time_taken,
             inputs=[
-                doc_file_name_no_extension_textbox,
+                total_pdf_page_count,
                 text_extract_method_radio,
-                output_folder_textbox,
-            ],
-            outputs=[relevant_ocr_output_with_words_found_checkbox],
-        )
-
-        # Run redaction function
-        document_redact_btn.click(
-            fn=reset_state_vars,
-            outputs=[
-                all_image_annotations_state,
-                all_page_line_level_ocr_results_df_base,
-                all_decision_process_table_state,
-                comprehend_query_number,
-                textract_metadata_textbox,
-                annotator,
-                output_file_list_state,
-                log_files_output_list_state,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                pdf_doc_state,
-                duplication_file_path_outputs_list_state,
-                redaction_output_summary_textbox,
-                is_a_textract_api_call,
-                textract_query_number,
-                all_page_line_level_ocr_results_with_words,
-                input_review_files,
-            ],
-        ).success(
-            fn=enforce_cost_codes,
-            inputs=[
-                enforce_cost_code_textbox,
-                cost_code_choice_drop,
-                cost_code_dataframe_base,
-            ],
-        ).success(
-            fn=choose_and_run_redactor,
-            inputs=[
-                in_doc_files,
-                prepared_pdf_state,
-                images_pdf_state,
-                in_redact_entities,
-                in_redact_comprehend_entities,
-                text_extract_method_radio,
-                in_allow_list_state,
-                in_deny_list_state,
-                in_fully_redacted_list_state,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                output_file_list_state,
-                log_files_output_list_state,
-                first_loop_state,
-                page_min,
-                page_max,
-                actual_time_taken_number,
-                handwrite_signature_checkbox,
-                textract_metadata_textbox,
-                all_image_annotations_state,
-                all_page_line_level_ocr_results_df_base,
-                all_decision_process_table_state,
-                pdf_doc_state,
-                current_loop_page_number,
-                page_break_return,
                 pii_identification_method_drop,
-                comprehend_query_number,
-                max_fuzzy_spelling_mistakes_num,
-                match_fuzzy_whole_phrase_bool,
-                aws_access_key_textbox,
-                aws_secret_key_textbox,
-                annotate_max_pages,
-                review_file_df,
-                output_folder_textbox,
-                document_cropboxes,
-                page_sizes,
                 textract_output_found_checkbox,
                 only_extract_text_radio,
-                duplication_file_path_outputs_list_state,
-                latest_review_file_path,
-                input_folder_textbox,
-                textract_query_number,
-                latest_ocr_file_path,
-                all_page_line_level_ocr_results,
-                all_page_line_level_ocr_results_with_words,
-                all_page_line_level_ocr_results_with_words_df_base,
-                local_ocr_method_radio,
-                chosen_language_drop,
-                input_review_files,
+                relevant_ocr_output_with_words_found_checkbox,
             ],
-            outputs=[
-                redaction_output_summary_textbox,
-                output_file,
-                output_file_list_state,
-                latest_file_completed_num,
-                log_files_output,
-                log_files_output_list_state,
-                actual_time_taken_number,
-                textract_metadata_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                current_loop_page_number,
-                page_break_return,
-                all_page_line_level_ocr_results_df_base,
-                all_decision_process_table_state,
-                comprehend_query_number,
-                input_pdf_for_review,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                prepared_pdf_state,
-                images_pdf_state,
-                review_file_df,
-                page_sizes,
-                duplication_file_path_outputs_list_state,
-                in_duplicate_pages,
-                latest_review_file_path,
-                textract_query_number,
-                latest_ocr_file_path,
-                all_page_line_level_ocr_results,
-                all_page_line_level_ocr_results_with_words,
-                all_page_line_level_ocr_results_with_words_df_base,
-                backup_review_state,
-                task_textbox,
-                input_review_files,
-            ],
-            api_name="redact_doc",
-            show_progress_on=[redaction_output_summary_textbox],
-        ).success(
-            fn=export_outputs_to_s3,
-            inputs=[
-                output_file_list_state,
-                s3_output_folder_state,
-                save_outputs_to_s3_checkbox,
-                in_doc_files,
-            ],
-            outputs=None,
-        ).success(
-            fn=update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                page_min,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
+            outputs=[estimated_time_taken_number],
         )
-
-        # If a file has been completed, the function will continue onto the next document
-        latest_file_completed_num.change(
-            fn=choose_and_run_redactor,
+        textract_output_found_checkbox.change(
+            calculate_time_taken,
             inputs=[
-                in_doc_files,
-                prepared_pdf_state,
-                images_pdf_state,
-                in_redact_entities,
-                in_redact_comprehend_entities,
+                total_pdf_page_count,
                 text_extract_method_radio,
-                in_allow_list_state,
-                in_deny_list_state,
-                in_fully_redacted_list_state,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                output_file_list_state,
-                log_files_output_list_state,
-                second_loop_state,
-                page_min,
-                page_max,
-                actual_time_taken_number,
                 handwrite_signature_checkbox,
-                textract_metadata_textbox,
-                all_image_annotations_state,
-                all_page_line_level_ocr_results_df_base,
-                all_decision_process_table_state,
-                pdf_doc_state,
-                current_loop_page_number,
-                page_break_return,
                 pii_identification_method_drop,
-                comprehend_query_number,
-                max_fuzzy_spelling_mistakes_num,
-                match_fuzzy_whole_phrase_bool,
-                aws_access_key_textbox,
-                aws_secret_key_textbox,
-                annotate_max_pages,
-                review_file_df,
-                output_folder_textbox,
-                document_cropboxes,
-                page_sizes,
                 textract_output_found_checkbox,
                 only_extract_text_radio,
-                duplication_file_path_outputs_list_state,
-                latest_review_file_path,
-                input_folder_textbox,
-                textract_query_number,
-                latest_ocr_file_path,
-                all_page_line_level_ocr_results,
-                all_page_line_level_ocr_results_with_words,
-                all_page_line_level_ocr_results_with_words_df_base,
-                local_ocr_method_radio,
-                chosen_language_drop,
-                input_review_files,
+                relevant_ocr_output_with_words_found_checkbox,
             ],
-            outputs=[
-                redaction_output_summary_textbox,
-                output_file,
-                output_file_list_state,
-                latest_file_completed_num,
-                log_files_output,
-                log_files_output_list_state,
-                actual_time_taken_number,
-                textract_metadata_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                current_loop_page_number,
-                page_break_return,
-                all_page_line_level_ocr_results_df_base,
-                all_decision_process_table_state,
-                comprehend_query_number,
-                input_pdf_for_review,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                prepared_pdf_state,
-                images_pdf_state,
-                review_file_df,
-                page_sizes,
-                duplication_file_path_outputs_list_state,
-                in_duplicate_pages,
-                latest_review_file_path,
-                textract_query_number,
-                latest_ocr_file_path,
-                all_page_line_level_ocr_results,
-                all_page_line_level_ocr_results_with_words,
-                all_page_line_level_ocr_results_with_words_df_base,
-                backup_review_state,
-                task_textbox,
-                input_review_files,
-            ],
-            show_progress_on=[redaction_output_summary_textbox],
-        ).success(
-            fn=export_outputs_to_s3,
+            outputs=[estimated_time_taken_number],
+        )
+        only_extract_text_radio.input(
+            calculate_time_taken,
             inputs=[
-                output_file_list_state,
-                s3_output_folder_state,
-                save_outputs_to_s3_checkbox,
-                in_doc_files,
-            ],
-            outputs=None,
-        ).success(
-            fn=update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                page_min,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            fn=check_for_existing_textract_file,
-            inputs=[
-                doc_file_name_no_extension_textbox,
-                output_folder_textbox,
-                handwrite_signature_checkbox,
-            ],
-            outputs=[textract_output_found_checkbox],
-        ).success(
-            fn=check_for_relevant_ocr_output_with_words,
-            inputs=[
-                doc_file_name_no_extension_textbox,
+                total_pdf_page_count,
                 text_extract_method_radio,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+                relevant_ocr_output_with_words_found_checkbox,
+            ],
+            outputs=[estimated_time_taken_number],
+        )
+        textract_output_found_checkbox.change(
+            calculate_time_taken,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+                relevant_ocr_output_with_words_found_checkbox,
+            ],
+            outputs=[estimated_time_taken_number],
+        )
+        relevant_ocr_output_with_words_found_checkbox.change(
+            calculate_time_taken,
+            inputs=[
+                total_pdf_page_count,
+                text_extract_method_radio,
+                pii_identification_method_drop,
+                textract_output_found_checkbox,
+                only_extract_text_radio,
+                relevant_ocr_output_with_words_found_checkbox,
+            ],
+            outputs=[estimated_time_taken_number],
+        )
+
+    # Allow user to select items from cost code dataframe for cost code
+    if SHOW_COSTS and (GET_COST_CODES or ENFORCE_COST_CODES):
+        cost_code_dataframe.select(
+            df_select_callback_cost,
+            inputs=[cost_code_dataframe],
+            outputs=[cost_code_choice_drop],
+        )
+        reset_cost_code_dataframe_button.click(
+            reset_base_dataframe,
+            inputs=[cost_code_dataframe_base],
+            outputs=[cost_code_dataframe],
+        )
+
+        cost_code_choice_drop.select(
+            update_cost_code_dataframe_from_dropdown_select,
+            inputs=[cost_code_choice_drop, cost_code_dataframe_base],
+            outputs=[cost_code_dataframe],
+        )
+
+    in_doc_files.upload(
+        fn=get_input_file_names,
+        inputs=[in_doc_files],
+        outputs=[
+            doc_file_name_no_extension_textbox,
+            doc_file_name_with_extension_textbox,
+            doc_full_file_name_textbox,
+            doc_file_name_textbox_list,
+            total_pdf_page_count,
+        ],
+    ).success(
+        fn=prepare_image_or_pdf,
+        inputs=[
+            in_doc_files,
+            text_extract_method_radio,
+            all_page_line_level_ocr_results_df_base,
+            all_page_line_level_ocr_results_with_words_df_base,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            first_loop_state,
+            annotate_max_pages,
+            all_image_annotations_state,
+            prepare_for_review_bool_false,
+            in_fully_redacted_list_state,
+            output_folder_textbox,
+            input_folder_textbox,
+            prepare_images_bool_false,
+            page_sizes,
+            pdf_doc_state,
+            page_min,
+            page_max,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            prepared_pdf_state,
+            images_pdf_state,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            pdf_doc_state,
+            all_image_annotations_state,
+            review_file_df,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            all_img_details_state,
+            all_page_line_level_ocr_results_df_base,
+            relevant_ocr_output_with_words_found_checkbox,
+            all_page_line_level_ocr_results_with_words_df_base,
+        ],
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=check_for_existing_textract_file,
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            output_folder_textbox,
+            handwrite_signature_checkbox,
+        ],
+        outputs=[textract_output_found_checkbox],
+    ).success(
+        fn=check_for_relevant_ocr_output_with_words,
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            text_extract_method_radio,
+            output_folder_textbox,
+        ],
+        outputs=[relevant_ocr_output_with_words_found_checkbox],
+    )
+
+    # Run redaction function
+    document_redact_btn.click(
+        fn=reset_state_vars,
+        outputs=[
+            all_image_annotations_state,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            comprehend_query_number,
+            textract_metadata_textbox,
+            annotator,
+            output_file_list_state,
+            log_files_output_list_state,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            pdf_doc_state,
+            duplication_file_path_outputs_list_state,
+            redaction_output_summary_textbox,
+            is_a_textract_api_call,
+            textract_query_number,
+            all_page_line_level_ocr_results_with_words,
+            input_review_files,
+        ],
+    ).success(
+        fn=enforce_cost_codes,
+        inputs=[
+            enforce_cost_code_textbox,
+            cost_code_choice_drop,
+            cost_code_dataframe_base,
+        ],
+    ).success(
+        fn=choose_and_run_redactor,
+        inputs=[
+            in_doc_files,
+            prepared_pdf_state,
+            images_pdf_state,
+            in_redact_entities,
+            in_redact_comprehend_entities,
+            text_extract_method_radio,
+            in_allow_list_state,
+            in_deny_list_state,
+            in_fully_redacted_list_state,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            output_file_list_state,
+            log_files_output_list_state,
+            first_loop_state,
+            page_min,
+            page_max,
+            actual_time_taken_number,
+            handwrite_signature_checkbox,
+            textract_metadata_textbox,
+            all_image_annotations_state,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            pdf_doc_state,
+            current_loop_page_number,
+            page_break_return,
+            pii_identification_method_drop,
+            comprehend_query_number,
+            max_fuzzy_spelling_mistakes_num,
+            match_fuzzy_whole_phrase_bool,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            annotate_max_pages,
+            review_file_df,
+            output_folder_textbox,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            only_extract_text_radio,
+            duplication_file_path_outputs_list_state,
+            latest_review_file_path,
+            input_folder_textbox,
+            textract_query_number,
+            latest_ocr_file_path,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            local_ocr_method_radio,
+            chosen_language_drop,
+            input_review_files,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            output_file,
+            output_file_list_state,
+            latest_file_completed_num,
+            log_files_output,
+            log_files_output_list_state,
+            actual_time_taken_number,
+            textract_metadata_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            current_loop_page_number,
+            page_break_return,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            comprehend_query_number,
+            input_pdf_for_review,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            prepared_pdf_state,
+            images_pdf_state,
+            review_file_df,
+            page_sizes,
+            duplication_file_path_outputs_list_state,
+            in_duplicate_pages,
+            latest_review_file_path,
+            textract_query_number,
+            latest_ocr_file_path,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            backup_review_state,
+            task_textbox,
+            input_review_files,
+        ],
+        api_name="redact_doc",
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_doc_files,
+        ],
+        outputs=None,
+    ).success(
+        fn=update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            page_min,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    # If a file has been completed, the function will continue onto the next document
+    latest_file_completed_num.change(
+        fn=choose_and_run_redactor,
+        inputs=[
+            in_doc_files,
+            prepared_pdf_state,
+            images_pdf_state,
+            in_redact_entities,
+            in_redact_comprehend_entities,
+            text_extract_method_radio,
+            in_allow_list_state,
+            in_deny_list_state,
+            in_fully_redacted_list_state,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            output_file_list_state,
+            log_files_output_list_state,
+            second_loop_state,
+            page_min,
+            page_max,
+            actual_time_taken_number,
+            handwrite_signature_checkbox,
+            textract_metadata_textbox,
+            all_image_annotations_state,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            pdf_doc_state,
+            current_loop_page_number,
+            page_break_return,
+            pii_identification_method_drop,
+            comprehend_query_number,
+            max_fuzzy_spelling_mistakes_num,
+            match_fuzzy_whole_phrase_bool,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            annotate_max_pages,
+            review_file_df,
+            output_folder_textbox,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            only_extract_text_radio,
+            duplication_file_path_outputs_list_state,
+            latest_review_file_path,
+            input_folder_textbox,
+            textract_query_number,
+            latest_ocr_file_path,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            local_ocr_method_radio,
+            chosen_language_drop,
+            input_review_files,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            output_file,
+            output_file_list_state,
+            latest_file_completed_num,
+            log_files_output,
+            log_files_output_list_state,
+            actual_time_taken_number,
+            textract_metadata_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            current_loop_page_number,
+            page_break_return,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            comprehend_query_number,
+            input_pdf_for_review,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            prepared_pdf_state,
+            images_pdf_state,
+            review_file_df,
+            page_sizes,
+            duplication_file_path_outputs_list_state,
+            in_duplicate_pages,
+            latest_review_file_path,
+            textract_query_number,
+            latest_ocr_file_path,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            backup_review_state,
+            task_textbox,
+            input_review_files,
+        ],
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_doc_files,
+        ],
+        outputs=None,
+    ).success(
+        fn=update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            page_min,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        fn=check_for_existing_textract_file,
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            output_folder_textbox,
+            handwrite_signature_checkbox,
+        ],
+        outputs=[textract_output_found_checkbox],
+    ).success(
+        fn=check_for_relevant_ocr_output_with_words,
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            text_extract_method_radio,
+            output_folder_textbox,
+        ],
+        outputs=[relevant_ocr_output_with_words_found_checkbox],
+    ).success(
+        fn=reveal_feedback_buttons,
+        outputs=[
+            pdf_feedback_radio,
+            pdf_further_details_text,
+            pdf_submit_feedback_btn,
+            pdf_feedback_title,
+        ],
+    ).success(
+        fn=reset_aws_call_vars,
+        outputs=[comprehend_query_number, textract_query_number],
+    )
+
+    # If the line level ocr results are changed by load in by user or by a new redaction task, replace the ocr results displayed in the table
+    all_page_line_level_ocr_results_df_base.change(
+        reset_ocr_base_dataframe,
+        inputs=[all_page_line_level_ocr_results_df_base],
+        outputs=[all_page_line_level_ocr_results_df],
+    )
+    all_page_line_level_ocr_results_with_words_df_base.change(
+        reset_ocr_with_words_base_dataframe,
+        inputs=[
+            all_page_line_level_ocr_results_with_words_df_base,
+            page_entity_dropdown_redaction,
+        ],
+        outputs=[
+            all_page_line_level_ocr_results_with_words_df,
+            backup_all_page_line_level_ocr_results_with_words_df_base,
+        ],
+    )
+
+    # Send whole document to Textract for text extraction
+    send_document_to_textract_api_btn.click(
+        analyse_document_with_textract_api,
+        inputs=[
+            prepared_pdf_state,
+            s3_whole_document_textract_input_subfolder,
+            s3_whole_document_textract_output_subfolder,
+            textract_job_detail_df,
+            s3_whole_document_textract_default_bucket,
+            output_folder_textbox,
+            handwrite_signature_checkbox,
+            successful_textract_api_call_number,
+            total_pdf_page_count,
+        ],
+        outputs=[
+            job_output_textbox,
+            job_id_textbox,
+            job_type_dropdown,
+            successful_textract_api_call_number,
+            is_a_textract_api_call,
+            textract_query_number,
+            task_textbox,
+        ],
+        show_progress_on=[job_current_status],
+    ).success(check_for_provided_job_id, inputs=[job_id_textbox]).success(
+        poll_whole_document_textract_analysis_progress_and_download,
+        inputs=[
+            job_id_textbox,
+            job_type_dropdown,
+            s3_whole_document_textract_output_subfolder,
+            doc_file_name_no_extension_textbox,
+            textract_job_detail_df,
+            s3_whole_document_textract_default_bucket,
+            output_folder_textbox,
+            s3_whole_document_textract_logs_subfolder,
+            local_whole_document_textract_logs_subfolder,
+        ],
+        outputs=[
+            textract_job_output_file,
+            job_current_status,
+            textract_job_detail_df,
+            doc_file_name_no_extension_textbox,
+        ],
+        show_progress_on=[job_current_status],
+    ).success(
+        fn=check_for_existing_textract_file,
+        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
+        outputs=[textract_output_found_checkbox],
+        show_progress_on=[job_current_status],
+    )
+
+    check_state_of_textract_api_call_btn.click(
+        check_for_provided_job_id,
+        inputs=[job_id_textbox],
+        show_progress_on=[job_current_status],
+    ).success(
+        poll_whole_document_textract_analysis_progress_and_download,
+        inputs=[
+            job_id_textbox,
+            job_type_dropdown,
+            s3_whole_document_textract_output_subfolder,
+            doc_file_name_no_extension_textbox,
+            textract_job_detail_df,
+            s3_whole_document_textract_default_bucket,
+            output_folder_textbox,
+            s3_whole_document_textract_logs_subfolder,
+            local_whole_document_textract_logs_subfolder,
+        ],
+        outputs=[
+            textract_job_output_file,
+            job_current_status,
+            textract_job_detail_df,
+            doc_file_name_no_extension_textbox,
+        ],
+        show_progress_on=[job_current_status],
+    ).success(
+        fn=check_for_existing_textract_file,
+        inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
+        outputs=[textract_output_found_checkbox],
+        show_progress_on=[job_current_status],
+    )
+
+    textract_job_detail_df.select(
+        df_select_callback_textract_api,
+        inputs=[textract_output_found_checkbox],
+        outputs=[job_id_textbox, job_type_dropdown, selected_job_id_row],
+    )
+
+    convert_textract_outputs_to_ocr_results.click(
+        replace_existing_pdf_input_for_whole_document_outputs,
+        inputs=[
+            s3_whole_document_textract_input_subfolder,
+            doc_file_name_no_extension_textbox,
+            output_folder_textbox,
+            s3_whole_document_textract_default_bucket,
+            in_doc_files,
+            input_folder_textbox,
+        ],
+        outputs=[
+            in_doc_files,
+            doc_file_name_no_extension_textbox,
+            doc_file_name_with_extension_textbox,
+            doc_full_file_name_textbox,
+            doc_file_name_textbox_list,
+            total_pdf_page_count,
+        ],
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=prepare_image_or_pdf,
+        inputs=[
+            in_doc_files,
+            text_extract_method_radio,
+            all_page_line_level_ocr_results_df_base,
+            all_page_line_level_ocr_results_with_words_df_base,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            first_loop_state,
+            annotate_max_pages,
+            all_image_annotations_state,
+            prepare_for_review_bool_false,
+            in_fully_redacted_list_state,
+            output_folder_textbox,
+            input_folder_textbox,
+            prepare_images_bool_false,
+            page_sizes,
+            pdf_doc_state,
+            page_min,
+            page_max,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            prepared_pdf_state,
+            images_pdf_state,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            pdf_doc_state,
+            all_image_annotations_state,
+            review_file_df,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            all_img_details_state,
+            all_page_line_level_ocr_results_df_base,
+            relevant_ocr_output_with_words_found_checkbox,
+            all_page_line_level_ocr_results_with_words_df_base,
+        ],
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=check_for_existing_textract_file,
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            output_folder_textbox,
+            handwrite_signature_checkbox,
+        ],
+        outputs=[textract_output_found_checkbox],
+    ).success(
+        fn=check_for_relevant_ocr_output_with_words,
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            text_extract_method_radio,
+            output_folder_textbox,
+        ],
+        outputs=[relevant_ocr_output_with_words_found_checkbox],
+    ).success(
+        fn=check_textract_outputs_exist, inputs=[textract_output_found_checkbox]
+    ).success(
+        fn=reset_state_vars,
+        outputs=[
+            all_image_annotations_state,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            comprehend_query_number,
+            textract_metadata_textbox,
+            annotator,
+            output_file_list_state,
+            log_files_output_list_state,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            pdf_doc_state,
+            duplication_file_path_outputs_list_state,
+            redaction_output_summary_textbox,
+            is_a_textract_api_call,
+            textract_query_number,
+            all_page_line_level_ocr_results_with_words,
+            input_review_files,
+        ],
+    ).success(
+        fn=choose_and_run_redactor,
+        inputs=[
+            in_doc_files,
+            prepared_pdf_state,
+            images_pdf_state,
+            in_redact_entities,
+            in_redact_comprehend_entities,
+            textract_only_method_drop,
+            in_allow_list_state,
+            in_deny_list_state,
+            in_fully_redacted_list_state,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            output_file_list_state,
+            log_files_output_list_state,
+            first_loop_state,
+            page_min,
+            page_max,
+            actual_time_taken_number,
+            handwrite_signature_checkbox,
+            textract_metadata_textbox,
+            all_image_annotations_state,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            pdf_doc_state,
+            current_loop_page_number,
+            page_break_return,
+            no_redaction_method_drop,
+            comprehend_query_number,
+            max_fuzzy_spelling_mistakes_num,
+            match_fuzzy_whole_phrase_bool,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            annotate_max_pages,
+            review_file_df,
+            output_folder_textbox,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            only_extract_text_radio,
+            duplication_file_path_outputs_list_state,
+            latest_review_file_path,
+            input_folder_textbox,
+            textract_query_number,
+            latest_ocr_file_path,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            local_ocr_method_radio,
+            chosen_language_drop,
+            input_review_files,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            output_file,
+            output_file_list_state,
+            latest_file_completed_num,
+            log_files_output,
+            log_files_output_list_state,
+            actual_time_taken_number,
+            textract_metadata_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            current_loop_page_number,
+            page_break_return,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            comprehend_query_number,
+            input_pdf_for_review,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            prepared_pdf_state,
+            images_pdf_state,
+            review_file_df,
+            page_sizes,
+            duplication_file_path_outputs_list_state,
+            in_duplicate_pages,
+            latest_review_file_path,
+            textract_query_number,
+            latest_ocr_file_path,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            backup_review_state,
+            task_textbox,
+            input_review_files,
+        ],
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            page_min,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    def change_tab():
+        return gr.Tabs(selected=2)
+
+    go_to_review_redactions_tab_btn.click(
+        fn=change_tab,
+        inputs=None,
+        outputs=tabs,
+    )
+
+    ###
+    # REVIEW PDF REDACTIONS
+    ###
+
+    # Upload previous PDF for modifying redactions
+    upload_pdf_for_review_btn.click(
+        fn=reset_review_vars,
+        inputs=None,
+        outputs=[recogniser_entity_dataframe, recogniser_entity_dataframe_base],
+    ).success(
+        fn=get_input_file_names,
+        inputs=[input_pdf_for_review],
+        outputs=[
+            doc_file_name_no_extension_textbox,
+            doc_file_name_with_extension_textbox,
+            doc_full_file_name_textbox,
+            doc_file_name_textbox_list,
+            total_pdf_page_count,
+        ],
+    ).success(
+        fn=prepare_image_or_pdf,
+        inputs=[
+            input_pdf_for_review,
+            text_extract_method_radio,
+            all_page_line_level_ocr_results_df_base,
+            all_page_line_level_ocr_results_with_words_df_base,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            second_loop_state,
+            annotate_max_pages,
+            all_image_annotations_state,
+            prepare_for_review_bool,
+            in_fully_redacted_list_state,
+            output_folder_textbox,
+            input_folder_textbox,
+            prepare_images_bool_false,
+            page_sizes,
+            pdf_doc_state,
+            page_min,
+            page_max,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            prepared_pdf_state,
+            images_pdf_state,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            pdf_doc_state,
+            all_image_annotations_state,
+            review_file_df,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            all_img_details_state,
+            all_page_line_level_ocr_results_df_base,
+            relevant_ocr_output_with_words_found_checkbox,
+            all_page_line_level_ocr_results_with_words_df_base,
+        ],
+        api_name="prepare_doc",
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    # Upload previous review CSV files for modifying redactions
+    upload_review_files_btn.click(
+        fn=prepare_image_or_pdf,
+        inputs=[
+            input_review_files,
+            text_extract_method_radio,
+            all_page_line_level_ocr_results_df_base,
+            all_page_line_level_ocr_results_with_words_df_base,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            second_loop_state,
+            annotate_max_pages,
+            all_image_annotations_state,
+            prepare_for_review_bool,
+            in_fully_redacted_list_state,
+            output_folder_textbox,
+            input_folder_textbox,
+            prepare_images_bool_false,
+            page_sizes,
+            pdf_doc_state,
+            page_min,
+            page_max,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            prepared_pdf_state,
+            images_pdf_state,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            pdf_doc_state,
+            all_image_annotations_state,
+            review_file_df,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            all_img_details_state,
+            all_page_line_level_ocr_results_df_base,
+            relevant_ocr_output_with_words_found_checkbox,
+            all_page_line_level_ocr_results_with_words_df_base,
+        ],
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    # Manual updates to review df
+    review_file_df.input(
+        update_annotator_page_from_review_df,
+        inputs=[
+            review_file_df,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            annotator,
+            selected_entity_dataframe_row,
+            input_folder_textbox,
+            doc_full_file_name_textbox,
+        ],
+        outputs=[
+            annotator,
+            all_image_annotations_state,
+            annotate_current_page,
+            page_sizes,
+            review_file_df,
+            annotate_previous_page,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    # Page number controls
+    annotate_current_page.submit(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_previous_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    annotation_last_page_button.click(
+        fn=decrease_page,
+        inputs=[annotate_current_page, all_image_annotations_state],
+        outputs=[annotate_current_page, annotate_current_page_bottom],
+        show_progress_on=[all_image_annotations_state],
+    ).success(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_previous_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    annotation_next_page_button.click(
+        fn=increase_page,
+        inputs=[annotate_current_page, all_image_annotations_state],
+        outputs=[annotate_current_page, annotate_current_page_bottom],
+        show_progress_on=[all_image_annotations_state],
+    ).success(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_previous_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    annotation_last_page_button_bottom.click(
+        fn=decrease_page,
+        inputs=[annotate_current_page, all_image_annotations_state],
+        outputs=[annotate_current_page, annotate_current_page_bottom],
+        show_progress_on=[all_image_annotations_state],
+    ).success(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_previous_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    annotation_next_page_button_bottom.click(
+        fn=increase_page,
+        inputs=[annotate_current_page, all_image_annotations_state],
+        outputs=[annotate_current_page, annotate_current_page_bottom],
+        show_progress_on=[all_image_annotations_state],
+    ).success(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_previous_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    annotate_current_page_bottom.submit(
+        update_other_annotator_number_from_current,
+        inputs=[annotate_current_page_bottom],
+        outputs=[annotate_current_page],
+    ).success(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_previous_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    # Apply page redactions
+    annotation_button_apply.click(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        scroll_to_output=True,
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    # Save current page manual redactions
+    update_current_page_redactions_btn.click(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    ###
+    # Review and exclude suggested redactions
+    ###
+
+    # Review table controls
+    recogniser_entity_dropdown.select(
+        update_entities_df_recogniser_entities,
+        inputs=[
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            page_entity_dropdown,
+            text_entity_dropdown,
+        ],
+        outputs=[
+            recogniser_entity_dataframe,
+            text_entity_dropdown,
+            page_entity_dropdown,
+        ],
+    )
+    page_entity_dropdown.select(
+        update_entities_df_page,
+        inputs=[
+            page_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+        ],
+        outputs=[
+            recogniser_entity_dataframe,
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+        ],
+    )
+    text_entity_dropdown.select(
+        update_entities_df_text,
+        inputs=[
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+        ],
+        outputs=[
+            recogniser_entity_dataframe,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+        ],
+    )
+
+    # Clicking on a cell in the recogniser entity dataframe will take you to that page, and also highlight the target redaction box in blue
+    recogniser_entity_dataframe.select(
+        df_select_callback_dataframe_row,
+        inputs=[recogniser_entity_dataframe],
+        outputs=[selected_entity_dataframe_row, selected_entity_dataframe_row_text],
+    ).success(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        get_and_merge_current_page_annotations,
+        inputs=[
+            page_sizes,
+            annotate_current_page,
+            all_image_annotations_state,
+            review_file_df,
+        ],
+        outputs=[review_file_df],
+    ).success(
+        update_selected_review_df_row_colour,
+        inputs=[
+            selected_entity_dataframe_row,
+            review_file_df,
+            selected_entity_id,
+            selected_entity_colour,
+        ],
+        outputs=[review_file_df, selected_entity_id, selected_entity_colour],
+    ).success(
+        update_annotator_page_from_review_df,
+        inputs=[
+            review_file_df,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            annotator,
+            selected_entity_dataframe_row,
+            input_folder_textbox,
+            doc_full_file_name_textbox,
+        ],
+        outputs=[
+            annotator,
+            all_image_annotations_state,
+            annotate_current_page,
+            page_sizes,
+            review_file_df,
+            annotate_previous_page,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        increase_bottom_page_count_based_on_top,
+        inputs=[annotate_current_page],
+        outputs=[annotate_current_page_bottom],
+    )
+
+    reset_dropdowns_btn.click(
+        reset_dropdowns,
+        inputs=[recogniser_entity_dataframe_base],
+        outputs=[
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+            page_entity_dropdown,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    ### Exclude current selection from annotator and outputs
+    # Exclude only selected row
+    exclude_selected_row_btn.click(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        get_and_merge_current_page_annotations,
+        inputs=[
+            page_sizes,
+            annotate_current_page,
+            all_image_annotations_state,
+            review_file_df,
+        ],
+        outputs=[review_file_df],
+    ).success(
+        exclude_selected_items_from_redaction,
+        inputs=[
+            review_file_df,
+            selected_entity_dataframe_row,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+        ],
+        outputs=[
+            review_file_df,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+            backup_review_state,
+            backup_image_annotations_state,
+            backup_recogniser_entity_dataframe_base,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    ).success(
+        update_all_entity_df_dropdowns,
+        inputs=[
+            recogniser_entity_dataframe_base,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            text_entity_dropdown,
+        ],
+        outputs=[
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+            page_entity_dropdown,
+        ],
+    )
+
+    # Exclude all items with same text as selected row
+    exclude_text_with_same_as_selected_row_btn.click(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        get_and_merge_current_page_annotations,
+        inputs=[
+            page_sizes,
+            annotate_current_page,
+            all_image_annotations_state,
+            review_file_df,
+        ],
+        outputs=[review_file_df],
+    ).success(
+        get_all_rows_with_same_text,
+        inputs=[
+            recogniser_entity_dataframe_base,
+            selected_entity_dataframe_row_text,
+        ],
+        outputs=[recogniser_entity_dataframe_same_text],
+    ).success(
+        exclude_selected_items_from_redaction,
+        inputs=[
+            review_file_df,
+            recogniser_entity_dataframe_same_text,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+        ],
+        outputs=[
+            review_file_df,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+            backup_review_state,
+            backup_image_annotations_state,
+            backup_recogniser_entity_dataframe_base,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    ).success(
+        update_all_entity_df_dropdowns,
+        inputs=[
+            recogniser_entity_dataframe_base,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            text_entity_dropdown,
+        ],
+        outputs=[
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+            page_entity_dropdown,
+        ],
+    )
+
+    # Exclude everything visible in table
+    exclude_selected_btn.click(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        get_and_merge_current_page_annotations,
+        inputs=[
+            page_sizes,
+            annotate_current_page,
+            all_image_annotations_state,
+            review_file_df,
+        ],
+        outputs=[review_file_df],
+    ).success(
+        exclude_selected_items_from_redaction,
+        inputs=[
+            review_file_df,
+            recogniser_entity_dataframe,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+        ],
+        outputs=[
+            review_file_df,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+            backup_review_state,
+            backup_image_annotations_state,
+            backup_recogniser_entity_dataframe_base,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    ).success(
+        update_all_entity_df_dropdowns,
+        inputs=[
+            recogniser_entity_dataframe_base,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            text_entity_dropdown,
+        ],
+        outputs=[
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+            page_entity_dropdown,
+        ],
+    )
+
+    # Undo last redaction exclusion action
+    undo_last_removal_btn.click(
+        undo_last_removal,
+        inputs=[
+            backup_review_state,
+            backup_image_annotations_state,
+            backup_recogniser_entity_dataframe_base,
+        ],
+        outputs=[
+            review_file_df,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    ###
+    # Add new redactions with table selection
+    ###
+    page_entity_dropdown_redaction.select(
+        update_redact_choice_df_from_page_dropdown,
+        inputs=[
+            page_entity_dropdown_redaction,
+            all_page_line_level_ocr_results_with_words_df_base,
+        ],
+        outputs=[all_page_line_level_ocr_results_with_words_df],
+    )
+
+    def run_search_with_regex_option(
+        search_text, word_df, similarity_threshold, use_regex_flag
+    ):
+        """Wrapper function to call run_full_search_and_analysis with regex option"""
+        return run_full_search_and_analysis(
+            search_query_text=search_text,
+            word_level_df_orig=word_df,
+            similarity_threshold=similarity_threshold,
+            combine_pages=False,
+            min_word_count=1,
+            min_consecutive_pages=1,
+            greedy_match=True,
+            remake_index=False,
+            use_regex=use_regex_flag,
+        )
+
+    multi_word_search_text.submit(
+        fn=run_search_with_regex_option,
+        inputs=[
+            multi_word_search_text,
+            all_page_line_level_ocr_results_with_words_df_base,
+            similarity_search_score_minimum,
+            use_regex_search,
+        ],
+        outputs=[
+            all_page_line_level_ocr_results_with_words_df,
+            duplicate_files_out,
+            full_duplicate_data_by_file,
+        ],
+    )
+
+    multi_word_search_text_btn.click(
+        fn=run_search_with_regex_option,
+        inputs=[
+            multi_word_search_text,
+            all_page_line_level_ocr_results_with_words_df_base,
+            similarity_search_score_minimum,
+            use_regex_search,
+        ],
+        outputs=[
+            all_page_line_level_ocr_results_with_words_df,
+            duplicate_files_out,
+            full_duplicate_data_by_file,
+        ],
+        api_name="word_level_ocr_text_search",
+    )
+
+    # Clicking on a cell in the redact items table will take you to that page
+    all_page_line_level_ocr_results_with_words_df.select(
+        df_select_callback_dataframe_row_ocr_with_words,
+        inputs=[all_page_line_level_ocr_results_with_words_df],
+        outputs=[
+            selected_entity_dataframe_row_redact,
+            selected_entity_dataframe_row_text_redact,
+        ],
+    ).success(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        get_and_merge_current_page_annotations,
+        inputs=[
+            page_sizes,
+            annotate_current_page,
+            all_image_annotations_state,
+            review_file_df,
+        ],
+        outputs=[review_file_df],
+    ).success(
+        update_annotator_page_from_review_df,
+        inputs=[
+            review_file_df,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            annotator,
+            selected_entity_dataframe_row_redact,
+            input_folder_textbox,
+            doc_full_file_name_textbox,
+        ],
+        outputs=[
+            annotator,
+            all_image_annotations_state,
+            annotate_current_page,
+            page_sizes,
+            review_file_df,
+            annotate_previous_page,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        increase_bottom_page_count_based_on_top,
+        inputs=[annotate_current_page],
+        outputs=[annotate_current_page_bottom],
+    )
+
+    # Reset dropdowns
+    reset_dropdowns_btn_new.click(
+        reset_dropdowns,
+        inputs=[all_page_line_level_ocr_results_with_words_df_base],
+        outputs=[
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+            page_entity_dropdown_redaction,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    # Redact everything visible in table
+    redact_selected_btn.click(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        create_annotation_objects_from_filtered_ocr_results_with_words,
+        inputs=[
+            all_page_line_level_ocr_results_with_words_df,
+            all_page_line_level_ocr_results_with_words_df_base,
+            page_sizes,
+            review_file_df,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+            new_redaction_text_label,
+            colour_label,
+            annotate_current_page,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            backup_image_annotations_state,
+            review_file_df,
+            backup_review_state,
+            recogniser_entity_dataframe,
+            backup_recogniser_entity_dataframe_base,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    ).success(
+        update_all_entity_df_dropdowns,
+        inputs=[
+            all_page_line_level_ocr_results_with_words_df_base,
+            recogniser_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+        ],
+        outputs=[
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+            page_entity_dropdown_redaction,
+        ],
+    )
+
+    # Reset redaction table following filtering
+    reset_ocr_with_words_df_btn.click(
+        reset_ocr_with_words_base_dataframe,
+        inputs=[
+            all_page_line_level_ocr_results_with_words_df_base,
+            page_entity_dropdown_redaction,
+        ],
+        outputs=[
+            all_page_line_level_ocr_results_with_words_df,
+            backup_all_page_line_level_ocr_results_with_words_df_base,
+        ],
+    )
+
+    # Redact current selection
+    redact_selected_row_btn.click(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        create_annotation_objects_from_filtered_ocr_results_with_words,
+        inputs=[
+            selected_entity_dataframe_row_redact,
+            all_page_line_level_ocr_results_with_words_df_base,
+            page_sizes,
+            review_file_df,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+            new_redaction_text_label,
+            colour_label,
+            annotate_current_page,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            backup_image_annotations_state,
+            review_file_df,
+            backup_review_state,
+            recogniser_entity_dataframe,
+            backup_recogniser_entity_dataframe_base,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    ).success(
+        update_all_entity_df_dropdowns,
+        inputs=[
+            all_page_line_level_ocr_results_with_words_df_base,
+            recogniser_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+        ],
+        outputs=[
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+            page_entity_dropdown_redaction,
+        ],
+    )
+
+    # Redact all items with same text as selected row
+    redact_text_with_same_as_selected_row_btn.click(
+        update_all_page_annotation_object_based_on_previous_page,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page,
+            all_image_annotations_state,
+            page_sizes,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            annotate_previous_page,
+            annotate_current_page_bottom,
+        ],
+    ).success(
+        get_all_rows_with_same_text_redact,
+        inputs=[
+            all_page_line_level_ocr_results_with_words_df_base,
+            selected_entity_dataframe_row_text_redact,
+        ],
+        outputs=[to_redact_dataframe_same_text],
+    ).success(
+        create_annotation_objects_from_filtered_ocr_results_with_words,
+        inputs=[
+            to_redact_dataframe_same_text,
+            all_page_line_level_ocr_results_with_words_df_base,
+            page_sizes,
+            review_file_df,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+            new_redaction_text_label,
+            colour_label,
+            annotate_current_page,
+        ],
+        outputs=[
+            all_image_annotations_state,
+            backup_image_annotations_state,
+            review_file_df,
+            backup_review_state,
+            recogniser_entity_dataframe,
+            backup_recogniser_entity_dataframe_base,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    ).success(
+        update_all_entity_df_dropdowns,
+        inputs=[
+            all_page_line_level_ocr_results_with_words_df_base,
+            recogniser_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+        ],
+        outputs=[
+            recogniser_entity_dropdown,
+            text_entity_dropdown,
+            page_entity_dropdown_redaction,
+        ],
+    )
+
+    # Undo last redaction action
+    undo_last_redact_btn.click(
+        undo_last_removal,
+        inputs=[
+            backup_review_state,
+            backup_image_annotations_state,
+            backup_recogniser_entity_dataframe_base,
+        ],
+        outputs=[
+            review_file_df,
+            all_image_annotations_state,
+            recogniser_entity_dataframe_base,
+        ],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
+    )
+
+    ###
+    # Review OCR text
+    ###
+    all_page_line_level_ocr_results_df.select(
+        df_select_callback_ocr,
+        inputs=[all_page_line_level_ocr_results_df],
+        outputs=[annotate_current_page, selected_ocr_dataframe_row],
+    ).success(
+        update_annotator_page_from_review_df,
+        inputs=[
+            review_file_df,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            annotator,
+            selected_ocr_dataframe_row,
+            input_folder_textbox,
+            doc_full_file_name_textbox,
+        ],
+        outputs=[
+            annotator,
+            all_image_annotations_state,
+            annotate_current_page,
+            page_sizes,
+            review_file_df,
+            annotate_previous_page,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        increase_bottom_page_count_based_on_top,
+        inputs=[annotate_current_page],
+        outputs=[annotate_current_page_bottom],
+    )
+
+    # Reset the OCR results filter
+    reset_all_ocr_results_btn.click(
+        reset_ocr_base_dataframe,
+        inputs=[all_page_line_level_ocr_results_df_base],
+        outputs=[all_page_line_level_ocr_results_df],
+    )
+
+    # Convert review file to xfdf Adobe format
+    convert_review_file_to_adobe_btn.click(
+        fn=get_input_file_names,
+        inputs=[input_pdf_for_review],
+        outputs=[
+            doc_file_name_no_extension_textbox,
+            doc_file_name_with_extension_textbox,
+            doc_full_file_name_textbox,
+            doc_file_name_textbox_list,
+            total_pdf_page_count,
+        ],
+    ).success(
+        fn=prepare_image_or_pdf,
+        inputs=[
+            input_pdf_for_review,
+            text_extract_method_radio,
+            all_page_line_level_ocr_results_df_base,
+            all_page_line_level_ocr_results_with_words_df_base,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            second_loop_state,
+            annotate_max_pages,
+            all_image_annotations_state,
+            prepare_for_review_bool,
+            in_fully_redacted_list_state,
+            output_folder_textbox,
+            input_folder_textbox,
+            prepare_images_bool_false,
+            page_sizes,
+            pdf_doc_state,
+            page_min,
+            page_max,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            prepared_pdf_state,
+            images_pdf_state,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            pdf_doc_state,
+            all_image_annotations_state,
+            review_file_df,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            all_img_details_state,
+            all_line_level_ocr_results_df_placeholder,
+            relevant_ocr_output_with_words_found_checkbox,
+            all_page_line_level_ocr_results_with_words_df_base,
+        ],
+        show_progress_on=[adobe_review_files_out],
+    ).success(
+        convert_df_to_xfdf,
+        inputs=[
+            input_pdf_for_review,
+            pdf_doc_state,
+            images_pdf_state,
+            output_folder_textbox,
+            document_cropboxes,
+            page_sizes,
+        ],
+        outputs=[adobe_review_files_out],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            adobe_review_files_out,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            input_pdf_for_review,
+        ],
+        outputs=None,
+    )
+
+    # Convert xfdf Adobe file back to review_file.csv
+    convert_adobe_to_review_file_btn.click(
+        fn=get_input_file_names,
+        inputs=[adobe_review_files_out],
+        outputs=[
+            doc_file_name_no_extension_textbox,
+            doc_file_name_with_extension_textbox,
+            doc_full_file_name_textbox,
+            doc_file_name_textbox_list,
+            total_pdf_page_count,
+        ],
+    ).success(
+        fn=prepare_image_or_pdf,
+        inputs=[
+            adobe_review_files_out,
+            text_extract_method_radio,
+            all_page_line_level_ocr_results_df_base,
+            all_page_line_level_ocr_results_with_words_df_base,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            second_loop_state,
+            annotate_max_pages,
+            all_image_annotations_state,
+            prepare_for_review_bool,
+            in_fully_redacted_list_state,
+            output_folder_textbox,
+            input_folder_textbox,
+            prepare_images_bool_false,
+            page_sizes,
+            pdf_doc_state,
+            page_min,
+            page_max,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            prepared_pdf_state,
+            images_pdf_state,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            pdf_doc_state,
+            all_image_annotations_state,
+            review_file_df,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            all_img_details_state,
+            all_line_level_ocr_results_df_placeholder,
+            relevant_ocr_output_with_words_found_checkbox,
+            all_page_line_level_ocr_results_with_words_df_base,
+        ],
+        show_progress_on=[adobe_review_files_out],
+    ).success(
+        fn=convert_xfdf_to_dataframe,
+        inputs=[
+            adobe_review_files_out,
+            pdf_doc_state,
+            images_pdf_state,
+            output_folder_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[input_pdf_for_review],
+        scroll_to_output=True,
+    )
+
+    ###
+    # WORD/TABULAR DATA REDACTION
+    ###
+    in_data_files.upload(
+        fn=put_columns_in_df,
+        inputs=[in_data_files],
+        outputs=[in_colnames, in_excel_sheets],
+    ).success(
+        fn=get_input_file_names,
+        inputs=[in_data_files],
+        outputs=[
+            data_file_name_no_extension_textbox,
+            data_file_name_with_extension_textbox,
+            data_full_file_name_textbox,
+            data_file_name_textbox_list,
+            total_pdf_page_count,
+        ],
+    )
+
+    tabular_data_redact_btn.click(
+        reset_data_vars,
+        outputs=[
+            actual_time_taken_number,
+            log_files_output_list_state,
+            comprehend_query_number,
+        ],
+    ).success(
+        fn=anonymise_files_with_open_text,
+        inputs=[
+            in_data_files,
+            in_text,
+            anon_strategy,
+            in_colnames,
+            in_redact_entities,
+            in_allow_list_state,
+            text_tabular_files_done,
+            text_output_summary,
+            text_output_file_list_state,
+            log_files_output_list_state,
+            in_excel_sheets,
+            first_loop_state,
+            output_folder_textbox,
+            in_deny_list_state,
+            max_fuzzy_spelling_mistakes_num,
+            pii_identification_method_drop_tabular,
+            in_redact_comprehend_entities,
+            comprehend_query_number,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            actual_time_taken_number,
+            do_initial_clean,
+            chosen_language_drop,
+        ],
+        outputs=[
+            text_output_summary,
+            text_output_file,
+            text_output_file_list_state,
+            text_tabular_files_done,
+            log_files_output,
+            log_files_output_list_state,
+            actual_time_taken_number,
+            comprehend_query_number,
+        ],
+        api_name="redact_data",
+        show_progress_on=[text_output_summary],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            text_output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
+    )
+
+    # If the output file count text box changes, keep going with redacting each data file until done
+    text_tabular_files_done.change(
+        fn=anonymise_files_with_open_text,
+        inputs=[
+            in_data_files,
+            in_text,
+            anon_strategy,
+            in_colnames,
+            in_redact_entities,
+            in_allow_list_state,
+            text_tabular_files_done,
+            text_output_summary,
+            text_output_file_list_state,
+            log_files_output_list_state,
+            in_excel_sheets,
+            second_loop_state,
+            output_folder_textbox,
+            in_deny_list_state,
+            max_fuzzy_spelling_mistakes_num,
+            pii_identification_method_drop_tabular,
+            in_redact_comprehend_entities,
+            comprehend_query_number,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            actual_time_taken_number,
+            do_initial_clean,
+            chosen_language_drop,
+        ],
+        outputs=[
+            text_output_summary,
+            text_output_file,
+            text_output_file_list_state,
+            text_tabular_files_done,
+            log_files_output,
+            log_files_output_list_state,
+            actual_time_taken_number,
+            comprehend_query_number,
+        ],
+        show_progress_on=[text_output_summary],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            text_output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
+    ).success(
+        fn=reveal_feedback_buttons,
+        outputs=[
+            data_feedback_radio,
+            data_further_details_text,
+            data_submit_feedback_btn,
+            data_feedback_title,
+        ],
+    )
+
+    ###
+    # IDENTIFY DUPLICATE PAGES
+    ###
+
+    find_duplicate_pages_btn.click(
+        fn=run_duplicate_analysis,
+        inputs=[
+            in_duplicate_pages,
+            duplicate_threshold_input,
+            min_word_count_input,
+            min_consecutive_pages_input,
+            greedy_match_input,
+            combine_page_text_for_duplicates_bool,
+            output_folder_textbox,
+        ],
+        outputs=[
+            results_df_preview,
+            duplicate_files_out,
+            full_duplicate_data_by_file,
+            actual_time_taken_number,
+            task_textbox,
+        ],
+        show_progress_on=[results_df_preview],
+    ).success(
+        fn=export_outputs_to_s3,
+        # duplicate_files_out returns a single file path; export helper will normalise it
+        inputs=[
+            duplicate_files_out,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_duplicate_pages,
+        ],
+        outputs=None,
+    )
+
+    # full_duplicated_data_df,
+    results_df_preview.select(
+        fn=handle_selection_and_preview,
+        inputs=[results_df_preview, full_duplicate_data_by_file],
+        outputs=[
+            selected_duplicate_data_row_index,
+            page1_text_preview,
+            page2_text_preview,
+        ],
+    )
+
+    # When the user clicks the "Exclude" button
+    exclude_match_btn.click(
+        fn=exclude_match,
+        inputs=[results_df_preview, selected_duplicate_data_row_index],
+        outputs=[
+            results_df_preview,
+            duplicate_files_out,
+            page1_text_preview,
+            page2_text_preview,
+        ],
+    )
+
+    apply_match_btn.click(
+        fn=create_annotation_objects_from_duplicates,
+        inputs=[
+            results_df_preview,
+            all_page_line_level_ocr_results_df_base,
+            page_sizes,
+            combine_page_text_for_duplicates_bool,
+        ],
+        outputs=[new_duplicate_search_annotation_object],
+    ).success(
+        fn=apply_whole_page_redactions_from_list,
+        inputs=[
+            in_fully_redacted_list_state,
+            doc_file_name_with_extension_textbox,
+            review_file_df,
+            duplicate_files_out,
+            pdf_doc_state,
+            page_sizes,
+            all_image_annotations_state,
+            combine_page_text_for_duplicates_bool,
+            new_duplicate_search_annotation_object,
+        ],
+        outputs=[review_file_df, all_image_annotations_state],
+    ).success(
+        update_annotator_page_from_review_df,
+        inputs=[
+            review_file_df,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            annotator,
+            selected_entity_dataframe_row,
+            input_folder_textbox,
+            doc_full_file_name_textbox,
+        ],
+        outputs=[
+            annotator,
+            all_image_annotations_state,
+            annotate_current_page,
+            page_sizes,
+            review_file_df,
+            annotate_previous_page,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    ###
+    # TABULAR DUPLICATE DETECTION
+    ###
+
+    # Event handlers
+    in_tabular_duplicate_files.upload(
+        fn=put_columns_in_df,
+        inputs=[in_tabular_duplicate_files],
+        outputs=[tabular_text_columns, in_excel_tabular_sheets],
+    )
+
+    find_tabular_duplicates_btn.click(
+        fn=run_tabular_duplicate_detection,
+        inputs=[
+            in_tabular_duplicate_files,
+            tabular_duplicate_threshold,
+            tabular_min_word_count,
+            tabular_text_columns,
+            output_folder_textbox,
+            do_initial_clean_dup,
+            in_excel_tabular_sheets,
+            remove_duplicate_rows,
+        ],
+        outputs=[
+            tabular_results_df,
+            tabular_cleaned_file,
+            tabular_file_to_clean,
+            actual_time_taken_number,
+            task_textbox,
+        ],
+        api_name="tabular_clean_duplicates",
+        show_progress_on=[tabular_results_df],
+    )
+
+    tabular_results_df.select(
+        fn=handle_tabular_row_selection,
+        inputs=[tabular_results_df],
+        outputs=[
+            tabular_selected_row_index,
+            tabular_text1_preview,
+            tabular_text2_preview,
+        ],
+    )
+
+    clean_duplicates_btn.click(
+        fn=clean_tabular_duplicates,
+        inputs=[
+            tabular_file_to_clean,
+            tabular_results_df,
+            output_folder_textbox,
+            in_excel_tabular_sheets,
+        ],
+        outputs=[tabular_cleaned_file],
+    )
+
+    ###
+    # SETTINGS PAGE INPUT / OUTPUT
+    ###
+    # If a custom allow/deny/duplicate page list is uploaded
+    in_allow_list.change(
+        fn=custom_regex_load,
+        inputs=[in_allow_list],
+        outputs=[in_allow_list_text, in_allow_list_state],
+    )
+    in_deny_list.change(
+        fn=custom_regex_load,
+        inputs=[in_deny_list, in_deny_list_text_in],
+        outputs=[in_deny_list_text, in_deny_list_state],
+    )
+    in_fully_redacted_list.change(
+        fn=custom_regex_load,
+        inputs=[in_fully_redacted_list, in_fully_redacted_text_in],
+        outputs=[in_fully_redacted_list_text, in_fully_redacted_list_state],
+    )
+
+    # The following allows for more reliable updates of the data in the custom list dataframes
+    in_allow_list_state.input(
+        update_dataframe,
+        inputs=[in_allow_list_state],
+        outputs=[in_allow_list_state],
+    )
+    in_deny_list_state.input(
+        update_dataframe, inputs=[in_deny_list_state], outputs=[in_deny_list_state]
+    )
+    in_fully_redacted_list_state.input(
+        update_dataframe,
+        inputs=[in_fully_redacted_list_state],
+        outputs=[in_fully_redacted_list_state],
+    )
+
+    # Apply whole page redactions from the provided whole page redaction csv file upload/list of specific page numbers given by user
+    apply_fully_redacted_list_btn.click(
+        fn=apply_whole_page_redactions_from_list,
+        inputs=[
+            in_fully_redacted_list_state,
+            doc_file_name_with_extension_textbox,
+            review_file_df,
+            duplicate_files_out,
+            pdf_doc_state,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        outputs=[review_file_df, all_image_annotations_state],
+    ).success(
+        update_annotator_page_from_review_df,
+        inputs=[
+            review_file_df,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            annotator,
+            selected_entity_dataframe_row,
+            input_folder_textbox,
+            doc_full_file_name_textbox,
+        ],
+        outputs=[
+            annotator,
+            all_image_annotations_state,
+            annotate_current_page,
+            page_sizes,
+            review_file_df,
+            annotate_previous_page,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    # Merge multiple review csv files together
+    merge_multiple_review_files_btn.click(
+        fn=merge_csv_files,
+        inputs=multiple_review_files_in_out,
+        outputs=multiple_review_files_in_out,
+    )
+
+    # Need to momentarilly change the root directory of the file explorer to another non-sensitive folder when the button is clicked to get it to update (workaround))
+    all_output_files_btn.click(
+        fn=lambda: gr.FileExplorer(root_dir=FEEDBACK_LOGS_FOLDER),
+        inputs=None,
+        outputs=all_output_files,
+    ).success(
+        fn=load_all_output_files,
+        inputs=output_folder_textbox,
+        outputs=all_output_files,
+    )
+
+    all_output_files.change(
+        fn=all_outputs_file_download_fn,
+        inputs=all_output_files,
+        outputs=all_outputs_file_download,
+    )
+
+    # Language selection dropdown
+    chosen_language_full_name_drop.select(
+        update_language_dropdown,
+        inputs=[chosen_language_full_name_drop],
+        outputs=[chosen_language_drop],
+    )
+
+    ###
+    # APP LOAD AND LOGGING
+    ###
+
+    # Get connection details on app load
+
+    if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
+        blocks.load(
+            get_connection_params,
+            inputs=[
                 output_folder_textbox,
-            ],
-            outputs=[relevant_ocr_output_with_words_found_checkbox],
-        ).success(
-            fn=reveal_feedback_buttons,
-            outputs=[
-                pdf_feedback_radio,
-                pdf_further_details_text,
-                pdf_submit_feedback_btn,
-                pdf_feedback_title,
-            ],
-        ).success(
-            fn=reset_aws_call_vars,
-            outputs=[comprehend_query_number, textract_query_number],
-        )
-
-        # If the line level ocr results are changed by load in by user or by a new redaction task, replace the ocr results displayed in the table
-        all_page_line_level_ocr_results_df_base.change(
-            reset_ocr_base_dataframe,
-            inputs=[all_page_line_level_ocr_results_df_base],
-            outputs=[all_page_line_level_ocr_results_df],
-        )
-        all_page_line_level_ocr_results_with_words_df_base.change(
-            reset_ocr_with_words_base_dataframe,
-            inputs=[
-                all_page_line_level_ocr_results_with_words_df_base,
-                page_entity_dropdown_redaction,
-            ],
-            outputs=[
-                all_page_line_level_ocr_results_with_words_df,
-                backup_all_page_line_level_ocr_results_with_words_df_base,
-            ],
-        )
-
-        # Send whole document to Textract for text extraction
-        send_document_to_textract_api_btn.click(
-            analyse_document_with_textract_api,
-            inputs=[
-                prepared_pdf_state,
+                input_folder_textbox,
+                session_output_folder_textbox,
+                s3_output_folder_state,
                 s3_whole_document_textract_input_subfolder,
                 s3_whole_document_textract_output_subfolder,
-                textract_job_detail_df,
-                s3_whole_document_textract_default_bucket,
-                output_folder_textbox,
-                handwrite_signature_checkbox,
-                successful_textract_api_call_number,
-                total_pdf_page_count,
-            ],
-            outputs=[
-                job_output_textbox,
-                job_id_textbox,
-                job_type_dropdown,
-                successful_textract_api_call_number,
-                is_a_textract_api_call,
-                textract_query_number,
-                task_textbox,
-            ],
-            show_progress_on=[job_current_status],
-        ).success(check_for_provided_job_id, inputs=[job_id_textbox]).success(
-            poll_whole_document_textract_analysis_progress_and_download,
-            inputs=[
-                job_id_textbox,
-                job_type_dropdown,
-                s3_whole_document_textract_output_subfolder,
-                doc_file_name_no_extension_textbox,
-                textract_job_detail_df,
-                s3_whole_document_textract_default_bucket,
-                output_folder_textbox,
                 s3_whole_document_textract_logs_subfolder,
                 local_whole_document_textract_logs_subfolder,
             ],
             outputs=[
-                textract_job_output_file,
-                job_current_status,
-                textract_job_detail_df,
-                doc_file_name_no_extension_textbox,
-            ],
-            show_progress_on=[job_current_status],
-        ).success(
-            fn=check_for_existing_textract_file,
-            inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
-            outputs=[textract_output_found_checkbox],
-            show_progress_on=[job_current_status],
-        )
-
-        check_state_of_textract_api_call_btn.click(
-            check_for_provided_job_id,
-            inputs=[job_id_textbox],
-            show_progress_on=[job_current_status],
-        ).success(
-            poll_whole_document_textract_analysis_progress_and_download,
-            inputs=[
-                job_id_textbox,
-                job_type_dropdown,
-                s3_whole_document_textract_output_subfolder,
-                doc_file_name_no_extension_textbox,
-                textract_job_detail_df,
-                s3_whole_document_textract_default_bucket,
+                session_hash_state,
                 output_folder_textbox,
+                session_hash_textbox,
+                input_folder_textbox,
+                s3_whole_document_textract_input_subfolder,
+                s3_whole_document_textract_output_subfolder,
+                s3_whole_document_textract_logs_subfolder,
+                local_whole_document_textract_logs_subfolder,
+                s3_output_folder_state,
+            ],
+        ).success(
+            load_in_textract_job_details,
+            inputs=[
+                load_s3_whole_document_textract_logs_bool,
                 s3_whole_document_textract_logs_subfolder,
                 local_whole_document_textract_logs_subfolder,
             ],
-            outputs=[
-                textract_job_output_file,
-                job_current_status,
-                textract_job_detail_df,
-                doc_file_name_no_extension_textbox,
-            ],
-            show_progress_on=[job_current_status],
-        ).success(
-            fn=check_for_existing_textract_file,
-            inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
-            outputs=[textract_output_found_checkbox],
-            show_progress_on=[job_current_status],
-        )
-
-        textract_job_detail_df.select(
-            df_select_callback_textract_api,
-            inputs=[textract_output_found_checkbox],
-            outputs=[job_id_textbox, job_type_dropdown, selected_job_id_row],
-        )
-
-        convert_textract_outputs_to_ocr_results.click(
-            replace_existing_pdf_input_for_whole_document_outputs,
-            inputs=[
-                s3_whole_document_textract_input_subfolder,
-                doc_file_name_no_extension_textbox,
-                output_folder_textbox,
-                s3_whole_document_textract_default_bucket,
-                in_doc_files,
-                input_folder_textbox,
-            ],
-            outputs=[
-                in_doc_files,
-                doc_file_name_no_extension_textbox,
-                doc_file_name_with_extension_textbox,
-                doc_full_file_name_textbox,
-                doc_file_name_textbox_list,
-                total_pdf_page_count,
-            ],
-            show_progress_on=[redaction_output_summary_textbox],
-        ).success(
-            fn=prepare_image_or_pdf,
-            inputs=[
-                in_doc_files,
-                text_extract_method_radio,
-                all_page_line_level_ocr_results_df_base,
-                all_page_line_level_ocr_results_with_words_df_base,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                first_loop_state,
-                annotate_max_pages,
-                all_image_annotations_state,
-                prepare_for_review_bool_false,
-                in_fully_redacted_list_state,
-                output_folder_textbox,
-                input_folder_textbox,
-                prepare_images_bool_false,
-                page_sizes,
-                pdf_doc_state,
-                page_min,
-                page_max,
-            ],
-            outputs=[
-                redaction_output_summary_textbox,
-                prepared_pdf_state,
-                images_pdf_state,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                pdf_doc_state,
-                all_image_annotations_state,
-                review_file_df,
-                document_cropboxes,
-                page_sizes,
-                textract_output_found_checkbox,
-                all_img_details_state,
-                all_page_line_level_ocr_results_df_base,
-                relevant_ocr_output_with_words_found_checkbox,
-                all_page_line_level_ocr_results_with_words_df_base,
-            ],
-            show_progress_on=[redaction_output_summary_textbox],
-        ).success(
-            fn=check_for_existing_textract_file,
-            inputs=[
-                doc_file_name_no_extension_textbox,
-                output_folder_textbox,
-                handwrite_signature_checkbox,
-            ],
-            outputs=[textract_output_found_checkbox],
-        ).success(
-            fn=check_for_relevant_ocr_output_with_words,
-            inputs=[
-                doc_file_name_no_extension_textbox,
-                text_extract_method_radio,
-                output_folder_textbox,
-            ],
-            outputs=[relevant_ocr_output_with_words_found_checkbox],
-        ).success(
-            fn=check_textract_outputs_exist, inputs=[textract_output_found_checkbox]
-        ).success(
-            fn=reset_state_vars,
-            outputs=[
-                all_image_annotations_state,
-                all_page_line_level_ocr_results_df_base,
-                all_decision_process_table_state,
-                comprehend_query_number,
-                textract_metadata_textbox,
-                annotator,
-                output_file_list_state,
-                log_files_output_list_state,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                pdf_doc_state,
-                duplication_file_path_outputs_list_state,
-                redaction_output_summary_textbox,
-                is_a_textract_api_call,
-                textract_query_number,
-                all_page_line_level_ocr_results_with_words,
-                input_review_files,
-            ],
-        ).success(
-            fn=choose_and_run_redactor,
-            inputs=[
-                in_doc_files,
-                prepared_pdf_state,
-                images_pdf_state,
-                in_redact_entities,
-                in_redact_comprehend_entities,
-                textract_only_method_drop,
-                in_allow_list_state,
-                in_deny_list_state,
-                in_fully_redacted_list_state,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                output_file_list_state,
-                log_files_output_list_state,
-                first_loop_state,
-                page_min,
-                page_max,
-                actual_time_taken_number,
-                handwrite_signature_checkbox,
-                textract_metadata_textbox,
-                all_image_annotations_state,
-                all_page_line_level_ocr_results_df_base,
-                all_decision_process_table_state,
-                pdf_doc_state,
-                current_loop_page_number,
-                page_break_return,
-                no_redaction_method_drop,
-                comprehend_query_number,
-                max_fuzzy_spelling_mistakes_num,
-                match_fuzzy_whole_phrase_bool,
-                aws_access_key_textbox,
-                aws_secret_key_textbox,
-                annotate_max_pages,
-                review_file_df,
-                output_folder_textbox,
-                document_cropboxes,
-                page_sizes,
-                textract_output_found_checkbox,
-                only_extract_text_radio,
-                duplication_file_path_outputs_list_state,
-                latest_review_file_path,
-                input_folder_textbox,
-                textract_query_number,
-                latest_ocr_file_path,
-                all_page_line_level_ocr_results,
-                all_page_line_level_ocr_results_with_words,
-                all_page_line_level_ocr_results_with_words_df_base,
-                local_ocr_method_radio,
-                chosen_language_drop,
-                input_review_files,
-            ],
-            outputs=[
-                redaction_output_summary_textbox,
-                output_file,
-                output_file_list_state,
-                latest_file_completed_num,
-                log_files_output,
-                log_files_output_list_state,
-                actual_time_taken_number,
-                textract_metadata_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                current_loop_page_number,
-                page_break_return,
-                all_page_line_level_ocr_results_df_base,
-                all_decision_process_table_state,
-                comprehend_query_number,
-                input_pdf_for_review,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                prepared_pdf_state,
-                images_pdf_state,
-                review_file_df,
-                page_sizes,
-                duplication_file_path_outputs_list_state,
-                in_duplicate_pages,
-                latest_review_file_path,
-                textract_query_number,
-                latest_ocr_file_path,
-                all_page_line_level_ocr_results,
-                all_page_line_level_ocr_results_with_words,
-                all_page_line_level_ocr_results_with_words_df_base,
-                backup_review_state,
-                task_textbox,
-                input_review_files,
-            ],
-            show_progress_on=[redaction_output_summary_textbox],
-        ).success(
-            fn=update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                page_min,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        )
-
-        def change_tab():
-            return gr.Tabs(selected=2)
-
-        go_to_review_redactions_tab_btn.click(
-            fn=change_tab,
-            inputs=None,
-            outputs=tabs,
-        )
-
-        ###
-        # REVIEW PDF REDACTIONS
-        ###
-
-        # Upload previous PDF for modifying redactions
-        upload_pdf_for_review_btn.click(
-            fn=reset_review_vars,
-            inputs=None,
-            outputs=[recogniser_entity_dataframe, recogniser_entity_dataframe_base],
-        ).success(
-            fn=get_input_file_names,
-            inputs=[input_pdf_for_review],
-            outputs=[
-                doc_file_name_no_extension_textbox,
-                doc_file_name_with_extension_textbox,
-                doc_full_file_name_textbox,
-                doc_file_name_textbox_list,
-                total_pdf_page_count,
-            ],
-        ).success(
-            fn=prepare_image_or_pdf,
-            inputs=[
-                input_pdf_for_review,
-                text_extract_method_radio,
-                all_page_line_level_ocr_results_df_base,
-                all_page_line_level_ocr_results_with_words_df_base,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                second_loop_state,
-                annotate_max_pages,
-                all_image_annotations_state,
-                prepare_for_review_bool,
-                in_fully_redacted_list_state,
-                output_folder_textbox,
-                input_folder_textbox,
-                prepare_images_bool_false,
-                page_sizes,
-                pdf_doc_state,
-                page_min,
-                page_max,
-            ],
-            outputs=[
-                redaction_output_summary_textbox,
-                prepared_pdf_state,
-                images_pdf_state,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                pdf_doc_state,
-                all_image_annotations_state,
-                review_file_df,
-                document_cropboxes,
-                page_sizes,
-                textract_output_found_checkbox,
-                all_img_details_state,
-                all_page_line_level_ocr_results_df_base,
-                relevant_ocr_output_with_words_found_checkbox,
-                all_page_line_level_ocr_results_with_words_df_base,
-            ],
-            api_name="prepare_doc",
-            show_progress_on=[redaction_output_summary_textbox],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        )
-
-        # Upload previous review CSV files for modifying redactions
-        upload_review_files_btn.click(
-            fn=prepare_image_or_pdf,
-            inputs=[
-                input_review_files,
-                text_extract_method_radio,
-                all_page_line_level_ocr_results_df_base,
-                all_page_line_level_ocr_results_with_words_df_base,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                second_loop_state,
-                annotate_max_pages,
-                all_image_annotations_state,
-                prepare_for_review_bool,
-                in_fully_redacted_list_state,
-                output_folder_textbox,
-                input_folder_textbox,
-                prepare_images_bool_false,
-                page_sizes,
-                pdf_doc_state,
-                page_min,
-                page_max,
-            ],
-            outputs=[
-                redaction_output_summary_textbox,
-                prepared_pdf_state,
-                images_pdf_state,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                pdf_doc_state,
-                all_image_annotations_state,
-                review_file_df,
-                document_cropboxes,
-                page_sizes,
-                textract_output_found_checkbox,
-                all_img_details_state,
-                all_page_line_level_ocr_results_df_base,
-                relevant_ocr_output_with_words_found_checkbox,
-                all_page_line_level_ocr_results_with_words_df_base,
-            ],
-            show_progress_on=[redaction_output_summary_textbox],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        )
-
-        # Manual updates to review df
-        review_file_df.input(
-            update_annotator_page_from_review_df,
-            inputs=[
-                review_file_df,
-                images_pdf_state,
-                page_sizes,
-                all_image_annotations_state,
-                annotator,
-                selected_entity_dataframe_row,
-                input_folder_textbox,
-                doc_full_file_name_textbox,
-            ],
-            outputs=[
-                annotator,
-                all_image_annotations_state,
-                annotate_current_page,
-                page_sizes,
-                review_file_df,
-                annotate_previous_page,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        )
-
-        # Page number controls
-        annotate_current_page.submit(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_previous_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        annotation_last_page_button.click(
-            fn=decrease_page,
-            inputs=[annotate_current_page, all_image_annotations_state],
-            outputs=[annotate_current_page, annotate_current_page_bottom],
-            show_progress_on=[all_image_annotations_state],
-        ).success(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_previous_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        annotation_next_page_button.click(
-            fn=increase_page,
-            inputs=[annotate_current_page, all_image_annotations_state],
-            outputs=[annotate_current_page, annotate_current_page_bottom],
-            show_progress_on=[all_image_annotations_state],
-        ).success(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_previous_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        annotation_last_page_button_bottom.click(
-            fn=decrease_page,
-            inputs=[annotate_current_page, all_image_annotations_state],
-            outputs=[annotate_current_page, annotate_current_page_bottom],
-            show_progress_on=[all_image_annotations_state],
-        ).success(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_previous_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        annotation_next_page_button_bottom.click(
-            fn=increase_page,
-            inputs=[annotate_current_page, all_image_annotations_state],
-            outputs=[annotate_current_page, annotate_current_page_bottom],
-            show_progress_on=[all_image_annotations_state],
-        ).success(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_previous_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        annotate_current_page_bottom.submit(
-            update_other_annotator_number_from_current,
-            inputs=[annotate_current_page_bottom],
-            outputs=[annotate_current_page],
-        ).success(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_previous_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        # Apply page redactions
-        annotation_button_apply.click(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            scroll_to_output=True,
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        # Save current page manual redactions
-        update_current_page_redactions_btn.click(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        ###
-        # Review and exclude suggested redactions
-        ###
-
-        # Review table controls
-        recogniser_entity_dropdown.select(
-            update_entities_df_recogniser_entities,
-            inputs=[
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                page_entity_dropdown,
-                text_entity_dropdown,
-            ],
-            outputs=[
-                recogniser_entity_dataframe,
-                text_entity_dropdown,
-                page_entity_dropdown,
-            ],
-        )
-        page_entity_dropdown.select(
-            update_entities_df_page,
-            inputs=[
-                page_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-            ],
-            outputs=[
-                recogniser_entity_dataframe,
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-            ],
-        )
-        text_entity_dropdown.select(
-            update_entities_df_text,
-            inputs=[
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-            ],
-            outputs=[
-                recogniser_entity_dataframe,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-            ],
-        )
-
-        # Clicking on a cell in the recogniser entity dataframe will take you to that page, and also highlight the target redaction box in blue
-        recogniser_entity_dataframe.select(
-            df_select_callback_dataframe_row,
-            inputs=[recogniser_entity_dataframe],
-            outputs=[selected_entity_dataframe_row, selected_entity_dataframe_row_text],
-        ).success(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            get_and_merge_current_page_annotations,
-            inputs=[
-                page_sizes,
-                annotate_current_page,
-                all_image_annotations_state,
-                review_file_df,
-            ],
-            outputs=[review_file_df],
-        ).success(
-            update_selected_review_df_row_colour,
-            inputs=[
-                selected_entity_dataframe_row,
-                review_file_df,
-                selected_entity_id,
-                selected_entity_colour,
-            ],
-            outputs=[review_file_df, selected_entity_id, selected_entity_colour],
-        ).success(
-            update_annotator_page_from_review_df,
-            inputs=[
-                review_file_df,
-                images_pdf_state,
-                page_sizes,
-                all_image_annotations_state,
-                annotator,
-                selected_entity_dataframe_row,
-                input_folder_textbox,
-                doc_full_file_name_textbox,
-            ],
-            outputs=[
-                annotator,
-                all_image_annotations_state,
-                annotate_current_page,
-                page_sizes,
-                review_file_df,
-                annotate_previous_page,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            increase_bottom_page_count_based_on_top,
-            inputs=[annotate_current_page],
-            outputs=[annotate_current_page_bottom],
-        )
-
-        reset_dropdowns_btn.click(
-            reset_dropdowns,
-            inputs=[recogniser_entity_dataframe_base],
-            outputs=[
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-                page_entity_dropdown,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        )
-
-        ### Exclude current selection from annotator and outputs
-        # Exclude only selected row
-        exclude_selected_row_btn.click(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            get_and_merge_current_page_annotations,
-            inputs=[
-                page_sizes,
-                annotate_current_page,
-                all_image_annotations_state,
-                review_file_df,
-            ],
-            outputs=[review_file_df],
-        ).success(
-            exclude_selected_items_from_redaction,
-            inputs=[
-                review_file_df,
-                selected_entity_dataframe_row,
-                images_pdf_state,
-                page_sizes,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-            ],
-            outputs=[
-                review_file_df,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-                backup_review_state,
-                backup_image_annotations_state,
-                backup_recogniser_entity_dataframe_base,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        ).success(
-            update_all_entity_df_dropdowns,
-            inputs=[
-                recogniser_entity_dataframe_base,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                text_entity_dropdown,
-            ],
-            outputs=[
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-                page_entity_dropdown,
-            ],
-        )
-
-        # Exclude all items with same text as selected row
-        exclude_text_with_same_as_selected_row_btn.click(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            get_and_merge_current_page_annotations,
-            inputs=[
-                page_sizes,
-                annotate_current_page,
-                all_image_annotations_state,
-                review_file_df,
-            ],
-            outputs=[review_file_df],
-        ).success(
-            get_all_rows_with_same_text,
-            inputs=[
-                recogniser_entity_dataframe_base,
-                selected_entity_dataframe_row_text,
-            ],
-            outputs=[recogniser_entity_dataframe_same_text],
-        ).success(
-            exclude_selected_items_from_redaction,
-            inputs=[
-                review_file_df,
-                recogniser_entity_dataframe_same_text,
-                images_pdf_state,
-                page_sizes,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-            ],
-            outputs=[
-                review_file_df,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-                backup_review_state,
-                backup_image_annotations_state,
-                backup_recogniser_entity_dataframe_base,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        ).success(
-            update_all_entity_df_dropdowns,
-            inputs=[
-                recogniser_entity_dataframe_base,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                text_entity_dropdown,
-            ],
-            outputs=[
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-                page_entity_dropdown,
-            ],
-        )
-
-        # Exclude everything visible in table
-        exclude_selected_btn.click(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            get_and_merge_current_page_annotations,
-            inputs=[
-                page_sizes,
-                annotate_current_page,
-                all_image_annotations_state,
-                review_file_df,
-            ],
-            outputs=[review_file_df],
-        ).success(
-            exclude_selected_items_from_redaction,
-            inputs=[
-                review_file_df,
-                recogniser_entity_dataframe,
-                images_pdf_state,
-                page_sizes,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-            ],
-            outputs=[
-                review_file_df,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-                backup_review_state,
-                backup_image_annotations_state,
-                backup_recogniser_entity_dataframe_base,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        ).success(
-            update_all_entity_df_dropdowns,
-            inputs=[
-                recogniser_entity_dataframe_base,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                text_entity_dropdown,
-            ],
-            outputs=[
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-                page_entity_dropdown,
-            ],
-        )
-
-        # Undo last redaction exclusion action
-        undo_last_removal_btn.click(
-            undo_last_removal,
-            inputs=[
-                backup_review_state,
-                backup_image_annotations_state,
-                backup_recogniser_entity_dataframe_base,
-            ],
-            outputs=[
-                review_file_df,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        ###
-        # Add new redactions with table selection
-        ###
-        page_entity_dropdown_redaction.select(
-            update_redact_choice_df_from_page_dropdown,
-            inputs=[
-                page_entity_dropdown_redaction,
-                all_page_line_level_ocr_results_with_words_df_base,
-            ],
-            outputs=[all_page_line_level_ocr_results_with_words_df],
-        )
-
-        def run_search_with_regex_option(
-            search_text, word_df, similarity_threshold, use_regex_flag
-        ):
-            """Wrapper function to call run_full_search_and_analysis with regex option"""
-            return run_full_search_and_analysis(
-                search_query_text=search_text,
-                word_level_df_orig=word_df,
-                similarity_threshold=similarity_threshold,
-                combine_pages=False,
-                min_word_count=1,
-                min_consecutive_pages=1,
-                greedy_match=True,
-                remake_index=False,
-                use_regex=use_regex_flag,
-            )
-
-        multi_word_search_text.submit(
-            fn=run_search_with_regex_option,
-            inputs=[
-                multi_word_search_text,
-                all_page_line_level_ocr_results_with_words_df_base,
-                similarity_search_score_minimum,
-                use_regex_search,
-            ],
-            outputs=[
-                all_page_line_level_ocr_results_with_words_df,
-                duplicate_files_out,
-                full_duplicate_data_by_file,
-            ],
-        )
-
-        multi_word_search_text_btn.click(
-            fn=run_search_with_regex_option,
-            inputs=[
-                multi_word_search_text,
-                all_page_line_level_ocr_results_with_words_df_base,
-                similarity_search_score_minimum,
-                use_regex_search,
-            ],
-            outputs=[
-                all_page_line_level_ocr_results_with_words_df,
-                duplicate_files_out,
-                full_duplicate_data_by_file,
-            ],
-            api_name="word_level_ocr_text_search",
-        )
-
-        # Clicking on a cell in the redact items table will take you to that page
-        all_page_line_level_ocr_results_with_words_df.select(
-            df_select_callback_dataframe_row_ocr_with_words,
-            inputs=[all_page_line_level_ocr_results_with_words_df],
-            outputs=[
-                selected_entity_dataframe_row_redact,
-                selected_entity_dataframe_row_text_redact,
-            ],
-        ).success(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            get_and_merge_current_page_annotations,
-            inputs=[
-                page_sizes,
-                annotate_current_page,
-                all_image_annotations_state,
-                review_file_df,
-            ],
-            outputs=[review_file_df],
-        ).success(
-            update_annotator_page_from_review_df,
-            inputs=[
-                review_file_df,
-                images_pdf_state,
-                page_sizes,
-                all_image_annotations_state,
-                annotator,
-                selected_entity_dataframe_row_redact,
-                input_folder_textbox,
-                doc_full_file_name_textbox,
-            ],
-            outputs=[
-                annotator,
-                all_image_annotations_state,
-                annotate_current_page,
-                page_sizes,
-                review_file_df,
-                annotate_previous_page,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            increase_bottom_page_count_based_on_top,
-            inputs=[annotate_current_page],
-            outputs=[annotate_current_page_bottom],
-        )
-
-        # Reset dropdowns
-        reset_dropdowns_btn_new.click(
-            reset_dropdowns,
-            inputs=[all_page_line_level_ocr_results_with_words_df_base],
-            outputs=[
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-                page_entity_dropdown_redaction,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        )
-
-        # Redact everything visible in table
-        redact_selected_btn.click(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            create_annotation_objects_from_filtered_ocr_results_with_words,
-            inputs=[
-                all_page_line_level_ocr_results_with_words_df,
-                all_page_line_level_ocr_results_with_words_df_base,
-                page_sizes,
-                review_file_df,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-                new_redaction_text_label,
-                colour_label,
-                annotate_current_page,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                backup_image_annotations_state,
-                review_file_df,
-                backup_review_state,
-                recogniser_entity_dataframe,
-                backup_recogniser_entity_dataframe_base,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        ).success(
-            update_all_entity_df_dropdowns,
-            inputs=[
-                all_page_line_level_ocr_results_with_words_df_base,
-                recogniser_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-            ],
-            outputs=[
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-                page_entity_dropdown_redaction,
-            ],
-        )
-
-        # Reset redaction table following filtering
-        reset_ocr_with_words_df_btn.click(
-            reset_ocr_with_words_base_dataframe,
-            inputs=[
-                all_page_line_level_ocr_results_with_words_df_base,
-                page_entity_dropdown_redaction,
-            ],
-            outputs=[
-                all_page_line_level_ocr_results_with_words_df,
-                backup_all_page_line_level_ocr_results_with_words_df_base,
-            ],
-        )
-
-        # Redact current selection
-        redact_selected_row_btn.click(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            create_annotation_objects_from_filtered_ocr_results_with_words,
-            inputs=[
-                selected_entity_dataframe_row_redact,
-                all_page_line_level_ocr_results_with_words_df_base,
-                page_sizes,
-                review_file_df,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-                new_redaction_text_label,
-                colour_label,
-                annotate_current_page,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                backup_image_annotations_state,
-                review_file_df,
-                backup_review_state,
-                recogniser_entity_dataframe,
-                backup_recogniser_entity_dataframe_base,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        ).success(
-            update_all_entity_df_dropdowns,
-            inputs=[
-                all_page_line_level_ocr_results_with_words_df_base,
-                recogniser_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-            ],
-            outputs=[
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-                page_entity_dropdown_redaction,
-            ],
-        )
-
-        # Redact all items with same text as selected row
-        redact_text_with_same_as_selected_row_btn.click(
-            update_all_page_annotation_object_based_on_previous_page,
-            inputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page,
-                all_image_annotations_state,
-                page_sizes,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                annotate_previous_page,
-                annotate_current_page_bottom,
-            ],
-        ).success(
-            get_all_rows_with_same_text_redact,
-            inputs=[
-                all_page_line_level_ocr_results_with_words_df_base,
-                selected_entity_dataframe_row_text_redact,
-            ],
-            outputs=[to_redact_dataframe_same_text],
-        ).success(
-            create_annotation_objects_from_filtered_ocr_results_with_words,
-            inputs=[
-                to_redact_dataframe_same_text,
-                all_page_line_level_ocr_results_with_words_df_base,
-                page_sizes,
-                review_file_df,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-                new_redaction_text_label,
-                colour_label,
-                annotate_current_page,
-            ],
-            outputs=[
-                all_image_annotations_state,
-                backup_image_annotations_state,
-                review_file_df,
-                backup_review_state,
-                recogniser_entity_dataframe,
-                backup_recogniser_entity_dataframe_base,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        ).success(
-            update_all_entity_df_dropdowns,
-            inputs=[
-                all_page_line_level_ocr_results_with_words_df_base,
-                recogniser_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-            ],
-            outputs=[
-                recogniser_entity_dropdown,
-                text_entity_dropdown,
-                page_entity_dropdown_redaction,
-            ],
-        )
-
-        # Undo last redaction action
-        undo_last_redact_btn.click(
-            undo_last_removal,
-            inputs=[
-                backup_review_state,
-                backup_image_annotations_state,
-                backup_recogniser_entity_dataframe_base,
-            ],
-            outputs=[
-                review_file_df,
-                all_image_annotations_state,
-                recogniser_entity_dataframe_base,
-            ],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            apply_redactions_to_review_df_and_files,
-            inputs=[
-                annotator,
-                doc_full_file_name_textbox,
-                pdf_doc_state,
-                all_image_annotations_state,
-                annotate_current_page,
-                review_file_df,
-                output_folder_textbox,
-                do_not_save_pdf_state,
-                page_sizes,
-            ],
-            outputs=[
-                pdf_doc_state,
-                all_image_annotations_state,
-                input_pdf_for_review,
-                log_files_output,
-                review_file_df,
-            ],
-            show_progress_on=[input_pdf_for_review],
-        )
-
-        ###
-        # Review OCR text
-        ###
-        all_page_line_level_ocr_results_df.select(
-            df_select_callback_ocr,
-            inputs=[all_page_line_level_ocr_results_df],
-            outputs=[annotate_current_page, selected_ocr_dataframe_row],
-        ).success(
-            update_annotator_page_from_review_df,
-            inputs=[
-                review_file_df,
-                images_pdf_state,
-                page_sizes,
-                all_image_annotations_state,
-                annotator,
-                selected_ocr_dataframe_row,
-                input_folder_textbox,
-                doc_full_file_name_textbox,
-            ],
-            outputs=[
-                annotator,
-                all_image_annotations_state,
-                annotate_current_page,
-                page_sizes,
-                review_file_df,
-                annotate_previous_page,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            increase_bottom_page_count_based_on_top,
-            inputs=[annotate_current_page],
-            outputs=[annotate_current_page_bottom],
-        )
-
-        # Reset the OCR results filter
-        reset_all_ocr_results_btn.click(
-            reset_ocr_base_dataframe,
-            inputs=[all_page_line_level_ocr_results_df_base],
-            outputs=[all_page_line_level_ocr_results_df],
-        )
-
-        # Convert review file to xfdf Adobe format
-        convert_review_file_to_adobe_btn.click(
-            fn=get_input_file_names,
-            inputs=[input_pdf_for_review],
-            outputs=[
-                doc_file_name_no_extension_textbox,
-                doc_file_name_with_extension_textbox,
-                doc_full_file_name_textbox,
-                doc_file_name_textbox_list,
-                total_pdf_page_count,
-            ],
-        ).success(
-            fn=prepare_image_or_pdf,
-            inputs=[
-                input_pdf_for_review,
-                text_extract_method_radio,
-                all_page_line_level_ocr_results_df_base,
-                all_page_line_level_ocr_results_with_words_df_base,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                second_loop_state,
-                annotate_max_pages,
-                all_image_annotations_state,
-                prepare_for_review_bool,
-                in_fully_redacted_list_state,
-                output_folder_textbox,
-                input_folder_textbox,
-                prepare_images_bool_false,
-                page_sizes,
-                pdf_doc_state,
-                page_min,
-                page_max,
-            ],
-            outputs=[
-                redaction_output_summary_textbox,
-                prepared_pdf_state,
-                images_pdf_state,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                pdf_doc_state,
-                all_image_annotations_state,
-                review_file_df,
-                document_cropboxes,
-                page_sizes,
-                textract_output_found_checkbox,
-                all_img_details_state,
-                all_line_level_ocr_results_df_placeholder,
-                relevant_ocr_output_with_words_found_checkbox,
-                all_page_line_level_ocr_results_with_words_df_base,
-            ],
-            show_progress_on=[adobe_review_files_out],
-        ).success(
-            convert_df_to_xfdf,
-            inputs=[
-                input_pdf_for_review,
-                pdf_doc_state,
-                images_pdf_state,
-                output_folder_textbox,
-                document_cropboxes,
-                page_sizes,
-            ],
-            outputs=[adobe_review_files_out],
-        ).success(
-            fn=export_outputs_to_s3,
-            inputs=[
-                adobe_review_files_out,
-                s3_output_folder_state,
-                save_outputs_to_s3_checkbox,
-                input_pdf_for_review,
-            ],
-            outputs=None,
-        )
-
-        # Convert xfdf Adobe file back to review_file.csv
-        convert_adobe_to_review_file_btn.click(
-            fn=get_input_file_names,
-            inputs=[adobe_review_files_out],
-            outputs=[
-                doc_file_name_no_extension_textbox,
-                doc_file_name_with_extension_textbox,
-                doc_full_file_name_textbox,
-                doc_file_name_textbox_list,
-                total_pdf_page_count,
-            ],
-        ).success(
-            fn=prepare_image_or_pdf,
-            inputs=[
-                adobe_review_files_out,
-                text_extract_method_radio,
-                all_page_line_level_ocr_results_df_base,
-                all_page_line_level_ocr_results_with_words_df_base,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                second_loop_state,
-                annotate_max_pages,
-                all_image_annotations_state,
-                prepare_for_review_bool,
-                in_fully_redacted_list_state,
-                output_folder_textbox,
-                input_folder_textbox,
-                prepare_images_bool_false,
-                page_sizes,
-                pdf_doc_state,
-                page_min,
-                page_max,
-            ],
-            outputs=[
-                redaction_output_summary_textbox,
-                prepared_pdf_state,
-                images_pdf_state,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                pdf_doc_state,
-                all_image_annotations_state,
-                review_file_df,
-                document_cropboxes,
-                page_sizes,
-                textract_output_found_checkbox,
-                all_img_details_state,
-                all_line_level_ocr_results_df_placeholder,
-                relevant_ocr_output_with_words_found_checkbox,
-                all_page_line_level_ocr_results_with_words_df_base,
-            ],
-            show_progress_on=[adobe_review_files_out],
-        ).success(
-            fn=convert_xfdf_to_dataframe,
-            inputs=[
-                adobe_review_files_out,
-                pdf_doc_state,
-                images_pdf_state,
-                output_folder_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[input_pdf_for_review],
-            scroll_to_output=True,
-        )
-
-        ###
-        # WORD/TABULAR DATA REDACTION
-        ###
-        in_data_files.upload(
-            fn=put_columns_in_df,
-            inputs=[in_data_files],
-            outputs=[in_colnames, in_excel_sheets],
-        ).success(
-            fn=get_input_file_names,
-            inputs=[in_data_files],
-            outputs=[
-                data_file_name_no_extension_textbox,
-                data_file_name_with_extension_textbox,
-                data_full_file_name_textbox,
-                data_file_name_textbox_list,
-                total_pdf_page_count,
-            ],
-        )
-
-        tabular_data_redact_btn.click(
-            reset_data_vars,
-            outputs=[
-                actual_time_taken_number,
-                log_files_output_list_state,
-                comprehend_query_number,
-            ],
-        ).success(
-            fn=anonymise_files_with_open_text,
-            inputs=[
-                in_data_files,
-                in_text,
-                anon_strategy,
-                in_colnames,
-                in_redact_entities,
-                in_allow_list_state,
-                text_tabular_files_done,
-                text_output_summary,
-                text_output_file_list_state,
-                log_files_output_list_state,
-                in_excel_sheets,
-                first_loop_state,
-                output_folder_textbox,
-                in_deny_list_state,
-                max_fuzzy_spelling_mistakes_num,
-                pii_identification_method_drop_tabular,
-                in_redact_comprehend_entities,
-                comprehend_query_number,
-                aws_access_key_textbox,
-                aws_secret_key_textbox,
-                actual_time_taken_number,
-                do_initial_clean,
-                chosen_language_drop,
-            ],
-            outputs=[
-                text_output_summary,
-                text_output_file,
-                text_output_file_list_state,
-                text_tabular_files_done,
-                log_files_output,
-                log_files_output_list_state,
-                actual_time_taken_number,
-                comprehend_query_number,
-            ],
-            api_name="redact_data",
-            show_progress_on=[text_output_summary],
-        ).success(
-            fn=export_outputs_to_s3,
-            inputs=[
-                text_output_file_list_state,
-                s3_output_folder_state,
-                save_outputs_to_s3_checkbox,
-                in_data_files,
-            ],
-            outputs=None,
-        )
-
-        # If the output file count text box changes, keep going with redacting each data file until done
-        text_tabular_files_done.change(
-            fn=anonymise_files_with_open_text,
-            inputs=[
-                in_data_files,
-                in_text,
-                anon_strategy,
-                in_colnames,
-                in_redact_entities,
-                in_allow_list_state,
-                text_tabular_files_done,
-                text_output_summary,
-                text_output_file_list_state,
-                log_files_output_list_state,
-                in_excel_sheets,
-                second_loop_state,
-                output_folder_textbox,
-                in_deny_list_state,
-                max_fuzzy_spelling_mistakes_num,
-                pii_identification_method_drop_tabular,
-                in_redact_comprehend_entities,
-                comprehend_query_number,
-                aws_access_key_textbox,
-                aws_secret_key_textbox,
-                actual_time_taken_number,
-                do_initial_clean,
-                chosen_language_drop,
-            ],
-            outputs=[
-                text_output_summary,
-                text_output_file,
-                text_output_file_list_state,
-                text_tabular_files_done,
-                log_files_output,
-                log_files_output_list_state,
-                actual_time_taken_number,
-                comprehend_query_number,
-            ],
-            show_progress_on=[text_output_summary],
-        ).success(
-            fn=export_outputs_to_s3,
-            inputs=[
-                text_output_file_list_state,
-                s3_output_folder_state,
-                save_outputs_to_s3_checkbox,
-                in_data_files,
-            ],
-            outputs=None,
-        ).success(
-            fn=reveal_feedback_buttons,
-            outputs=[
-                data_feedback_radio,
-                data_further_details_text,
-                data_submit_feedback_btn,
-                data_feedback_title,
-            ],
-        )
-
-        ###
-        # IDENTIFY DUPLICATE PAGES
-        ###
-
-        find_duplicate_pages_btn.click(
-            fn=run_duplicate_analysis,
-            inputs=[
-                in_duplicate_pages,
-                duplicate_threshold_input,
-                min_word_count_input,
-                min_consecutive_pages_input,
-                greedy_match_input,
-                combine_page_text_for_duplicates_bool,
-                output_folder_textbox,
-            ],
-            outputs=[
-                results_df_preview,
-                duplicate_files_out,
-                full_duplicate_data_by_file,
-                actual_time_taken_number,
-                task_textbox,
-            ],
-            show_progress_on=[results_df_preview],
-        ).success(
-            fn=export_outputs_to_s3,
-            # duplicate_files_out returns a single file path; export helper will normalise it
-            inputs=[
-                duplicate_files_out,
-                s3_output_folder_state,
-                save_outputs_to_s3_checkbox,
-                in_duplicate_pages,
-            ],
-            outputs=None,
-        )
-
-        # full_duplicated_data_df,
-        results_df_preview.select(
-            fn=handle_selection_and_preview,
-            inputs=[results_df_preview, full_duplicate_data_by_file],
-            outputs=[
-                selected_duplicate_data_row_index,
-                page1_text_preview,
-                page2_text_preview,
-            ],
-        )
-
-        # When the user clicks the "Exclude" button
-        exclude_match_btn.click(
-            fn=exclude_match,
-            inputs=[results_df_preview, selected_duplicate_data_row_index],
-            outputs=[
-                results_df_preview,
-                duplicate_files_out,
-                page1_text_preview,
-                page2_text_preview,
-            ],
-        )
-
-        apply_match_btn.click(
-            fn=create_annotation_objects_from_duplicates,
-            inputs=[
-                results_df_preview,
-                all_page_line_level_ocr_results_df_base,
-                page_sizes,
-                combine_page_text_for_duplicates_bool,
-            ],
-            outputs=[new_duplicate_search_annotation_object],
-        ).success(
-            fn=apply_whole_page_redactions_from_list,
-            inputs=[
-                in_fully_redacted_list_state,
-                doc_file_name_with_extension_textbox,
-                review_file_df,
-                duplicate_files_out,
-                pdf_doc_state,
-                page_sizes,
-                all_image_annotations_state,
-                combine_page_text_for_duplicates_bool,
-                new_duplicate_search_annotation_object,
-            ],
-            outputs=[review_file_df, all_image_annotations_state],
-        ).success(
-            update_annotator_page_from_review_df,
-            inputs=[
-                review_file_df,
-                images_pdf_state,
-                page_sizes,
-                all_image_annotations_state,
-                annotator,
-                selected_entity_dataframe_row,
-                input_folder_textbox,
-                doc_full_file_name_textbox,
-            ],
-            outputs=[
-                annotator,
-                all_image_annotations_state,
-                annotate_current_page,
-                page_sizes,
-                review_file_df,
-                annotate_previous_page,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        )
-
-        ###
-        # TABULAR DUPLICATE DETECTION
-        ###
-
-        # Event handlers
-        in_tabular_duplicate_files.upload(
-            fn=put_columns_in_df,
-            inputs=[in_tabular_duplicate_files],
-            outputs=[tabular_text_columns, in_excel_tabular_sheets],
-        )
-
-        find_tabular_duplicates_btn.click(
-            fn=run_tabular_duplicate_detection,
-            inputs=[
-                in_tabular_duplicate_files,
-                tabular_duplicate_threshold,
-                tabular_min_word_count,
-                tabular_text_columns,
-                output_folder_textbox,
-                do_initial_clean_dup,
-                in_excel_tabular_sheets,
-                remove_duplicate_rows,
-            ],
-            outputs=[
-                tabular_results_df,
-                tabular_cleaned_file,
-                tabular_file_to_clean,
-                actual_time_taken_number,
-                task_textbox,
-            ],
-            api_name="tabular_clean_duplicates",
-            show_progress_on=[tabular_results_df],
-        )
-
-        tabular_results_df.select(
-            fn=handle_tabular_row_selection,
-            inputs=[tabular_results_df],
-            outputs=[
-                tabular_selected_row_index,
-                tabular_text1_preview,
-                tabular_text2_preview,
-            ],
-        )
-
-        clean_duplicates_btn.click(
-            fn=clean_tabular_duplicates,
-            inputs=[
-                tabular_file_to_clean,
-                tabular_results_df,
-                output_folder_textbox,
-                in_excel_tabular_sheets,
-            ],
-            outputs=[tabular_cleaned_file],
-        )
-
-        ###
-        # SETTINGS PAGE INPUT / OUTPUT
-        ###
-        # If a custom allow/deny/duplicate page list is uploaded
-        in_allow_list.change(
-            fn=custom_regex_load,
-            inputs=[in_allow_list],
-            outputs=[in_allow_list_text, in_allow_list_state],
-        )
-        in_deny_list.change(
-            fn=custom_regex_load,
-            inputs=[in_deny_list, in_deny_list_text_in],
-            outputs=[in_deny_list_text, in_deny_list_state],
-        )
-        in_fully_redacted_list.change(
-            fn=custom_regex_load,
-            inputs=[in_fully_redacted_list, in_fully_redacted_text_in],
-            outputs=[in_fully_redacted_list_text, in_fully_redacted_list_state],
-        )
-
-        # The following allows for more reliable updates of the data in the custom list dataframes
-        in_allow_list_state.input(
-            update_dataframe,
-            inputs=[in_allow_list_state],
-            outputs=[in_allow_list_state],
-        )
-        in_deny_list_state.input(
-            update_dataframe, inputs=[in_deny_list_state], outputs=[in_deny_list_state]
-        )
-        in_fully_redacted_list_state.input(
-            update_dataframe,
-            inputs=[in_fully_redacted_list_state],
-            outputs=[in_fully_redacted_list_state],
-        )
-
-        # Apply whole page redactions from the provided whole page redaction csv file upload/list of specific page numbers given by user
-        apply_fully_redacted_list_btn.click(
-            fn=apply_whole_page_redactions_from_list,
-            inputs=[
-                in_fully_redacted_list_state,
-                doc_file_name_with_extension_textbox,
-                review_file_df,
-                duplicate_files_out,
-                pdf_doc_state,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            outputs=[review_file_df, all_image_annotations_state],
-        ).success(
-            update_annotator_page_from_review_df,
-            inputs=[
-                review_file_df,
-                images_pdf_state,
-                page_sizes,
-                all_image_annotations_state,
-                annotator,
-                selected_entity_dataframe_row,
-                input_folder_textbox,
-                doc_full_file_name_textbox,
-            ],
-            outputs=[
-                annotator,
-                all_image_annotations_state,
-                annotate_current_page,
-                page_sizes,
-                review_file_df,
-                annotate_previous_page,
-            ],
-            show_progress_on=[annotator],
-        ).success(
-            update_annotator_object_and_filter_df,
-            inputs=[
-                all_image_annotations_state,
-                annotate_current_page,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[annotator],
-        )
-
-        # Merge multiple review csv files together
-        merge_multiple_review_files_btn.click(
-            fn=merge_csv_files,
-            inputs=multiple_review_files_in_out,
-            outputs=multiple_review_files_in_out,
-        )
-
-        # Need to momentarilly change the root directory of the file explorer to another non-sensitive folder when the button is clicked to get it to update (workaround))
-        all_output_files_btn.click(
-            fn=lambda: gr.FileExplorer(root_dir=FEEDBACK_LOGS_FOLDER),
-            inputs=None,
-            outputs=all_output_files,
+            outputs=[textract_job_detail_df],
         ).success(
             fn=load_all_output_files,
             inputs=output_folder_textbox,
             outputs=all_output_files,
         )
 
-        all_output_files.change(
-            fn=all_outputs_file_download_fn,
-            inputs=all_output_files,
-            outputs=all_outputs_file_download,
+    else:
+        blocks.load(
+            get_connection_params,
+            inputs=[
+                output_folder_textbox,
+                input_folder_textbox,
+                session_output_folder_textbox,
+                s3_output_folder_state,
+                s3_whole_document_textract_input_subfolder,
+                s3_whole_document_textract_output_subfolder,
+                s3_whole_document_textract_logs_subfolder,
+                local_whole_document_textract_logs_subfolder,
+            ],
+            outputs=[
+                session_hash_state,
+                output_folder_textbox,
+                session_hash_textbox,
+                input_folder_textbox,
+                s3_whole_document_textract_input_subfolder,
+                s3_whole_document_textract_output_subfolder,
+                s3_whole_document_textract_logs_subfolder,
+                local_whole_document_textract_logs_subfolder,
+                s3_output_folder_state,
+            ],
+        ).success(
+            fn=load_all_output_files,
+            inputs=output_folder_textbox,
+            outputs=all_output_files,
         )
 
-        # Language selection dropdown
-        chosen_language_full_name_drop.select(
-            update_language_dropdown,
-            inputs=[chosen_language_full_name_drop],
-            outputs=[chosen_language_drop],
-        )
-
-        ###
-        # APP LOAD AND LOGGING
-        ###
-
-        # Get connection details on app load
-
-        if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
+    # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location
+    if GET_DEFAULT_ALLOW_LIST and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
+        if (
+            not os.path.exists(ALLOW_LIST_PATH)
+            and S3_ALLOW_LIST_PATH
+            and RUN_AWS_FUNCTIONS
+        ):
+            print("Downloading allow list from S3")
             blocks.load(
-                get_connection_params,
+                download_file_from_s3,
                 inputs=[
-                    output_folder_textbox,
-                    input_folder_textbox,
-                    session_output_folder_textbox,
-                    s3_output_folder_state,
-                    s3_whole_document_textract_input_subfolder,
-                    s3_whole_document_textract_output_subfolder,
-                    s3_whole_document_textract_logs_subfolder,
-                    local_whole_document_textract_logs_subfolder,
-                ],
-                outputs=[
-                    session_hash_state,
-                    output_folder_textbox,
-                    session_hash_textbox,
-                    input_folder_textbox,
-                    s3_whole_document_textract_input_subfolder,
-                    s3_whole_document_textract_output_subfolder,
-                    s3_whole_document_textract_logs_subfolder,
-                    local_whole_document_textract_logs_subfolder,
-                    s3_output_folder_state,
+                    s3_default_bucket,
+                    s3_default_allow_list_file,
+                    default_allow_list_output_folder_location,
                 ],
             ).success(
-                load_in_textract_job_details,
-                inputs=[
-                    load_s3_whole_document_textract_logs_bool,
-                    s3_whole_document_textract_logs_subfolder,
-                    local_whole_document_textract_logs_subfolder,
-                ],
-                outputs=[textract_job_detail_df],
-            ).success(
-                fn=load_all_output_files,
-                inputs=output_folder_textbox,
-                outputs=all_output_files,
+                load_in_default_allow_list,
+                inputs=[default_allow_list_output_folder_location],
+                outputs=[in_allow_list],
             )
-
+            print("Successfully loaded allow list from S3")
+        elif os.path.exists(ALLOW_LIST_PATH):
+            print(
+                "Loading allow list from default allow list output path location:",
+                ALLOW_LIST_PATH,
+            )
+            blocks.load(
+                load_in_default_allow_list,
+                inputs=[default_allow_list_output_folder_location],
+                outputs=[in_allow_list],
+            )
         else:
+            print("Could not load in default allow list")
+
+    # If relevant environment variable is set, load in the default cost code file from S3 or locally
+    if GET_COST_CODES and (COST_CODES_PATH or S3_COST_CODES_PATH):
+        if (
+            not os.path.exists(COST_CODES_PATH)
+            and S3_COST_CODES_PATH
+            and RUN_AWS_FUNCTIONS
+        ):
+            print("Downloading cost codes from S3")
             blocks.load(
-                get_connection_params,
+                download_file_from_s3,
                 inputs=[
-                    output_folder_textbox,
-                    input_folder_textbox,
-                    session_output_folder_textbox,
-                    s3_output_folder_state,
-                    s3_whole_document_textract_input_subfolder,
-                    s3_whole_document_textract_output_subfolder,
-                    s3_whole_document_textract_logs_subfolder,
-                    local_whole_document_textract_logs_subfolder,
-                ],
-                outputs=[
-                    session_hash_state,
-                    output_folder_textbox,
-                    session_hash_textbox,
-                    input_folder_textbox,
-                    s3_whole_document_textract_input_subfolder,
-                    s3_whole_document_textract_output_subfolder,
-                    s3_whole_document_textract_logs_subfolder,
-                    local_whole_document_textract_logs_subfolder,
-                    s3_output_folder_state,
+                    s3_default_bucket,
+                    s3_default_cost_codes_file,
+                    default_cost_codes_output_folder_location,
                 ],
             ).success(
-                fn=load_all_output_files,
-                inputs=output_folder_textbox,
-                outputs=all_output_files,
+                load_in_default_cost_codes,
+                inputs=[
+                    default_cost_codes_output_folder_location,
+                    default_cost_code_textbox,
+                ],
+                outputs=[
+                    cost_code_dataframe,
+                    cost_code_dataframe_base,
+                    cost_code_choice_drop,
+                ],
             )
+            print("Successfully loaded cost codes from S3")
+        elif os.path.exists(COST_CODES_PATH):
+            print(
+                "Loading cost codes from default cost codes path location:",
+                COST_CODES_PATH,
+            )
+            blocks.load(
+                load_in_default_cost_codes,
+                inputs=[
+                    default_cost_codes_output_folder_location,
+                    default_cost_code_textbox,
+                ],
+                outputs=[
+                    cost_code_dataframe,
+                    cost_code_dataframe_base,
+                    cost_code_choice_drop,
+                ],
+            )
+        else:
+            print("Could not load in cost code data")
 
-        # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location
-        if GET_DEFAULT_ALLOW_LIST and (ALLOW_LIST_PATH or S3_ALLOW_LIST_PATH):
-            if (
-                not os.path.exists(ALLOW_LIST_PATH)
-                and S3_ALLOW_LIST_PATH
-                and RUN_AWS_FUNCTIONS
-            ):
-                print("Downloading allow list from S3")
-                blocks.load(
-                    download_file_from_s3,
-                    inputs=[
-                        s3_default_bucket,
-                        s3_default_allow_list_file,
-                        default_allow_list_output_folder_location,
-                    ],
-                ).success(
-                    load_in_default_allow_list,
-                    inputs=[default_allow_list_output_folder_location],
-                    outputs=[in_allow_list],
-                )
-                print("Successfully loaded allow list from S3")
-            elif os.path.exists(ALLOW_LIST_PATH):
-                print(
-                    "Loading allow list from default allow list output path location:",
-                    ALLOW_LIST_PATH,
-                )
-                blocks.load(
-                    load_in_default_allow_list,
-                    inputs=[default_allow_list_output_folder_location],
-                    outputs=[in_allow_list],
-                )
-            else:
-                print("Could not load in default allow list")
+    ###
+    # LOGGING
+    ###
 
-        # If relevant environment variable is set, load in the default cost code file from S3 or locally
-        if GET_COST_CODES and (COST_CODES_PATH or S3_COST_CODES_PATH):
-            if (
-                not os.path.exists(COST_CODES_PATH)
-                and S3_COST_CODES_PATH
-                and RUN_AWS_FUNCTIONS
-            ):
-                print("Downloading cost codes from S3")
-                blocks.load(
-                    download_file_from_s3,
-                    inputs=[
-                        s3_default_bucket,
-                        s3_default_cost_codes_file,
-                        default_cost_codes_output_folder_location,
-                    ],
-                ).success(
-                    load_in_default_cost_codes,
-                    inputs=[
-                        default_cost_codes_output_folder_location,
-                        default_cost_code_textbox,
-                    ],
-                    outputs=[
-                        cost_code_dataframe,
-                        cost_code_dataframe_base,
-                        cost_code_choice_drop,
-                    ],
-                )
-                print("Successfully loaded cost codes from S3")
-            elif os.path.exists(COST_CODES_PATH):
-                print(
-                    "Loading cost codes from default cost codes path location:",
-                    COST_CODES_PATH,
-                )
-                blocks.load(
-                    load_in_default_cost_codes,
-                    inputs=[
-                        default_cost_codes_output_folder_location,
-                        default_cost_code_textbox,
-                    ],
-                    outputs=[
-                        cost_code_dataframe,
-                        cost_code_dataframe_base,
-                        cost_code_choice_drop,
-                    ],
-                )
-            else:
-                print("Could not load in cost code data")
+    ### ACCESS LOGS
+    # Log usernames and times of access to file (to know who is using the app when running on AWS)
+    access_callback = CSVLogger_custom(dataset_file_name=LOG_FILE_NAME)
 
-        ###
-        # LOGGING
-        ###
+    access_callback.setup([session_hash_textbox, host_name_textbox], ACCESS_LOGS_FOLDER)
+    session_hash_textbox.change(
+        lambda *args: access_callback.flag(
+            list(args),
+            save_to_csv=SAVE_LOGS_TO_CSV,
+            save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+            dynamodb_table_name=ACCESS_LOG_DYNAMODB_TABLE_NAME,
+            dynamodb_headers=DYNAMODB_ACCESS_LOG_HEADERS,
+            replacement_headers=CSV_ACCESS_LOG_HEADERS,
+        ),
+        [session_hash_textbox, host_name_textbox],
+        outputs=[flag_value_placeholder],
+        preprocess=False,
+    ).success(
+        fn=upload_log_file_to_s3,
+        inputs=[access_logs_state, access_s3_logs_loc_state],
+        outputs=[s3_logs_output_textbox],
+    )
 
-        ### ACCESS LOGS
-        # Log usernames and times of access to file (to know who is using the app when running on AWS)
-        access_callback = CSVLogger_custom(dataset_file_name=LOG_FILE_NAME)
+    ### FEEDBACK LOGS
+    pdf_callback = CSVLogger_custom(dataset_file_name=FEEDBACK_LOG_FILE_NAME)
+    data_callback = CSVLogger_custom(dataset_file_name=FEEDBACK_LOG_FILE_NAME)
 
-        access_callback.setup(
-            [session_hash_textbox, host_name_textbox], ACCESS_LOGS_FOLDER
+    if DISPLAY_FILE_NAMES_IN_LOGS:
+        # User submitted feedback for pdf redactions
+        pdf_callback.setup(
+            [
+                pdf_feedback_radio,
+                pdf_further_details_text,
+                doc_file_name_no_extension_textbox,
+            ],
+            FEEDBACK_LOGS_FOLDER,
         )
-        session_hash_textbox.change(
-            lambda *args: access_callback.flag(
+        pdf_submit_feedback_btn.click(
+            lambda *args: pdf_callback.flag(
                 list(args),
                 save_to_csv=SAVE_LOGS_TO_CSV,
                 save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                dynamodb_table_name=ACCESS_LOG_DYNAMODB_TABLE_NAME,
-                dynamodb_headers=DYNAMODB_ACCESS_LOG_HEADERS,
-                replacement_headers=CSV_ACCESS_LOG_HEADERS,
+                dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS,
+                replacement_headers=CSV_FEEDBACK_LOG_HEADERS,
             ),
-            [session_hash_textbox, host_name_textbox],
+            [
+                pdf_feedback_radio,
+                pdf_further_details_text,
+                doc_file_name_no_extension_textbox,
+            ],
             outputs=[flag_value_placeholder],
             preprocess=False,
         ).success(
             fn=upload_log_file_to_s3,
-            inputs=[access_logs_state, access_s3_logs_loc_state],
+            inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
+            outputs=[pdf_further_details_text],
+        )
+
+        # User submitted feedback for data redactions
+        data_callback.setup(
+            [
+                data_feedback_radio,
+                data_further_details_text,
+                data_file_name_with_extension_textbox,
+            ],
+            FEEDBACK_LOGS_FOLDER,
+        )
+        data_submit_feedback_btn.click(
+            lambda *args: data_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS,
+                replacement_headers=CSV_FEEDBACK_LOG_HEADERS,
+            ),
+            [
+                data_feedback_radio,
+                data_further_details_text,
+                data_file_name_with_extension_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
+            outputs=[data_further_details_text],
+        )
+    else:
+        # User submitted feedback for pdf redactions
+        pdf_callback.setup(
+            [
+                pdf_feedback_radio,
+                pdf_further_details_text,
+                doc_file_name_no_extension_textbox,
+            ],
+            FEEDBACK_LOGS_FOLDER,
+        )
+        pdf_submit_feedback_btn.click(
+            lambda *args: pdf_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS,
+                replacement_headers=CSV_FEEDBACK_LOG_HEADERS,
+            ),
+            [
+                pdf_feedback_radio,
+                pdf_further_details_text,
+                placeholder_doc_file_name_no_extension_textbox_for_logs,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
+            outputs=[pdf_further_details_text],
+        )
+
+        # User submitted feedback for data redactions
+        data_callback.setup(
+            [
+                data_feedback_radio,
+                data_further_details_text,
+                data_file_name_with_extension_textbox,
+            ],
+            FEEDBACK_LOGS_FOLDER,
+        )
+        data_submit_feedback_btn.click(
+            lambda *args: data_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS,
+                replacement_headers=CSV_FEEDBACK_LOG_HEADERS,
+            ),
+            [
+                data_feedback_radio,
+                data_further_details_text,
+                placeholder_data_file_name_no_extension_textbox_for_logs,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
+            outputs=[data_further_details_text],
+        )
+
+    ### USAGE LOGS
+    # Log processing usage - time taken for redaction queries, and also logs for queries to Textract/Comprehend
+    usage_callback = CSVLogger_custom(dataset_file_name=USAGE_LOG_FILE_NAME)
+
+    if DISPLAY_FILE_NAMES_IN_LOGS:
+        usage_callback.setup(
+            [
+                session_hash_textbox,
+                doc_file_name_no_extension_textbox,
+                data_file_name_with_extension_textbox,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            USAGE_LOGS_FOLDER,
+        )
+
+        latest_file_completed_num.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                doc_file_name_no_extension_textbox,
+                data_file_name_with_extension_textbox,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+            api_name="usage_logs",
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
             outputs=[s3_logs_output_textbox],
         )
 
-        ### FEEDBACK LOGS
-        pdf_callback = CSVLogger_custom(dataset_file_name=FEEDBACK_LOG_FILE_NAME)
-        data_callback = CSVLogger_custom(dataset_file_name=FEEDBACK_LOG_FILE_NAME)
+        text_tabular_files_done.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                doc_file_name_no_extension_textbox,
+                data_file_name_with_extension_textbox,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                textract_query_number,
+                pii_identification_method_drop_tabular,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
+            outputs=[s3_logs_output_textbox],
+        )
 
-        if DISPLAY_FILE_NAMES_IN_LOGS:
-            # User submitted feedback for pdf redactions
-            pdf_callback.setup(
-                [
-                    pdf_feedback_radio,
-                    pdf_further_details_text,
-                    doc_file_name_no_extension_textbox,
-                ],
-                FEEDBACK_LOGS_FOLDER,
-            )
-            pdf_submit_feedback_btn.click(
-                lambda *args: pdf_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS,
-                    replacement_headers=CSV_FEEDBACK_LOG_HEADERS,
-                ),
-                [
-                    pdf_feedback_radio,
-                    pdf_further_details_text,
-                    doc_file_name_no_extension_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
-                outputs=[pdf_further_details_text],
-            )
+        successful_textract_api_call_number.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                doc_file_name_no_extension_textbox,
+                data_file_name_with_extension_textbox,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
+            outputs=[s3_logs_output_textbox],
+        )
 
-            # User submitted feedback for data redactions
-            data_callback.setup(
-                [
-                    data_feedback_radio,
-                    data_further_details_text,
-                    data_file_name_with_extension_textbox,
-                ],
-                FEEDBACK_LOGS_FOLDER,
-            )
-            data_submit_feedback_btn.click(
-                lambda *args: data_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS,
-                    replacement_headers=CSV_FEEDBACK_LOG_HEADERS,
-                ),
-                [
-                    data_feedback_radio,
-                    data_further_details_text,
-                    data_file_name_with_extension_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
-                outputs=[data_further_details_text],
-            )
-        else:
-            # User submitted feedback for pdf redactions
-            pdf_callback.setup(
-                [
-                    pdf_feedback_radio,
-                    pdf_further_details_text,
-                    doc_file_name_no_extension_textbox,
-                ],
-                FEEDBACK_LOGS_FOLDER,
-            )
-            pdf_submit_feedback_btn.click(
-                lambda *args: pdf_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS,
-                    replacement_headers=CSV_FEEDBACK_LOG_HEADERS,
-                ),
-                [
-                    pdf_feedback_radio,
-                    pdf_further_details_text,
-                    placeholder_doc_file_name_no_extension_textbox_for_logs,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
-                outputs=[pdf_further_details_text],
-            )
+        # Deduplication usage logging
+        duplicate_files_out.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                blank_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                actual_time_taken_number,
+                textract_query_number,
+                pii_identification_method_drop_tabular,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
+            outputs=[s3_logs_output_textbox],
+        )
 
-            # User submitted feedback for data redactions
-            data_callback.setup(
-                [
-                    data_feedback_radio,
-                    data_further_details_text,
-                    data_file_name_with_extension_textbox,
-                ],
-                FEEDBACK_LOGS_FOLDER,
-            )
-            data_submit_feedback_btn.click(
-                lambda *args: data_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS,
-                    replacement_headers=CSV_FEEDBACK_LOG_HEADERS,
-                ),
-                [
-                    data_feedback_radio,
-                    data_further_details_text,
-                    placeholder_data_file_name_no_extension_textbox_for_logs,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
-                outputs=[data_further_details_text],
-            )
+        tabular_results_df.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                blank_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                textract_query_number,
+                pii_identification_method_drop_tabular,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
+            outputs=[s3_logs_output_textbox],
+        )
+    else:
+        usage_callback.setup(
+            [
+                session_hash_textbox,
+                blank_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            USAGE_LOGS_FOLDER,
+        )
 
-        ### USAGE LOGS
-        # Log processing usage - time taken for redaction queries, and also logs for queries to Textract/Comprehend
-        usage_callback = CSVLogger_custom(dataset_file_name=USAGE_LOG_FILE_NAME)
+        latest_file_completed_num.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                placeholder_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                actual_time_taken_number,
+                total_pdf_page_count,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
+            outputs=[s3_logs_output_textbox],
+        )
 
-        if DISPLAY_FILE_NAMES_IN_LOGS:
-            usage_callback.setup(
-                [
-                    session_hash_textbox,
-                    doc_file_name_no_extension_textbox,
-                    data_file_name_with_extension_textbox,
-                    total_pdf_page_count,
-                    actual_time_taken_number,
-                    textract_query_number,
-                    pii_identification_method_drop,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                USAGE_LOGS_FOLDER,
-            )
+        text_tabular_files_done.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                blank_doc_file_name_no_extension_textbox_for_logs,
+                placeholder_data_file_name_no_extension_textbox_for_logs,
+                actual_time_taken_number,
+                total_pdf_page_count,
+                textract_query_number,
+                pii_identification_method_drop_tabular,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
+            outputs=[s3_logs_output_textbox],
+        )
 
-            latest_file_completed_num.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    doc_file_name_no_extension_textbox,
-                    data_file_name_with_extension_textbox,
-                    total_pdf_page_count,
-                    actual_time_taken_number,
-                    textract_query_number,
-                    pii_identification_method_drop,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-                api_name="usage_logs",
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
+        successful_textract_api_call_number.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                placeholder_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                actual_time_taken_number,
+                total_pdf_page_count,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
+            outputs=[s3_logs_output_textbox],
+        )
 
-            text_tabular_files_done.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    doc_file_name_no_extension_textbox,
-                    data_file_name_with_extension_textbox,
-                    total_pdf_page_count,
-                    actual_time_taken_number,
-                    textract_query_number,
-                    pii_identification_method_drop_tabular,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
+        # Deduplication usage logging (when file names not displayed)
+        duplicate_files_out.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                placeholder_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                total_pdf_page_count,
+                textract_query_number,
+                pii_identification_method_drop_tabular,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
+            outputs=[s3_logs_output_textbox],
+        )
 
-            successful_textract_api_call_number.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    doc_file_name_no_extension_textbox,
-                    data_file_name_with_extension_textbox,
-                    total_pdf_page_count,
-                    actual_time_taken_number,
-                    textract_query_number,
-                    pii_identification_method_drop,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
-
-            # Deduplication usage logging
-            duplicate_files_out.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    blank_doc_file_name_no_extension_textbox_for_logs,
-                    blank_data_file_name_no_extension_textbox_for_logs,
-                    actual_time_taken_number,
-                    textract_query_number,
-                    pii_identification_method_drop_tabular,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
-
-            tabular_results_df.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    blank_doc_file_name_no_extension_textbox_for_logs,
-                    blank_data_file_name_no_extension_textbox_for_logs,
-                    total_pdf_page_count,
-                    actual_time_taken_number,
-                    textract_query_number,
-                    pii_identification_method_drop_tabular,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
-        else:
-            usage_callback.setup(
-                [
-                    session_hash_textbox,
-                    blank_doc_file_name_no_extension_textbox_for_logs,
-                    blank_data_file_name_no_extension_textbox_for_logs,
-                    total_pdf_page_count,
-                    actual_time_taken_number,
-                    textract_query_number,
-                    pii_identification_method_drop,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                USAGE_LOGS_FOLDER,
-            )
-
-            latest_file_completed_num.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    placeholder_doc_file_name_no_extension_textbox_for_logs,
-                    blank_data_file_name_no_extension_textbox_for_logs,
-                    actual_time_taken_number,
-                    total_pdf_page_count,
-                    textract_query_number,
-                    pii_identification_method_drop,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
-
-            text_tabular_files_done.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    blank_doc_file_name_no_extension_textbox_for_logs,
-                    placeholder_data_file_name_no_extension_textbox_for_logs,
-                    actual_time_taken_number,
-                    total_pdf_page_count,
-                    textract_query_number,
-                    pii_identification_method_drop_tabular,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
-
-            successful_textract_api_call_number.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    placeholder_doc_file_name_no_extension_textbox_for_logs,
-                    blank_data_file_name_no_extension_textbox_for_logs,
-                    actual_time_taken_number,
-                    total_pdf_page_count,
-                    textract_query_number,
-                    pii_identification_method_drop,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
-
-            # Deduplication usage logging (when file names not displayed)
-            duplicate_files_out.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    placeholder_doc_file_name_no_extension_textbox_for_logs,
-                    blank_data_file_name_no_extension_textbox_for_logs,
-                    total_pdf_page_count,
-                    actual_time_taken_number,
-                    total_pdf_page_count,
-                    textract_query_number,
-                    pii_identification_method_drop_tabular,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
-
-            tabular_results_df.change(
-                lambda *args: usage_callback.flag(
-                    list(args),
-                    save_to_csv=SAVE_LOGS_TO_CSV,
-                    save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                    dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                    replacement_headers=CSV_USAGE_LOG_HEADERS,
-                ),
-                [
-                    session_hash_textbox,
-                    placeholder_doc_file_name_no_extension_textbox_for_logs,
-                    blank_data_file_name_no_extension_textbox_for_logs,
-                    total_pdf_page_count,
-                    actual_time_taken_number,
-                    total_pdf_page_count,
-                    textract_query_number,
-                    pii_identification_method_drop_tabular,
-                    comprehend_query_number,
-                    cost_code_choice_drop,
-                    handwrite_signature_checkbox,
-                    host_name_textbox,
-                    text_extract_method_radio,
-                    is_a_textract_api_call,
-                    task_textbox,
-                ],
-                outputs=[flag_value_placeholder],
-                preprocess=False,
-            ).success(
-                fn=upload_log_file_to_s3,
-                inputs=[usage_logs_state, usage_s3_logs_loc_state],
-                outputs=[s3_logs_output_textbox],
-            )
+        tabular_results_df.change(
+            lambda *args: usage_callback.flag(
+                list(args),
+                save_to_csv=SAVE_LOGS_TO_CSV,
+                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+                replacement_headers=CSV_USAGE_LOG_HEADERS,
+            ),
+            [
+                session_hash_textbox,
+                placeholder_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                total_pdf_page_count,
+                textract_query_number,
+                pii_identification_method_drop_tabular,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+            ],
+            outputs=[flag_value_placeholder],
+            preprocess=False,
+        ).success(
+            fn=upload_log_file_to_s3,
+            inputs=[usage_logs_state, usage_s3_logs_loc_state],
+            outputs=[s3_logs_output_textbox],
+        )
 
     blocks.queue(
         max_size=int(MAX_QUEUE_SIZE),
