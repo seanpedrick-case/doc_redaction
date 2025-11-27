@@ -383,6 +383,19 @@ SESSION_OUTPUT_FOLDER = convert_string_to_boolean(
 OUTPUT_FOLDER = get_or_create_env_var("GRADIO_OUTPUT_FOLDER", "output/")  # 'output/'
 INPUT_FOLDER = get_or_create_env_var("GRADIO_INPUT_FOLDER", "input/")  # 'input/'
 
+# Whether to automatically upload redaction outputs to S3
+SAVE_OUTPUTS_TO_S3 = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_OUTPUTS_TO_S3", "False")
+)
+
+# Base S3 folder (key prefix) for saving redaction outputs within the DOCUMENT_REDACTION_BUCKET.
+# If left blank, S3 uploads for outputs will be skipped even if SAVE_OUTPUTS_TO_S3 is True.
+S3_OUTPUTS_FOLDER = get_or_create_env_var("S3_OUTPUTS_FOLDER", "")
+
+S3_OUTPUTS_BUCKET = get_or_create_env_var(
+    "S3_OUTPUTS_BUCKET", DOCUMENT_REDACTION_BUCKET
+)
+
 # Allow for files to be saved in a temporary folder for increased security in some instances
 if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
     # Create a temporary directory

@@ -203,7 +203,6 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
             show_search="filter",
             type="pandas",
             headers=["page", "label", "text", "id"],
-            show_fullscreen_button=True,
             wrap=True,
             max_height=400,
         )
@@ -333,7 +332,6 @@ def update_recogniser_dataframes(
             show_search="filter",
             type="pandas",
             headers=["page", "label", "text", "id"],
-            show_fullscreen_button=True,
             wrap=True,
             max_height=400,
         )
