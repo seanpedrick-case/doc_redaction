@@ -545,17 +545,61 @@ def lambda_handler(event, context):
     cli_args["handwrite_signature_extraction"] = extraction_options
 
     # Download optional files if they are specified
-    allow_list_key = arguments.get("allow_list_file")
-    if allow_list_key:
-        allow_list_path = os.path.join(INPUT_DIR, "allow_list.csv")
-        download_file_from_s3(bucket_name, allow_list_key, allow_list_path)
-        cli_args["allow_list_file"] = allow_list_path
+    # Note: These can be S3 keys (relative to bucket) or full s3:// paths
+    # If they're full s3:// paths, the CLI will handle them automatically
+    # If they're S3 keys (not starting with s3:// and not existing locally), download them here
+    allow_list_file = arguments.get("allow_list_file") or cli_args.get(
+        "allow_list_file"
+    )
+    if allow_list_file:
+        # Check if it's a full S3 path (s3://bucket/key)
+        if allow_list_file.startswith("s3://"):
+            # Let the CLI handle it - don't download here
+            cli_args["allow_list_file"] = allow_list_file
+        elif os.path.exists(allow_list_file) or os.path.isabs(allow_list_file):
+            # It's already a local absolute path or exists - use it as-is
+            cli_args["allow_list_file"] = allow_list_file
+        else:
+            # Assume it's an S3 key (relative to bucket) - download it
+            allow_list_path = os.path.join(INPUT_DIR, "allow_list.csv")
+            download_file_from_s3(bucket_name, allow_list_file, allow_list_path)
+            cli_args["allow_list_file"] = allow_list_path
 
-    deny_list_key = arguments.get("deny_list_file")
-    if deny_list_key:
-        deny_list_path = os.path.join(INPUT_DIR, "deny_list.csv")
-        download_file_from_s3(bucket_name, deny_list_key, deny_list_path)
-        cli_args["deny_list_file"] = deny_list_path
+    deny_list_file = arguments.get("deny_list_file") or cli_args.get("deny_list_file")
+    if deny_list_file:
+        # Check if it's a full S3 path (s3://bucket/key)
+        if deny_list_file.startswith("s3://"):
+            # Let the CLI handle it - don't download here
+            cli_args["deny_list_file"] = deny_list_file
+        elif os.path.exists(deny_list_file) or os.path.isabs(deny_list_file):
+            # It's already a local absolute path or exists - use it as-is
+            cli_args["deny_list_file"] = deny_list_file
+        else:
+            # Assume it's an S3 key (relative to bucket) - download it
+            deny_list_path = os.path.join(INPUT_DIR, "deny_list.csv")
+            download_file_from_s3(bucket_name, deny_list_file, deny_list_path)
+            cli_args["deny_list_file"] = deny_list_path
+
+    redact_whole_page_file = arguments.get("redact_whole_page_file") or cli_args.get(
+        "redact_whole_page_file"
+    )
+    if redact_whole_page_file:
+        # Check if it's a full S3 path (s3://bucket/key)
+        if redact_whole_page_file.startswith("s3://"):
+            # Let the CLI handle it - don't download here
+            cli_args["redact_whole_page_file"] = redact_whole_page_file
+        elif os.path.exists(redact_whole_page_file) or os.path.isabs(
+            redact_whole_page_file
+        ):
+            # It's already a local absolute path or exists - use it as-is
+            cli_args["redact_whole_page_file"] = redact_whole_page_file
+        else:
+            # Assume it's an S3 key (relative to bucket) - download it
+            redact_whole_page_path = os.path.join(INPUT_DIR, "redact_whole_page.csv")
+            download_file_from_s3(
+                bucket_name, redact_whole_page_file, redact_whole_page_path
+            )
+            cli_args["redact_whole_page_file"] = redact_whole_page_path
 
     # 5. Execute the main application logic
     try:
