@@ -400,11 +400,37 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
 
-        # budget for image processor, since the compression ratio is 32 for Qwen3-VL, we can set the number of visual tokens of a single image to 256-1280
-        # processor.image_processor.size = {
-        #     "longest_edge": VLM_MAX_IMAGE_SIZE,
-        #     "shortest_edge": VLM_MIN_IMAGE_SIZE,
-        # }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
+        else:
+            load_kwargs["dtype"] = "auto"
+        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
+            MODEL_ID, **load_kwargs
+        ).eval()
+
+        model_default_prompt = """Read all the text in the image."""
+        model_default_do_sample = False
+        model_default_top_p = 0.8
+        model_default_min_p = 0.0
+        model_default_top_k = 20
+        model_default_temperature = 0.7
+        model_default_repetition_penalty = 1.0
+        model_default_presence_penalty = 1.5
+        model_default_max_new_tokens = MAX_NEW_TOKENS
+        model_supports_presence_penalty = (
+            False  # I found that this doesn't work when using transformers
+        )
+
+    elif SELECTED_MODEL == "Qwen3-VL-235B-A22B-Instruct":
+        MODEL_ID = "Qwen/Qwen3-VL-235B-A22B-Instruct"
+        from transformers import Qwen3VLMoeForConditionalGeneration
+
+        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        load_kwargs = {
+            "attn_implementation": attn_implementation,
+            "device_map": "auto",
+            "trust_remote_code": True,
+        }
 
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config

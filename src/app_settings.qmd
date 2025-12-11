@@ -618,6 +618,10 @@ Settings for multi-language support.
     * **Description:** Lists of supported language codes for Textract and Comprehend.
     * **Default Value:** `['en', 'es', 'fr', 'de', 'it', 'pt']` and `['en', 'es']`
 
+* **`SPLIT_PUNCTUATION_FROM_WORDS`**
+    * **Description:** If set to `"True"`, splits punctuation from words in Textract output.
+    * **Default Value:** `"False"`
+
 * **`MAPPED_LANGUAGE_CHOICES`** / **`LANGUAGE_CHOICES`**
     * **Description:** Paired lists of full language names and their corresponding short codes for the UI dropdown.
     * **Default Value:** Predefined lists (see script).

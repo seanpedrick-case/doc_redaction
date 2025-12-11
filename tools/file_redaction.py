@@ -2,6 +2,7 @@ import copy
 import io
 import json
 import os
+import re
 import time
 from collections import defaultdict  # For efficient grouping
 from datetime import datetime
@@ -6055,9 +6056,25 @@ def visualise_ocr_words_bounding_boxes(
 
         # Generate filename
         if image_name:
+            # Extract page number from image_name if it follows the pattern _<number> at the end
+            # This handles cases like "document_1", "document.pdf_1", etc.
+            page_number = None
+            page_match = re.search(r"_(\d+)$", image_name)
+            if page_match:
+                page_number = page_match.group(1)
+                # Remove the page number suffix from image_name for base_name extraction
+                image_name_without_page = image_name[: page_match.start()]
+            else:
+                image_name_without_page = image_name
+
             # Remove file extension if present
-            base_name = os.path.splitext(image_name)[0]
-            filename = f"{base_name}_{visualisation_folder}.jpg"
+            base_name = os.path.splitext(image_name_without_page)[0]
+
+            # Include page number in filename if it was found
+            if page_number:
+                filename = f"{base_name}_page_{page_number}_{visualisation_folder}.jpg"
+            else:
+                filename = f"{base_name}_{visualisation_folder}.jpg"
         else:
             timestamp = int(time.time())
             filename = f"{visualisation_folder}_{timestamp}.jpg"
