@@ -349,11 +349,18 @@ def run_cli_redact(
 
     # 3. Execute the command using subprocess
     try:
+        # Set environment variable to ensure UTF-8 encoding in the subprocess
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+
         result = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,  # Pass the environment with UTF-8 encoding
             cwd=script_folder,  # Important for relative paths within the script
         )
 

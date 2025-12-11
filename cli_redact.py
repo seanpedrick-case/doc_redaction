@@ -5,6 +5,7 @@ import uuid
 
 import pandas as pd
 
+from tools.aws_functions import download_file_from_s3
 from tools.config import (
     ACCESS_LOGS_FOLDER,
     ALLOW_LIST_PATH,
@@ -34,6 +35,7 @@ from tools.config import (
     FEEDBACK_LOGS_FOLDER,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
+    GRADIO_TEMP_DIR,
     IMAGES_DPI,
     INPUT_FOLDER,
     LOCAL_OCR_MODEL_OPTIONS,
@@ -129,6 +131,69 @@ def _get_env_list(env_var_name: str) -> list[str]:
         return []
     # Split by comma and filter out any empty strings that might result from extra commas
     return [s.strip() for s in value.split(",") if s.strip()]
+
+
+def _download_s3_file_if_needed(
+    file_path: str, default_filename: str = "downloaded_file"
+) -> str:
+    """
+    Download a file from S3 if the path starts with 's3://' or 'S3://', otherwise return the path as-is.
+
+    Args:
+        file_path: File path (either local or S3 URL)
+        default_filename: Default filename to use if S3 key doesn't have a filename
+
+    Returns:
+        Local file path (downloaded from S3 or original path)
+    """
+    if not file_path:
+        return file_path
+
+    # Check for S3 URL (case-insensitive)
+    file_path_stripped = file_path.strip()
+    file_path_upper = file_path_stripped.upper()
+    if not file_path_upper.startswith("S3://"):
+        return file_path
+
+    # Use GRADIO_TEMP_DIR if available, otherwise use INPUT_FOLDER as fallback
+    temp_dir = GRADIO_TEMP_DIR if GRADIO_TEMP_DIR else INPUT_FOLDER
+    os.makedirs(temp_dir, exist_ok=True)
+
+    # Parse S3 URL: s3://bucket/key (preserve original case for bucket/key)
+    # Remove 's3://' prefix (case-insensitive)
+    s3_path = (
+        file_path_stripped.split("://", 1)[1]
+        if "://" in file_path_stripped
+        else file_path_stripped
+    )
+    # Split bucket and key (first '/' separates bucket from key)
+    if "/" in s3_path:
+        bucket_name_s3, s3_key = s3_path.split("/", 1)
+    else:
+        # If no key provided, use bucket name as key (unlikely but handle it)
+        bucket_name_s3 = s3_path
+        s3_key = ""
+
+    # Get the filename from the S3 key
+    filename = os.path.basename(s3_key) if s3_key else bucket_name_s3
+    if not filename:
+        filename = default_filename
+
+    # Create local file path in temp directory
+    local_file_path = os.path.join(temp_dir, filename)
+
+    # Download file from S3
+    try:
+        download_file_from_s3(
+            bucket_name=bucket_name_s3,
+            key=s3_key,
+            local_file_path_and_name=local_file_path,
+        )
+        print(f"S3 file downloaded successfully: {file_path} -> {local_file_path}")
+        return local_file_path
+    except Exception as e:
+        print(f"Error downloading file from S3 ({file_path}): {e}")
+        raise Exception(f"Failed to download file from S3: {e}")
 
 
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
@@ -600,6 +665,46 @@ python cli_redact.py --task textract --textract_action list
     else:
         # Parse command line arguments
         args = parser.parse_args()
+
+    # --- Handle S3 file downloads ---
+    # Download input files from S3 if needed
+    # Note: args.input_file is typically a list (from CLI nargs="+" or from direct mode)
+    # but we also handle pipe-separated strings for compatibility
+    if args.input_file:
+        if isinstance(args.input_file, list):
+            # Handle list of files (may include S3 paths)
+            downloaded_files = []
+            for file_path in args.input_file:
+                downloaded_path = _download_s3_file_if_needed(file_path)
+                downloaded_files.append(downloaded_path)
+            args.input_file = downloaded_files
+        elif isinstance(args.input_file, str):
+            # Handle pipe-separated string (for direct mode compatibility)
+            if "|" in args.input_file:
+                file_list = [f.strip() for f in args.input_file.split("|") if f.strip()]
+                downloaded_files = []
+                for file_path in file_list:
+                    downloaded_path = _download_s3_file_if_needed(file_path)
+                    downloaded_files.append(downloaded_path)
+                args.input_file = downloaded_files
+            else:
+                # Single file path
+                args.input_file = [_download_s3_file_if_needed(args.input_file)]
+
+    # Download other file arguments from S3 if needed
+    if args.deny_list_file:
+        args.deny_list_file = _download_s3_file_if_needed(
+            args.deny_list_file, default_filename="downloaded_deny_list.csv"
+        )
+    if args.allow_list_file:
+        args.allow_list_file = _download_s3_file_if_needed(
+            args.allow_list_file, default_filename="downloaded_allow_list.csv"
+        )
+    if args.redact_whole_page_file:
+        args.redact_whole_page_file = _download_s3_file_if_needed(
+            args.redact_whole_page_file,
+            default_filename="downloaded_redact_whole_page.csv",
+        )
 
     # --- Initial Setup ---
     # Convert string boolean variables to boolean
