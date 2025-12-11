@@ -1,9 +1,10 @@
 import io
 import json
 import os
+import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import boto3
 import pandas as pd
@@ -15,6 +16,7 @@ from tools.config import (
     AWS_SECRET_KEY,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RUN_AWS_FUNCTIONS,
+    SPLIT_PUNCTUATION_FROM_WORDS,
 )
 from tools.custom_image_analyser_engine import CustomImageRecognizerResult, OCRResult
 from tools.helper_functions import _generate_unique_ids
@@ -202,6 +204,151 @@ def convert_pike_pdf_page_to_bytes(pdf: object, page_num: int):
     return pdf_bytes
 
 
+def split_word_with_punctuation(
+    word_text: str,
+    bounding_box: Tuple[int, int, int, int],
+    confidence: float,
+) -> List[Dict[str, Any]]:
+    """
+    Split a word that may contain punctuation into separate word entries.
+    Only separates punctuation at the start and end of words.
+    Punctuation in the middle (e.g., in email addresses like user@example.com)
+    is kept as part of the word.
+
+    Args:
+        word_text: The text of the word (may contain punctuation)
+        bounding_box: Tuple of (left, top, right, bottom) in pixels
+        confidence: Confidence score for the original word
+
+    Returns:
+        List of word dictionaries, each with text and bounding_box.
+        Leading and trailing punctuation become separate entries, while
+        the middle part (which may contain internal punctuation) remains intact.
+    """
+    if not word_text:
+        return []
+
+    # Extract leading punctuation (at the start of the word)
+    leading_punct_match = re.match(r"^([^\w\s]+)", word_text)
+    leading_punct = leading_punct_match.group(1) if leading_punct_match else ""
+
+    # Extract trailing punctuation (at the end of the word)
+    trailing_punct_match = re.search(r"([^\w\s]+)$", word_text)
+    trailing_punct = trailing_punct_match.group(1) if trailing_punct_match else ""
+
+    # Get the middle part (everything between leading and trailing punctuation)
+    # This may contain punctuation (like @ or . in email addresses) which we keep
+    start_idx = len(leading_punct)
+    end_idx = len(word_text) - len(trailing_punct) if trailing_punct else len(word_text)
+    middle_part = word_text[start_idx:end_idx] if start_idx < end_idx else ""
+
+    # Build list of parts (leading punct, middle, trailing punct)
+    parts = []
+    if leading_punct:
+        parts.append(leading_punct)
+    if middle_part:
+        parts.append(middle_part)
+    if trailing_punct:
+        parts.append(trailing_punct)
+
+    # If no parts to split, return original word
+    if len(parts) == 0:
+        return [
+            {
+                "text": word_text,
+                "confidence": confidence,
+                "bounding_box": bounding_box,
+            }
+        ]
+
+    # If only one part (no leading/trailing punctuation), return as-is
+    if len(parts) == 1:
+        return [
+            {
+                "text": word_text,
+                "confidence": confidence,
+                "bounding_box": bounding_box,
+            }
+        ]
+
+    # Calculate bounding box dimensions
+    left, top, right, bottom = bounding_box
+    width = right - left
+    bottom - top
+
+    # Calculate character width (assuming proportional distribution based on text length)
+    total_chars = len(word_text)
+    if total_chars == 0:
+        return []
+
+    # Punctuation characters are typically narrower than alphanumeric characters
+    # Use a scaling factor to make punctuation boxes thinner
+    PUNCTUATION_WIDTH_SCALE = (
+        0.5  # Punctuation is approximately 50% the width of alphanumeric chars
+    )
+
+    # First pass: calculate effective character widths for each part
+    # Alphanumeric parts get full width, punctuation parts get scaled width
+    total_effective_chars = 0
+    part_info = []
+
+    for part in parts:
+        if not part:
+            continue
+        # Check if part is punctuation-only (no alphanumeric characters)
+        is_punctuation_only = not bool(re.search(r"[\w]", part))
+        if is_punctuation_only:
+            effective_length = len(part) * PUNCTUATION_WIDTH_SCALE
+        else:
+            effective_length = len(part)
+        part_info.append(
+            {
+                "text": part,
+                "length": len(part),
+                "effective_length": effective_length,
+                "is_punctuation": is_punctuation_only,
+            }
+        )
+        total_effective_chars += effective_length
+
+    if total_effective_chars == 0:
+        return []
+
+    # Calculate base character width based on effective character count
+    effective_char_width = width / total_effective_chars
+
+    # Build separate word entries
+    word_entries = []
+    current_pos = 0
+
+    for info in part_info:
+        # Calculate actual width for this part based on effective length
+        # (punctuation parts already have reduced effective_length)
+        part_width = info["effective_length"] * effective_char_width
+
+        # Calculate bounding box for this part
+        part_left = left + current_pos
+        part_right = part_left + part_width
+
+        word_entries.append(
+            {
+                "text": info["text"],
+                "confidence": confidence,
+                "bounding_box": (
+                    int(part_left),
+                    int(top),
+                    int(part_right),
+                    int(bottom),
+                ),
+            }
+        )
+
+        # Move position forward by the effective width used
+        current_pos += part_width
+
+    return word_entries
+
+
 def json_to_ocrresult(
     json_data: dict, page_width: float, page_height: float, page_no: int
 ):
@@ -278,44 +425,62 @@ def json_to_ocrresult(
                             word_block = block_map.get(child_id)
                             if word_block and word_block["BlockType"] == "WORD":
                                 w_bbox = word_block["Geometry"]["BoundingBox"]
-                                line_info["words"].append(
-                                    {
-                                        "text": word_block.get("Text", ""),
-                                        "confidence": round(
-                                            word_block.get("Confidence", 0.0), 0
-                                        ),
-                                        "bounding_box": (
-                                            int(w_bbox["Left"] * page_width),
-                                            int(w_bbox["Top"] * page_height),
-                                            int(
-                                                (w_bbox["Left"] + w_bbox["Width"])
-                                                * page_width
-                                            ),
-                                            int(
-                                                (w_bbox["Top"] + w_bbox["Height"])
-                                                * page_height
-                                            ),
-                                        ),
-                                    }
+                                word_text = word_block.get("Text", "")
+                                word_confidence = round(
+                                    word_block.get("Confidence", 0.0), 0
                                 )
+                                original_bounding_box = (
+                                    int(w_bbox["Left"] * page_width),
+                                    int(w_bbox["Top"] * page_height),
+                                    int(
+                                        (w_bbox["Left"] + w_bbox["Width"]) * page_width
+                                    ),
+                                    int(
+                                        (w_bbox["Top"] + w_bbox["Height"]) * page_height
+                                    ),
+                                )
+
+                                # Conditionally split word into alphanumeric parts and punctuation
+                                if SPLIT_PUNCTUATION_FROM_WORDS:
+                                    split_words = split_word_with_punctuation(
+                                        word_text,
+                                        original_bounding_box,
+                                        word_confidence,
+                                    )
+                                else:
+                                    # Original behavior: keep word as-is
+                                    split_words = [
+                                        {
+                                            "text": word_text,
+                                            "confidence": word_confidence,
+                                            "bounding_box": original_bounding_box,
+                                        }
+                                    ]
+
+                                # Add all word parts to the line
+                                for split_word in split_words:
+                                    line_info["words"].append(split_word)
+
+                                # Handle handwriting - check if original word was handwriting
                                 if word_block.get("TextType") == "HANDWRITING":
-                                    rec_res = CustomImageRecognizerResult(
-                                        entity_type="HANDWRITING",
-                                        text=word_block.get("Text", ""),
-                                        score=round(
-                                            word_block.get("Confidence", 0.0), 0
-                                        ),
-                                        start=0,
-                                        end=len(word_block.get("Text", "")),
-                                        left=int(w_bbox["Left"] * page_width),
-                                        top=int(w_bbox["Top"] * page_height),
-                                        width=int(w_bbox["Width"] * page_width),
-                                        height=int(w_bbox["Height"] * page_height),
-                                    )
-                                    handwriting_recogniser_results.append(rec_res)
-                                    signature_or_handwriting_recogniser_results.append(
-                                        rec_res
-                                    )
+                                    # For handwriting, create recognition results for each split part
+                                    for split_word in split_words:
+                                        split_bbox = split_word["bounding_box"]
+                                        rec_res = CustomImageRecognizerResult(
+                                            entity_type="HANDWRITING",
+                                            text=split_word["text"],
+                                            score=split_word["confidence"],
+                                            start=0,
+                                            end=len(split_word["text"]),
+                                            left=split_bbox[0],
+                                            top=split_bbox[1],
+                                            width=split_bbox[2] - split_bbox[0],
+                                            height=split_bbox[3] - split_bbox[1],
+                                        )
+                                        handwriting_recogniser_results.append(rec_res)
+                                        signature_or_handwriting_recogniser_results.append(
+                                            rec_res
+                                        )
             lines_data.append(line_info)
 
         elif block_type == "SELECTION_ELEMENT":
