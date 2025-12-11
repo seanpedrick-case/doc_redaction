@@ -39,3 +39,4 @@ test/usage/*
 .ruff_cache/*
 model_cache/*
 sanitized_file/*
+src/doc_redaction.egg-info/*
