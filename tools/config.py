@@ -1083,6 +1083,13 @@ if INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION == "True":
 if INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION == "True":
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append("Extract tables")
 
+# Whether to split punctuation from words in Textract output
+# If True, punctuation marks (full stops, commas, quotes, brackets, etc.) will be separated
+# from alphanumeric characters and returned as separate words with separate bounding boxes.
+# If False, words will be returned as-is from Textract (original behavior).
+SPLIT_PUNCTUATION_FROM_WORDS = convert_string_to_boolean(
+    get_or_create_env_var("SPLIT_PUNCTUATION_FROM_WORDS", "False")
+)
 
 DEFAULT_SEARCH_QUERY = get_or_create_env_var("DEFAULT_SEARCH_QUERY", "")
 DEFAULT_FUZZY_SPELLING_MISTAKES_NUM = int(
