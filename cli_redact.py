@@ -1,11 +1,13 @@
 import argparse
 import os
+import re
 import time
 import uuid
+from datetime import datetime
 
 import pandas as pd
 
-from tools.aws_functions import download_file_from_s3
+from tools.aws_functions import download_file_from_s3, export_outputs_to_s3
 from tools.config import (
     ACCESS_LOGS_FOLDER,
     ALLOW_LIST_PATH,
@@ -46,9 +48,12 @@ from tools.config import (
     REMOVE_DUPLICATE_ROWS,
     RETURN_REDACTED_PDF,
     RUN_AWS_FUNCTIONS,
+    S3_OUTPUTS_BUCKET,
+    S3_OUTPUTS_FOLDER,
     S3_USAGE_LOGS_FOLDER,
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
+    SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
     SPACY_MODEL_PATH,
     TEXTRACT_JOBS_LOCAL_LOC,
@@ -68,6 +73,34 @@ def _generate_session_hash() -> str:
     return str(uuid.uuid4())[:8]
 
 
+def _sanitize_folder_name(folder_name: str, max_length: int = 50) -> str:
+    """
+    Sanitize folder name for S3 compatibility.
+
+    Replaces 'strange' characters (anything that's not alphanumeric, dash, underscore, or full stop)
+    with underscores, and limits the length to max_length characters.
+
+    Args:
+        folder_name: Original folder name to sanitize
+        max_length: Maximum length for the folder name (default: 50)
+
+    Returns:
+        Sanitized folder name
+    """
+    if not folder_name:
+        return folder_name
+
+    # Replace any character that's not alphanumeric, dash, underscore, or full stop with underscore
+    # This handles @, commas, exclamation marks, spaces, etc.
+    sanitized = re.sub(r"[^a-zA-Z0-9._-]", "_", folder_name)
+
+    # Limit length to max_length
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length]
+
+    return sanitized
+
+
 def get_username_and_folders(
     username: str = "",
     output_folder_textbox: str = OUTPUT_FOLDER,
@@ -85,22 +118,25 @@ def get_username_and_folders(
     else:
         out_session_hash = _generate_session_hash()
 
+    # Sanitize session hash for S3 compatibility (especially important for S3 folder paths)
+    sanitized_session_hash = _sanitize_folder_name(out_session_hash)
+
     if session_output_folder:
-        output_folder = output_folder_textbox + out_session_hash + "/"
-        input_folder = input_folder_textbox + out_session_hash + "/"
+        output_folder = output_folder_textbox + sanitized_session_hash + "/"
+        input_folder = input_folder_textbox + sanitized_session_hash + "/"
 
         textract_document_upload_input_folder = (
-            textract_document_upload_input_folder + "/" + out_session_hash
+            textract_document_upload_input_folder + "/" + sanitized_session_hash
         )
         textract_document_upload_output_folder = (
-            textract_document_upload_output_folder + "/" + out_session_hash
+            textract_document_upload_output_folder + "/" + sanitized_session_hash
         )
 
         s3_textract_document_logs_subfolder = (
-            s3_textract_document_logs_subfolder + "/" + out_session_hash
+            s3_textract_document_logs_subfolder + "/" + sanitized_session_hash
         )
         local_textract_document_logs_subfolder = (
-            local_textract_document_logs_subfolder + "/" + out_session_hash + "/"
+            local_textract_document_logs_subfolder + "/" + sanitized_session_hash + "/"
         )
 
     else:
@@ -194,6 +230,43 @@ def _download_s3_file_if_needed(
     except Exception as e:
         print(f"Error downloading file from S3 ({file_path}): {e}")
         raise Exception(f"Failed to download file from S3: {e}")
+
+
+def _build_s3_output_folder(
+    s3_outputs_folder: str,
+    session_hash: str,
+    save_to_user_folders: bool,
+) -> str:
+    """
+    Build the S3 output folder path with session hash and date suffix if needed.
+
+    Args:
+        s3_outputs_folder: Base S3 folder path
+        session_hash: Session hash/username
+        save_to_user_folders: Whether to append session hash to folder path
+
+    Returns:
+        Final S3 folder path with session hash and date suffix
+    """
+    if not s3_outputs_folder:
+        return ""
+
+    # Append session hash if save_to_user_folders is enabled
+    if save_to_user_folders and session_hash:
+        sanitized_session_hash = _sanitize_folder_name(session_hash)
+        s3_outputs_folder = (
+            s3_outputs_folder.rstrip("/") + "/" + sanitized_session_hash + "/"
+        )
+    else:
+        # Ensure trailing slash
+        if not s3_outputs_folder.endswith("/"):
+            s3_outputs_folder = s3_outputs_folder + "/"
+
+    # Append today's date (YYYYMMDD/)
+    today_suffix = datetime.now().strftime("%Y%m%d") + "/"
+    s3_outputs_folder = s3_outputs_folder.rstrip("/") + "/" + today_suffix
+
+    return s3_outputs_folder
 
 
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
@@ -385,6 +458,21 @@ python cli_redact.py --task textract --textract_action list
         "--s3_bucket",
         default=DOCUMENT_REDACTION_BUCKET,
         help="S3 bucket name for cloud operations.",
+    )
+    general_group.add_argument(
+        "--save_outputs_to_s3",
+        default=SAVE_OUTPUTS_TO_S3,
+        help="Upload output files (redacted PDFs, anonymized documents, etc.) to S3 after processing.",
+    )
+    general_group.add_argument(
+        "--s3_outputs_folder",
+        default=S3_OUTPUTS_FOLDER,
+        help="S3 folder (key prefix) for saving output files. If left blank, outputs will not be uploaded even if --save_outputs_to_s3 is enabled.",
+    )
+    general_group.add_argument(
+        "--s3_outputs_bucket",
+        default=S3_OUTPUTS_BUCKET,
+        help="S3 bucket name for output files (defaults to --s3_bucket if not specified).",
     )
     general_group.add_argument(
         "--do_initial_clean",
@@ -754,6 +842,8 @@ python cli_redact.py --task textract --textract_action list
         args.match_fuzzy_whole_phrase_bool = False
     # Convert save_to_user_folders to boolean (handles both string and boolean values)
     args.save_to_user_folders = convert_string_to_boolean(args.save_to_user_folders)
+    # Convert save_outputs_to_s3 to boolean (handles both string and boolean values)
+    args.save_outputs_to_s3 = convert_string_to_boolean(args.save_outputs_to_s3)
 
     # Combine extraction options
     extraction_options = (
@@ -813,6 +903,21 @@ python cli_redact.py --task textract --textract_action list
     print(
         f"Conducting analyses with user {args.username}. Outputs will be saved to {args.output_dir}."
     )
+
+    # Build S3 output folder path if S3 uploads are enabled
+    s3_output_folder = ""
+    if args.save_outputs_to_s3 and args.s3_outputs_folder:
+        s3_output_folder = _build_s3_output_folder(
+            s3_outputs_folder=args.s3_outputs_folder,
+            session_hash=session_hash,
+            save_to_user_folders=args.save_to_user_folders,
+        )
+        if s3_output_folder:
+            print(f"S3 output folder: s3://{args.s3_outputs_bucket}/{s3_output_folder}")
+    elif args.save_outputs_to_s3 and not args.s3_outputs_folder:
+        print(
+            "Warning: --save_outputs_to_s3 is enabled but --s3_outputs_folder is not set. Outputs will not be uploaded to S3."
+        )
 
     # --- Route to the Correct Workflow Based on Task and File Type ---
 
@@ -1006,6 +1111,28 @@ python cli_redact.py --task textract --textract_action list
                 if log_files:
                     print("Log Files:", sorted(log_files))
 
+                # Upload output files to S3 if enabled
+                if args.save_outputs_to_s3 and s3_output_folder and output_files:
+                    print("\n--- Uploading output files to S3 ---")
+                    try:
+                        # Get base file name for organizing outputs
+                        (
+                            os.path.splitext(os.path.basename(args.input_file[0]))[0]
+                            if args.input_file
+                            else None
+                        )
+                        export_outputs_to_s3(
+                            file_list_state=output_files,
+                            s3_output_folder_state_value=s3_output_folder,
+                            save_outputs_to_s3_flag=args.save_outputs_to_s3,
+                            base_file_state=(
+                                args.input_file[0] if args.input_file else None
+                            ),
+                            s3_bucket=args.s3_outputs_bucket,
+                        )
+                    except Exception as e:
+                        print(f"Warning: Could not upload output files to S3: {e}")
+
             except Exception as e:
                 print(
                     f"\nAn error occurred during the PDF/Image redaction workflow: {e}"
@@ -1115,6 +1242,22 @@ python cli_redact.py --task textract --textract_action list
                 if log_files:
                     print("Log Files:", sorted(log_files))
 
+                # Upload output files to S3 if enabled
+                if args.save_outputs_to_s3 and s3_output_folder and output_files:
+                    print("\n--- Uploading output files to S3 ---")
+                    try:
+                        export_outputs_to_s3(
+                            file_list_state=output_files,
+                            s3_output_folder_state_value=s3_output_folder,
+                            save_outputs_to_s3_flag=args.save_outputs_to_s3,
+                            base_file_state=(
+                                args.input_file[0] if args.input_file else None
+                            ),
+                            s3_bucket=args.s3_outputs_bucket,
+                        )
+                    except Exception as e:
+                        print(f"Warning: Could not upload output files to S3: {e}")
+
             except Exception as e:
                 print(
                     f"\nAn error occurred during the Word/Tabular anonymisation workflow: {e}"
@@ -1172,6 +1315,22 @@ python cli_redact.py --task textract --textract_action list
                     print(f"\nOutput files saved to: {args.output_dir}")
                     if output_paths:
                         print("Generated Files:", sorted(output_paths))
+
+                    # Upload output files to S3 if enabled
+                    if args.save_outputs_to_s3 and s3_output_folder and output_paths:
+                        print("\n--- Uploading output files to S3 ---")
+                        try:
+                            export_outputs_to_s3(
+                                file_list_state=output_paths,
+                                s3_output_folder_state_value=s3_output_folder,
+                                save_outputs_to_s3_flag=args.save_outputs_to_s3,
+                                base_file_state=(
+                                    args.input_file[0] if args.input_file else None
+                                ),
+                                s3_bucket=args.s3_outputs_bucket,
+                            )
+                        except Exception as e:
+                            print(f"Warning: Could not upload output files to S3: {e}")
 
                 else:
                     print(
@@ -1313,6 +1472,22 @@ python cli_redact.py --task textract --textract_action list
                     print(f"\nOutput files saved to: {args.output_dir}")
                     if output_paths:
                         print("Generated Files:", sorted(output_paths))
+
+                    # Upload output files to S3 if enabled
+                    if args.save_outputs_to_s3 and s3_output_folder and output_paths:
+                        print("\n--- Uploading output files to S3 ---")
+                        try:
+                            export_outputs_to_s3(
+                                file_list_state=output_paths,
+                                s3_output_folder_state_value=s3_output_folder,
+                                save_outputs_to_s3_flag=args.save_outputs_to_s3,
+                                base_file_state=(
+                                    args.input_file[0] if args.input_file else None
+                                ),
+                                s3_bucket=args.s3_outputs_bucket,
+                            )
+                        except Exception as e:
+                            print(f"Warning: Could not upload output files to S3: {e}")
 
                 else:
                     print(
