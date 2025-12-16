@@ -164,11 +164,27 @@ def process_single_page_for_image_conversion(
     if create_images is True:
         try:
             # Construct the full output directory path
-            image_output_dir = secure_join(os.getcwd(), input_folder)
-            out_path = secure_join(
+            # Normalize input_folder to ensure it's used as-is without sanitization
+            if os.path.isabs(input_folder):
+                image_output_dir = Path(input_folder).resolve()
+            else:
+                # Join with cwd, but ensure input_folder is used as-is
+                base_dir = Path(os.getcwd()).resolve()
+                # Use Path.joinpath which doesn't sanitize folder names
+                image_output_dir = base_dir / input_folder
+                image_output_dir = image_output_dir.resolve()
+
+            # Ensure the directory exists
+            image_output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Construct the output file path using secure_path_join for the filename only
+            from tools.secure_path_utils import secure_path_join
+
+            out_path = secure_path_join(
                 image_output_dir, f"{os.path.basename(pdf_path)}_{page_num}.png"
             )
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            # Convert Path object to string immediately to avoid downstream type issues
+            out_path = str(out_path)
 
             if os.path.exists(out_path):
                 # Load existing image
@@ -306,7 +322,8 @@ def convert_pdf_to_images(
     widths = [result[2] for result in results]
     heights = [result[3] for result in results]
 
-    # print("PDF has been converted to images.")
+    print("PDF has been converted to images.")
+    print("images:", images)
     return images, widths, heights, results
 
 
