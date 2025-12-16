@@ -11,7 +11,7 @@ short_description: OCR / redact PDF documents and tabular data
 ---
 # Document redaction
 
-version: 1.6.5
+version: 1.6.6
 
 Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
