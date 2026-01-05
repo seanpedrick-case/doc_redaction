@@ -300,7 +300,10 @@ async def lifespan(app: FastAPI):
 
 
 # 3. Initialize the App with the lifespan parameter
-app = FastAPI(lifespan=lifespan)
+# Clean the ROOT_PATH for FastAPI
+# Ensure it starts with / and has no trailing /
+CLEAN_ROOT = f"/{FASTAPI_ROOT_PATH.strip('/')}" if FASTAPI_ROOT_PATH.strip("/") else ""
+app = FastAPI(lifespan=lifespan, root_path=CLEAN_ROOT)
 
 # Added to pass lint check, no effect
 spaces.annotations
@@ -521,16 +524,26 @@ div[class*="tab-nav"] button {
 }
 """
 
-# Create the gradio interface
-blocks = gr.Blocks(
-    theme=gr.themes.Default(primary_hue="blue"),
-    head=head_html,
-    css=css,
-    analytics_enabled=False,
-    title="Document Redaction App",
-    delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
-    fill_width=True,
-)
+# Create the gradio interface. If running in FastAPI mode, we don't need the head_html and base_href.
+if RUN_FASTAPI:
+    blocks = gr.Blocks(
+        theme=gr.themes.Default(primary_hue="blue"),
+        css=css,
+        analytics_enabled=False,
+        title="Document Redaction App",
+        delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
+        fill_width=True,
+    )
+else:
+    blocks = gr.Blocks(
+        theme=gr.themes.Default(primary_hue="blue"),
+        head=head_html,
+        css=css,
+        analytics_enabled=False,
+        title="Document Redaction App",
+        delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
+        fill_width=True,
+    )
 
 with blocks:
 
@@ -6959,7 +6972,7 @@ with blocks:
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
-                path=FASTAPI_ROOT_PATH,
+                path="",
                 favicon_path=Path(FAVICON_PATH),
                 mcp_server=RUN_MCP_SERVER,
             )

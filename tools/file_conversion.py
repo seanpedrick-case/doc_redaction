@@ -323,7 +323,6 @@ def convert_pdf_to_images(
     heights = [result[3] for result in results]
 
     print("PDF has been converted to images.")
-    print("images:", images)
     return images, widths, heights, results
 
 
