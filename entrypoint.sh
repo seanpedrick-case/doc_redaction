@@ -26,7 +26,7 @@ else
             --host $GRADIO_SERVER_NAME \
             --port $GRADIO_SERVER_PORT \
             --proxy-headers \
-            --forwarded-allow-ips *
+            --forwarded-allow-ips "*"
     else
         echo "Starting in Gradio mode..."
         exec python app.py
