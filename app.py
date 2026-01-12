@@ -505,7 +505,9 @@ base_href = f"{clean_path}/" if clean_path != "/" else "/"
 if ROOT_PATH:
     print(f"✅ Setting HTML base href for Gradio to: '{base_href}'")
 
-head_html = f"<base href='{base_href}'>"
+head_html = f"""<base href='{base_href}'>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/iframe-resizer/4.3.1/iframeResizer.contentWindow.min.js" integrity="sha256-62pj+jS8t+leByFOFwjiY0T92YlWwowYgHnFRklgv0M=" crossorigin="anonymous"></script>"""
 
 css = """
 /* Target tab navigation buttons only - not buttons inside tab content */
@@ -528,6 +530,7 @@ div[class*="tab-nav"] button {
 if RUN_FASTAPI:
     blocks = gr.Blocks(
         theme=gr.themes.Default(primary_hue="blue"),
+        head=head_html,
         css=css,
         analytics_enabled=False,
         title="Document Redaction App",
