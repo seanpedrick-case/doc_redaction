@@ -51,3 +51,7 @@ pytest-cov>=4.0.0
 --extra-index-url https://download.pytorch.org/whl/cu129
 torch>=2.5.1,<=2.8.0
 torchvision
+
+# --- LLM libraries ---
+google-genai>=1.52.0
+openai>=2.8.1

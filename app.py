@@ -149,6 +149,7 @@ from tools.config import (
     SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
     SHOW_LANGUAGE_SELECTION,
+    SHOW_LLM_PII_DETECTION_OPTIONS,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     SPACY_MODEL_PATH,
@@ -526,7 +527,7 @@ div[class*="tab-nav"] button {
 }
 """
 
-# Create the gradio interface. If running in FastAPI mode, we don't need the head_html and base_href.
+# Create the gradio interface.
 if RUN_FASTAPI:
     blocks = gr.Blocks(
         theme=gr.themes.Default(primary_hue="blue"),
@@ -2671,6 +2672,21 @@ with blocks:
                         value=True,
                     )
 
+            with gr.Accordion(
+                "LLM Custom Instructions (for LLM-based PII detection only)", open=False
+            ):
+                custom_llm_instructions_textbox = gr.Textbox(
+                    label="Custom instructions for LLM-based entity detection",
+                    placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'only redact email addresses, ignore phone numbers'",
+                    value="",
+                    lines=3,
+                    visible=SHOW_LLM_PII_DETECTION_OPTIONS,
+                )
+                gr.Markdown(
+                    "**Note:** This only applies when using 'LLM (AWS Bedrock)' as the PII identification method. "
+                    "These instructions will be included in the prompt sent to the LLM to guide its entity detection behavior."
+                )
+
             with gr.Accordion("Redact only selected pages", open=False):
                 with gr.Row():
                     page_min.render()
@@ -3139,6 +3155,7 @@ with blocks:
             local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
+            custom_llm_instructions_textbox,
         ],
         outputs=[
             redaction_output_summary_textbox,

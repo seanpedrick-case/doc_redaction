@@ -32,6 +32,10 @@ from tools.config import (
     INFERENCE_SERVER_API_URL,
     INFERENCE_SERVER_MODEL_NAME,
     INFERENCE_SERVER_TIMEOUT,
+    LLM_MODEL_CHOICE,
+    LLM_PII_MAX_TOKENS,
+    LLM_PII_OPTION,
+    LLM_PII_TEMPERATURE,
     LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
@@ -75,6 +79,9 @@ from tools.run_vlm import (
 from tools.secure_path_utils import validate_folder_containment
 from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
+
+DEFAULT_NEW_BATCH_CHAR_COUNT = 1000
+DEFAULT_NEW_BATCH_WORD_COUNT = 200
 
 if LOAD_PADDLE_AT_STARTUP:
     # Set PaddleOCR font path BEFORE importing to prevent font downloads during import
@@ -4964,6 +4971,9 @@ class CustomImageAnalyzerEngine:
         custom_entities: List[str] = custom_entities,
         language: Optional[str] = DEFAULT_LANGUAGE,
         nlp_analyser: AnalyzerEngine = None,
+        bedrock_runtime=None,
+        model_choice: str = LLM_MODEL_CHOICE,
+        custom_llm_instructions: str = "",
         **text_analyzer_kwargs,
     ) -> List[CustomImageRecognizerResult]:
 
@@ -5063,7 +5073,10 @@ class CustomImageAnalyzerEngine:
                 for word_idx, word in enumerate(words):
                     new_batch_char_count = len(current_batch) + len(word) + 1
 
-                    if batch_word_count >= 50 or new_batch_char_count >= 200:
+                    if (
+                        batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                        or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                    ):
                         # Process current batch
                         all_text_line_results = do_aws_comprehend_call(
                             current_batch,
@@ -5115,6 +5128,154 @@ class CustomImageAnalyzerEngine:
                     text_analyzer_kwargs.get("allow_list", []),
                     chosen_redact_comprehend_entities,
                     all_text_line_results,
+                )
+                comprehend_query_number += 1
+
+        elif pii_identification_method == LLM_PII_OPTION:
+            # LLM-based entity detection using AWS Bedrock
+            try:
+                from tools.llm_entity_detection import do_llm_entity_detection_call
+            except ImportError as e:
+                print(f"Error importing LLM entity detection: {e}")
+                raise ImportError(
+                    "LLM entity detection not available. Please ensure llm_funcs.py is accessible."
+                )
+
+            if not bedrock_runtime:
+                raise ValueError(
+                    "bedrock_runtime is required when using LLM-based PII detection"
+                )
+
+            # Handle custom entities first (same as AWS Comprehend)
+            if custom_entities:
+                custom_redact_entities = [
+                    entity
+                    for entity in chosen_redact_comprehend_entities
+                    if entity in custom_entities
+                ]
+
+                if custom_redact_entities:
+                    # Filter entities to only include those supported by the language
+                    language_supported_entities = filter_entities_for_language(
+                        custom_redact_entities, valid_language_entities, language
+                    )
+
+                    if language_supported_entities:
+                        text_analyzer_kwargs["entities"] = language_supported_entities
+
+                    page_analyser_result = nlp_analyser.analyze(
+                        text=page_text, language=language, **text_analyzer_kwargs
+                    )
+                    all_text_line_results = map_back_entity_results(
+                        page_analyser_result, page_text_mapping, all_text_line_results
+                    )
+
+            # Process text in batches for LLM (same batching logic as AWS Comprehend)
+            current_batch = ""
+            current_batch_mapping = list()
+            batch_char_count = 0
+            batch_word_count = 0
+
+            for i, text_line in enumerate(line_level_ocr_results):
+                words = text_line.text.split()
+                word_start_positions = list()
+                current_pos = 0
+
+                for word in words:
+                    word_start_positions.append(current_pos)
+                    current_pos += len(word) + 1
+
+                for word_idx, word in enumerate(words):
+                    new_batch_char_count = len(current_batch) + len(word) + 1
+
+                    if (
+                        batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                        or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                    ):
+
+                        # Remove 'CUSTOM' entities from the chosen_redact_comprehend_entities list
+                        llm_chosen_redact_comprehend_entities = [
+                            entity
+                            for entity in chosen_redact_comprehend_entities
+                            if entity != "CUSTOM"
+                        ]
+                        # Process current batch
+                        all_text_line_results = do_llm_entity_detection_call(
+                            current_batch,
+                            current_batch_mapping,
+                            bedrock_runtime,
+                            aws_language,
+                            text_analyzer_kwargs.get("allow_list", []),
+                            llm_chosen_redact_comprehend_entities,
+                            all_text_line_results,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=getattr(self, "output_folder", None),
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = word
+                        batch_word_count = 1
+                        batch_char_count = len(word)
+                        current_batch_mapping = [
+                            (0, i, text_line, None, word_start_positions[word_idx])
+                        ]
+                    else:
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+
+            # Process final batch if any
+            if current_batch:
+                # Remove 'CUSTOM' entities from the chosen_redact_comprehend_entities list
+                llm_chosen_redact_comprehend_entities = [
+                    entity
+                    for entity in chosen_redact_comprehend_entities
+                    if entity != "CUSTOM"
+                ]
+                all_text_line_results = do_llm_entity_detection_call(
+                    current_batch,
+                    current_batch_mapping,
+                    bedrock_runtime,
+                    aws_language,
+                    text_analyzer_kwargs.get("allow_list", []),
+                    llm_chosen_redact_comprehend_entities,
+                    all_text_line_results,
+                    model_choice=model_choice,
+                    temperature=text_analyzer_kwargs.get(
+                        "temperature", LLM_PII_TEMPERATURE
+                    ),
+                    max_tokens=text_analyzer_kwargs.get(
+                        "max_tokens", LLM_PII_MAX_TOKENS
+                    ),
+                    output_folder=getattr(self, "output_folder", None),
+                    batch_number=comprehend_query_number + 1,
+                    custom_instructions=custom_llm_instructions,
                 )
                 comprehend_query_number += 1
 

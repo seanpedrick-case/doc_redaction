@@ -50,6 +50,7 @@ from tools.config import (
     IMAGES_DPI,
     INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
     INPUT_FOLDER,
+    LLM_PII_OPTION,
     LOAD_TRUNCATED_IMAGES,
     MAX_DOC_PAGES,
     MAX_IMAGE_PIXELS,
@@ -281,6 +282,7 @@ def choose_and_run_redactor(
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
+    custom_llm_instructions: str = "",
     progress=gr.Progress(track_tqdm=True),
 ):
     """
@@ -844,6 +846,40 @@ def choose_and_run_redactor(
     else:
         comprehend_client = ""
 
+    # Try to connect to AWS Bedrock Runtime Client if using LLM-based PII detection
+    if pii_identification_method == LLM_PII_OPTION:
+        if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        elif aws_access_key_textbox and aws_secret_key_textbox:
+            print(
+                "Connecting to Bedrock using AWS access key and secret keys from user input."
+            )
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=aws_access_key_textbox,
+                aws_secret_access_key=aws_secret_key_textbox,
+                region_name=AWS_REGION,
+            )
+        elif RUN_AWS_FUNCTIONS:
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+            print("Getting Bedrock credentials from environment variables")
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=AWS_ACCESS_KEY,
+                aws_secret_access_key=AWS_SECRET_KEY,
+                region_name=AWS_REGION,
+            )
+        else:
+            bedrock_runtime = None
+            out_message = "Cannot connect to AWS Bedrock service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
+            print(out_message)
+            raise Exception(out_message)
+    else:
+        bedrock_runtime = None
+
     # Try to connect to AWS Textract Client if using that text extraction method
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
@@ -1054,6 +1090,7 @@ def choose_and_run_redactor(
                 pii_identification_method,
                 comprehend_query_number,
                 comprehend_client,
+                bedrock_runtime,
                 textract_client,
                 custom_recogniser_word_list_flat,
                 redact_whole_page_list_flat,
@@ -1070,6 +1107,7 @@ def choose_and_run_redactor(
                 nlp_analyser=nlp_analyser,
                 output_folder=output_folder,
                 input_folder=input_folder,
+                custom_llm_instructions=custom_llm_instructions,
             )
 
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
@@ -3139,6 +3177,7 @@ def redact_image_pdf(
     pii_identification_method: str = "Local",
     comprehend_query_number: int = 0,
     comprehend_client: str = "",
+    bedrock_runtime=None,
     textract_client: str = "",
     in_deny_list: List[str] = list(),
     redact_whole_page_list: List[str] = list(),
@@ -3157,6 +3196,7 @@ def redact_image_pdf(
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     output_folder: str = OUTPUT_FOLDER,
     input_folder: str = INPUT_FOLDER,
+    custom_llm_instructions: str = "",
     progress=Progress(track_tqdm=True),
 ):
     """
@@ -3586,7 +3626,49 @@ def redact_image_pdf(
                     )
 
                 else:
-                    page_word_level_ocr_results = image_analyser.perform_ocr(image_path)
+                    # Check if image_path is a placeholder and create the actual image if needed
+                    actual_image_path = image_path
+                    if isinstance(image_path, str) and (
+                        "placeholder_image" in image_path
+                        or "image_placeholder" in image_path
+                    ):
+                        try:
+                            # Use the current page number (page_no is 0-indexed)
+                            # Create the actual image using process_single_page_for_image_conversion
+                            _, created_image_path, _, _ = (
+                                process_single_page_for_image_conversion(
+                                    pdf_path=file_path,
+                                    page_num=page_no,  # page_no is already 0-indexed
+                                    image_dpi=IMAGES_DPI,
+                                    create_images=True,
+                                    input_folder=input_folder,
+                                )
+                            )
+
+                            # Use the created image path if it exists
+                            if os.path.exists(created_image_path):
+                                actual_image_path = created_image_path
+                                # Update image_path in page_sizes_df for future reference
+                                if not page_sizes_df.empty:
+                                    page_sizes_df.loc[
+                                        page_sizes_df["page"] == (page_no + 1),
+                                        "image_path",
+                                    ] = created_image_path
+                                print(
+                                    f"Created actual image for page {page_no + 1} from placeholder: {created_image_path}"
+                                )
+                            else:
+                                print(
+                                    f"Warning: Failed to create image for page {page_no + 1} from placeholder"
+                                )
+                        except Exception as e:
+                            print(f"Error creating image from placeholder for OCR: {e}")
+                            # Fall back to using the placeholder path (will likely fail, but preserves original behavior)
+                            actual_image_path = image_path
+
+                    page_word_level_ocr_results = image_analyser.perform_ocr(
+                        actual_image_path
+                    )
 
                     (
                         page_line_level_ocr_results,
@@ -4091,11 +4173,13 @@ def redact_image_pdf(
                                 chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
                                 pii_identification_method=pii_identification_method,
                                 comprehend_client=comprehend_client,
+                                bedrock_runtime=bedrock_runtime,
                                 custom_entities=chosen_redact_entities,
                                 language=language,
                                 allow_list=allow_list,
                                 score_threshold=score_threshold,
                                 nlp_analyser=nlp_analyser,
+                                custom_llm_instructions=custom_llm_instructions,
                             )
                         )
 
