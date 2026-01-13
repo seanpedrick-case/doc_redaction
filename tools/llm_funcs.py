@@ -1680,6 +1680,7 @@ def send_request(
                     gen_config,
                     api_url=api_url,
                     model_name=model_choice,
+                    use_llama_swap=USE_LLAMA_SWAP,
                 )
 
                 break

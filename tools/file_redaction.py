@@ -50,6 +50,7 @@ from tools.config import (
     IMAGES_DPI,
     INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
     INPUT_FOLDER,
+    LLM_MODEL_CHOICE,
     LLM_PII_OPTION,
     LOAD_TRUNCATED_IMAGES,
     MAX_DOC_PAGES,
@@ -235,7 +236,8 @@ def choose_and_run_redactor(
     pdf_image_file_paths: List[str],
     chosen_redact_entities: List[str],
     chosen_redact_comprehend_entities: List[str],
-    text_extraction_method: str,
+    chosen_llm_entities: List[str] = None,
+    text_extraction_method: str = None,
     in_allow_list: List[str] = list(),
     in_deny_list: List[str] = list(),
     redact_whole_page_list: List[str] = list(),
@@ -279,10 +281,10 @@ def choose_and_run_redactor(
     chosen_local_ocr_model: str = CHOSEN_LOCAL_OCR_MODEL,
     language: str = DEFAULT_LANGUAGE,
     ocr_review_files: list = list(),
+    custom_llm_instructions: str = "",
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
-    custom_llm_instructions: str = "",
     progress=gr.Progress(track_tqdm=True),
 ):
     """
@@ -338,6 +340,7 @@ def choose_and_run_redactor(
     - language (str, optional): The language of the text in the files. Defaults to English.
     - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
     - ocr_review_files (list, optional): A list of OCR review files to be used for the redaction process. Defaults to an empty list.
+    - custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to an empty string.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - RETURN_REDACTED_PDF (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
@@ -353,6 +356,13 @@ def choose_and_run_redactor(
     page_break_return = False
     blank_request_metadata = list()
     custom_recogniser_word_list_flat = list()
+    # Ensure all_request_metadata_str is a string (handle case where list might be passed)
+    if isinstance(all_request_metadata_str, list):
+        all_request_metadata_str = (
+            "\n".join(str(item) for item in all_request_metadata_str)
+            if all_request_metadata_str
+            else ""
+        )
     all_textract_request_metadata = (
         all_request_metadata_str.split("\n") if all_request_metadata_str else []
     )
@@ -374,6 +384,11 @@ def choose_and_run_redactor(
         print("Performing local OCR with" + chosen_local_ocr_model + " model.")
     if text_extraction_method == "Local text":
         text_extraction_method = SELECTABLE_TEXT_EXTRACT_OPTION
+
+    # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+    if chosen_llm_entities is None:
+        chosen_llm_entities = chosen_redact_comprehend_entities
+
     if pii_identification_method == "None":
         pii_identification_method = NO_REDACTION_PII_OPTION
 
@@ -1076,6 +1091,7 @@ def choose_and_run_redactor(
                 chosen_redact_entities,
                 chosen_redact_comprehend_entities,
                 in_allow_list_flat,
+                chosen_llm_entities,
                 page_min,
                 page_max,
                 text_extraction_method,
@@ -1164,6 +1180,10 @@ def choose_and_run_redactor(
                 text_extraction_only,
                 output_folder=output_folder,
                 input_folder=input_folder,
+                bedrock_runtime=bedrock_runtime,
+                model_choice=LLM_MODEL_CHOICE,
+                custom_llm_instructions=custom_llm_instructions,
+                chosen_llm_entities=chosen_llm_entities,
             )
         else:
             out_message = "No redaction method selected"
@@ -3142,6 +3162,7 @@ def redact_image_pdf(
     chosen_redact_entities: List[str],
     chosen_redact_comprehend_entities: List[str],
     allow_list: List[str] = None,
+    chosen_llm_entities: List[str] = None,
     page_min: int = 0,
     page_max: int = 0,
     text_extraction_method: str = TESSERACT_TEXT_EXTRACT_OPTION,
@@ -3243,6 +3264,10 @@ def redact_image_pdf(
     - input_folder (str, optional): The folder for file inputs.
     The function returns a redacted PDF document along with processing output objects.
     """
+
+    # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+    if chosen_llm_entities is None:
+        chosen_llm_entities = chosen_redact_comprehend_entities
 
     tic = time.perf_counter()
 
@@ -4171,6 +4196,7 @@ def redact_image_pdf(
                                 page_line_level_ocr_results["results"],
                                 page_line_level_ocr_results_with_words["results"],
                                 chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+                                chosen_llm_entities=chosen_llm_entities,
                                 pii_identification_method=pii_identification_method,
                                 comprehend_client=comprehend_client,
                                 bedrock_runtime=bedrock_runtime,
@@ -4180,6 +4206,8 @@ def redact_image_pdf(
                                 score_threshold=score_threshold,
                                 nlp_analyser=nlp_analyser,
                                 custom_llm_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=int(reported_page_number),
                             )
                         )
 
@@ -5002,6 +5030,10 @@ def redact_text_pdf(
     max_time: int = int(MAX_TIME_VALUE),
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     progress: Progress = Progress(track_tqdm=True),  # Progress tracking object
+    bedrock_runtime=None,
+    model_choice: str = LLM_MODEL_CHOICE,
+    custom_llm_instructions: str = "",
+    chosen_llm_entities: List[str] = None,
 ):
     """
     Redact chosen entities from a PDF that is made up of multiple pages that are not images.
@@ -5085,7 +5117,7 @@ def redact_text_pdf(
     pikepdf_pdf = Pdf.open(file_path)
     number_of_pages = len(pikepdf_pdf.pages)
 
-    # file_name = get_file_name_without_type(file_path)
+    file_name = get_file_name_without_type(file_path)
 
     if not all_page_line_level_ocr_results_with_words:
         all_page_line_level_ocr_results_with_words = list()
@@ -5271,6 +5303,13 @@ def redact_text_pdf(
                             score_threshold,
                             custom_entities,
                             comprehend_query_number,
+                            bedrock_runtime=bedrock_runtime,
+                            model_choice=model_choice,
+                            custom_llm_instructions=custom_llm_instructions,
+                            chosen_llm_entities=chosen_llm_entities,
+                            output_folder=output_folder,
+                            file_name=file_name,
+                            page_number=int(reported_page_number),
                         )
 
                         # Annotate redactions on page

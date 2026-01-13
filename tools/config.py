@@ -1420,6 +1420,43 @@ LLM_PII_NUMBER_OF_RETRY_ATTEMPTS = int(
 )
 LLM_PII_TIMEOUT_WAIT = int(get_or_create_env_var("LLM_PII_TIMEOUT_WAIT", "5"))
 
+# LLM inference method for PII detection (similar to VLM options)
+# Options: "aws-bedrock", "local", "inference-server", "azure-openai", "gemini"
+CHOSEN_LLM_PII_INFERENCE_METHOD = get_or_create_env_var(
+    "CHOSEN_LLM_PII_INFERENCE_METHOD", "aws-bedrock"
+)  # Default to AWS Bedrock for backward compatibility
+
+SHOW_LOCAL_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOCAL_LLM_PII_OPTIONS", "False")
+)  # Whether to show local LLM options for PII detection
+
+SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS", "False")
+)  # Whether to show inference-server options for PII detection
+
+SHOW_AZURE_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AZURE_LLM_PII_OPTIONS", "False")
+)  # Whether to show Azure/OpenAI options for PII detection
+
+SHOW_GEMINI_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_GEMINI_LLM_PII_OPTIONS", "False")
+)  # Whether to show Gemini options for PII detection
+
+# Build list of available LLM inference methods for PII detection
+LLM_PII_INFERENCE_METHODS = ["aws-bedrock"]  # Always available
+
+if SHOW_LOCAL_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("local")
+
+if SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("inference-server")
+
+if SHOW_AZURE_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("azure-openai")
+
+if SHOW_GEMINI_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("gemini")
+
 # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
 if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "Reasoning: low")
@@ -1438,6 +1475,17 @@ CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var(
 FULL_COMPREHEND_ENTITY_LIST = get_or_create_env_var(
     "FULL_COMPREHEND_ENTITY_LIST",
     "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE','SSN','DATE_TIME','PASSPORT_NUMBER','DRIVER_ID','URL','AGE','USERNAME','PASSWORD','AWS_ACCESS_KEY','AWS_SECRET_KEY','IP_ADDRESS','MAC_ADDRESS','ALL','LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER','CA_SOCIAL_INSURANCE_NUMBER','US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER','UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER','IN_PERMANENT_ACCOUNT_NUMBER','IN_NREGA','INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER','CA_HEALTH_NUMBER','IN_AADHAAR','IN_VOTER_NUMBER', 'CUSTOM_FUZZY']",
+)
+
+FULL_LLM_ENTITY_LIST = get_or_create_env_var(
+    "FULL_LLM_ENTITY_LIST",
+    "['EMAIL','ADDRESS','NAME','PHONE', 'DATE_TIME', 'URL', 'IP_ADDRESS', 'MAC_ADDRESS', 'AGE', 'BANK_ACCOUNT_NUMBER', 'PASSPORT_NUMBER', 'CA_HEALTH_NUMBER', 'CUSTOM', 'CUSTOM_FUZZY']",
+)
+
+# Entities for LLM-based PII redaction option
+CHOSEN_LLM_ENTITIES = get_or_create_env_var(
+    "CHOSEN_LLM_ENTITIES",
+    "['EMAIL','ADDRESS','NAME','PHONE']",
 )
 
 
@@ -1984,6 +2032,10 @@ if CHOSEN_COMPREHEND_ENTITIES:
     CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
 if FULL_COMPREHEND_ENTITY_LIST:
     FULL_COMPREHEND_ENTITY_LIST = _get_env_list(FULL_COMPREHEND_ENTITY_LIST)
+if FULL_LLM_ENTITY_LIST:
+    FULL_LLM_ENTITY_LIST = _get_env_list(FULL_LLM_ENTITY_LIST)
+if CHOSEN_LLM_ENTITIES:
+    CHOSEN_LLM_ENTITIES = _get_env_list(CHOSEN_LLM_ENTITIES)
 if CHOSEN_REDACT_ENTITIES:
     CHOSEN_REDACT_ENTITIES = _get_env_list(CHOSEN_REDACT_ENTITIES)
 if FULL_ENTITY_LIST:

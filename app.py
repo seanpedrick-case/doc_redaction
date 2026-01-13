@@ -28,6 +28,7 @@ from tools.config import (
     AWS_REGION,
     AWS_SECRET_KEY,
     CHOSEN_COMPREHEND_ENTITIES,
+    CHOSEN_LLM_ENTITIES,
     CHOSEN_LOCAL_MODEL_INTRO_TEXT,
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
@@ -103,6 +104,7 @@ from tools.config import (
     FILE_INPUT_HEIGHT,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
+    FULL_LLM_ENTITY_LIST,
     GET_COST_CODES,
     GET_DEFAULT_ALLOW_LIST,
     GRADIO_SERVER_NAME,
@@ -268,6 +270,7 @@ ensure_folder_exists(USAGE_LOGS_FOLDER)
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
+# CHOSEN_LLM_ENTITIES.extend(custom_entities)
 
 ###
 # Load in FastAPI app
@@ -359,6 +362,13 @@ in_redact_comprehend_entities = gr.Dropdown(
     choices=FULL_COMPREHEND_ENTITY_LIST,
     multiselect=True,
     label="AWS Comprehend PII identification model (click empty space in box for full list)",
+)
+
+in_redact_llm_entities = gr.Dropdown(
+    value=CHOSEN_LLM_ENTITIES,
+    choices=FULL_LLM_ENTITY_LIST,
+    multiselect=True,
+    label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
 )
 
 in_deny_list = gr.File(
@@ -2656,8 +2666,16 @@ with blocks:
                             )
 
             with gr.Accordion("Select entity types to redact", open=True):
-                in_redact_entities.render()
-                in_redact_comprehend_entities.render()
+                with gr.Accordion(
+                    "Local PII identification model entities", open=False
+                ):
+                    in_redact_entities.render()
+                with gr.Accordion(
+                    "AWS Comprehend PII identification model entities", open=False
+                ):
+                    in_redact_comprehend_entities.render()
+                with gr.Accordion("LLM PII identification model entities", open=False):
+                    in_redact_llm_entities.render()
 
                 with gr.Row():
                     max_fuzzy_spelling_mistakes_num = gr.Number(
@@ -3111,6 +3129,7 @@ with blocks:
             images_pdf_state,
             in_redact_entities,
             in_redact_comprehend_entities,
+            in_redact_llm_entities,
             text_extract_method_radio,
             in_allow_list_state,
             in_deny_list_state,
@@ -3245,6 +3264,7 @@ with blocks:
             images_pdf_state,
             in_redact_entities,
             in_redact_comprehend_entities,
+            in_redact_llm_entities,
             text_extract_method_radio,
             in_allow_list_state,
             in_deny_list_state,
@@ -3607,6 +3627,7 @@ with blocks:
             images_pdf_state,
             in_redact_entities,
             in_redact_comprehend_entities,
+            in_redact_llm_entities,
             textract_only_method_drop,
             in_allow_list_state,
             in_deny_list_state,

@@ -54,6 +54,7 @@ from tools.config import (
     SELECTED_MODEL,
     TESSERACT_SEGMENTATION_LEVEL,
     TESSERACT_WORD_LEVEL_OCR,
+    USE_LLAMA_SWAP,
     VLM_MAX_DPI,
     VLM_MAX_IMAGE_SIZE,
 )
@@ -80,8 +81,20 @@ from tools.secure_path_utils import validate_folder_containment
 from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
 
-DEFAULT_NEW_BATCH_CHAR_COUNT = 1000
-DEFAULT_NEW_BATCH_WORD_COUNT = 200
+DEFAULT_NEW_BATCH_CHAR_COUNT = 2000
+DEFAULT_NEW_BATCH_WORD_COUNT = 400
+
+# Phrase-ending punctuation marks
+PHRASE_ENDING_PUNCTUATION = {".", "!", "?", ";", ":"}
+
+
+def ends_with_phrase_punctuation(word: str) -> bool:
+    """Check if a word ends with phrase-ending punctuation."""
+    if not word:
+        return False
+    # Check if the word ends with any phrase-ending punctuation
+    return any(word.rstrip().endswith(punct) for punct in PHRASE_ENDING_PUNCTUATION)
+
 
 if LOAD_PADDLE_AT_STARTUP:
     # Set PaddleOCR font path BEFORE importing to prevent font downloads during import
@@ -702,6 +715,7 @@ def _call_inference_server_vlm_api(
     do_sample: bool = None,
     min_p: float = None,
     presence_penalty: float = None,
+    use_llama_swap: bool = USE_LLAMA_SWAP,
 ) -> str:
     """
     Calls a inference-server API endpoint with an image and text prompt.
@@ -726,6 +740,8 @@ def _call_inference_server_vlm_api(
             If False, use greedy decoding (do_sample=False).
         min_p: Minimum probability threshold for token sampling.
         presence_penalty: Penalty for token presence.
+        use_llama_swap: Whether to use llama-swap for the model (defaults to USE_LLAMA_SWAP from config).
+            If True and model_name is provided, the model name will be included in the payload.
     Returns:
         str: The generated text response from the model
 
@@ -767,8 +783,8 @@ def _call_inference_server_vlm_api(
         "stream": stream,
     }
 
-    # Add optional parameters if provided
-    if model_name:
+    # Add model name if specified and use llama-swap
+    if model_name and use_llama_swap:
         payload["model"] = model_name
     if do_sample is not None:
         payload["do_sample"] = do_sample
@@ -1099,6 +1115,7 @@ def _inference_server_ocr_predict(
                     do_sample=model_default_do_sample,
                     min_p=model_default_min_p,
                     presence_penalty=model_default_presence_penalty,
+                    use_llama_swap=USE_LLAMA_SWAP,
                 )
                 # If we get here, the API call succeeded
                 break
@@ -2103,6 +2120,7 @@ def _inference_server_page_ocr_predict(
             do_sample=model_default_do_sample,
             min_p=model_default_min_p,
             presence_penalty=model_default_presence_penalty,
+            use_llama_swap=USE_LLAMA_SWAP,
         )
 
         # Check if extracted_text is None or empty
@@ -4974,6 +4992,9 @@ class CustomImageAnalyzerEngine:
         bedrock_runtime=None,
         model_choice: str = LLM_MODEL_CHOICE,
         custom_llm_instructions: str = "",
+        chosen_llm_entities: List[str] = None,
+        file_name: Optional[str] = None,
+        page_number: Optional[int] = None,
         **text_analyzer_kwargs,
     ) -> List[CustomImageRecognizerResult]:
 
@@ -4981,6 +5002,10 @@ class CustomImageAnalyzerEngine:
         page_text_mapping = list()
         all_text_line_results = list()
         comprehend_query_number = 0
+
+        # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+        if chosen_llm_entities is None:
+            chosen_llm_entities = chosen_redact_comprehend_entities
 
         if not nlp_analyser:
             nlp_analyser = self.analyzer_engine
@@ -5070,33 +5095,19 @@ class CustomImageAnalyzerEngine:
                     word_start_positions.append(current_pos)
                     current_pos += len(word) + 1
 
-                for word_idx, word in enumerate(words):
+                word_idx = 0
+                while word_idx < len(words):
+                    word = words[word_idx]
                     new_batch_char_count = len(current_batch) + len(word) + 1
 
-                    if (
+                    # Check if we've hit the limit
+                    limit_reached = (
                         batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
                         or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
-                    ):
-                        # Process current batch
-                        all_text_line_results = do_aws_comprehend_call(
-                            current_batch,
-                            current_batch_mapping,
-                            comprehend_client,
-                            aws_language,
-                            text_analyzer_kwargs.get("allow_list", []),
-                            chosen_redact_comprehend_entities,
-                            all_text_line_results,
-                        )
-                        comprehend_query_number += 1
+                    )
 
-                        # Reset batch
-                        current_batch = word
-                        batch_word_count = 1
-                        batch_char_count = len(word)
-                        current_batch_mapping = [
-                            (0, i, text_line, None, word_start_positions[word_idx])
-                        ]
-                    else:
+                    if limit_reached:
+                        # Add the current word to the batch first
                         if current_batch:
                             current_batch += " "
                             batch_char_count += 1
@@ -5117,6 +5128,115 @@ class CustomImageAnalyzerEngine:
                                     word_start_positions[word_idx],
                                 )
                             )
+
+                        # Check if current word ends with phrase punctuation
+                        if ends_with_phrase_punctuation(word):
+                            # Process current batch
+                            all_text_line_results = do_aws_comprehend_call(
+                                current_batch,
+                                current_batch_mapping,
+                                comprehend_client,
+                                aws_language,
+                                text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_comprehend_entities,
+                                all_text_line_results,
+                            )
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx += 1
+                        else:
+                            # Look ahead in current line for phrase-ending punctuation or end of line
+                            lookahead_idx = word_idx + 1
+                            lookahead_batch = current_batch
+                            lookahead_char_count = batch_char_count
+                            lookahead_word_count = batch_word_count
+                            lookahead_mapping = list(current_batch_mapping)
+
+                            # Continue adding words until we find phrase-ending punctuation or end of line
+                            while lookahead_idx < len(words):
+                                lookahead_word = words[lookahead_idx]
+                                (len(lookahead_batch) + len(lookahead_word) + 1)
+
+                                # Add the word to lookahead batch
+                                if lookahead_batch:
+                                    lookahead_batch += " "
+                                    lookahead_char_count += 1
+                                lookahead_batch += lookahead_word
+                                lookahead_char_count += len(lookahead_word)
+                                lookahead_word_count += 1
+
+                                if (
+                                    not lookahead_mapping
+                                    or lookahead_mapping[-1][1] != i
+                                ):
+                                    lookahead_mapping.append(
+                                        (
+                                            lookahead_char_count - len(lookahead_word),
+                                            i,
+                                            text_line,
+                                            None,
+                                            word_start_positions[lookahead_idx],
+                                        )
+                                    )
+
+                                # Check if this word ends with phrase punctuation
+                                if ends_with_phrase_punctuation(lookahead_word):
+                                    break
+
+                                lookahead_idx += 1
+
+                            # Use the lookahead batch (either found phrase end or reached end of line)
+                            current_batch = lookahead_batch
+                            batch_char_count = lookahead_char_count
+                            batch_word_count = lookahead_word_count
+                            current_batch_mapping = lookahead_mapping
+
+                            # Process current batch
+                            all_text_line_results = do_aws_comprehend_call(
+                                current_batch,
+                                current_batch_mapping,
+                                comprehend_client,
+                                aws_language,
+                                text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_comprehend_entities,
+                                all_text_line_results,
+                            )
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx = lookahead_idx + 1
+                    else:
+                        # Normal case: add word to batch
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+                        word_idx += 1
 
             # Process final batch if any
             if current_batch:
@@ -5150,7 +5270,7 @@ class CustomImageAnalyzerEngine:
             if custom_entities:
                 custom_redact_entities = [
                     entity
-                    for entity in chosen_redact_comprehend_entities
+                    for entity in chosen_llm_entities
                     if entity in custom_entities
                 ]
 
@@ -5185,50 +5305,19 @@ class CustomImageAnalyzerEngine:
                     word_start_positions.append(current_pos)
                     current_pos += len(word) + 1
 
-                for word_idx, word in enumerate(words):
+                word_idx = 0
+                while word_idx < len(words):
+                    word = words[word_idx]
                     new_batch_char_count = len(current_batch) + len(word) + 1
 
-                    if (
+                    # Check if we've hit the limit
+                    limit_reached = (
                         batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
                         or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
-                    ):
+                    )
 
-                        # Remove 'CUSTOM' entities from the chosen_redact_comprehend_entities list
-                        llm_chosen_redact_comprehend_entities = [
-                            entity
-                            for entity in chosen_redact_comprehend_entities
-                            if entity != "CUSTOM"
-                        ]
-                        # Process current batch
-                        all_text_line_results = do_llm_entity_detection_call(
-                            current_batch,
-                            current_batch_mapping,
-                            bedrock_runtime,
-                            aws_language,
-                            text_analyzer_kwargs.get("allow_list", []),
-                            llm_chosen_redact_comprehend_entities,
-                            all_text_line_results,
-                            model_choice=model_choice,
-                            temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
-                            ),
-                            max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
-                            ),
-                            output_folder=getattr(self, "output_folder", None),
-                            batch_number=comprehend_query_number + 1,
-                            custom_instructions=custom_llm_instructions,
-                        )
-                        comprehend_query_number += 1
-
-                        # Reset batch
-                        current_batch = word
-                        batch_word_count = 1
-                        batch_char_count = len(word)
-                        current_batch_mapping = [
-                            (0, i, text_line, None, word_start_positions[word_idx])
-                        ]
-                    else:
+                    if limit_reached:
+                        # Add the current word to the batch first
                         if current_batch:
                             current_batch += " "
                             batch_char_count += 1
@@ -5250,22 +5339,187 @@ class CustomImageAnalyzerEngine:
                                 )
                             )
 
+                        # Check if current word ends with phrase punctuation
+                        if ends_with_phrase_punctuation(word):
+                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                            ]
+                            # Process current batch
+                            all_text_line_results = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                local_model=text_analyzer_kwargs.get("local_model"),
+                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                assistant_model=text_analyzer_kwargs.get(
+                                    "assistant_model"
+                                ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx += 1
+                        else:
+                            # Look ahead in current line for phrase-ending punctuation or end of line
+                            lookahead_idx = word_idx + 1
+                            lookahead_batch = current_batch
+                            lookahead_char_count = batch_char_count
+                            lookahead_word_count = batch_word_count
+                            lookahead_mapping = list(current_batch_mapping)
+
+                            # Continue adding words until we find phrase-ending punctuation or end of line
+                            while lookahead_idx < len(words):
+                                lookahead_word = words[lookahead_idx]
+                                (len(lookahead_batch) + len(lookahead_word) + 1)
+
+                                # Add the word to lookahead batch
+                                if lookahead_batch:
+                                    lookahead_batch += " "
+                                    lookahead_char_count += 1
+                                lookahead_batch += lookahead_word
+                                lookahead_char_count += len(lookahead_word)
+                                lookahead_word_count += 1
+
+                                if (
+                                    not lookahead_mapping
+                                    or lookahead_mapping[-1][1] != i
+                                ):
+                                    lookahead_mapping.append(
+                                        (
+                                            lookahead_char_count - len(lookahead_word),
+                                            i,
+                                            text_line,
+                                            None,
+                                            word_start_positions[lookahead_idx],
+                                        )
+                                    )
+
+                                # Check if this word ends with phrase punctuation
+                                if ends_with_phrase_punctuation(lookahead_word):
+                                    break
+
+                                lookahead_idx += 1
+
+                            # Use the lookahead batch (either found phrase end or reached end of line)
+                            current_batch = lookahead_batch
+                            batch_char_count = lookahead_char_count
+                            batch_word_count = lookahead_word_count
+                            current_batch_mapping = lookahead_mapping
+
+                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                            ]
+                            # Process current batch
+                            all_text_line_results = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                local_model=text_analyzer_kwargs.get("local_model"),
+                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                assistant_model=text_analyzer_kwargs.get(
+                                    "assistant_model"
+                                ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx = lookahead_idx + 1
+                    else:
+                        # Normal case: add word to batch
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+                        word_idx += 1
+
             # Process final batch if any
             if current_batch:
-                # Remove 'CUSTOM' entities from the chosen_redact_comprehend_entities list
+                # Remove 'CUSTOM' entities from the chosen_llm_entities list
                 llm_chosen_redact_comprehend_entities = [
-                    entity
-                    for entity in chosen_redact_comprehend_entities
-                    if entity != "CUSTOM"
+                    entity for entity in chosen_llm_entities if entity != "CUSTOM"
                 ]
                 all_text_line_results = do_llm_entity_detection_call(
                     current_batch,
                     current_batch_mapping,
-                    bedrock_runtime,
-                    aws_language,
-                    text_analyzer_kwargs.get("allow_list", []),
-                    llm_chosen_redact_comprehend_entities,
-                    all_text_line_results,
+                    bedrock_runtime=bedrock_runtime,
+                    language=aws_language,
+                    allow_list=text_analyzer_kwargs.get("allow_list", []),
+                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                    all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(
                         "temperature", LLM_PII_TEMPERATURE
@@ -5276,6 +5530,15 @@ class CustomImageAnalyzerEngine:
                     output_folder=getattr(self, "output_folder", None),
                     batch_number=comprehend_query_number + 1,
                     custom_instructions=custom_llm_instructions,
+                    file_name=file_name,
+                    page_number=page_number,
+                    inference_method=text_analyzer_kwargs.get("inference_method"),
+                    local_model=text_analyzer_kwargs.get("local_model"),
+                    tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    client=text_analyzer_kwargs.get("client"),
+                    client_config=text_analyzer_kwargs.get("client_config"),
+                    api_url=text_analyzer_kwargs.get("api_url"),
                 )
                 comprehend_query_number += 1
 
@@ -5654,6 +5917,14 @@ def run_page_text_redaction(
     score_threshold: float = 0.0,
     custom_entities: List[str] = None,
     comprehend_query_number: int = 0,
+    bedrock_runtime=None,
+    model_choice: str = LLM_MODEL_CHOICE,
+    custom_llm_instructions: str = "",
+    chosen_llm_entities: List[str] = None,
+    output_folder: str = None,
+    file_name: Optional[str] = None,
+    page_number: Optional[int] = None,
+    **text_analyzer_kwargs,
 ):
     """
     This function performs text redaction on a page based on the specified language and chosen entities.
@@ -5673,6 +5944,14 @@ def run_page_text_redaction(
         score_threshold (float, optional): The threshold score for entity detection. Defaults to 0.0.
         custom_entities (List[str], optional): A list of custom entities for redaction. Defaults to None.
         comprehend_query_number (int, optional): A counter for the number of Comprehend queries made. Defaults to 0.
+        bedrock_runtime: The AWS Bedrock runtime client for LLM-based entity detection. Defaults to None.
+        model_choice (str, optional): The LLM model choice for entity detection. Defaults to LLM_MODEL_CHOICE.
+        custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to "".
+        chosen_llm_entities (List[str], optional): A list of entities for LLM-based detection. Defaults to None.
+        output_folder (str, optional): Output folder for saving LLM prompts and responses. Defaults to None.
+        file_name (str, optional): File name (without extension) for saving LLM logs. Defaults to None.
+        page_number (int, optional): Page number for saving LLM logs. Defaults to None.
+        **text_analyzer_kwargs: Additional keyword arguments for text analysis.
     """
 
     page_text = ""
@@ -5680,15 +5959,21 @@ def run_page_text_redaction(
     all_text_line_results = list()
     comprehend_query_number = 0
 
+    # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+    if chosen_llm_entities is None:
+        chosen_llm_entities = chosen_redact_comprehend_entities
+
     # Collect all text from the page
     for i, text_line in enumerate(line_level_text_results_list):
-        if chosen_redact_entities:
-            if page_text:
-                page_text += " "
+        if page_text:
+            page_text += " "
 
-            start_pos = len(page_text)
-            page_text += text_line.text
-            page_text_mapping.append((start_pos, i, text_line, line_characters[i]))
+        start_pos = len(page_text)
+        page_text += text_line.text
+        page_text_mapping.append((start_pos, i, text_line, line_characters[i]))
+
+    # Determine language for downstream services
+    aws_language = language or "en"
 
     valid_language_entities = nlp_analyser.registry.get_supported_entities(
         languages=[language]
@@ -5707,13 +5992,20 @@ def run_page_text_redaction(
             chosen_redact_entities, valid_language_entities, language
         )
 
+        if language_supported_entities:
+            text_analyzer_kwargs["entities"] = language_supported_entities
+        else:
+            out_message = f"No relevant entities supported for language: {language}"
+            print(out_message)
+            raise Warning(out_message)
+
         page_analyser_result = nlp_analyser.analyze(
             text=page_text,
             language=language,
-            entities=language_supported_entities,
             score_threshold=score_threshold,
             return_decision_process=True,
             allow_list=allow_list,
+            **text_analyzer_kwargs,
         )
 
         all_text_line_results = map_back_entity_results(
@@ -5730,24 +6022,29 @@ def run_page_text_redaction(
                 if entity in custom_entities
             ]
 
-            language_supported_entities = filter_entities_for_language(
-                custom_redact_entities, valid_language_entities, language
-            )
+            if custom_redact_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    custom_redact_entities, valid_language_entities, language
+                )
 
-            if language_supported_entities:
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
+
                 page_analyser_result = nlp_analyser.analyze(
                     text=page_text,
                     language=language,
-                    entities=language_supported_entities,
                     score_threshold=score_threshold,
                     return_decision_process=True,
                     allow_list=allow_list,
+                    **text_analyzer_kwargs,
                 )
 
                 all_text_line_results = map_back_entity_results(
                     page_analyser_result, page_text_mapping, all_text_line_results
                 )
 
+        # Process text in batches for AWS Comprehend
         current_batch = ""
         current_batch_mapping = list()
         batch_char_count = 0
@@ -5756,43 +6053,25 @@ def run_page_text_redaction(
         for i, text_line in enumerate(line_level_text_results_list):
             words = text_line.text.split()
             word_start_positions = list()
-
-            # Calculate word start positions within the line
             current_pos = 0
+
             for word in words:
                 word_start_positions.append(current_pos)
-                current_pos += len(word) + 1  # +1 for space
+                current_pos += len(word) + 1
 
-            for word_idx, word in enumerate(words):
+            word_idx = 0
+            while word_idx < len(words):
+                word = words[word_idx]
                 new_batch_char_count = len(current_batch) + len(word) + 1
 
-                if batch_word_count >= 50 or new_batch_char_count >= 200:
-                    # Process current batch
-                    all_text_line_results = do_aws_comprehend_call(
-                        current_batch,
-                        current_batch_mapping,
-                        comprehend_client,
-                        language,
-                        allow_list,
-                        chosen_redact_comprehend_entities,
-                        all_text_line_results,
-                    )
-                    comprehend_query_number += 1
+                # Check if we've hit the limit
+                limit_reached = (
+                    batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                    or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                )
 
-                    # Start new batch
-                    current_batch = word
-                    batch_word_count = 1
-                    batch_char_count = len(word)
-                    current_batch_mapping = [
-                        (
-                            0,
-                            i,
-                            text_line,
-                            line_characters[i],
-                            word_start_positions[word_idx],
-                        )
-                    ]
-                else:
+                if limit_reached:
+                    # Add the current word to the batch first
                     if current_batch:
                         current_batch += " "
                         batch_char_count += 1
@@ -5807,22 +6086,406 @@ def run_page_text_redaction(
                                 i,
                                 text_line,
                                 line_characters[i],
-                                word_start_positions[
-                                    word_idx
-                                ],  # Add the word's start position within its line
+                                word_start_positions[word_idx],
                             )
                         )
 
-        # Process final batch
+                    # Check if current word ends with phrase punctuation
+                    if ends_with_phrase_punctuation(word):
+                        # Process current batch
+                        all_text_line_results = do_aws_comprehend_call(
+                            current_batch,
+                            current_batch_mapping,
+                            comprehend_client,
+                            aws_language,
+                            text_analyzer_kwargs.get("allow_list", allow_list or []),
+                            chosen_redact_comprehend_entities,
+                            all_text_line_results,
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx += 1
+                    else:
+                        # Look ahead in current line for phrase-ending punctuation or end of line
+                        lookahead_idx = word_idx + 1
+                        lookahead_batch = current_batch
+                        lookahead_char_count = batch_char_count
+                        lookahead_word_count = batch_word_count
+                        lookahead_mapping = list(current_batch_mapping)
+
+                        # Continue adding words until we find phrase-ending punctuation or end of line
+                        while lookahead_idx < len(words):
+                            lookahead_word = words[lookahead_idx]
+                            (len(lookahead_batch) + len(lookahead_word) + 1)
+
+                            # Add the word to lookahead batch
+                            if lookahead_batch:
+                                lookahead_batch += " "
+                                lookahead_char_count += 1
+                            lookahead_batch += lookahead_word
+                            lookahead_char_count += len(lookahead_word)
+                            lookahead_word_count += 1
+
+                            if not lookahead_mapping or lookahead_mapping[-1][1] != i:
+                                lookahead_mapping.append(
+                                    (
+                                        lookahead_char_count - len(lookahead_word),
+                                        i,
+                                        text_line,
+                                        line_characters[i],
+                                        word_start_positions[lookahead_idx],
+                                    )
+                                )
+
+                            # Check if this word ends with phrase punctuation
+                            if ends_with_phrase_punctuation(lookahead_word):
+                                break
+
+                            lookahead_idx += 1
+
+                        # Use the lookahead batch (either found phrase end or reached end of line)
+                        current_batch = lookahead_batch
+                        batch_char_count = lookahead_char_count
+                        batch_word_count = lookahead_word_count
+                        current_batch_mapping = lookahead_mapping
+
+                        # Process current batch
+                        all_text_line_results = do_aws_comprehend_call(
+                            current_batch,
+                            current_batch_mapping,
+                            comprehend_client,
+                            aws_language,
+                            text_analyzer_kwargs.get("allow_list", allow_list or []),
+                            chosen_redact_comprehend_entities,
+                            all_text_line_results,
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx = lookahead_idx + 1
+                else:
+                    # Normal case: add word to batch
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+                    word_idx += 1
+
+        # Process final batch if any
         if current_batch:
             all_text_line_results = do_aws_comprehend_call(
                 current_batch,
                 current_batch_mapping,
                 comprehend_client,
-                language,
-                allow_list,
+                aws_language,
+                text_analyzer_kwargs.get("allow_list", allow_list or []),
                 chosen_redact_comprehend_entities,
                 all_text_line_results,
+            )
+            comprehend_query_number += 1
+
+    elif pii_identification_method == LLM_PII_OPTION:
+        # LLM-based entity detection using AWS Bedrock
+        try:
+            from tools.llm_entity_detection import do_llm_entity_detection_call
+        except ImportError as e:
+            print(f"Error importing LLM entity detection: {e}")
+            raise ImportError(
+                "LLM entity detection not available. Please ensure llm_entity_detection.py is accessible."
+            )
+
+        if not bedrock_runtime:
+            raise ValueError(
+                "bedrock_runtime is required when using LLM-based PII detection"
+            )
+
+        # Handle custom entities first (same as AWS Comprehend)
+        if custom_entities:
+            custom_redact_entities = [
+                entity for entity in chosen_llm_entities if entity in custom_entities
+            ]
+
+            if custom_redact_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    custom_redact_entities, valid_language_entities, language
+                )
+
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
+
+                page_analyser_result = nlp_analyser.analyze(
+                    text=page_text,
+                    language=language,
+                    score_threshold=score_threshold,
+                    return_decision_process=True,
+                    allow_list=allow_list,
+                    **text_analyzer_kwargs,
+                )
+                all_text_line_results = map_back_entity_results(
+                    page_analyser_result, page_text_mapping, all_text_line_results
+                )
+
+        # Process text in batches for LLM (same batching logic as AWS Comprehend)
+        current_batch = ""
+        current_batch_mapping = list()
+        batch_char_count = 0
+        batch_word_count = 0
+
+        for i, text_line in enumerate(line_level_text_results_list):
+            words = text_line.text.split()
+            word_start_positions = list()
+            current_pos = 0
+
+            for word in words:
+                word_start_positions.append(current_pos)
+                current_pos += len(word) + 1
+
+            word_idx = 0
+            while word_idx < len(words):
+                word = words[word_idx]
+                new_batch_char_count = len(current_batch) + len(word) + 1
+
+                # Check if we've hit the limit
+                limit_reached = (
+                    batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                    or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                )
+
+                if limit_reached:
+                    # Add the current word to the batch first
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+
+                    # Check if current word ends with phrase punctuation
+                    if ends_with_phrase_punctuation(word):
+                        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                        llm_chosen_redact_comprehend_entities = [
+                            entity
+                            for entity in chosen_llm_entities
+                            if entity != "CUSTOM"
+                        ]
+                        # Process current batch
+                        all_text_line_results = do_llm_entity_detection_call(
+                            current_batch,
+                            current_batch_mapping,
+                            bedrock_runtime=bedrock_runtime,
+                            language=aws_language,
+                            allow_list=text_analyzer_kwargs.get(
+                                "allow_list", allow_list or []
+                            ),
+                            chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                            all_text_line_results=all_text_line_results,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=output_folder,
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=page_number,
+                            inference_method=text_analyzer_kwargs.get(
+                                "inference_method"
+                            ),
+                            local_model=text_analyzer_kwargs.get("local_model"),
+                            tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            client=text_analyzer_kwargs.get("client"),
+                            client_config=text_analyzer_kwargs.get("client_config"),
+                            api_url=text_analyzer_kwargs.get("api_url"),
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx += 1
+                    else:
+                        # Look ahead in current line for phrase-ending punctuation or end of line
+                        lookahead_idx = word_idx + 1
+                        lookahead_batch = current_batch
+                        lookahead_char_count = batch_char_count
+                        lookahead_word_count = batch_word_count
+                        lookahead_mapping = list(current_batch_mapping)
+
+                        # Continue adding words until we find phrase-ending punctuation or end of line
+                        while lookahead_idx < len(words):
+                            lookahead_word = words[lookahead_idx]
+                            (len(lookahead_batch) + len(lookahead_word) + 1)
+
+                            # Add the word to lookahead batch
+                            if lookahead_batch:
+                                lookahead_batch += " "
+                                lookahead_char_count += 1
+                            lookahead_batch += lookahead_word
+                            lookahead_char_count += len(lookahead_word)
+                            lookahead_word_count += 1
+
+                            if not lookahead_mapping or lookahead_mapping[-1][1] != i:
+                                lookahead_mapping.append(
+                                    (
+                                        lookahead_char_count - len(lookahead_word),
+                                        i,
+                                        text_line,
+                                        line_characters[i],
+                                        word_start_positions[lookahead_idx],
+                                    )
+                                )
+
+                            # Check if this word ends with phrase punctuation
+                            if ends_with_phrase_punctuation(lookahead_word):
+                                break
+
+                            lookahead_idx += 1
+
+                        # Use the lookahead batch (either found phrase end or reached end of line)
+                        current_batch = lookahead_batch
+                        batch_char_count = lookahead_char_count
+                        batch_word_count = lookahead_word_count
+                        current_batch_mapping = lookahead_mapping
+
+                        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                        llm_chosen_redact_comprehend_entities = [
+                            entity
+                            for entity in chosen_llm_entities
+                            if entity != "CUSTOM"
+                        ]
+                        # Process current batch
+                        all_text_line_results = do_llm_entity_detection_call(
+                            current_batch,
+                            current_batch_mapping,
+                            bedrock_runtime=bedrock_runtime,
+                            language=aws_language,
+                            allow_list=text_analyzer_kwargs.get(
+                                "allow_list", allow_list or []
+                            ),
+                            chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                            all_text_line_results=all_text_line_results,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=output_folder,
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=page_number,
+                            inference_method=text_analyzer_kwargs.get(
+                                "inference_method"
+                            ),
+                            local_model=text_analyzer_kwargs.get("local_model"),
+                            tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            client=text_analyzer_kwargs.get("client"),
+                            client_config=text_analyzer_kwargs.get("client_config"),
+                            api_url=text_analyzer_kwargs.get("api_url"),
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx = lookahead_idx + 1
+                else:
+                    # Normal case: add word to batch
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+                    word_idx += 1
+
+        # Process final batch if any
+        if current_batch:
+            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+            llm_chosen_redact_comprehend_entities = [
+                entity for entity in chosen_llm_entities if entity != "CUSTOM"
+            ]
+            all_text_line_results = do_llm_entity_detection_call(
+                current_batch,
+                current_batch_mapping,
+                bedrock_runtime=bedrock_runtime,
+                language=aws_language,
+                allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
+                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                all_text_line_results=all_text_line_results,
+                model_choice=model_choice,
+                temperature=text_analyzer_kwargs.get(
+                    "temperature", LLM_PII_TEMPERATURE
+                ),
+                max_tokens=text_analyzer_kwargs.get("max_tokens", LLM_PII_MAX_TOKENS),
+                output_folder=output_folder,
+                batch_number=comprehend_query_number + 1,
+                custom_instructions=custom_llm_instructions,
+                file_name=file_name,
+                page_number=page_number,
+                inference_method=text_analyzer_kwargs.get("inference_method"),
+                local_model=text_analyzer_kwargs.get("local_model"),
+                tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                client=text_analyzer_kwargs.get("client"),
+                client_config=text_analyzer_kwargs.get("client_config"),
+                api_url=text_analyzer_kwargs.get("api_url"),
             )
             comprehend_query_number += 1
 
