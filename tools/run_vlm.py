@@ -150,7 +150,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         MAX_NEW_TOKENS,
         MODEL_CACHE_PATH,
         QUANTISE_VLM_MODELS,
-        SELECTED_MODEL,
+        SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
         USE_FLASH_ATTENTION,
         VLM_DEFAULT_DO_SAMPLE,
         VLM_DEFAULT_MIN_P,
@@ -233,10 +233,10 @@ if SHOW_VLM_MODEL_OPTIONS is True:
                 print("Falling back to loading models without quantization")
                 quantization_config = None
 
-    print(f"Loading vision model: {SELECTED_MODEL}")
+    print(f"Loading vision model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
 
     # Load only the selected model based on configuration
-    if SELECTED_MODEL == "Nanonets-OCR2-3B":
+    if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Nanonets-OCR2-3B":
         MODEL_ID = "nanonets/Nanonets-OCR2-3B"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
@@ -255,7 +255,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
         model_default_prompt = """Extract the text from the above document as if you were reading it naturally."""
 
-    elif SELECTED_MODEL == "Dots.OCR":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Dots.OCR":
         # Download and patch Dots.OCR model
         model_path_d_local = snapshot_download(
             repo_id="rednote-hilab/dots.ocr",
@@ -304,7 +304,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_default_prompt = """Extract the text content from this image."""
         model_default_max_new_tokens = MAX_NEW_TOKENS
 
-    elif SELECTED_MODEL == "Qwen3-VL-2B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-2B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
@@ -332,7 +332,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_MODEL == "Qwen3-VL-4B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-4B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
@@ -360,7 +360,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_supports_presence_penalty = (
             False  # I found that this doesn't work when using transformers
         )
-    elif SELECTED_MODEL == "Qwen3-VL-8B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-8B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
@@ -389,7 +389,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_MODEL == "Qwen3-VL-30B-A3B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-30B-A3B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
         from transformers import Qwen3VLMoeForConditionalGeneration
 
@@ -421,7 +421,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_MODEL == "Qwen3-VL-235B-A22B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-235B-A22B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-235B-A22B-Instruct"
         from transformers import Qwen3VLMoeForConditionalGeneration
 
@@ -453,7 +453,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_MODEL == "PaddleOCR-VL":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "PaddleOCR-VL":
         MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
         load_kwargs = {
             "trust_remote_code": True,
@@ -471,13 +471,13 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_default_prompt = """OCR:"""
         model_default_max_new_tokens = MAX_NEW_TOKENS
 
-    elif SELECTED_MODEL == "None":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "None":
         model = None
         processor = None
 
     else:
         raise ValueError(
-            f"Invalid model selected: {SELECTED_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, PaddleOCR-VL"
+            f"Invalid model selected: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, PaddleOCR-VL"
         )
 
     # Override model defaults with user-provided config values if they are set
@@ -499,7 +499,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     if VLM_SEED is not None:
         model_default_seed = VLM_SEED
 
-    print(f"Successfully loaded {SELECTED_MODEL}")
+    print(f"Successfully loaded {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
 
 
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)

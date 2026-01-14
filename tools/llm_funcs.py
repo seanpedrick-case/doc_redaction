@@ -56,6 +56,11 @@ _model = None
 _tokenizer = None
 _assistant_model = None
 
+# Global variables for PII detection model and tokenizer
+_pii_model = None
+_pii_tokenizer = None
+_pii_assistant_model = None
+
 # Import config variables with defaults for missing ones
 # This allows llm_funcs.py to work even if some config variables don't exist
 try:
@@ -89,8 +94,12 @@ try:
         LOCAL_MODEL_FILE,
         LOCAL_MODEL_FOLDER,
         LOCAL_REPO_ID,
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
         MAX_COMMENT_CHARS,
         MAX_TIME_FOR_LOOP,
+        MODEL_CACHE_PATH,
         MODEL_DTYPE,
         MULTIMODAL_PROMPT_FORMAT,
         NUM_PRED_TOKENS,
@@ -135,7 +144,11 @@ except ImportError:
     LOCAL_MODEL_FILE = ""
     LOCAL_MODEL_FOLDER = ""
     LOCAL_REPO_ID = ""
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = ""
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = ""
+    LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = ""
     MAX_COMMENT_CHARS = 1000
+    MODEL_CACHE_PATH = "./model_cache"
     MAX_TIME_FOR_LOOP = 3600
     MODEL_DTYPE = "bfloat16"
     MULTIMODAL_PROMPT_FORMAT = "False"
@@ -742,9 +755,104 @@ def set_model(model, tokenizer, assistant_model=None):
     _assistant_model = assistant_model
 
 
+def get_pii_model():
+    """Get the globally loaded PII detection model. Load it if not already loaded."""
+    global _pii_model, _pii_tokenizer, _pii_assistant_model
+
+    # Determine which repo_id, model_file, and model_folder to use
+    # If PII-specific config is set, use it; otherwise fall back to general local model config
+    if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
+        pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
+        pii_model_file = (
+            LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+            if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+            else ""
+        )
+        pii_model_folder = (
+            LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
+            if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
+            else (LOCAL_MODEL_FOLDER if LOCAL_MODEL_FOLDER else MODEL_CACHE_PATH)
+        )
+    else:
+        # Fall back to general local model config
+        pii_repo_id = LOCAL_REPO_ID
+        pii_model_file = LOCAL_MODEL_FILE
+        pii_model_folder = (
+            LOCAL_MODEL_FOLDER if LOCAL_MODEL_FOLDER else MODEL_CACHE_PATH
+        )
+
+    if _pii_model is None:
+        _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
+            local_model_type=CHOSEN_LOCAL_MODEL_TYPE,
+            gpu_layers=gpu_layers,
+            max_context_length=context_length,
+            gpu_config=gpu_config,
+            cpu_config=cpu_config,
+            torch_device=torch_device,
+            repo_id=pii_repo_id,
+            model_filename=pii_model_file,
+            model_dir=pii_model_folder,
+            compile_mode=COMPILE_MODE,
+            model_dtype=MODEL_DTYPE,
+            hf_token=HF_TOKEN,
+            model=_pii_model,
+            tokenizer=_pii_tokenizer,
+            assistant_model=_pii_assistant_model,
+        )
+    return _pii_model
+
+
+def get_pii_tokenizer():
+    """Get the globally loaded PII detection tokenizer. Load it if not already loaded."""
+    global _pii_model, _pii_tokenizer, _pii_assistant_model
+
+    # Determine which repo_id, model_file, and model_folder to use
+    # If PII-specific config is set, use it; otherwise fall back to general local model config
+    if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
+        pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
+        pii_model_file = (
+            LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+            if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+            else ""
+        )
+        pii_model_folder = (
+            LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
+            if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
+            else (LOCAL_MODEL_FOLDER if LOCAL_MODEL_FOLDER else MODEL_CACHE_PATH)
+        )
+    else:
+        # Fall back to general local model config
+        pii_repo_id = LOCAL_REPO_ID
+        pii_model_file = LOCAL_MODEL_FILE
+        pii_model_folder = (
+            LOCAL_MODEL_FOLDER if LOCAL_MODEL_FOLDER else MODEL_CACHE_PATH
+        )
+
+    if _pii_tokenizer is None:
+        _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
+            local_model_type=CHOSEN_LOCAL_MODEL_TYPE,
+            gpu_layers=gpu_layers,
+            max_context_length=context_length,
+            gpu_config=gpu_config,
+            cpu_config=cpu_config,
+            torch_device=torch_device,
+            repo_id=pii_repo_id,
+            model_filename=pii_model_file,
+            model_dir=pii_model_folder,
+            compile_mode=COMPILE_MODE,
+            model_dtype=MODEL_DTYPE,
+            hf_token=HF_TOKEN,
+            model=_pii_model,
+            tokenizer=_pii_tokenizer,
+            assistant_model=_pii_assistant_model,
+        )
+    return _pii_tokenizer
+
+
 # Initialize model at startup if configured
 if LOAD_LOCAL_MODEL_AT_START == "True" and RUN_LOCAL_MODEL == "1":
     get_model()  # This will trigger loading
+    get_pii_model()
 
 
 def call_llama_cpp_model(formatted_string: str, gen_config: str, model=None):

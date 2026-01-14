@@ -43,6 +43,7 @@ from tools.config import (
     LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_SPACES_GPU_RUN_TIME,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
@@ -55,7 +56,7 @@ from tools.config import (
     SAVE_PAGE_OCR_VISUALISATIONS,
     SAVE_PREPROCESS_IMAGES,
     SAVE_VLM_INPUT_IMAGES,
-    SELECTED_MODEL,
+    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     TESSERACT_SEGMENTATION_LEVEL,
     TESSERACT_WORD_LEVEL_OCR,
     USE_LLAMA_SWAP,
@@ -833,100 +834,121 @@ def _call_inference_server_vlm_api(
 
     endpoint = f"{api_url}/v1/chat/completions"
 
-    try:
-        if stream:
-            # Handle streaming response
-            response = requests.post(
-                endpoint,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                stream=True,
-                timeout=timeout,
-            )
-            response.raise_for_status()
+    # Retry logic: try up to 3 times for connection errors
+    max_retries = 3
+    retry_delay = 2  # seconds between retries
 
-            final_tokens = []
+    for attempt in range(max_retries):
+        try:
+            if stream:
+                # Handle streaming response
+                response = requests.post(
+                    endpoint,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    stream=True,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
 
-            for line in response.iter_lines():
-                if not line:  # Skip empty lines
-                    continue
+                final_tokens = []
 
-                line = line.decode("utf-8")
-                if line.startswith("data: "):
-                    data = line[6:]  # Remove 'data: ' prefix
-                    if data.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        if "choices" in chunk and len(chunk["choices"]) > 0:
-                            delta = chunk["choices"][0].get("delta", {})
-                            token = delta.get("content", "")
-                            if token:
-                                print(token, end="", flush=True)
-                                final_tokens.append(token)
-                                # output_tokens += 1
-                    except json.JSONDecodeError:
+                for line in response.iter_lines():
+                    if not line:  # Skip empty lines
                         continue
 
-            print()  # newline after stream finishes
+                    line = line.decode("utf-8")
+                    if line.startswith("data: "):
+                        data = line[6:]  # Remove 'data: ' prefix
+                        if data.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            if "choices" in chunk and len(chunk["choices"]) > 0:
+                                delta = chunk["choices"][0].get("delta", {})
+                                token = delta.get("content", "")
+                                if token:
+                                    print(token, end="", flush=True)
+                                    final_tokens.append(token)
+                                    # output_tokens += 1
+                        except json.JSONDecodeError:
+                            continue
 
-            text = "".join(final_tokens)
+                print()  # newline after stream finishes
 
-            # Estimate input tokens (rough approximation)
-            # input_tokens = len(prompt.split())
+                text = "".join(final_tokens)
 
-            # return {
-            #     "choices": [
-            #         {
-            #             "index": 0,
-            #             "finish_reason": "stop",
-            #             "message": {"role": "assistant", "content": text},
-            #         }
-            #     ],
-            #     "usage": {
-            #         "prompt_tokens": input_tokens,
-            #         "completion_tokens": output_tokens,
-            #         "total_tokens": input_tokens + output_tokens,
-            #     },
-            # }
-            return text
+                # Estimate input tokens (rough approximation)
+                # input_tokens = len(prompt.split())
 
-        else:
-            # Handle non-streaming response
-            response = requests.post(
-                endpoint,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=timeout,
-            )
-            response.raise_for_status()
+                # return {
+                #     "choices": [
+                #         {
+                #             "index": 0,
+                #             "finish_reason": "stop",
+                #             "message": {"role": "assistant", "content": text},
+                #         }
+                #     ],
+                #     "usage": {
+                #         "prompt_tokens": input_tokens,
+                #         "completion_tokens": output_tokens,
+                #         "total_tokens": input_tokens + output_tokens,
+                #     },
+                # }
+                return text
 
-            result = response.json()
-
-            # Ensure the response has the expected format
-            if "choices" not in result or len(result["choices"]) == 0:
-                raise ValueError(
-                    "Invalid response format from inference-server: no choices found"
+            else:
+                # Handle non-streaming response
+                response = requests.post(
+                    endpoint,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=timeout,
                 )
+                response.raise_for_status()
 
-            message = result["choices"][0].get("message", {})
-            content = message.get("content", "")
+                result = response.json()
 
-            if not content:
-                raise ValueError(
-                    "Invalid response format from inference-server: no content in message"
+                # Ensure the response has the expected format
+                if "choices" not in result or len(result["choices"]) == 0:
+                    raise ValueError(
+                        "Invalid response format from inference-server: no choices found"
+                    )
+
+                message = result["choices"][0].get("message", {})
+                content = message.get("content", "")
+
+                if not content:
+                    raise ValueError(
+                        "Invalid response format from inference-server: no content in message"
+                    )
+
+                return content
+
+        except (
+            requests.exceptions.RequestException,
+            requests.exceptions.HTTPError,
+        ) as e:
+            # Retry on connection errors or HTTP errors (like 500 Server Error)
+            if attempt < max_retries - 1:
+                print(
+                    f"Inference-server VLM API call failed (attempt {attempt + 1}/{max_retries}): {str(e)}"
                 )
-
-            return content
-
-    except requests.exceptions.RequestException as e:
-        raise ConnectionError(
-            f"Failed to connect to inference-server at {api_url}: {str(e)}"
-        )
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON response from inference-server: {str(e)}")
-    except Exception as e:
-        raise RuntimeError(f"Error calling inference-server API: {str(e)}")
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+                continue
+            else:
+                # Final attempt failed, raise the error
+                raise ConnectionError(
+                    f"Failed to connect to inference-server at {api_url} after {max_retries} attempts: {str(e)}"
+                )
+        except json.JSONDecodeError as e:
+            # Don't retry on JSON decode errors - these are likely permanent issues
+            raise ValueError(f"Invalid JSON response from inference-server: {str(e)}")
+        except Exception as e:
+            # Don't retry on other exceptions - these are likely permanent issues
+            raise RuntimeError(f"Error calling inference-server API: {str(e)}")
 
 
 def _call_bedrock_vlm_api(
@@ -4033,20 +4055,24 @@ class CustomImageAnalyzerEngine:
         elif self.ocr_engine == "hybrid-vlm":
             # VLM-based hybrid OCR - no additional initialization needed
             # The VLM model is loaded when run_vlm.py is imported
-            print(f"Initializing hybrid VLM OCR with model: {SELECTED_MODEL}")
+            print(
+                f"Initializing hybrid VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
+            )
             self.paddle_ocr = None  # Not using PaddleOCR
 
         elif self.ocr_engine == "vlm":
             # VLM page-level OCR - no additional initialization needed
             # The VLM model is loaded when run_vlm.py is imported
-            print(f"Initializing VLM OCR with model: {SELECTED_MODEL}")
+            print(
+                f"Initializing VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
+            )
             self.paddle_ocr = None  # Not using PaddleOCR
 
         if self.ocr_engine == "hybrid-paddle-vlm":
             # Hybrid PaddleOCR + VLM - requires both PaddleOCR and VLM
             # The VLM model is loaded when run_vlm.py is imported
             print(
-                f"Initializing hybrid PaddleOCR + VLM OCR with model: {SELECTED_MODEL}"
+                f"Initializing hybrid PaddleOCR + VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
             )
 
         if self.ocr_engine == "hybrid-paddle-inference-server":
@@ -6885,6 +6911,332 @@ class CustomImageAnalyzerEngine:
 
             # Update model_choice to use the value from text_analyzer_kwargs
             model_choice = text_analyzer_kwargs.get("model_choice", model_choice)
+
+            # Handle custom entities first (same as AWS Comprehend)
+            if custom_entities:
+                custom_redact_entities = [
+                    entity
+                    for entity in chosen_llm_entities
+                    if entity in custom_entities
+                ]
+
+                if custom_redact_entities:
+                    # Filter entities to only include those supported by the language
+                    language_supported_entities = filter_entities_for_language(
+                        custom_redact_entities, valid_language_entities, language
+                    )
+
+                    if language_supported_entities:
+                        text_analyzer_kwargs["entities"] = language_supported_entities
+
+                    page_analyser_result = nlp_analyser.analyze(
+                        text=page_text, language=language, **text_analyzer_kwargs
+                    )
+                    all_text_line_results = map_back_entity_results(
+                        page_analyser_result, page_text_mapping, all_text_line_results
+                    )
+
+            # Process text in batches for LLM (same batching logic as AWS Comprehend)
+            current_batch = ""
+            current_batch_mapping = list()
+            batch_char_count = 0
+            batch_word_count = 0
+
+            for i, text_line in enumerate(line_level_ocr_results):
+                words = text_line.text.split()
+                word_start_positions = list()
+                current_pos = 0
+
+                for word in words:
+                    word_start_positions.append(current_pos)
+                    current_pos += len(word) + 1
+
+                word_idx = 0
+                while word_idx < len(words):
+                    word = words[word_idx]
+                    new_batch_char_count = len(current_batch) + len(word) + 1
+
+                    # Check if we've hit the limit
+                    limit_reached = (
+                        batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                        or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                    )
+
+                    if limit_reached:
+                        # Add the current word to the batch first
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+
+                        # Check if current word ends with phrase punctuation
+                        if ends_with_phrase_punctuation(word):
+                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                            ]
+                            # Process current batch
+                            all_text_line_results = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                local_model=text_analyzer_kwargs.get("local_model"),
+                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                assistant_model=text_analyzer_kwargs.get(
+                                    "assistant_model"
+                                ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx += 1
+                        else:
+                            # Look ahead in current line for phrase-ending punctuation or end of line
+                            lookahead_idx = word_idx + 1
+                            lookahead_batch = current_batch
+                            lookahead_char_count = batch_char_count
+                            lookahead_word_count = batch_word_count
+                            lookahead_mapping = list(current_batch_mapping)
+
+                            # Continue adding words until we find phrase-ending punctuation or end of line
+                            while lookahead_idx < len(words):
+                                lookahead_word = words[lookahead_idx]
+                                (len(lookahead_batch) + len(lookahead_word) + 1)
+
+                                # Add the word to lookahead batch
+                                if lookahead_batch:
+                                    lookahead_batch += " "
+                                    lookahead_char_count += 1
+                                lookahead_batch += lookahead_word
+                                lookahead_char_count += len(lookahead_word)
+                                lookahead_word_count += 1
+
+                                if (
+                                    not lookahead_mapping
+                                    or lookahead_mapping[-1][1] != i
+                                ):
+                                    lookahead_mapping.append(
+                                        (
+                                            lookahead_char_count - len(lookahead_word),
+                                            i,
+                                            text_line,
+                                            None,
+                                            word_start_positions[lookahead_idx],
+                                        )
+                                    )
+
+                                # Check if this word ends with phrase punctuation
+                                if ends_with_phrase_punctuation(lookahead_word):
+                                    break
+
+                                lookahead_idx += 1
+
+                            # Use the lookahead batch (either found phrase end or reached end of line)
+                            current_batch = lookahead_batch
+                            batch_char_count = lookahead_char_count
+                            batch_word_count = lookahead_word_count
+                            current_batch_mapping = lookahead_mapping
+
+                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                            ]
+                            # Process current batch
+                            all_text_line_results = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                local_model=text_analyzer_kwargs.get("local_model"),
+                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                assistant_model=text_analyzer_kwargs.get(
+                                    "assistant_model"
+                                ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx = lookahead_idx + 1
+                    else:
+                        # Normal case: add word to batch
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+                        word_idx += 1
+
+            # Process final batch if any
+            if current_batch:
+                # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                llm_chosen_redact_comprehend_entities = [
+                    entity for entity in chosen_llm_entities if entity != "CUSTOM"
+                ]
+                all_text_line_results = do_llm_entity_detection_call(
+                    current_batch,
+                    current_batch_mapping,
+                    bedrock_runtime=bedrock_runtime,
+                    language=aws_language,
+                    allow_list=text_analyzer_kwargs.get("allow_list", []),
+                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                    all_text_line_results=all_text_line_results,
+                    model_choice=model_choice,
+                    temperature=text_analyzer_kwargs.get(
+                        "temperature", LLM_PII_TEMPERATURE
+                    ),
+                    max_tokens=text_analyzer_kwargs.get(
+                        "max_tokens", LLM_PII_MAX_TOKENS
+                    ),
+                    output_folder=getattr(self, "output_folder", None),
+                    batch_number=comprehend_query_number + 1,
+                    custom_instructions=custom_llm_instructions,
+                    file_name=file_name,
+                    page_number=page_number,
+                    inference_method=text_analyzer_kwargs.get("inference_method"),
+                    local_model=text_analyzer_kwargs.get("local_model"),
+                    tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    client=text_analyzer_kwargs.get("client"),
+                    client_config=text_analyzer_kwargs.get("client_config"),
+                    api_url=text_analyzer_kwargs.get("api_url"),
+                )
+                comprehend_query_number += 1
+
+        elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
+            # LLM-based entity detection using local transformers models
+            try:
+                from tools.llm_entity_detection import do_llm_entity_detection_call
+            except ImportError as e:
+                print(f"Error importing LLM entity detection: {e}")
+                raise ImportError(
+                    "LLM entity detection not available. Please ensure llm_funcs.py is accessible."
+                )
+
+            # Set inference method to local if not already set
+            if text_analyzer_kwargs.get("inference_method") is None:
+                text_analyzer_kwargs["inference_method"] = "local"
+
+            # Set model choice if not already set - use LLM_MODEL_CHOICE as default
+            if text_analyzer_kwargs.get("model_choice") is None:
+                text_analyzer_kwargs["model_choice"] = model_choice
+
+            # Update model_choice to use the value from text_analyzer_kwargs
+            model_choice = text_analyzer_kwargs.get("model_choice", model_choice)
+
+            # Load PII-specific model and tokenizer if not already provided
+            if (
+                text_analyzer_kwargs.get("local_model") is None
+                and text_analyzer_kwargs.get("inference_method") == "local"
+            ):
+                from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
+
+                try:
+                    text_analyzer_kwargs["local_model"] = get_pii_model()
+                except Exception as e:
+                    print(
+                        f"Warning: Failed to load PII model: {e}. "
+                        f"Will attempt to load model on-demand."
+                    )
+            if (
+                text_analyzer_kwargs.get("tokenizer") is None
+                and text_analyzer_kwargs.get("inference_method") == "local"
+                and USE_LLAMA_CPP != "True"
+            ):
+                from tools.llm_funcs import get_pii_tokenizer
+
+                try:
+                    text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+                except Exception as e:
+                    print(
+                        f"Warning: Failed to load PII tokenizer: {e}. "
+                        f"Will attempt to load tokenizer on-demand."
+                    )
 
             # Handle custom entities first (same as AWS Comprehend)
             if custom_entities:

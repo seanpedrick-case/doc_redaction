@@ -59,6 +59,7 @@ from tools.config import (
     LLM_MODEL_CHOICE,
     LLM_PII_OPTION,
     LOAD_TRUNCATED_IMAGES,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_DOC_PAGES,
     MAX_IMAGE_PIXELS,
     MAX_SIMULTANEOUS_FILES,
@@ -904,6 +905,10 @@ def choose_and_run_redactor(
         # For inference server, we don't need bedrock_runtime
         bedrock_runtime = None
         print("Using inference server for PII detection")
+    elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
+        # For local transformers LLM, we don't need bedrock_runtime
+        bedrock_runtime = None
+        print("Using local transformers LLM for PII detection")
     else:
         bedrock_runtime = None
 
@@ -3515,7 +3520,7 @@ def redact_image_pdf(
 
     page_loop_end = page_max
 
-    progress_bar = tqdm(
+    tqdm(
         range(page_loop_start, page_loop_end),
         unit="pages remaining",
         desc="Redacting pages",
@@ -3539,7 +3544,6 @@ def redact_image_pdf(
     # Dictionary to store OCR results and page metadata for two-pass processing
     # This allows us to do all OCR first, then all PII detection, avoiding model switching
     ocr_results_by_page = {}
-    page_metadata_by_page = {}
 
     # FIRST PASS: Perform OCR on all pages
     # This collects OCR results without doing PII detection, which is more efficient
@@ -3550,7 +3554,7 @@ def redact_image_pdf(
         unit="pages remaining",
         desc="OCR pass",
     )
-    
+
     for page_no in ocr_progress_bar:
 
         reported_page_number = str(page_no + 1)
@@ -4353,14 +4357,12 @@ def redact_image_pdf(
                     "image": image,
                     "reported_page_number": reported_page_number,
                 }
-            
+
             # Skip PII detection and redaction in first pass - we'll do it in second pass
             # Continue to next page for OCR
             # Note: Pages outside page_min/page_max range will not have OCR results stored
             # and will be skipped in the second pass
             continue
-
-    
 
     # SECOND PASS: Perform PII detection on all pages using stored OCR results
     print("Second pass: Performing PII detection on all pages...")
@@ -4371,22 +4373,30 @@ def redact_image_pdf(
     )
 
     redacted_image = image.copy()
-    
+
     for page_no in pii_progress_bar:
-        
+
         reported_page_number = str(page_no + 1)
         print(f"PII Detection - Current page: {reported_page_number}")
-        
+
         # Retrieve stored OCR results and page metadata
         if page_no not in ocr_results_by_page:
-            print(f"Warning: No OCR results found for page {reported_page_number}, skipping PII detection")
+            print(
+                f"Warning: No OCR results found for page {reported_page_number}, skipping PII detection"
+            )
             continue
-            
+
         page_data = ocr_results_by_page[page_no]
         page_line_level_ocr_results = page_data["page_line_level_ocr_results"]
-        page_line_level_ocr_results_with_words = page_data["page_line_level_ocr_results_with_words"]
-        page_signature_recogniser_results = page_data["page_signature_recogniser_results"]
-        page_handwriting_recogniser_results = page_data["page_handwriting_recogniser_results"]
+        page_line_level_ocr_results_with_words = page_data[
+            "page_line_level_ocr_results_with_words"
+        ]
+        page_signature_recogniser_results = page_data[
+            "page_signature_recogniser_results"
+        ]
+        page_handwriting_recogniser_results = page_data[
+            "page_handwriting_recogniser_results"
+        ]
         handwriting_or_signature_boxes = page_data["handwriting_or_signature_boxes"]
         image_path = page_data["image_path"]
         pymupdf_page = page_data["pymupdf_page"]
@@ -4395,18 +4405,22 @@ def redact_image_pdf(
         page_height = page_data["page_height"]
         image = page_data["image"]
         reported_page_number = page_data["reported_page_number"]
-        
+
         page_image_annotations = {"image": image_path, "boxes": []}
         page_break_return = False
-        
+
         # Skip if OCR results are missing or invalid
-        if (not page_line_level_ocr_results 
+        if (
+            not page_line_level_ocr_results
             or not isinstance(page_line_level_ocr_results, dict)
             or "results" not in page_line_level_ocr_results
             or not page_line_level_ocr_results_with_words
             or not isinstance(page_line_level_ocr_results_with_words, dict)
-            or "results" not in page_line_level_ocr_results_with_words):
-            print(f"Warning: Missing or invalid OCR results for page {reported_page_number}, skipping PII detection")
+            or "results" not in page_line_level_ocr_results_with_words
+        ):
+            print(
+                f"Warning: Missing or invalid OCR results for page {reported_page_number}, skipping PII detection"
+            )
             # Still need to handle page_image_annotations and current_loop_page for consistency
             page_image_annotations = {"image": image_path, "boxes": []}
             # Check if the image_path already exists in annotations_all_pages
@@ -4438,12 +4452,10 @@ def redact_image_pdf(
                 # Step 2: Analyse text and identify PII
                 if chosen_redact_entities or chosen_redact_comprehend_entities:
 
-                    # Set up inference server parameters if using inference server for PII detection
+                    # Set up inference server or local transformers parameters for PII detection
                     text_analyzer_kwargs = {}
                     if pii_identification_method == INFERENCE_SERVER_PII_OPTION:
-                        text_analyzer_kwargs["inference_method"] = (
-                            "inference-server"
-                        )
+                        text_analyzer_kwargs["inference_method"] = "inference-server"
                         text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
                         # Use DEFAULT_INFERENCE_SERVER_PII_MODEL if set, otherwise use CHOSEN_INFERENCE_SERVER_MODEL or empty
                         from tools.config import CHOSEN_INFERENCE_SERVER_MODEL
@@ -4461,6 +4473,29 @@ def redact_image_pdf(
                             text_analyzer_kwargs["model_choice"] = (
                                 inference_server_pii_model
                             )
+                    elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
+                        # Set up local transformers LLM parameters
+                        text_analyzer_kwargs["inference_method"] = "local"
+                        # Use LLM_MODEL_CHOICE as default model for local transformers
+                        text_analyzer_kwargs["model_choice"] = LLM_MODEL_CHOICE
+                        # Load PII-specific model and tokenizer if not already loaded
+                        from tools.llm_funcs import (
+                            USE_LLAMA_CPP,
+                            get_pii_model,
+                            get_pii_tokenizer,
+                        )
+
+                        if (
+                            "local_model" not in text_analyzer_kwargs
+                            or text_analyzer_kwargs["local_model"] is None
+                        ):
+                            text_analyzer_kwargs["local_model"] = get_pii_model()
+                        if (
+                            "tokenizer" not in text_analyzer_kwargs
+                            or text_analyzer_kwargs["tokenizer"] is None
+                        ) and USE_LLAMA_CPP != "True":
+                            text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+                        print("Using local transformers PII model for entity detection")
 
                     # Call analyze_text for all PII detection methods (Local, AWS Comprehend, LLM, Inference Server)
                     page_redaction_bounding_boxes, comprehend_query_number_new = (
@@ -4506,11 +4541,11 @@ def redact_image_pdf(
 
             if is_pdf(file_path) is True:
                 if redact_whole_page_list:
-                        int_reported_page_number = int(reported_page_number)
-                        if int_reported_page_number in redact_whole_page_list:
-                            redact_whole_page = True
-                        else:
-                            redact_whole_page = False
+                    int_reported_page_number = int(reported_page_number)
+                    if int_reported_page_number in redact_whole_page_list:
+                        redact_whole_page = True
+                    else:
+                        redact_whole_page = False
                 else:
                     redact_whole_page = False
 
@@ -4624,8 +4659,6 @@ def redact_image_pdf(
                         "image": file_path,
                         "boxes": all_image_annotations_boxes,
                     }
-
-                    
 
             # Convert decision process to table
             decision_process_table = pd.DataFrame(

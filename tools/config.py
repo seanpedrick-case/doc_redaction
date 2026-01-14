@@ -630,6 +630,9 @@ LLM_PII_OPTION = get_or_create_env_var("LLM_PII_OPTION", "LLM (AWS Bedrock)")
 INFERENCE_SERVER_PII_OPTION = get_or_create_env_var(
     "INFERENCE_SERVER_PII_OPTION", "Local inference server"
 )
+LOCAL_TRANSFORMERS_LLM_PII_OPTION = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_OPTION", "Local transformers LLM"
+)
 
 SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS", "True")
@@ -697,12 +700,16 @@ SHOW_LLM_PII_DETECTION_OPTIONS = convert_string_to_boolean(
 SHOW_INFERENCE_SERVER_PII_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_INFERENCE_SERVER_PII_OPTIONS", "False")
 )
+SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS", "False")
+)
 
 if (
     not SHOW_LOCAL_PII_DETECTION_OPTIONS
     and not SHOW_AWS_PII_DETECTION_OPTIONS
     and not SHOW_LLM_PII_DETECTION_OPTIONS
     and not SHOW_INFERENCE_SERVER_PII_OPTIONS
+    and not SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS
 ):
     SHOW_LOCAL_PII_DETECTION_OPTIONS = True
 
@@ -721,6 +728,9 @@ if SHOW_LLM_PII_DETECTION_OPTIONS:
 
 if SHOW_INFERENCE_SERVER_PII_OPTIONS:
     local_model_options.append(INFERENCE_SERVER_PII_OPTION)
+
+if SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS:
+    local_model_options.append(LOCAL_TRANSFORMERS_LLM_PII_OPTION)
 
 PII_DETECTION_MODELS = local_model_options + aws_model_options
 
@@ -765,13 +775,13 @@ SHOW_VLM_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_VLM_MODEL_OPTIONS", "False")
 )  # Whether to show the VLM model options in the UI
 
-SELECTED_MODEL = get_or_create_env_var(
-    "SELECTED_MODEL", "Qwen3-VL-4B-Instruct"
+SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL = get_or_create_env_var(
+    "SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL", "Qwen3-VL-4B-Instruct"
 )  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "Qwen3-VL-30B-A3B-Instruct", "Qwen3-VL-235B-A22B-Instruct", "PaddleOCR-VL"
 
 if SHOW_VLM_MODEL_OPTIONS:
     VLM_MODEL_OPTIONS = [
-        SELECTED_MODEL,
+        SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     ]
 
 MAX_SPACES_GPU_RUN_TIME = int(
@@ -1312,6 +1322,19 @@ USE_LLAMA_CPP = get_or_create_env_var(
 LOCAL_REPO_ID = get_or_create_env_var("LOCAL_REPO_ID", "")
 LOCAL_MODEL_FILE = get_or_create_env_var("LOCAL_MODEL_FILE", "")
 LOCAL_MODEL_FOLDER = get_or_create_env_var("LOCAL_MODEL_FOLDER", "")
+
+# Local Transformers LLM PII Detection Model Configuration
+# These variables allow you to specify a different Hugging Face model specifically for PII detection
+# If LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is empty, the app will use LOCAL_REPO_ID, LOCAL_MODEL_FILE, and LOCAL_MODEL_FOLDER
+LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID", "unsloth/gemma-3-4b-it-bnb-4bit"
+)  # Hugging Face repository ID for PII detection model (e.g., "unsloth/gemma-3-4b-it-bnb-4bit")
+LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"
+)  # Optional: Specific model filename if needed. If empty, uses the default from the repo.
+LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER", "model/gemma3_4b"
+)  # Optional: Local folder for PII model. If empty, uses LOCAL_MODEL_FOLDER or MODEL_CACHE_PATH
 
 GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
 GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var(
