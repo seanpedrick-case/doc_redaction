@@ -454,6 +454,7 @@ def load_model(
         gpu_config.update_gpu(gpu_layers)
         gpu_config.update_context(max_context_length)
 
+        # Llama.cpp python support not currently implemented
         if USE_LLAMA_CPP == "True":
             from llama_cpp import Llama
             from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
@@ -494,7 +495,6 @@ def load_model(
                 AutoModelForCausalLM,
                 BitsAndBytesConfig,
             )
-            from unsloth import FastLanguageModel
 
             print("Loading model from transformers")
             # Use the official model ID for Gemma 3 4B
@@ -557,7 +557,7 @@ def load_model(
 
                     # print("Loading model with bitsandbytes quantisation config:", quantisation_config)
 
-                    model, tokenizer = FastLanguageModel.from_pretrained(
+                    model, tokenizer = AutoModelForCausalLM.from_pretrained(
                         model_id,
                         max_seq_length=max_context_length,
                         dtype=torch_dtype,
@@ -567,10 +567,10 @@ def load_model(
                         token=hf_token,
                     )
 
-                    FastLanguageModel.for_inference(model)
+                    AutoModelForCausalLM.for_inference(model)
                 else:
                     print("Loading model without bitsandbytes quantisation")
-                    model, tokenizer = FastLanguageModel.from_pretrained(
+                    model, tokenizer = AutoModelForCausalLM.from_pretrained(
                         model_id,
                         max_seq_length=max_context_length,
                         dtype=torch_dtype,
@@ -578,7 +578,7 @@ def load_model(
                         token=hf_token,
                     )
 
-                    FastLanguageModel.for_inference(model)
+                    AutoModelForCausalLM.for_inference(model)
 
                 if not tokenizer.pad_token:
                     tokenizer.pad_token = tokenizer.eos_token
