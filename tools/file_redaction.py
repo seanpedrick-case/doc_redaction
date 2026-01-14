@@ -43,10 +43,13 @@ from tools.config import (
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
+    AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     CHOSEN_LOCAL_OCR_MODEL,
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
+    GEMINI_VLM_TEXT_EXTRACT_OPTION,
     IMAGES_DPI,
     INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
     INPUT_FOLDER,
@@ -70,6 +73,7 @@ from tools.config import (
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
+    VLM_MODEL_CHOICE,
     aws_comprehend_language_choices,
     textract_language_choices,
 )
@@ -282,6 +286,7 @@ def choose_and_run_redactor(
     language: str = DEFAULT_LANGUAGE,
     ocr_review_files: list = list(),
     custom_llm_instructions: str = "",
+    inference_server_vlm_model: str = "",
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
@@ -934,6 +939,81 @@ def choose_and_run_redactor(
     else:
         textract_client = ""
 
+    # Try to connect to cloud VLM clients if using cloud VLM OCR
+    gemini_client = None
+    gemini_config = None
+    azure_openai_client = None
+
+    if text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+        # Use the same bedrock_runtime that may have been created for LLM PII detection
+        if bedrock_runtime is None:
+            if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
+                print("Connecting to Bedrock via existing SSO connection for VLM OCR")
+                bedrock_runtime = boto3.client(
+                    "bedrock-runtime", region_name=AWS_REGION
+                )
+            elif aws_access_key_textbox and aws_secret_key_textbox:
+                print(
+                    "Connecting to Bedrock using AWS access key and secret keys from user input for VLM OCR."
+                )
+                bedrock_runtime = boto3.client(
+                    "bedrock-runtime",
+                    aws_access_key_id=aws_access_key_textbox,
+                    aws_secret_access_key=aws_secret_key_textbox,
+                    region_name=AWS_REGION,
+                )
+            elif RUN_AWS_FUNCTIONS:
+                print("Connecting to Bedrock via existing SSO connection for VLM OCR")
+                bedrock_runtime = boto3.client(
+                    "bedrock-runtime", region_name=AWS_REGION
+                )
+            elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+                print(
+                    "Getting Bedrock credentials from environment variables for VLM OCR"
+                )
+                bedrock_runtime = boto3.client(
+                    "bedrock-runtime",
+                    aws_access_key_id=AWS_ACCESS_KEY,
+                    aws_secret_access_key=AWS_SECRET_KEY,
+                    region_name=AWS_REGION,
+                )
+            else:
+                bedrock_runtime = None
+                out_message = "Cannot connect to AWS Bedrock service for VLM OCR. Please provide access keys under Textract settings on the Redaction settings tab."
+                print(out_message)
+                raise Exception(out_message)
+
+    elif text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION:
+        from tools.llm_funcs import construct_gemini_generative_model
+
+        try:
+            gemini_client, gemini_config = construct_gemini_generative_model(
+                in_api_key="",  # Will use environment variable
+                temperature=0.0,  # Use low temperature for OCR
+                model_choice=VLM_MODEL_CHOICE,
+                system_prompt="",  # No system prompt needed for OCR
+                max_tokens=4096,  # Reasonable default for OCR
+            )
+            print("Connected to Google Gemini for VLM OCR")
+        except Exception as e:
+            out_message = f"Cannot connect to Google Gemini service for VLM OCR: {e}. Please ensure GEMINI_API_KEY is set."
+            print(out_message)
+            raise Exception(out_message)
+
+    elif text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION:
+        from tools.llm_funcs import construct_azure_client
+
+        try:
+            azure_openai_client, _ = construct_azure_client(
+                in_api_key="",  # Will use environment variable
+                endpoint="",  # Will use environment variable
+            )
+            print("Connected to Azure/OpenAI for VLM OCR")
+        except Exception as e:
+            out_message = f"Cannot connect to Azure/OpenAI service for VLM OCR: {e}. Please ensure AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT are set."
+            print(out_message)
+            raise Exception(out_message)
+
     ### Language check - check if selected language packs exist
     try:
         if (
@@ -1020,6 +1100,12 @@ def choose_and_run_redactor(
             file_ending = "local_ocr"
         elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
             file_ending = "textract"
+        elif text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+            file_ending = "bedrock_vlm"
+        elif text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION:
+            file_ending = "gemini_vlm"
+        elif text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION:
+            file_ending = "azure_openai_vlm"
         else:
             print(
                 "No valid text extraction method found. Defaulting to local text extraction."
@@ -1058,6 +1144,9 @@ def choose_and_run_redactor(
         if (
             text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
             or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+            or text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+            or text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION
+            or text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION
         ):
 
             # Analyse and redact image-based pdf or image
@@ -1108,6 +1197,9 @@ def choose_and_run_redactor(
                 comprehend_client,
                 bedrock_runtime,
                 textract_client,
+                gemini_client,
+                gemini_config,
+                azure_openai_client,
                 custom_recogniser_word_list_flat,
                 redact_whole_page_list_flat,
                 max_fuzzy_spelling_mistakes_num,
@@ -1124,6 +1216,7 @@ def choose_and_run_redactor(
                 output_folder=output_folder,
                 input_folder=input_folder,
                 custom_llm_instructions=custom_llm_instructions,
+                inference_server_vlm_model=inference_server_vlm_model,
             )
 
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
@@ -3200,6 +3293,9 @@ def redact_image_pdf(
     comprehend_client: str = "",
     bedrock_runtime=None,
     textract_client: str = "",
+    gemini_client=None,
+    gemini_config=None,
+    azure_openai_client=None,
     in_deny_list: List[str] = list(),
     redact_whole_page_list: List[str] = list(),
     max_fuzzy_spelling_mistakes_num: int = 1,
@@ -3218,6 +3314,7 @@ def redact_image_pdf(
     output_folder: str = OUTPUT_FOLDER,
     input_folder: str = INPUT_FOLDER,
     custom_llm_instructions: str = "",
+    inference_server_vlm_model: str = "",
     progress=Progress(track_tqdm=True),
 ):
     """
@@ -3260,8 +3357,10 @@ def redact_image_pdf(
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
     - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
     - output_folder (str, optional): The folder for file outputs.
-    - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
     - input_folder (str, optional): The folder for file inputs.
+    - custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to an empty string.
+    - inference_server_vlm_model (str, optional): The inference-server VLM model to use for OCR. Defaults to an empty string. If empty, uses DEFAULT_INFERENCE_SERVER_VLM_MODEL.
+    - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
     The function returns a redacted PDF document along with processing output objects.
     """
 
@@ -3305,21 +3404,24 @@ def redact_image_pdf(
         )
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
 
-    # Only load in PaddleOCR models if not running Textract
+    # Map text extraction method to OCR engine
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
-        image_analyser = CustomImageAnalyzerEngine(
-            analyzer_engine=nlp_analyser,
-            ocr_engine="tesseract",
-            language=language,
-            output_folder=output_folder,
-        )
+        ocr_engine = "tesseract"  # Not actually used, but required for initialization
+    elif text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+        ocr_engine = "bedrock-vlm"
+    elif text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION:
+        ocr_engine = "gemini-vlm"
+    elif text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION:
+        ocr_engine = "azure-openai-vlm"
     else:
-        image_analyser = CustomImageAnalyzerEngine(
-            analyzer_engine=nlp_analyser,
-            ocr_engine=chosen_local_ocr_model,
-            language=language,
-            output_folder=output_folder,
-        )
+        ocr_engine = chosen_local_ocr_model
+
+    image_analyser = CustomImageAnalyzerEngine(
+        analyzer_engine=nlp_analyser,
+        ocr_engine=ocr_engine,
+        language=language,
+        output_folder=output_folder,
+    )
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         out_message = "Connection to AWS Comprehend service unsuccessful."
@@ -3617,9 +3719,14 @@ def redact_image_pdf(
                 page_width = pymupdf_page.mediabox.width
                 page_height = pymupdf_page.mediabox.height
 
-            # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
-            # If using Tesseract
-            if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+            # Step 1: Perform OCR. Either with Tesseract, cloud VLM, or with AWS Textract
+            # If using Tesseract or cloud VLM (all image-based OCR methods)
+            if (
+                text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+                or text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                or text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION
+                or text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION
+            ):
 
                 if all_page_line_level_ocr_results_with_words:
                     # Find the first dict where 'page' matches
@@ -3692,7 +3799,17 @@ def redact_image_pdf(
                             actual_image_path = image_path
 
                     page_word_level_ocr_results = image_analyser.perform_ocr(
-                        actual_image_path
+                        actual_image_path,
+                        bedrock_runtime=bedrock_runtime,
+                        gemini_client=gemini_client,
+                        gemini_config=gemini_config,
+                        azure_openai_client=azure_openai_client,
+                        vlm_model_choice=VLM_MODEL_CHOICE,
+                        inference_server_model_name=(
+                            inference_server_vlm_model
+                            if inference_server_vlm_model
+                            else None
+                        ),
                     )
 
                     (
@@ -4098,21 +4215,32 @@ def redact_image_pdf(
                     form_key_value_results_list.extend(form_key_value_results)
 
             # Convert to DataFrame and add to ongoing logging table
-            line_level_ocr_results_df = pd.DataFrame(
-                [
-                    {
-                        "page": page_line_level_ocr_results["page"],
-                        "text": result.text,
-                        "left": result.left,
-                        "top": result.top,
-                        "width": result.width,
-                        "height": result.height,
-                        "line": result.line,
-                        "conf": result.conf,
-                    }
-                    for result in page_line_level_ocr_results["results"]
-                ]
-            )
+            # Only process if page_line_level_ocr_results is initialized and has results
+            try:
+                if (
+                    page_line_level_ocr_results
+                    and "results" in page_line_level_ocr_results
+                ):
+                    line_level_ocr_results_df = pd.DataFrame(
+                        [
+                            {
+                                "page": page_line_level_ocr_results["page"],
+                                "text": result.text,
+                                "left": result.left,
+                                "top": result.top,
+                                "width": result.width,
+                                "height": result.height,
+                                "line": result.line,
+                                "conf": result.conf,
+                            }
+                            for result in page_line_level_ocr_results["results"]
+                        ]
+                    )
+                else:
+                    line_level_ocr_results_df = pd.DataFrame()
+            except (UnboundLocalError, NameError, KeyError):
+                # page_line_level_ocr_results not initialized or missing expected structure
+                line_level_ocr_results_df = pd.DataFrame()
 
             if not line_level_ocr_results_df.empty:  # Ensure there are records to add
                 all_line_level_ocr_results_list.extend(
@@ -4121,11 +4249,18 @@ def redact_image_pdf(
 
             # Save OCR visualization with bounding boxes (works for all OCR methods)
             if (
-                text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                and SAVE_PAGE_OCR_VISUALISATIONS is True
-            ) or (
-                text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
-                and SAVE_PAGE_OCR_VISUALISATIONS is True
+                (
+                    text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    and SAVE_PAGE_OCR_VISUALISATIONS is True
+                )
+                or (
+                    text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+                    and SAVE_PAGE_OCR_VISUALISATIONS is True
+                )
+                or (
+                    text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                    and SAVE_PAGE_OCR_VISUALISATIONS is True
+                )
             ):
                 if (
                     page_line_level_ocr_results_with_words

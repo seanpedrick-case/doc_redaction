@@ -27,6 +27,7 @@ from tools.config import (
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     CHOSEN_COMPREHEND_ENTITIES,
     CHOSEN_LLM_ENTITIES,
     CHOSEN_LOCAL_MODEL_INTRO_TEXT,
@@ -45,6 +46,7 @@ from tools.config import (
     DEFAULT_EXCEL_SHEETS,
     DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
     DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+    DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
     DEFAULT_LANGUAGE_FULL_NAME,
     DEFAULT_MIN_CONSECUTIVE_PAGES,
@@ -150,6 +152,7 @@ from tools.config import (
     SHOW_COSTS,
     SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
+    SHOW_INFERENCE_SERVER_OPTIONS,
     SHOW_LANGUAGE_SELECTION,
     SHOW_LLM_PII_DETECTION_OPTIONS,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
@@ -1530,6 +1533,37 @@ with blocks:
                             local_ocr_method_radio.render()
                     else:
                         local_ocr_method_radio.render()
+
+                    if SHOW_INFERENCE_SERVER_OPTIONS:
+                        with gr.Accordion(
+                            "Inference Server VLM Model (for inference-server OCR only)",
+                            open=False,
+                        ):
+                            inference_server_vlm_model_textbox = gr.Textbox(
+                                label="Inference Server VLM Model Name",
+                                placeholder="e.g., 'qwen2-vl-7b-instruct' or leave empty to use default",
+                                value=(
+                                    DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                                    if DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                                    else ""
+                                ),
+                                lines=1,
+                                visible=SHOW_INFERENCE_SERVER_OPTIONS,
+                            )
+                            gr.Markdown(
+                                "**Note:** This only applies when using 'inference-server' or 'hybrid-paddle-inference-server' as the OCR method. "
+                                "If left empty, uses the default model from configuration."
+                            )
+                    else:
+                        inference_server_vlm_model_textbox = gr.Textbox(
+                            label="Inference Server VLM Model Name",
+                            value=(
+                                DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                                if DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                                else ""
+                            ),
+                            visible=False,
+                        )
 
                     if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
                         with gr.Accordion(
@@ -3005,6 +3039,21 @@ with blocks:
             outputs=[estimated_time_taken_number],
         )
 
+        # Automatically set local_ocr_method_radio to "bedrock-vlm" when AWS Bedrock VLM is selected
+        def auto_set_local_ocr_for_bedrock_vlm(text_extract_method):
+            """Automatically set local OCR method to bedrock-vlm when AWS Bedrock VLM is selected."""
+            if text_extract_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+                # Only set if "bedrock-vlm" is a valid option
+                if "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS:
+                    return gr.update(value="bedrock-vlm")
+            return gr.update()
+
+        text_extract_method_radio.change(
+            fn=auto_set_local_ocr_for_bedrock_vlm,
+            inputs=[text_extract_method_radio],
+            outputs=[local_ocr_method_radio],
+        )
+
     # Allow user to select items from cost code dataframe for cost code
     if SHOW_COSTS and (GET_COST_CODES or ENFORCE_COST_CODES):
         cost_code_dataframe.select(
@@ -3175,6 +3224,7 @@ with blocks:
             chosen_language_drop,
             input_review_files,
             custom_llm_instructions_textbox,
+            inference_server_vlm_model_textbox,
         ],
         outputs=[
             redaction_output_summary_textbox,

@@ -25,6 +25,7 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from tools.config import (
     AWS_PII_OPTION,
     CONVERT_LINE_TO_WORD_LEVEL,
+    DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
     HYBRID_OCR_CONFIDENCE_THRESHOLD,
     HYBRID_OCR_MAX_NEW_TOKENS,
@@ -829,6 +830,17 @@ def _call_inference_server_vlm_api(
 
     endpoint = f"{api_url}/v1/chat/completions"
 
+    print(f"Payload model: {model_name}")
+    print(f"Payload max_new_tokens: {max_new_tokens}")
+    print(f"Payload temperature: {temperature}")
+    print(f"Payload top_p: {top_p}")
+    print(f"Payload top_k: {top_k}")
+    print(f"Payload repetition_penalty: {repetition_penalty}")
+    print(f"Payload do_sample: {do_sample}")
+    print(f"Payload min_p: {min_p}")
+    print(f"Payload presence_penalty: {presence_penalty}")
+    print(f"Payload seed: {seed}")
+
     try:
         if stream:
             # Handle streaming response
@@ -923,6 +935,272 @@ def _call_inference_server_vlm_api(
         raise ValueError(f"Invalid JSON response from inference-server: {str(e)}")
     except Exception as e:
         raise RuntimeError(f"Error calling inference-server API: {str(e)}")
+
+
+def _call_bedrock_vlm_api(
+    image: Image.Image,
+    prompt: str,
+    model_choice: str = None,
+    bedrock_runtime=None,
+    max_new_tokens: int = None,
+    temperature: float = None,
+    top_p: float = None,
+    timeout: int = 60,
+) -> str:
+    """
+    Calls AWS Bedrock API with an image and text prompt for vision models.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        model_choice: Bedrock model ID (e.g., "anthropic.claude-3-5-sonnet-20241022-v2:0")
+        bedrock_runtime: boto3 Bedrock runtime client
+        max_new_tokens: Maximum number of tokens to generate
+        temperature: Sampling temperature
+        top_p: Nucleus sampling parameter
+        timeout: Request timeout in seconds
+
+    Returns:
+        str: The generated text response from the model
+
+    Raises:
+        ConnectionError: If the API request fails
+        ValueError: If the response format is invalid
+    """
+    if bedrock_runtime is None:
+        raise ValueError("bedrock_runtime client is required for Bedrock VLM calls")
+    if model_choice is None:
+        raise ValueError("model_choice is required for Bedrock VLM calls")
+
+    # Convert PIL Image to base64
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    image_bytes = buffer.getvalue()
+    base64.b64encode(image_bytes).decode("utf-8")
+
+    # Prepare messages for Bedrock converse API
+    # Bedrock supports images in the content array
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"image": {"format": "png", "source": {"bytes": image_bytes}}},
+                {"text": prompt},
+            ],
+        }
+    ]
+
+    # Build inference config
+    inference_config = {
+        "maxTokens": max_new_tokens if max_new_tokens is not None else 4096,
+    }
+    if temperature is not None:
+        inference_config["temperature"] = temperature
+    if top_p is not None:
+        inference_config["topP"] = top_p
+
+    try:
+        # Call Bedrock converse API
+        api_response = bedrock_runtime.converse(
+            modelId=model_choice,
+            messages=messages,
+            inferenceConfig=inference_config,
+        )
+
+        # Extract response text
+        output_message = api_response["output"]["message"]
+        if "content" in output_message and len(output_message["content"]) > 0:
+            # Handle reasoning content if present
+            if "reasoningContent" in output_message["content"][0]:
+                # Extract the output text (skip reasoning)
+                if len(output_message["content"]) > 1:
+                    text = output_message["content"][1]["text"]
+                else:
+                    text = ""
+            else:
+                text = output_message["content"][0]["text"]
+        else:
+            raise ValueError("No content in Bedrock response")
+
+        return text
+
+    except Exception as e:
+        raise ConnectionError(f"Failed to call Bedrock API: {str(e)}")
+
+
+def _call_gemini_vlm_api(
+    image: Image.Image,
+    prompt: str,
+    client=None,
+    config=None,
+    model_choice: str = None,
+    max_new_tokens: int = None,
+    temperature: float = None,
+    timeout: int = 60,
+) -> str:
+    """
+    Calls Gemini API with an image and text prompt for vision models.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        client: Gemini ai.Client instance
+        config: Gemini types.GenerateContentConfig instance
+        model_choice: Gemini model name (e.g., "gemini-1.5-pro")
+        max_new_tokens: Maximum number of tokens to generate
+        temperature: Sampling temperature
+        timeout: Request timeout in seconds
+
+    Returns:
+        str: The generated text response from the model
+
+    Raises:
+        ConnectionError: If the API request fails
+        ValueError: If the response format is invalid
+    """
+    if client is None:
+        raise ValueError("Gemini client is required for Gemini VLM calls")
+    if model_choice is None:
+        raise ValueError("model_choice is required for Gemini VLM calls")
+
+    # Convert PIL Image to base64
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    image_bytes = buffer.getvalue()
+    base64.b64encode(image_bytes).decode("utf-8")
+
+    # Prepare content for Gemini API
+    # Gemini expects content as a list with parts containing image and text
+    try:
+        # Use the client to generate content with image
+        # Gemini API expects the image as part of the content
+        try:
+            import google.genai.types as types
+        except ImportError:
+            raise ImportError(
+                "Google GenAI types not available. Please install google-genai package."
+            )
+
+        # Create content with image and text
+        # For Gemini, we can pass image bytes directly or use inline_data
+        parts = [
+            types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+            types.Part.from_text(text=prompt),
+        ]
+
+        # Update config if needed
+        if config is None:
+            config = types.GenerateContentConfig(
+                temperature=temperature if temperature is not None else 0.7,
+                max_output_tokens=(
+                    max_new_tokens if max_new_tokens is not None else 4096
+                ),
+            )
+        else:
+            # Update existing config
+            if temperature is not None:
+                config.temperature = temperature
+            if max_new_tokens is not None:
+                config.max_output_tokens = max_new_tokens
+
+        response = client.models.generate_content(
+            model=model_choice, contents=parts, config=config
+        )
+
+        # Extract text from response
+        if hasattr(response, "text"):
+            return response.text
+        elif hasattr(response, "candidates") and len(response.candidates) > 0:
+            if hasattr(response.candidates[0], "content"):
+                if hasattr(response.candidates[0].content, "parts"):
+                    text_parts = []
+                    for part in response.candidates[0].content.parts:
+                        if hasattr(part, "text"):
+                            text_parts.append(part.text)
+                    return "".join(text_parts)
+        else:
+            raise ValueError("No text content in Gemini response")
+
+    except Exception as e:
+        raise ConnectionError(f"Failed to call Gemini API: {str(e)}")
+
+
+def _call_azure_openai_vlm_api(
+    image: Image.Image,
+    prompt: str,
+    client=None,
+    model_choice: str = None,
+    max_new_tokens: int = None,
+    temperature: float = None,
+    timeout: int = 60,
+) -> str:
+    """
+    Calls Azure/OpenAI API with an image and text prompt for vision models.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        client: OpenAI client instance
+        model_choice: Model name (e.g., "gpt-4o", "gpt-4-vision-preview")
+        max_new_tokens: Maximum number of tokens to generate
+        temperature: Sampling temperature
+        timeout: Request timeout in seconds
+
+    Returns:
+        str: The generated text response from the model
+
+    Raises:
+        ConnectionError: If the API request fails
+        ValueError: If the response format is invalid
+    """
+    if client is None:
+        raise ValueError("OpenAI client is required for Azure/OpenAI VLM calls")
+    if model_choice is None:
+        raise ValueError("model_choice is required for Azure/OpenAI VLM calls")
+
+    # Convert PIL Image to base64
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    image_bytes = buffer.getvalue()
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    # Prepare messages in OpenAI format
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{image_base64}"},
+                },
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+
+    try:
+        # Call OpenAI chat completions API
+        response = client.chat.completions.create(
+            model=model_choice,
+            messages=messages,
+            temperature=temperature if temperature is not None else 0.7,
+            max_completion_tokens=(
+                max_new_tokens if max_new_tokens is not None else 4096
+            ),
+        )
+
+        # Extract text from response
+        if response.choices and len(response.choices) > 0:
+            message = response.choices[0].message
+            if hasattr(message, "content") and message.content:
+                return message.content
+            else:
+                raise ValueError("No content in OpenAI response")
+        else:
+            raise ValueError("No choices in OpenAI response")
+
+    except Exception as e:
+        raise ConnectionError(f"Failed to call Azure/OpenAI API: {str(e)}")
 
 
 def _vlm_ocr_predict(
@@ -1039,6 +1317,7 @@ def _inference_server_ocr_predict(
     image: Image.Image,
     prompt: str = model_default_prompt,
     max_retries: int = 5,
+    model_name: str = None,
 ) -> Dict[str, Any]:
     """
     Inference-server OCR prediction function that mimics PaddleOCR's interface.
@@ -1099,9 +1378,25 @@ def _inference_server_ocr_predict(
 
         for attempt in range(1, max_retries + 1):
             try:
+                # Determine model_name: use provided parameter, then DEFAULT_INFERENCE_SERVER_VLM_MODEL, then INFERENCE_SERVER_MODEL_NAME
+                final_model_name = model_name
+                if final_model_name is None or final_model_name == "":
+                    final_model_name = (
+                        DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                        if DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                        else None
+                    )
+                if final_model_name is None or final_model_name == "":
+                    final_model_name = (
+                        INFERENCE_SERVER_MODEL_NAME
+                        if INFERENCE_SERVER_MODEL_NAME
+                        else None
+                    )
+
                 extracted_text = _call_inference_server_vlm_api(
                     image=image,
                     prompt=prompt,
+                    model_name=final_model_name,
                     max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
                     temperature=model_default_temperature,
                     top_p=model_default_top_p,
@@ -1172,6 +1467,380 @@ def _inference_server_ocr_predict(
         import traceback
 
         print(f"Inference-server OCR error traceback: {traceback.format_exc()}")
+        return {"rec_texts": [], "rec_scores": []}
+
+
+def _bedrock_vlm_ocr_predict(
+    image: Image.Image,
+    prompt: str = model_default_prompt,
+    model_choice: str = None,
+    bedrock_runtime=None,
+    max_retries: int = 5,
+) -> Dict[str, Any]:
+    """
+    Bedrock VLM OCR prediction function that mimics PaddleOCR's interface.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        model_choice: Bedrock model ID
+        bedrock_runtime: boto3 Bedrock runtime client
+        max_retries: Maximum number of retry attempts for API calls (default: 5)
+
+    Returns:
+        Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
+    """
+    try:
+        # Validate image exists and is not None
+        if image is None:
+            print("Bedrock VLM OCR error: Image is None")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Bedrock VLM OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+        except Exception as size_error:
+            print(f"Bedrock VLM OCR error: Could not get image size: {size_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+                width, height = image.size
+        except Exception as convert_error:
+            print(
+                f"Bedrock VLM OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        try:
+            image = _prepare_image_for_vlm(image)
+            width, height = image.size
+        except Exception as prep_error:
+            print(
+                f"Bedrock VLM OCR error: Could not prepare image for VLM: {prep_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Use the Bedrock API to extract text with retry logic
+        extracted_text = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                extracted_text = _call_bedrock_vlm_api(
+                    image=image,
+                    prompt=prompt,
+                    model_choice=model_choice,
+                    bedrock_runtime=bedrock_runtime,
+                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    temperature=model_default_temperature,
+                    top_p=model_default_top_p,
+                )
+                # If we get here, the API call succeeded
+                break
+            except Exception as api_error:
+                print(
+                    f"Bedrock VLM OCR retry attempt {attempt}/{max_retries} failed: {api_error}"
+                )
+                if attempt == max_retries:
+                    raise Exception(
+                        f"Bedrock VLM OCR failed after {max_retries} attempts. Last error: {str(api_error)}"
+                    ) from api_error
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None:
+            return {"rec_texts": [], "rec_scores": []}
+
+        if not isinstance(extracted_text, str):
+            return {"rec_texts": [], "rec_scores": []}
+
+        if extracted_text.strip():
+            # Clean the text
+            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
+            cleaned_text = cleaned_text.strip()
+
+            # Split into words for compatibility with PaddleOCR format
+            words = cleaned_text.split()
+
+            # If text has more than 30 words, assume something went wrong and skip it
+            if len(words) > 30:
+                print(
+                    f"Bedrock VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+
+            # Create PaddleOCR-compatible result
+            result = {
+                "rec_texts": words,
+                "rec_scores": [1.0] * len(words),  # High confidence for Bedrock results
+            }
+
+            return result
+        else:
+            return {"rec_texts": [], "rec_scores": []}
+
+    except Exception as e:
+        print(f"Bedrock VLM OCR error: {e}")
+        import traceback
+
+        print(f"Bedrock VLM OCR error traceback: {traceback.format_exc()}")
+        return {"rec_texts": [], "rec_scores": []}
+
+
+def _gemini_vlm_ocr_predict(
+    image: Image.Image,
+    prompt: str = model_default_prompt,
+    model_choice: str = None,
+    client=None,
+    config=None,
+    max_retries: int = 5,
+) -> Dict[str, Any]:
+    """
+    Gemini VLM OCR prediction function that mimics PaddleOCR's interface.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        model_choice: Gemini model name
+        client: Gemini ai.Client instance
+        config: Gemini types.GenerateContentConfig instance
+        max_retries: Maximum number of retry attempts for API calls (default: 5)
+
+    Returns:
+        Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
+    """
+    try:
+        # Validate image exists and is not None
+        if image is None:
+            print("Gemini VLM OCR error: Image is None")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Gemini VLM OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+        except Exception as size_error:
+            print(f"Gemini VLM OCR error: Could not get image size: {size_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+                width, height = image.size
+        except Exception as convert_error:
+            print(
+                f"Gemini VLM OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        try:
+            image = _prepare_image_for_vlm(image)
+            width, height = image.size
+        except Exception as prep_error:
+            print(
+                f"Gemini VLM OCR error: Could not prepare image for VLM: {prep_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Use the Gemini API to extract text with retry logic
+        extracted_text = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                extracted_text = _call_gemini_vlm_api(
+                    image=image,
+                    prompt=prompt,
+                    client=client,
+                    config=config,
+                    model_choice=model_choice,
+                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    temperature=model_default_temperature,
+                )
+                # If we get here, the API call succeeded
+                break
+            except Exception as api_error:
+                print(
+                    f"Gemini VLM OCR retry attempt {attempt}/{max_retries} failed: {api_error}"
+                )
+                if attempt == max_retries:
+                    raise Exception(
+                        f"Gemini VLM OCR failed after {max_retries} attempts. Last error: {str(api_error)}"
+                    ) from api_error
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None:
+            return {"rec_texts": [], "rec_scores": []}
+
+        if not isinstance(extracted_text, str):
+            return {"rec_texts": [], "rec_scores": []}
+
+        if extracted_text.strip():
+            # Clean the text
+            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
+            cleaned_text = cleaned_text.strip()
+
+            # Split into words for compatibility with PaddleOCR format
+            words = cleaned_text.split()
+
+            # If text has more than 30 words, assume something went wrong and skip it
+            if len(words) > 30:
+                print(
+                    f"Gemini VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+
+            # Create PaddleOCR-compatible result
+            result = {
+                "rec_texts": words,
+                "rec_scores": [1.0] * len(words),  # High confidence for Gemini results
+            }
+
+            return result
+        else:
+            return {"rec_texts": [], "rec_scores": []}
+
+    except Exception as e:
+        print(f"Gemini VLM OCR error: {e}")
+        import traceback
+
+        print(f"Gemini VLM OCR error traceback: {traceback.format_exc()}")
+        return {"rec_texts": [], "rec_scores": []}
+
+
+def _azure_openai_vlm_ocr_predict(
+    image: Image.Image,
+    prompt: str = model_default_prompt,
+    model_choice: str = None,
+    client=None,
+    max_retries: int = 5,
+) -> Dict[str, Any]:
+    """
+    Azure/OpenAI VLM OCR prediction function that mimics PaddleOCR's interface.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        model_choice: Model name (e.g., "gpt-4o", "gpt-4-vision-preview")
+        client: OpenAI client instance
+        max_retries: Maximum number of retry attempts for API calls (default: 5)
+
+    Returns:
+        Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
+    """
+    try:
+        # Validate image exists and is not None
+        if image is None:
+            print("Azure/OpenAI VLM OCR error: Image is None")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Azure/OpenAI VLM OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+        except Exception as size_error:
+            print(f"Azure/OpenAI VLM OCR error: Could not get image size: {size_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+                width, height = image.size
+        except Exception as convert_error:
+            print(
+                f"Azure/OpenAI VLM OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        try:
+            image = _prepare_image_for_vlm(image)
+            width, height = image.size
+        except Exception as prep_error:
+            print(
+                f"Azure/OpenAI VLM OCR error: Could not prepare image for VLM: {prep_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Use the Azure/OpenAI API to extract text with retry logic
+        extracted_text = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                extracted_text = _call_azure_openai_vlm_api(
+                    image=image,
+                    prompt=prompt,
+                    client=client,
+                    model_choice=model_choice,
+                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    temperature=model_default_temperature,
+                )
+                # If we get here, the API call succeeded
+                break
+            except Exception as api_error:
+                print(
+                    f"Azure/OpenAI VLM OCR retry attempt {attempt}/{max_retries} failed: {api_error}"
+                )
+                if attempt == max_retries:
+                    raise Exception(
+                        f"Azure/OpenAI VLM OCR failed after {max_retries} attempts. Last error: {str(api_error)}"
+                    ) from api_error
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None:
+            return {"rec_texts": [], "rec_scores": []}
+
+        if not isinstance(extracted_text, str):
+            return {"rec_texts": [], "rec_scores": []}
+
+        if extracted_text.strip():
+            # Clean the text
+            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
+            cleaned_text = cleaned_text.strip()
+
+            # Split into words for compatibility with PaddleOCR format
+            words = cleaned_text.split()
+
+            # If text has more than 30 words, assume something went wrong and skip it
+            if len(words) > 30:
+                print(
+                    f"Azure/OpenAI VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+
+            # Create PaddleOCR-compatible result
+            result = {
+                "rec_texts": words,
+                "rec_scores": [1.0]
+                * len(words),  # High confidence for Azure/OpenAI results
+            }
+
+            return result
+        else:
+            return {"rec_texts": [], "rec_scores": []}
+
+    except Exception as e:
+        print(f"Azure/OpenAI VLM OCR error: {e}")
+        import traceback
+
+        print(f"Azure/OpenAI VLM OCR error traceback: {traceback.format_exc()}")
         return {"rec_texts": [], "rec_scores": []}
 
 
@@ -1936,6 +2605,7 @@ def _inference_server_page_ocr_predict(
     detect_people_only: bool = False,
     detect_signatures_only: bool = False,
     progress: Optional[gr.Progress] = gr.Progress(),
+    model_name: str = None,
 ) -> Dict[str, List]:
     """
     Inference-server page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -2108,9 +2778,23 @@ def _inference_server_page_ocr_predict(
         # Use the inference-server API to extract structured text
         # Note: processed_width and processed_height were already captured on line 1921
         # after _prepare_image_for_vlm, so we use those values for normalization
+        # Determine model_name: use provided parameter, then DEFAULT_INFERENCE_SERVER_VLM_MODEL, then INFERENCE_SERVER_MODEL_NAME
+        final_model_name = model_name
+        if final_model_name is None or final_model_name == "":
+            final_model_name = (
+                DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                if DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                else None
+            )
+        if final_model_name is None or final_model_name == "":
+            final_model_name = (
+                INFERENCE_SERVER_MODEL_NAME if INFERENCE_SERVER_MODEL_NAME else None
+            )
+
         extracted_text = _call_inference_server_vlm_api(
             image=processed_image,
             prompt=prompt,
+            model_name=final_model_name,
             max_new_tokens=model_default_max_new_tokens,
             temperature=model_default_temperature,
             top_p=model_default_top_p,
@@ -2413,6 +3097,809 @@ def _inference_server_page_ocr_predict(
         import traceback
 
         print(f"Inference-server page OCR error traceback: {traceback.format_exc()}")
+        return {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+
+def _parse_vlm_page_ocr_response(
+    extracted_text: str,
+    processed_image: Image.Image,
+    processed_width: int,
+    processed_height: int,
+    scale_x: float,
+    scale_y: float,
+    normalised_coords_range: Optional[int],
+    model_name: str = "Cloud VLM",
+) -> Dict[str, List]:
+    """
+    Helper function to parse VLM page OCR response and convert to expected format.
+    Shared by all cloud VLM page OCR functions.
+
+    Args:
+        extracted_text: Raw text response from VLM
+        processed_image: The processed image that was sent to the VLM
+        processed_width: Width of processed image
+        processed_height: Height of processed image
+        scale_x: Scale factor for x coordinates (original/processed)
+        scale_y: Scale factor for y coordinates (original/processed)
+        normalised_coords_range: If set, bounding boxes are in normalized coordinates (0 to this value)
+        model_name: Name of the model for the 'model' field in results
+
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+    """
+    # Fix malformed bounding box values in the JSON string before parsing
+    extracted_text = _fix_malformed_bbox_in_json_string(extracted_text.strip())
+
+    lines_data = None
+
+    # Try various JSON parsing strategies (same as _vlm_page_ocr_predict)
+    try:
+        lines_data = json.loads(extracted_text)
+    except json.JSONDecodeError:
+        pass
+
+    if lines_data is None:
+        json_match = re.search(r"```(?:json)?\s*(\[.*?\])", extracted_text, re.DOTALL)
+        if json_match:
+            try:
+                lines_data = json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+    if lines_data is None:
+        start_idx = extracted_text.find("[")
+        if start_idx >= 0:
+            bracket_count = 0
+            end_idx = start_idx
+            for i in range(start_idx, len(extracted_text)):
+                if extracted_text[i] == "[":
+                    bracket_count += 1
+                elif extracted_text[i] == "]":
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        end_idx = i
+                        break
+            if end_idx > start_idx:
+                try:
+                    lines_data = json.loads(extracted_text[start_idx : end_idx + 1])
+                except json.JSONDecodeError:
+                    pass
+
+    if lines_data is None:
+        try:
+            python_data = ast.literal_eval(extracted_text)
+            if isinstance(python_data, list):
+                lines_data = python_data
+        except Exception:
+            pass
+
+    if lines_data is None:
+        print(f"{model_name} page OCR error: Could not parse JSON response")
+        print(f"Response text: {extracted_text[:500]}")
+        return {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+    if not isinstance(lines_data, list):
+        print(f"{model_name} page OCR error: Expected list, got {type(lines_data)}")
+        return {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+    # Convert VLM results to expected format
+    result = {
+        "text": [],
+        "left": [],
+        "top": [],
+        "width": [],
+        "height": [],
+        "conf": [],
+        "model": [],
+    }
+
+    for line_item in lines_data:
+        if not isinstance(line_item, dict):
+            continue
+
+        text = line_item.get("text_content") or line_item.get("text", "").strip()
+        if not text:
+            continue
+
+        bbox = (
+            line_item.get("bbox_2d")
+            or line_item.get("bbox", [])
+            or line_item.get("bb", [])
+        )
+        confidence = line_item.get("confidence", 100)
+
+        fixed_bbox = _fix_malformed_bbox(bbox)
+        if fixed_bbox is not None:
+            bbox = fixed_bbox
+        elif not isinstance(bbox, list) or len(bbox) != 4:
+            print(
+                f"{model_name} page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}"
+            )
+            continue
+
+        x1, y1, x2, y2 = bbox
+
+        try:
+            x1 = float(x1)
+            y1 = float(y1)
+            x2 = float(x2)
+            y2 = float(y2)
+        except (ValueError, TypeError):
+            print(
+                f"{model_name} page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}"
+            )
+            continue
+
+        if x2 <= x1 or y2 <= y1:
+            print(
+                f"{model_name} page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}"
+            )
+            continue
+
+        if normalised_coords_range is not None and normalised_coords_range > 0:
+            x1 = (x1 / float(normalised_coords_range)) * processed_width
+            y1 = (y1 / float(normalised_coords_range)) * processed_height
+            x2 = (x2 / float(normalised_coords_range)) * processed_width
+            y2 = (y2 / float(normalised_coords_range)) * processed_height
+
+        if scale_x != 1.0 or scale_y != 1.0:
+            x1 = x1 * scale_x
+            y1 = y1 * scale_y
+            x2 = x2 * scale_x
+            y2 = y2 * scale_y
+
+        left = int(round(x1))
+        top = int(round(y1))
+        width = int(round(x2 - x1))
+        height = int(round(y2 - y1))
+
+        try:
+            confidence = float(confidence)
+            confidence = max(0, min(100, confidence))
+        except (ValueError, TypeError):
+            confidence = 100
+
+        result["text"].append(clean_unicode_text(text))
+        result["left"].append(left)
+        result["top"].append(top)
+        result["width"].append(width)
+        result["height"].append(height)
+        result["conf"].append(int(round(confidence)))
+        result["model"].append(model_name)
+
+    return result
+
+
+def _bedrock_page_ocr_predict(
+    image: Image.Image,
+    image_name: str = "bedrock_page_ocr_input_image.png",
+    normalised_coords_range: Optional[int] = None,
+    output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
+    model_choice: str = None,
+    bedrock_runtime=None,
+) -> Dict[str, List]:
+    """
+    Bedrock page-level OCR prediction that returns structured line-level results with bounding boxes.
+
+    Args:
+        image: PIL Image to process (full page)
+        image_name: Name of the image for debugging
+        normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
+        output_folder: The folder where output images will be saved
+        detect_people_only: If True, only detect people in images
+        detect_signatures_only: If True, only detect signatures in images
+        progress: Gradio progress tracker
+        model_choice: Bedrock model ID
+        bedrock_runtime: boto3 Bedrock runtime client
+
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+    """
+    try:
+        if image is None:
+            print("Bedrock page OCR error: Image is None")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Bedrock page OCR error: Image is too small ({width}x{height} pixels)."
+                )
+                return {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                }
+        except Exception as size_error:
+            print(f"Bedrock page OCR error: Could not get image size: {size_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+        except Exception as convert_error:
+            print(
+                f"Bedrock page OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        scale_x = 1.0
+        scale_y = 1.0
+        try:
+            original_width, original_height = image.size
+            processed_image = _prepare_image_for_vlm(image)
+            processed_width, processed_height = processed_image.size
+
+            scale_x = (
+                float(original_width) / float(processed_width)
+                if processed_width > 0
+                else 1.0
+            )
+            scale_y = (
+                float(original_height) / float(processed_height)
+                if processed_height > 0
+                else 1.0
+            )
+        except Exception as prep_error:
+            print(f"Bedrock page OCR error: Could not prepare image: {prep_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Create prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+        else:
+            prompt = full_page_ocr_vlm_prompt
+
+        # Save input image for debugging if environment variable is set
+        if SAVE_VLM_INPUT_IMAGES:
+            try:
+                vlm_debug_dir = os.path.join(
+                    output_folder,
+                    "bedrock_visualisations/vlm_input_images",
+                )
+                os.makedirs(vlm_debug_dir, exist_ok=True)
+                # Increment the number at the end of image_name before .png
+                # This converts zero-indexed input to one-indexed output
+                incremented_image_name = image_name
+                if image_name.endswith(".png"):
+                    # Find the number pattern at the end before .png
+                    # Matches patterns like: _0.png, _00.png, 0.png, 00.png, etc.
+                    pattern = r"(\d+)(\.png)$"
+                    match = re.search(pattern, image_name)
+                    if match:
+                        number_str = match.group(1)
+                        number = int(number_str)
+                        incremented_number = number + 1
+                        # Preserve the same number of digits (padding with zeros if needed)
+                        incremented_str = str(incremented_number).zfill(len(number_str))
+                        incremented_image_name = re.sub(
+                            pattern, lambda m: incremented_str + m.group(2), image_name
+                        )
+                image_name_safe = safe_sanitize_text(incremented_image_name)
+
+                # Extract page number from image_name if present (e.g., "file_1.png" -> "1")
+                # Look for patterns like "_1.png", "_01.png", "_page_1.png", etc.
+                page_number = None
+                page_patterns = [
+                    r"_page_(\d+)\.png$",  # _page_1.png
+                    r"_(\d+)\.png$",  # _1.png, _01.png
+                    r"page_(\d+)\.png$",  # page_1.png
+                ]
+                for pattern in page_patterns:
+                    match = re.search(pattern, incremented_image_name, re.IGNORECASE)
+                    if match:
+                        page_number = match.group(1)
+                        break
+
+                # Use longer name limit to preserve page numbers, but still truncate if very long
+                # Remove .png extension before truncating to preserve more of the name
+                image_name_no_ext = image_name_safe.replace(".png", "").replace(
+                    ".PNG", ""
+                )
+                if len(image_name_no_ext) > 100:
+                    image_name_shortened = image_name_no_ext[:100]
+                else:
+                    image_name_shortened = image_name_no_ext
+
+                # Construct filename with page number if found
+                if page_number:
+                    filename = (
+                        f"{image_name_shortened}_page_{page_number}_bedrock_input.png"
+                    )
+                else:
+                    filename = f"{image_name_shortened}_bedrock_page_input_image.png"
+
+                filepath = os.path.join(vlm_debug_dir, filename)
+                print(f"Saving Bedrock VLM input image to: {filepath}")
+                processed_image.save(filepath)
+                # print(f"Saved Bedrock VLM input image to: {filepath}")
+            except Exception as save_error:
+                print(f"Warning: Could not save Bedrock VLM input image: {save_error}")
+
+        # Call Bedrock API
+        extracted_text = _call_bedrock_vlm_api(
+            image=processed_image,
+            prompt=prompt,
+            model_choice=model_choice,
+            bedrock_runtime=bedrock_runtime,
+            max_new_tokens=model_default_max_new_tokens,
+            temperature=model_default_temperature,
+            top_p=model_default_top_p,
+        )
+
+        if extracted_text is None or not isinstance(extracted_text, str):
+            print("Bedrock page OCR warning: No valid response")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Plot bounding boxes from VLM response if enabled
+        if SAVE_VLM_INPUT_IMAGES:
+            try:
+                # Determine task type based on prompt
+                task_type = "ocr"
+                if detect_people_only:
+                    task_type = "person"
+                elif detect_signatures_only:
+                    task_type = "signature"
+
+                plot_text_bounding_boxes(
+                    processed_image,
+                    extracted_text,
+                    image_name=image_name,
+                    image_folder="bedrock_visualisations",
+                    output_folder=output_folder,
+                    task_type=task_type,
+                )
+            except Exception as plot_error:
+                print(
+                    f"Warning: Could not plot Bedrock VLM bounding boxes: {plot_error}"
+                )
+
+        # Parse response using shared helper
+        return _parse_vlm_page_ocr_response(
+            extracted_text=extracted_text,
+            processed_image=processed_image,
+            processed_width=processed_width,
+            processed_height=processed_height,
+            scale_x=scale_x,
+            scale_y=scale_y,
+            normalised_coords_range=normalised_coords_range,
+            model_name="Bedrock",
+        )
+
+    except Exception as e:
+        print(f"Bedrock page OCR error: {e}")
+        import traceback
+
+        print(f"Bedrock page OCR error traceback: {traceback.format_exc()}")
+        return {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+
+def _gemini_page_ocr_predict(
+    image: Image.Image,
+    image_name: str = "gemini_page_ocr_input_image.png",
+    normalised_coords_range: Optional[int] = None,
+    output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
+    model_choice: str = None,
+    client=None,
+    config=None,
+) -> Dict[str, List]:
+    """
+    Gemini page-level OCR prediction that returns structured line-level results with bounding boxes.
+
+    Args:
+        image: PIL Image to process (full page)
+        image_name: Name of the image for debugging
+        normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
+        output_folder: The folder where output images will be saved
+        detect_people_only: If True, only detect people in images
+        detect_signatures_only: If True, only detect signatures in images
+        progress: Gradio progress tracker
+        model_choice: Gemini model name
+        client: Gemini ai.Client instance
+        config: Gemini types.GenerateContentConfig instance
+
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+    """
+    try:
+        if image is None:
+            print("Gemini page OCR error: Image is None")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Gemini page OCR error: Image is too small ({width}x{height} pixels)."
+                )
+                return {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                }
+        except Exception as size_error:
+            print(f"Gemini page OCR error: Could not get image size: {size_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+        except Exception as convert_error:
+            print(
+                f"Gemini page OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        scale_x = 1.0
+        scale_y = 1.0
+        try:
+            original_width, original_height = image.size
+            processed_image = _prepare_image_for_vlm(image)
+            processed_width, processed_height = processed_image.size
+
+            scale_x = (
+                float(original_width) / float(processed_width)
+                if processed_width > 0
+                else 1.0
+            )
+            scale_y = (
+                float(original_height) / float(processed_height)
+                if processed_height > 0
+                else 1.0
+            )
+        except Exception as prep_error:
+            print(f"Gemini page OCR error: Could not prepare image: {prep_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Create prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+        else:
+            prompt = full_page_ocr_vlm_prompt
+
+        # Call Gemini API
+        extracted_text = _call_gemini_vlm_api(
+            image=processed_image,
+            prompt=prompt,
+            client=client,
+            config=config,
+            model_choice=model_choice,
+            max_new_tokens=model_default_max_new_tokens,
+            temperature=model_default_temperature,
+        )
+
+        if extracted_text is None or not isinstance(extracted_text, str):
+            print("Gemini page OCR warning: No valid response")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Parse response using shared helper
+        return _parse_vlm_page_ocr_response(
+            extracted_text=extracted_text,
+            processed_image=processed_image,
+            processed_width=processed_width,
+            processed_height=processed_height,
+            scale_x=scale_x,
+            scale_y=scale_y,
+            normalised_coords_range=normalised_coords_range,
+            model_name="Gemini",
+        )
+
+    except Exception as e:
+        print(f"Gemini page OCR error: {e}")
+        import traceback
+
+        print(f"Gemini page OCR error traceback: {traceback.format_exc()}")
+        return {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+
+def _azure_openai_page_ocr_predict(
+    image: Image.Image,
+    image_name: str = "azure_openai_page_ocr_input_image.png",
+    normalised_coords_range: Optional[int] = None,
+    output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
+    model_choice: str = None,
+    client=None,
+) -> Dict[str, List]:
+    """
+    Azure/OpenAI page-level OCR prediction that returns structured line-level results with bounding boxes.
+
+    Args:
+        image: PIL Image to process (full page)
+        image_name: Name of the image for debugging
+        normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
+        output_folder: The folder where output images will be saved
+        detect_people_only: If True, only detect people in images
+        detect_signatures_only: If True, only detect signatures in images
+        progress: Gradio progress tracker
+        model_choice: Model name (e.g., "gpt-4o", "gpt-4-vision-preview")
+        client: OpenAI client instance
+
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+    """
+    try:
+        if image is None:
+            print("Azure/OpenAI page OCR error: Image is None")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Azure/OpenAI page OCR error: Image is too small ({width}x{height} pixels)."
+                )
+                return {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                }
+        except Exception as size_error:
+            print(
+                f"Azure/OpenAI page OCR error: Could not get image size: {size_error}"
+            )
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+        except Exception as convert_error:
+            print(
+                f"Azure/OpenAI page OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        scale_x = 1.0
+        scale_y = 1.0
+        try:
+            original_width, original_height = image.size
+            processed_image = _prepare_image_for_vlm(image)
+            processed_width, processed_height = processed_image.size
+
+            scale_x = (
+                float(original_width) / float(processed_width)
+                if processed_width > 0
+                else 1.0
+            )
+            scale_y = (
+                float(original_height) / float(processed_height)
+                if processed_height > 0
+                else 1.0
+            )
+        except Exception as prep_error:
+            print(f"Azure/OpenAI page OCR error: Could not prepare image: {prep_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Create prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+        else:
+            prompt = full_page_ocr_vlm_prompt
+
+        # Call Azure/OpenAI API
+        extracted_text = _call_azure_openai_vlm_api(
+            image=processed_image,
+            prompt=prompt,
+            client=client,
+            model_choice=model_choice,
+            max_new_tokens=model_default_max_new_tokens,
+            temperature=model_default_temperature,
+        )
+
+        if extracted_text is None or not isinstance(extracted_text, str):
+            print("Azure/OpenAI page OCR warning: No valid response")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Parse response using shared helper
+        return _parse_vlm_page_ocr_response(
+            extracted_text=extracted_text,
+            processed_image=processed_image,
+            processed_width=processed_width,
+            processed_height=processed_height,
+            scale_x=scale_x,
+            scale_y=scale_y,
+            normalised_coords_range=normalised_coords_range,
+            model_name="Azure/OpenAI",
+        )
+
+    except Exception as e:
+        print(f"Azure/OpenAI page OCR error: {e}")
+        import traceback
+
+        print(f"Azure/OpenAI page OCR error traceback: {traceback.format_exc()}")
         return {
             "text": [],
             "left": [],
@@ -2955,6 +4442,13 @@ class CustomImageAnalyzerEngine:
         }
 
         if not line_data or not line_data.get("text"):
+            return output
+
+        # Validate that image is not None before processing
+        if image is None:
+            print(
+                "Warning: Image is None in _convert_line_to_word_level. Returning empty output."
+            )
             return output
 
         # Convert PIL Image to numpy array (BGR format for OpenCV)
@@ -4041,6 +5535,7 @@ class CustomImageAnalyzerEngine:
         image_name: str = "unknown_image_name",
         input_image_width: int = None,
         input_image_height: int = None,
+        model_name: str = None,
     ) -> List[Any]:
         """
         Performs OCR using PaddleOCR at line level, then inference-server API for low-confidence lines.
@@ -4327,7 +5822,8 @@ class CustomImageAnalyzerEngine:
 
                         try:
                             inference_server_result = _inference_server_ocr_predict(
-                                cropped_image
+                                cropped_image,
+                                model_name=model_name,
                             )
                             inference_server_rec_texts = (
                                 inference_server_result.get("rec_texts", [])
@@ -4450,7 +5946,15 @@ class CustomImageAnalyzerEngine:
         return modified_paddle_results
 
     def perform_ocr(
-        self, image: Union[str, Image.Image, np.ndarray], ocr: Optional[Any] = None
+        self,
+        image: Union[str, Image.Image, np.ndarray],
+        ocr: Optional[Any] = None,
+        bedrock_runtime=None,
+        gemini_client=None,
+        gemini_config=None,
+        azure_openai_client=None,
+        vlm_model_choice: str = None,
+        inference_server_model_name: str = None,
     ) -> List[OCRResult]:
         """
         Performs OCR on the given image using the configured engine.
@@ -4546,8 +6050,76 @@ class CustomImageAnalyzerEngine:
                 image_name=image_name,
                 normalised_coords_range=999,
                 output_folder=self.output_folder,
+                model_name=inference_server_model_name,
             )
             # Inference-server returns data already in the expected format, so no conversion needed
+
+        elif self.ocr_engine == "bedrock-vlm":
+            # Bedrock page-level OCR - sends whole page to Bedrock API and gets structured line-level results
+            # Use original image (before preprocessing) for Bedrock since coordinates should be in original space
+            bedrock_image = (
+                original_image_for_visualization
+                if original_image_for_visualization is not None
+                else image
+            )
+            # Get model choice from parameter or config
+            from tools.config import VLM_MODEL_CHOICE
+
+            model_choice = vlm_model_choice if vlm_model_choice else VLM_MODEL_CHOICE
+            ocr_data = _bedrock_page_ocr_predict(
+                bedrock_image,
+                image_name=image_name,
+                normalised_coords_range=None,  # Bedrock typically returns absolute coordinates
+                output_folder=self.output_folder,
+                model_choice=model_choice,
+                bedrock_runtime=bedrock_runtime,
+            )
+            # Bedrock returns data already in the expected format, so no conversion needed
+
+        elif self.ocr_engine == "gemini-vlm":
+            # Gemini page-level OCR - sends whole page to Gemini API and gets structured line-level results
+            # Use original image (before preprocessing) for Gemini since coordinates should be in original space
+            gemini_image = (
+                original_image_for_visualization
+                if original_image_for_visualization is not None
+                else image
+            )
+            # Get model choice from parameter or config
+            from tools.config import VLM_MODEL_CHOICE
+
+            model_choice = vlm_model_choice if vlm_model_choice else VLM_MODEL_CHOICE
+            ocr_data = _gemini_page_ocr_predict(
+                gemini_image,
+                image_name=image_name,
+                normalised_coords_range=None,  # Gemini typically returns absolute coordinates
+                output_folder=self.output_folder,
+                model_choice=model_choice,
+                client=gemini_client,
+                config=gemini_config,
+            )
+            # Gemini returns data already in the expected format, so no conversion needed
+
+        elif self.ocr_engine == "azure-openai-vlm":
+            # Azure/OpenAI page-level OCR - sends whole page to Azure/OpenAI API and gets structured line-level results
+            # Use original image (before preprocessing) for Azure/OpenAI since coordinates should be in original space
+            azure_image = (
+                original_image_for_visualization
+                if original_image_for_visualization is not None
+                else image
+            )
+            # Get model choice from parameter or config
+            from tools.config import VLM_MODEL_CHOICE
+
+            model_choice = vlm_model_choice if vlm_model_choice else VLM_MODEL_CHOICE
+            ocr_data = _azure_openai_page_ocr_predict(
+                azure_image,
+                image_name=image_name,
+                normalised_coords_range=None,  # Azure/OpenAI typically returns absolute coordinates
+                output_folder=self.output_folder,
+                model_choice=model_choice,
+                client=azure_openai_client,
+            )
+            # Azure/OpenAI returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "tesseract":
 
@@ -4680,6 +6252,7 @@ class CustomImageAnalyzerEngine:
                     image_name=image_name,
                     input_image_width=original_image_width,
                     input_image_height=original_image_height,
+                    model_name=inference_server_model_name,
                 )
             else:
                 modified_paddle_results = copy.deepcopy(paddle_results)
@@ -4794,6 +6367,9 @@ class CustomImageAnalyzerEngine:
                 or self.ocr_engine == "hybrid-paddle-inference-server"
                 or self.ocr_engine == "vlm"
                 or self.ocr_engine == "inference-server"
+                or self.ocr_engine == "bedrock-vlm"
+                or self.ocr_engine == "gemini-vlm"
+                or self.ocr_engine == "azure-openai-vlm"
             ):
                 pass
                 # print(f"Skipping rescale_ocr_data for PaddleOCR/VLM (already scaled to original dimensions)")
@@ -4840,8 +6416,14 @@ class CustomImageAnalyzerEngine:
                     else:
                         # PaddleOCR processed the preprocessed image, so scale coordinates to preprocessed space
                         needs_scaling = True
-                elif self.ocr_engine == "vlm" or self.ocr_engine == "inference-server":
-                    # VLM returns coordinates in original image space (since we pass original image to VLM)
+                elif (
+                    self.ocr_engine == "vlm"
+                    or self.ocr_engine == "inference-server"
+                    or self.ocr_engine == "bedrock-vlm"
+                    or self.ocr_engine == "gemini-vlm"
+                    or self.ocr_engine == "azure-openai-vlm"
+                ):
+                    # VLM/Cloud VLM returns coordinates in original image space (since we pass original image to VLM)
                     # So we need to crop from the original image, not the preprocessed image
                     if original_image_for_visualization is not None:
                         # Coordinates are in original space, so crop from original image
@@ -4951,7 +6533,20 @@ class CustomImageAnalyzerEngine:
                                         else (
                                             "Inference Server"
                                             if self.ocr_engine == "inference-server"
-                                            else None
+                                            else (
+                                                "Bedrock"
+                                                if self.ocr_engine == "bedrock-vlm"
+                                                else (
+                                                    "Gemini"
+                                                    if self.ocr_engine == "gemini-vlm"
+                                                    else (
+                                                        "Azure/OpenAI"
+                                                        if self.ocr_engine
+                                                        == "azure-openai-vlm"
+                                                        else None
+                                                    )
+                                                )
+                                            )
                                         )
                                     )
                                 )

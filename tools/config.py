@@ -610,6 +610,15 @@ TESSERACT_TEXT_EXTRACT_OPTION = get_or_create_env_var(
 TEXTRACT_TEXT_EXTRACT_OPTION = get_or_create_env_var(
     "TEXTRACT_TEXT_EXTRACT_OPTION", "AWS Textract service - all PDF types"
 )
+BEDROCK_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
+    "BEDROCK_VLM_TEXT_EXTRACT_OPTION", "AWS Bedrock VLM OCR - all PDF types"
+)
+GEMINI_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
+    "GEMINI_VLM_TEXT_EXTRACT_OPTION", "Google Gemini VLM OCR - all PDF types"
+)
+AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
+    "AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION", "Azure/OpenAI VLM OCR - all PDF types"
+)
 
 # PII detection models
 NO_REDACTION_PII_OPTION = get_or_create_env_var(
@@ -625,13 +634,29 @@ SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
 SHOW_AWS_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_AWS_TEXT_EXTRACTION_OPTIONS", "True")
 )
+SHOW_BEDROCK_VLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_BEDROCK_VLM_MODELS", "False")
+)
+SHOW_GEMINI_VLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_GEMINI_VLM_MODELS", "False")
+)
+SHOW_AZURE_OPENAI_VLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AZURE_OPENAI_VLM_MODELS", "False")
+)
 
 # Show at least local options if everything mistakenly removed
-if not SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS and not SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
+if (
+    not SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS
+    and not SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+    and not SHOW_BEDROCK_VLM_MODELS
+    and not SHOW_GEMINI_VLM_MODELS
+    and not SHOW_AZURE_OPENAI_VLM_MODELS
+):
     SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = True
 
 local_model_options = list()
 aws_model_options = list()
+cloud_vlm_model_options = list()
 text_extraction_models = list()
 
 if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS:
@@ -641,7 +666,18 @@ if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS:
 if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
     aws_model_options.append(TEXTRACT_TEXT_EXTRACT_OPTION)
 
-TEXT_EXTRACTION_MODELS = local_model_options + aws_model_options
+if SHOW_BEDROCK_VLM_MODELS:
+    cloud_vlm_model_options.append(BEDROCK_VLM_TEXT_EXTRACT_OPTION)
+
+if SHOW_GEMINI_VLM_MODELS:
+    cloud_vlm_model_options.append(GEMINI_VLM_TEXT_EXTRACT_OPTION)
+
+if SHOW_AZURE_OPENAI_VLM_MODELS:
+    cloud_vlm_model_options.append(AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION)
+
+TEXT_EXTRACTION_MODELS = (
+    local_model_options + aws_model_options + cloud_vlm_model_options
+)
 DO_INITIAL_TABULAR_DATA_CLEAN = convert_string_to_boolean(
     get_or_create_env_var("DO_INITIAL_TABULAR_DATA_CLEAN", "True")
 )
@@ -842,6 +878,7 @@ if VLM_DEFAULT_PRESENCE_PENALTY and VLM_DEFAULT_PRESENCE_PENALTY.strip():
 else:
     VLM_DEFAULT_PRESENCE_PENALTY = None
 
+
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
@@ -937,6 +974,16 @@ if SHOW_INFERENCE_SERVER_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(inference_server_options)
     CHOSEN_LOCAL_MODEL_INTRO_TEXT += INFERENCE_SERVER_OCR_INTRO_TEXT
 
+# Cloud VLM options
+if SHOW_BEDROCK_VLM_MODELS:
+    LOCAL_OCR_MODEL_OPTIONS.append("bedrock-vlm")
+
+if SHOW_GEMINI_VLM_MODELS:
+    LOCAL_OCR_MODEL_OPTIONS.append("gemini-vlm")
+
+if SHOW_AZURE_OPENAI_VLM_MODELS:
+    LOCAL_OCR_MODEL_OPTIONS.append("azure-openai-vlm")
+
 # Inference-server API configuration
 INFERENCE_SERVER_API_URL = get_or_create_env_var(
     "INFERENCE_SERVER_API_URL", "http://localhost:8080"
@@ -949,6 +996,10 @@ INFERENCE_SERVER_MODEL_NAME = get_or_create_env_var(
 INFERENCE_SERVER_TIMEOUT = int(
     get_or_create_env_var("INFERENCE_SERVER_TIMEOUT", "300")
 )  # Timeout in seconds for API requests
+
+DEFAULT_INFERENCE_SERVER_VLM_MODEL = get_or_create_env_var(
+    "DEFAULT_INFERENCE_SERVER_VLM_MODEL", "qwen_3_vl_30b_a3b_it"
+)  # Default model name for inference-server VLM API calls. If empty, uses INFERENCE_SERVER_MODEL_NAME or server default
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)
@@ -1192,6 +1243,28 @@ LLM_MODEL_CHOICE = get_or_create_env_var(
     "LLM_MODEL_CHOICE",
     "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Default AWS Bedrock model for PII detection
 )
+
+# VLM Model Choice for cloud VLM OCR (defaults to first available cloud model)
+# Note: This should be set after model lists are defined
+VLM_MODEL_CHOICE = get_or_create_env_var(
+    "VLM_MODEL_CHOICE",
+    "qwen.qwen3-vl-235b-a22b",  # Will be set to default below if empty
+)  # Default model choice for cloud VLM OCR (Bedrock, Gemini, or Azure/OpenAI)
+
+# Set default VLM_MODEL_CHOICE if not provided
+if not VLM_MODEL_CHOICE or not VLM_MODEL_CHOICE.strip():
+    # Set default based on available models (priority: AWS Bedrock > Gemini > Azure/OpenAI)
+    if RUN_AWS_BEDROCK_MODELS == "1" and amazon_models:
+        VLM_MODEL_CHOICE = amazon_models[0]  # Default to first AWS Bedrock model
+    elif RUN_GEMINI_MODELS == "1" and gemini_models:
+        VLM_MODEL_CHOICE = gemini_models[0]  # Default to first Gemini model
+    elif RUN_AZURE_MODELS == "1" and azure_models:
+        VLM_MODEL_CHOICE = azure_models[0]  # Default to first Azure/OpenAI model
+    else:
+        VLM_MODEL_CHOICE = ""  # No default available
+else:
+    # Use the value from environment variable
+    VLM_MODEL_CHOICE = VLM_MODEL_CHOICE.strip()
 
 # print("model_name_map:", model_name_map)
 
