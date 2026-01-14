@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "1.6.7"
+version = "1.7.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 authors = [
@@ -67,6 +67,8 @@ dependencies = [
     "defusedxml==0.7.1",
     "numpy==2.2.6",
     "spaces==0.42.1",
+    "google-genai>=1.52.0",
+    "openai>=2.8.1"
 ]
 
 [project.optional-dependencies]

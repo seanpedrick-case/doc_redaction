@@ -27,7 +27,12 @@ from tools.config import (
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
+    AZURE_OPENAI_API_KEY,
+    AZURE_OPENAI_INFERENCE_ENDPOINT,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     CHOSEN_COMPREHEND_ENTITIES,
+    CHOSEN_LLM_ENTITIES,
+    CHOSEN_LLM_PII_INFERENCE_METHOD,
     CHOSEN_LOCAL_MODEL_INTRO_TEXT,
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
@@ -44,6 +49,8 @@ from tools.config import (
     DEFAULT_EXCEL_SHEETS,
     DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
     DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+    DEFAULT_INFERENCE_SERVER_PII_MODEL,
+    DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
     DEFAULT_LANGUAGE_FULL_NAME,
     DEFAULT_MIN_CONSECUTIVE_PAGES,
@@ -103,6 +110,8 @@ from tools.config import (
     FILE_INPUT_HEIGHT,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
+    FULL_LLM_ENTITY_LIST,
+    GEMINI_API_KEY,
     GET_COST_CODES,
     GET_DEFAULT_ALLOW_LIST,
     GRADIO_SERVER_NAME,
@@ -110,9 +119,13 @@ from tools.config import (
     GRADIO_TEMP_DIR,
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
     HOST_NAME,
+    INFERENCE_SERVER_API_URL,
     INPUT_FOLDER,
     INTRO_TEXT,
     LANGUAGE_CHOICES,
+    LLM_MODEL_CHOICE,
+    LLM_PII_MAX_TOKENS,
+    LLM_PII_TEMPERATURE,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     LOCAL_OCR_MODEL_OPTIONS,
     LOG_FILE_NAME,
@@ -148,7 +161,9 @@ from tools.config import (
     SHOW_COSTS,
     SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
+    SHOW_INFERENCE_SERVER_OPTIONS,
     SHOW_LANGUAGE_SELECTION,
+    SHOW_LLM_PII_DETECTION_OPTIONS,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     SPACY_MODEL_PATH,
@@ -165,6 +180,7 @@ from tools.config import (
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
     USE_GREEDY_DUPLICATE_DETECTION,
+    VLM_MODEL_CHOICE,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
 from tools.custom_csvlogger import CSVLogger_custom
@@ -267,6 +283,7 @@ ensure_folder_exists(USAGE_LOGS_FOLDER)
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
+# CHOSEN_LLM_ENTITIES.extend(custom_entities)
 
 ###
 # Load in FastAPI app
@@ -358,6 +375,13 @@ in_redact_comprehend_entities = gr.Dropdown(
     choices=FULL_COMPREHEND_ENTITY_LIST,
     multiselect=True,
     label="AWS Comprehend PII identification model (click empty space in box for full list)",
+)
+
+in_redact_llm_entities = gr.Dropdown(
+    value=CHOSEN_LLM_ENTITIES,
+    choices=FULL_LLM_ENTITY_LIST,
+    multiselect=True,
+    label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
 )
 
 in_deny_list = gr.File(
@@ -526,7 +550,7 @@ div[class*="tab-nav"] button {
 }
 """
 
-# Create the gradio interface. If running in FastAPI mode, we don't need the head_html and base_href.
+# Create the gradio interface.
 if RUN_FASTAPI:
     blocks = gr.Blocks(
         theme=gr.themes.Default(primary_hue="blue"),
@@ -708,6 +732,22 @@ with blocks:
     )
     textract_query_number = gr.Number(
         label="textract_query_number", value=0, visible=False
+    )
+
+    # VLM and LLM tracking components for usage logs
+    vlm_model_name_textbox = gr.Textbox(label="vlm_model_name", value="", visible=False)
+    vlm_total_input_tokens_number = gr.Number(
+        label="vlm_total_input_tokens", value=0, visible=False
+    )
+    vlm_total_output_tokens_number = gr.Number(
+        label="vlm_total_output_tokens", value=0, visible=False
+    )
+    llm_model_name_textbox = gr.Textbox(label="llm_model_name", value="", visible=False)
+    llm_total_input_tokens_number = gr.Number(
+        label="llm_total_input_tokens", value=0, visible=False
+    )
+    llm_total_output_tokens_number = gr.Number(
+        label="llm_total_output_tokens", value=0, visible=False
     )
 
     doc_full_file_name_textbox = gr.Textbox(
@@ -1519,6 +1559,37 @@ with blocks:
                             local_ocr_method_radio.render()
                     else:
                         local_ocr_method_radio.render()
+
+                    if SHOW_INFERENCE_SERVER_OPTIONS:
+                        with gr.Accordion(
+                            "Inference Server VLM Model (for inference-server OCR only)",
+                            open=False,
+                        ):
+                            inference_server_vlm_model_textbox = gr.Textbox(
+                                label="Inference Server VLM Model Name",
+                                placeholder="e.g., 'qwen2-vl-7b-instruct' or leave empty to use default",
+                                value=(
+                                    DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                                    if DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                                    else ""
+                                ),
+                                lines=1,
+                                visible=SHOW_INFERENCE_SERVER_OPTIONS,
+                            )
+                            gr.Markdown(
+                                "**Note:** This only applies when using 'inference-server' or 'hybrid-paddle-inference-server' as the OCR method. "
+                                "If left empty, uses the default model from configuration."
+                            )
+                    else:
+                        inference_server_vlm_model_textbox = gr.Textbox(
+                            label="Inference Server VLM Model Name",
+                            value=(
+                                DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                                if DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                                else ""
+                            ),
+                            visible=False,
+                        )
 
                     if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
                         with gr.Accordion(
@@ -2655,8 +2726,16 @@ with blocks:
                             )
 
             with gr.Accordion("Select entity types to redact", open=True):
-                in_redact_entities.render()
-                in_redact_comprehend_entities.render()
+                with gr.Accordion(
+                    "Local PII identification model entities", open=False
+                ):
+                    in_redact_entities.render()
+                with gr.Accordion(
+                    "AWS Comprehend PII identification model entities", open=False
+                ):
+                    in_redact_comprehend_entities.render()
+                with gr.Accordion("LLM PII identification model entities", open=False):
+                    in_redact_llm_entities.render()
 
                 with gr.Row():
                     max_fuzzy_spelling_mistakes_num = gr.Number(
@@ -2670,6 +2749,21 @@ with blocks:
                         label="Should fuzzy search match on entire phrases in deny list (as opposed to each word individually)?",
                         value=True,
                     )
+
+            with gr.Accordion(
+                "LLM Custom Instructions (for LLM-based PII detection only)", open=False
+            ):
+                custom_llm_instructions_textbox = gr.Textbox(
+                    label="Custom instructions for LLM-based entity detection",
+                    placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'only redact email addresses, ignore phone numbers'",
+                    value="",
+                    lines=3,
+                    visible=SHOW_LLM_PII_DETECTION_OPTIONS,
+                )
+                gr.Markdown(
+                    "**Note:** This only applies when using 'LLM (AWS Bedrock)' as the PII identification method. "
+                    "These instructions will be included in the prompt sent to the LLM to guide its entity detection behavior."
+                )
 
             with gr.Accordion("Redact only selected pages", open=False):
                 with gr.Row():
@@ -2971,6 +3065,21 @@ with blocks:
             outputs=[estimated_time_taken_number],
         )
 
+        # Automatically set local_ocr_method_radio to "bedrock-vlm" when AWS Bedrock VLM is selected
+        def auto_set_local_ocr_for_bedrock_vlm(text_extract_method):
+            """Automatically set local OCR method to bedrock-vlm when AWS Bedrock VLM is selected."""
+            if text_extract_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+                # Only set if "bedrock-vlm" is a valid option
+                if "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS:
+                    return gr.update(value="bedrock-vlm")
+            return gr.update()
+
+        text_extract_method_radio.change(
+            fn=auto_set_local_ocr_for_bedrock_vlm,
+            inputs=[text_extract_method_radio],
+            outputs=[local_ocr_method_radio],
+        )
+
     # Allow user to select items from cost code dataframe for cost code
     if SHOW_COSTS and (GET_COST_CODES or ENFORCE_COST_CODES):
         cost_code_dataframe.select(
@@ -3095,6 +3204,7 @@ with blocks:
             images_pdf_state,
             in_redact_entities,
             in_redact_comprehend_entities,
+            in_redact_llm_entities,
             text_extract_method_radio,
             in_allow_list_state,
             in_deny_list_state,
@@ -3139,6 +3249,8 @@ with blocks:
             local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
+            custom_llm_instructions_textbox,
+            inference_server_vlm_model_textbox,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3228,6 +3340,7 @@ with blocks:
             images_pdf_state,
             in_redact_entities,
             in_redact_comprehend_entities,
+            in_redact_llm_entities,
             text_extract_method_radio,
             in_allow_list_state,
             in_deny_list_state,
@@ -3590,6 +3703,7 @@ with blocks:
             images_pdf_state,
             in_redact_entities,
             in_redact_comprehend_entities,
+            in_redact_llm_entities,
             textract_only_method_drop,
             in_allow_list_state,
             in_deny_list_state,
@@ -6585,6 +6699,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             USAGE_LOGS_FOLDER,
         )
@@ -6613,6 +6733,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6647,6 +6773,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6680,6 +6812,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6713,6 +6851,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6746,6 +6890,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6771,6 +6921,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             USAGE_LOGS_FOLDER,
         )
@@ -6799,6 +6955,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6832,6 +6994,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6865,6 +7033,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6900,6 +7074,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6934,6 +7114,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -7072,6 +7258,20 @@ with blocks:
                 "extract_layout": DIRECT_MODE_EXTRACT_LAYOUT,
                 "extract_signatures": DIRECT_MODE_EXTRACT_SIGNATURES,
                 "match_fuzzy_whole_phrase_bool": DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
+                # VLM OCR Arguments
+                "vlm_model_choice": VLM_MODEL_CHOICE,
+                "inference_server_vlm_model": DEFAULT_INFERENCE_SERVER_VLM_MODEL,
+                "inference_server_api_url": INFERENCE_SERVER_API_URL,
+                "gemini_api_key": GEMINI_API_KEY,
+                "azure_openai_api_key": AZURE_OPENAI_API_KEY,
+                "azure_openai_endpoint": AZURE_OPENAI_INFERENCE_ENDPOINT,
+                # LLM PII Detection Arguments
+                "llm_model_choice": LLM_MODEL_CHOICE,
+                "llm_inference_method": CHOSEN_LLM_PII_INFERENCE_METHOD,
+                "inference_server_pii_model": DEFAULT_INFERENCE_SERVER_PII_MODEL,
+                "llm_temperature": LLM_PII_TEMPERATURE,
+                "llm_max_tokens": LLM_PII_MAX_TOKENS,
+                "custom_llm_instructions": "",  # Can be set via environment variable if needed
                 # Word/Tabular Anonymisation Arguments
                 "anon_strategy": DIRECT_MODE_ANON_STRATEGY,
                 "text_columns": DEFAULT_TEXT_COLUMNS,

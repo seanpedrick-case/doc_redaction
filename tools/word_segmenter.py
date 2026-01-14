@@ -483,6 +483,11 @@ class AdaptiveSegmenter:
             )
             return (one_word_result, False)
 
+        # Validate that line_image is not empty before processing
+        if line_image is None or line_image.size == 0 or len(line_image.shape) < 2:
+            # If line_image is empty, fall back to proportional estimation
+            return {}, False
+
         line_number = line_data["line"][0]
         safe_image_name = _sanitize_filename(image_name or "image", max_length=50)
         safe_line_number = _sanitize_filename(str(line_number), max_length=10)
@@ -492,7 +497,9 @@ class AdaptiveSegmenter:
             os.makedirs(self.output_folder, exist_ok=True)
             output_path = f"{self.output_folder}/word_segmentation/{safe_image_name}_{safe_line_number}_{safe_shortened_line_text}_original.png"
             os.makedirs(f"{self.output_folder}/word_segmentation", exist_ok=True)
-            cv2.imwrite(output_path, line_image)
+            # Only write if image is valid
+            if line_image.size > 0 and len(line_image.shape) >= 2:
+                cv2.imwrite(output_path, line_image)
 
         if len(line_image.shape) == 3:
             gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
@@ -634,6 +641,15 @@ class AdaptiveSegmenter:
         else:
             clean_binary = binary
 
+        # Validate clean_binary is not empty before proceeding
+        if (
+            clean_binary is None
+            or clean_binary.size == 0
+            or len(clean_binary.shape) < 2
+        ):
+            # If clean_binary is empty, fall back to proportional estimation
+            return {}, False
+
         # --- Vertical Cropping ---
         horizontal_projection = np.sum(clean_binary, axis=1)
         y_start = 0
@@ -648,13 +664,29 @@ class AdaptiveSegmenter:
             if y_end - y_start < 5:
                 y_start = p_top
                 y_end = p_bottom
-            analysis_image = clean_binary[y_start:y_end, :]
+            # Ensure y_end > y_start to avoid empty slice
+            if y_end > y_start:
+                analysis_image = clean_binary[y_start:y_end, :]
+            else:
+                # If slice would be empty, use the full image
+                analysis_image = clean_binary
         else:
             analysis_image = clean_binary
 
+        # Validate that analysis_image is not empty before proceeding
+        if (
+            analysis_image is None
+            or analysis_image.size == 0
+            or len(analysis_image.shape) < 2
+        ):
+            # If analysis_image is empty, fall back to proportional estimation
+            return {}, False
+
         if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
-            output_path = f"{self.output_folder}/word_segmentation/{safe_image_name}_{safe_line_number}_{safe_shortened_line_text}_clean_binary.png"
-            cv2.imwrite(output_path, analysis_image)
+            # Validate that analysis_image is not empty before writing
+            if analysis_image.size > 0 and len(analysis_image.shape) >= 2:
+                output_path = f"{self.output_folder}/word_segmentation/{safe_image_name}_{safe_line_number}_{safe_shortened_line_text}_clean_binary.png"
+                cv2.imwrite(output_path, analysis_image)
 
         # --- Adaptive Search ---
         best_boxes = None

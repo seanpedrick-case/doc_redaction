@@ -43,14 +43,23 @@ from tools.config import (
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
+    AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     CHOSEN_LOCAL_OCR_MODEL,
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
+    DEFAULT_INFERENCE_SERVER_PII_MODEL,
     DEFAULT_LANGUAGE,
+    GEMINI_VLM_TEXT_EXTRACT_OPTION,
     IMAGES_DPI,
     INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
+    INFERENCE_SERVER_API_URL,
+    INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
+    LLM_MODEL_CHOICE,
+    LLM_PII_OPTION,
     LOAD_TRUNCATED_IMAGES,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_DOC_PAGES,
     MAX_IMAGE_PIXELS,
     MAX_SIMULTANEOUS_FILES,
@@ -68,6 +77,7 @@ from tools.config import (
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
+    VLM_MODEL_CHOICE,
     aws_comprehend_language_choices,
     textract_language_choices,
 )
@@ -234,7 +244,8 @@ def choose_and_run_redactor(
     pdf_image_file_paths: List[str],
     chosen_redact_entities: List[str],
     chosen_redact_comprehend_entities: List[str],
-    text_extraction_method: str,
+    chosen_llm_entities: List[str] = None,
+    text_extraction_method: str = None,
     in_allow_list: List[str] = list(),
     in_deny_list: List[str] = list(),
     redact_whole_page_list: List[str] = list(),
@@ -278,6 +289,8 @@ def choose_and_run_redactor(
     chosen_local_ocr_model: str = CHOSEN_LOCAL_OCR_MODEL,
     language: str = DEFAULT_LANGUAGE,
     ocr_review_files: list = list(),
+    custom_llm_instructions: str = "",
+    inference_server_vlm_model: str = "",
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
@@ -336,6 +349,7 @@ def choose_and_run_redactor(
     - language (str, optional): The language of the text in the files. Defaults to English.
     - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
     - ocr_review_files (list, optional): A list of OCR review files to be used for the redaction process. Defaults to an empty list.
+    - custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to an empty string.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - RETURN_REDACTED_PDF (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
@@ -351,6 +365,13 @@ def choose_and_run_redactor(
     page_break_return = False
     blank_request_metadata = list()
     custom_recogniser_word_list_flat = list()
+    # Ensure all_request_metadata_str is a string (handle case where list might be passed)
+    if isinstance(all_request_metadata_str, list):
+        all_request_metadata_str = (
+            "\n".join(str(item) for item in all_request_metadata_str)
+            if all_request_metadata_str
+            else ""
+        )
     all_textract_request_metadata = (
         all_request_metadata_str.split("\n") if all_request_metadata_str else []
     )
@@ -372,6 +393,11 @@ def choose_and_run_redactor(
         print("Performing local OCR with" + chosen_local_ocr_model + " model.")
     if text_extraction_method == "Local text":
         text_extraction_method = SELECTABLE_TEXT_EXTRACT_OPTION
+
+    # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+    if chosen_llm_entities is None:
+        chosen_llm_entities = chosen_redact_comprehend_entities
+
     if pii_identification_method == "None":
         pii_identification_method = NO_REDACTION_PII_OPTION
 
@@ -844,6 +870,48 @@ def choose_and_run_redactor(
     else:
         comprehend_client = ""
 
+    # Try to connect to AWS Bedrock Runtime Client if using LLM-based PII detection
+    if pii_identification_method == LLM_PII_OPTION:
+        if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        elif aws_access_key_textbox and aws_secret_key_textbox:
+            print(
+                "Connecting to Bedrock using AWS access key and secret keys from user input."
+            )
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=aws_access_key_textbox,
+                aws_secret_access_key=aws_secret_key_textbox,
+                region_name=AWS_REGION,
+            )
+        elif RUN_AWS_FUNCTIONS:
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+            print("Getting Bedrock credentials from environment variables")
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=AWS_ACCESS_KEY,
+                aws_secret_access_key=AWS_SECRET_KEY,
+                region_name=AWS_REGION,
+            )
+        else:
+            bedrock_runtime = None
+            out_message = "Cannot connect to AWS Bedrock service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
+            print(out_message)
+            raise Exception(out_message)
+    elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+        # For inference server, we don't need bedrock_runtime
+        bedrock_runtime = None
+        print("Using inference server for PII detection")
+    elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
+        # For local transformers LLM, we don't need bedrock_runtime
+        bedrock_runtime = None
+        print("Using local transformers LLM for PII detection")
+    else:
+        bedrock_runtime = None
+
     # Try to connect to AWS Textract Client if using that text extraction method
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
@@ -882,6 +950,81 @@ def choose_and_run_redactor(
             raise Exception(out_message)
     else:
         textract_client = ""
+
+    # Try to connect to cloud VLM clients if using cloud VLM OCR
+    gemini_client = None
+    gemini_config = None
+    azure_openai_client = None
+
+    if text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+        # Use the same bedrock_runtime that may have been created for LLM PII detection
+        if bedrock_runtime is None:
+            if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
+                print("Connecting to Bedrock via existing SSO connection for VLM OCR")
+                bedrock_runtime = boto3.client(
+                    "bedrock-runtime", region_name=AWS_REGION
+                )
+            elif aws_access_key_textbox and aws_secret_key_textbox:
+                print(
+                    "Connecting to Bedrock using AWS access key and secret keys from user input for VLM OCR."
+                )
+                bedrock_runtime = boto3.client(
+                    "bedrock-runtime",
+                    aws_access_key_id=aws_access_key_textbox,
+                    aws_secret_access_key=aws_secret_key_textbox,
+                    region_name=AWS_REGION,
+                )
+            elif RUN_AWS_FUNCTIONS:
+                print("Connecting to Bedrock via existing SSO connection for VLM OCR")
+                bedrock_runtime = boto3.client(
+                    "bedrock-runtime", region_name=AWS_REGION
+                )
+            elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+                print(
+                    "Getting Bedrock credentials from environment variables for VLM OCR"
+                )
+                bedrock_runtime = boto3.client(
+                    "bedrock-runtime",
+                    aws_access_key_id=AWS_ACCESS_KEY,
+                    aws_secret_access_key=AWS_SECRET_KEY,
+                    region_name=AWS_REGION,
+                )
+            else:
+                bedrock_runtime = None
+                out_message = "Cannot connect to AWS Bedrock service for VLM OCR. Please provide access keys under Textract settings on the Redaction settings tab."
+                print(out_message)
+                raise Exception(out_message)
+
+    elif text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION:
+        from tools.llm_funcs import construct_gemini_generative_model
+
+        try:
+            gemini_client, gemini_config = construct_gemini_generative_model(
+                in_api_key="",  # Will use environment variable
+                temperature=0.0,  # Use low temperature for OCR
+                model_choice=VLM_MODEL_CHOICE,
+                system_prompt="",  # No system prompt needed for OCR
+                max_tokens=4096,  # Reasonable default for OCR
+            )
+            print("Connected to Google Gemini for VLM OCR")
+        except Exception as e:
+            out_message = f"Cannot connect to Google Gemini service for VLM OCR: {e}. Please ensure GEMINI_API_KEY is set."
+            print(out_message)
+            raise Exception(out_message)
+
+    elif text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION:
+        from tools.llm_funcs import construct_azure_client
+
+        try:
+            azure_openai_client, _ = construct_azure_client(
+                in_api_key="",  # Will use environment variable
+                endpoint="",  # Will use environment variable
+            )
+            print("Connected to Azure/OpenAI for VLM OCR")
+        except Exception as e:
+            out_message = f"Cannot connect to Azure/OpenAI service for VLM OCR: {e}. Please ensure AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT are set."
+            print(out_message)
+            raise Exception(out_message)
 
     ### Language check - check if selected language packs exist
     try:
@@ -969,6 +1112,12 @@ def choose_and_run_redactor(
             file_ending = "local_ocr"
         elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
             file_ending = "textract"
+        elif text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+            file_ending = "bedrock_vlm"
+        elif text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION:
+            file_ending = "gemini_vlm"
+        elif text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION:
+            file_ending = "azure_openai_vlm"
         else:
             print(
                 "No valid text extraction method found. Defaulting to local text extraction."
@@ -1007,6 +1156,9 @@ def choose_and_run_redactor(
         if (
             text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
             or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+            or text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+            or text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION
+            or text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION
         ):
 
             # Analyse and redact image-based pdf or image
@@ -1040,6 +1192,7 @@ def choose_and_run_redactor(
                 chosen_redact_entities,
                 chosen_redact_comprehend_entities,
                 in_allow_list_flat,
+                chosen_llm_entities,
                 page_min,
                 page_max,
                 text_extraction_method,
@@ -1054,7 +1207,11 @@ def choose_and_run_redactor(
                 pii_identification_method,
                 comprehend_query_number,
                 comprehend_client,
+                bedrock_runtime,
                 textract_client,
+                gemini_client,
+                gemini_config,
+                azure_openai_client,
                 custom_recogniser_word_list_flat,
                 redact_whole_page_list_flat,
                 max_fuzzy_spelling_mistakes_num,
@@ -1070,6 +1227,8 @@ def choose_and_run_redactor(
                 nlp_analyser=nlp_analyser,
                 output_folder=output_folder,
                 input_folder=input_folder,
+                custom_llm_instructions=custom_llm_instructions,
+                inference_server_vlm_model=inference_server_vlm_model,
             )
 
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
@@ -1126,6 +1285,10 @@ def choose_and_run_redactor(
                 text_extraction_only,
                 output_folder=output_folder,
                 input_folder=input_folder,
+                bedrock_runtime=bedrock_runtime,
+                model_choice=LLM_MODEL_CHOICE,
+                custom_llm_instructions=custom_llm_instructions,
+                chosen_llm_entities=chosen_llm_entities,
             )
         else:
             out_message = "No redaction method selected"
@@ -3104,6 +3267,7 @@ def redact_image_pdf(
     chosen_redact_entities: List[str],
     chosen_redact_comprehend_entities: List[str],
     allow_list: List[str] = None,
+    chosen_llm_entities: List[str] = None,
     page_min: int = 0,
     page_max: int = 0,
     text_extraction_method: str = TESSERACT_TEXT_EXTRACT_OPTION,
@@ -3139,7 +3303,11 @@ def redact_image_pdf(
     pii_identification_method: str = "Local",
     comprehend_query_number: int = 0,
     comprehend_client: str = "",
+    bedrock_runtime=None,
     textract_client: str = "",
+    gemini_client=None,
+    gemini_config=None,
+    azure_openai_client=None,
     in_deny_list: List[str] = list(),
     redact_whole_page_list: List[str] = list(),
     max_fuzzy_spelling_mistakes_num: int = 1,
@@ -3157,6 +3325,8 @@ def redact_image_pdf(
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     output_folder: str = OUTPUT_FOLDER,
     input_folder: str = INPUT_FOLDER,
+    custom_llm_instructions: str = "",
+    inference_server_vlm_model: str = "",
     progress=Progress(track_tqdm=True),
 ):
     """
@@ -3199,10 +3369,16 @@ def redact_image_pdf(
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
     - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
     - output_folder (str, optional): The folder for file outputs.
-    - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
     - input_folder (str, optional): The folder for file inputs.
+    - custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to an empty string.
+    - inference_server_vlm_model (str, optional): The inference-server VLM model to use for OCR. Defaults to an empty string. If empty, uses DEFAULT_INFERENCE_SERVER_VLM_MODEL.
+    - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
     The function returns a redacted PDF document along with processing output objects.
     """
+
+    # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+    if chosen_llm_entities is None:
+        chosen_llm_entities = chosen_redact_comprehend_entities
 
     tic = time.perf_counter()
 
@@ -3240,21 +3416,24 @@ def redact_image_pdf(
         )
         nlp_analyser.registry.add_recognizer(new_custom_fuzzy_recogniser)
 
-    # Only load in PaddleOCR models if not running Textract
+    # Map text extraction method to OCR engine
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
-        image_analyser = CustomImageAnalyzerEngine(
-            analyzer_engine=nlp_analyser,
-            ocr_engine="tesseract",
-            language=language,
-            output_folder=output_folder,
-        )
+        ocr_engine = "tesseract"  # Not actually used, but required for initialization
+    elif text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+        ocr_engine = "bedrock-vlm"
+    elif text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION:
+        ocr_engine = "gemini-vlm"
+    elif text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION:
+        ocr_engine = "azure-openai-vlm"
     else:
-        image_analyser = CustomImageAnalyzerEngine(
-            analyzer_engine=nlp_analyser,
-            ocr_engine=chosen_local_ocr_model,
-            language=language,
-            output_folder=output_folder,
-        )
+        ocr_engine = chosen_local_ocr_model
+
+    image_analyser = CustomImageAnalyzerEngine(
+        analyzer_engine=nlp_analyser,
+        ocr_engine=ocr_engine,
+        language=language,
+        output_folder=output_folder,
+    )
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
         out_message = "Connection to AWS Comprehend service unsuccessful."
@@ -3341,7 +3520,7 @@ def redact_image_pdf(
 
     page_loop_end = page_max
 
-    progress_bar = tqdm(
+    tqdm(
         range(page_loop_start, page_loop_end),
         unit="pages remaining",
         desc="Redacting pages",
@@ -3362,16 +3541,30 @@ def redact_image_pdf(
             all_pages_decision_process_table.to_dict("records")
         )
 
-    # Go through each page
-    for page_no in progress_bar:
+    # Dictionary to store OCR results and page metadata for two-pass processing
+    # This allows us to do all OCR first, then all PII detection, avoiding model switching
+    ocr_results_by_page = {}
+
+    # FIRST PASS: Perform OCR on all pages
+    # This collects OCR results without doing PII detection, which is more efficient
+    # when using inference servers that need to switch between VLM and LLM models
+    print("First pass: Performing OCR on all pages...")
+    ocr_progress_bar = tqdm(
+        range(page_loop_start, page_loop_end),
+        unit="pages remaining",
+        desc="OCR pass",
+    )
+
+    for page_no in ocr_progress_bar:
 
         reported_page_number = str(page_no + 1)
-        print(f"Current page: {reported_page_number}")
+        print(f"OCR - Current page: {reported_page_number}")
 
         handwriting_or_signature_boxes = list()
         page_signature_recogniser_results = list()
         page_handwriting_recogniser_results = list()
         page_line_level_ocr_results_with_words = list()
+        page_line_level_ocr_results = None  # Initialize to None, will be set during OCR
         page_break_return = False
 
         # Try to find image location
@@ -3552,9 +3745,14 @@ def redact_image_pdf(
                 page_width = pymupdf_page.mediabox.width
                 page_height = pymupdf_page.mediabox.height
 
-            # Step 1: Perform OCR. Either with Tesseract, or with AWS Textract
-            # If using Tesseract
-            if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+            # Step 1: Perform OCR. Either with Tesseract, cloud VLM, or with AWS Textract
+            # If using Tesseract or cloud VLM (all image-based OCR methods)
+            if (
+                text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+                or text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                or text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION
+                or text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION
+            ):
 
                 if all_page_line_level_ocr_results_with_words:
                     # Find the first dict where 'page' matches
@@ -3586,7 +3784,59 @@ def redact_image_pdf(
                     )
 
                 else:
-                    page_word_level_ocr_results = image_analyser.perform_ocr(image_path)
+                    # Check if image_path is a placeholder and create the actual image if needed
+                    actual_image_path = image_path
+                    if isinstance(image_path, str) and (
+                        "placeholder_image" in image_path
+                        or "image_placeholder" in image_path
+                    ):
+                        try:
+                            # Use the current page number (page_no is 0-indexed)
+                            # Create the actual image using process_single_page_for_image_conversion
+                            _, created_image_path, _, _ = (
+                                process_single_page_for_image_conversion(
+                                    pdf_path=file_path,
+                                    page_num=page_no,  # page_no is already 0-indexed
+                                    image_dpi=IMAGES_DPI,
+                                    create_images=True,
+                                    input_folder=input_folder,
+                                )
+                            )
+
+                            # Use the created image path if it exists
+                            if os.path.exists(created_image_path):
+                                actual_image_path = created_image_path
+                                # Update image_path in page_sizes_df for future reference
+                                if not page_sizes_df.empty:
+                                    page_sizes_df.loc[
+                                        page_sizes_df["page"] == (page_no + 1),
+                                        "image_path",
+                                    ] = created_image_path
+                                print(
+                                    f"Created actual image for page {page_no + 1} from placeholder: {created_image_path}"
+                                )
+                            else:
+                                print(
+                                    f"Warning: Failed to create image for page {page_no + 1} from placeholder"
+                                )
+                        except Exception as e:
+                            print(f"Error creating image from placeholder for OCR: {e}")
+                            # Fall back to using the placeholder path (will likely fail, but preserves original behavior)
+                            actual_image_path = image_path
+
+                    page_word_level_ocr_results = image_analyser.perform_ocr(
+                        actual_image_path,
+                        bedrock_runtime=bedrock_runtime,
+                        gemini_client=gemini_client,
+                        gemini_config=gemini_config,
+                        azure_openai_client=azure_openai_client,
+                        vlm_model_choice=VLM_MODEL_CHOICE,
+                        inference_server_model_name=(
+                            inference_server_vlm_model
+                            if inference_server_vlm_model
+                            else None
+                        ),
+                    )
 
                     (
                         page_line_level_ocr_results,
@@ -3991,21 +4241,32 @@ def redact_image_pdf(
                     form_key_value_results_list.extend(form_key_value_results)
 
             # Convert to DataFrame and add to ongoing logging table
-            line_level_ocr_results_df = pd.DataFrame(
-                [
-                    {
-                        "page": page_line_level_ocr_results["page"],
-                        "text": result.text,
-                        "left": result.left,
-                        "top": result.top,
-                        "width": result.width,
-                        "height": result.height,
-                        "line": result.line,
-                        "conf": result.conf,
-                    }
-                    for result in page_line_level_ocr_results["results"]
-                ]
-            )
+            # Only process if page_line_level_ocr_results is initialized and has results
+            try:
+                if (
+                    page_line_level_ocr_results
+                    and "results" in page_line_level_ocr_results
+                ):
+                    line_level_ocr_results_df = pd.DataFrame(
+                        [
+                            {
+                                "page": page_line_level_ocr_results["page"],
+                                "text": result.text,
+                                "left": result.left,
+                                "top": result.top,
+                                "width": result.width,
+                                "height": result.height,
+                                "line": result.line,
+                                "conf": result.conf,
+                            }
+                            for result in page_line_level_ocr_results["results"]
+                        ]
+                    )
+                else:
+                    line_level_ocr_results_df = pd.DataFrame()
+            except (UnboundLocalError, NameError, KeyError):
+                # page_line_level_ocr_results not initialized or missing expected structure
+                line_level_ocr_results_df = pd.DataFrame()
 
             if not line_level_ocr_results_df.empty:  # Ensure there are records to add
                 all_line_level_ocr_results_list.extend(
@@ -4014,11 +4275,18 @@ def redact_image_pdf(
 
             # Save OCR visualization with bounding boxes (works for all OCR methods)
             if (
-                text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                and SAVE_PAGE_OCR_VISUALISATIONS is True
-            ) or (
-                text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
-                and SAVE_PAGE_OCR_VISUALISATIONS is True
+                (
+                    text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    and SAVE_PAGE_OCR_VISUALISATIONS is True
+                )
+                or (
+                    text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+                    and SAVE_PAGE_OCR_VISUALISATIONS is True
+                )
+                or (
+                    text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                    and SAVE_PAGE_OCR_VISUALISATIONS is True
+                )
             ):
                 if (
                     page_line_level_ocr_results_with_words
@@ -4071,99 +4339,252 @@ def redact_image_pdf(
                             f"Warning: Could not determine image for visualization at page {reported_page_number}. Skipping visualization."
                         )
 
-            if (
-                pii_identification_method != NO_REDACTION_PII_OPTION
-                or RETURN_PDF_FOR_REVIEW is True
-            ):
-                page_redaction_bounding_boxes = list()
-                comprehend_query_number = 0
-                comprehend_query_number_new = 0
-                redact_whole_page = False
+            # Store OCR results and page metadata for second pass (PII detection)
+            # This happens after all OCR processing is complete for this page
+            # Only store if we're in the processing range
+            if page_no >= page_min and page_no < page_max:
+                ocr_results_by_page[page_no] = {
+                    "page_line_level_ocr_results": page_line_level_ocr_results,
+                    "page_line_level_ocr_results_with_words": page_line_level_ocr_results_with_words,
+                    "page_signature_recogniser_results": page_signature_recogniser_results,
+                    "page_handwriting_recogniser_results": page_handwriting_recogniser_results,
+                    "handwriting_or_signature_boxes": handwriting_or_signature_boxes,
+                    "image_path": image_path,
+                    "pymupdf_page": pymupdf_page,
+                    "original_cropbox": original_cropbox,
+                    "page_width": page_width,
+                    "page_height": page_height,
+                    "image": image,
+                    "reported_page_number": reported_page_number,
+                }
 
-                if pii_identification_method != NO_REDACTION_PII_OPTION:
-                    # Step 2: Analyse text and identify PII
-                    if chosen_redact_entities or chosen_redact_comprehend_entities:
+            # Skip PII detection and redaction in first pass - we'll do it in second pass
+            # Continue to next page for OCR
+            # Note: Pages outside page_min/page_max range will not have OCR results stored
+            # and will be skipped in the second pass
+            continue
 
-                        page_redaction_bounding_boxes, comprehend_query_number_new = (
-                            image_analyser.analyze_text(
-                                page_line_level_ocr_results["results"],
-                                page_line_level_ocr_results_with_words["results"],
-                                chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
-                                pii_identification_method=pii_identification_method,
-                                comprehend_client=comprehend_client,
-                                custom_entities=chosen_redact_entities,
-                                language=language,
-                                allow_list=allow_list,
-                                score_threshold=score_threshold,
-                                nlp_analyser=nlp_analyser,
+    # SECOND PASS: Perform PII detection on all pages using stored OCR results
+    print("Second pass: Performing PII detection on all pages...")
+    pii_progress_bar = tqdm(
+        range(page_loop_start, page_loop_end),
+        unit="pages remaining",
+        desc="PII detection pass",
+    )
+
+    redacted_image = image.copy()
+
+    for page_no in pii_progress_bar:
+
+        reported_page_number = str(page_no + 1)
+        print(f"PII Detection - Current page: {reported_page_number}")
+
+        # Retrieve stored OCR results and page metadata
+        if page_no not in ocr_results_by_page:
+            print(
+                f"Warning: No OCR results found for page {reported_page_number}, skipping PII detection"
+            )
+            continue
+
+        page_data = ocr_results_by_page[page_no]
+        page_line_level_ocr_results = page_data["page_line_level_ocr_results"]
+        page_line_level_ocr_results_with_words = page_data[
+            "page_line_level_ocr_results_with_words"
+        ]
+        page_signature_recogniser_results = page_data[
+            "page_signature_recogniser_results"
+        ]
+        page_handwriting_recogniser_results = page_data[
+            "page_handwriting_recogniser_results"
+        ]
+        handwriting_or_signature_boxes = page_data["handwriting_or_signature_boxes"]
+        image_path = page_data["image_path"]
+        pymupdf_page = page_data["pymupdf_page"]
+        original_cropbox = page_data["original_cropbox"]
+        page_width = page_data["page_width"]
+        page_height = page_data["page_height"]
+        image = page_data["image"]
+        reported_page_number = page_data["reported_page_number"]
+
+        page_image_annotations = {"image": image_path, "boxes": []}
+        page_break_return = False
+
+        # Skip if OCR results are missing or invalid
+        if (
+            not page_line_level_ocr_results
+            or not isinstance(page_line_level_ocr_results, dict)
+            or "results" not in page_line_level_ocr_results
+            or not page_line_level_ocr_results_with_words
+            or not isinstance(page_line_level_ocr_results_with_words, dict)
+            or "results" not in page_line_level_ocr_results_with_words
+        ):
+            print(
+                f"Warning: Missing or invalid OCR results for page {reported_page_number}, skipping PII detection"
+            )
+            # Still need to handle page_image_annotations and current_loop_page for consistency
+            page_image_annotations = {"image": image_path, "boxes": []}
+            # Check if the image_path already exists in annotations_all_pages
+            existing_index = next(
+                (
+                    index
+                    for index, ann in enumerate(annotations_all_pages)
+                    if ann.get("image") == page_image_annotations["image"]
+                ),
+                None,
+            )
+            if existing_index is not None:
+                annotations_all_pages[existing_index] = page_image_annotations
+            else:
+                annotations_all_pages.append(page_image_annotations)
+            current_loop_page = page_no + 1
+            continue
+
+        if (
+            pii_identification_method != NO_REDACTION_PII_OPTION
+            or RETURN_PDF_FOR_REVIEW is True
+        ):
+            page_redaction_bounding_boxes = list()
+            comprehend_query_number = 0
+            comprehend_query_number_new = 0
+            redact_whole_page = False
+
+            if pii_identification_method != NO_REDACTION_PII_OPTION:
+                # Step 2: Analyse text and identify PII
+                if chosen_redact_entities or chosen_redact_comprehend_entities:
+
+                    # Set up inference server or local transformers parameters for PII detection
+                    text_analyzer_kwargs = {}
+                    if pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+                        text_analyzer_kwargs["inference_method"] = "inference-server"
+                        text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
+                        # Use DEFAULT_INFERENCE_SERVER_PII_MODEL if set, otherwise use CHOSEN_INFERENCE_SERVER_MODEL or empty
+                        from tools.config import CHOSEN_INFERENCE_SERVER_MODEL
+
+                        inference_server_pii_model = (
+                            DEFAULT_INFERENCE_SERVER_PII_MODEL
+                            if DEFAULT_INFERENCE_SERVER_PII_MODEL
+                            else (
+                                CHOSEN_INFERENCE_SERVER_MODEL
+                                if CHOSEN_INFERENCE_SERVER_MODEL
+                                else ""
                             )
                         )
-
-                        comprehend_query_number = (
-                            comprehend_query_number + comprehend_query_number_new
+                        if inference_server_pii_model:
+                            text_analyzer_kwargs["model_choice"] = (
+                                inference_server_pii_model
+                            )
+                    elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
+                        # Set up local transformers LLM parameters
+                        text_analyzer_kwargs["inference_method"] = "local"
+                        # Use LLM_MODEL_CHOICE as default model for local transformers
+                        text_analyzer_kwargs["model_choice"] = LLM_MODEL_CHOICE
+                        # Load PII-specific model and tokenizer if not already loaded
+                        from tools.llm_funcs import (
+                            USE_LLAMA_CPP,
+                            get_pii_model,
+                            get_pii_tokenizer,
                         )
 
-                    else:
-                        page_redaction_bounding_boxes = list()
+                        if (
+                            "local_model" not in text_analyzer_kwargs
+                            or text_analyzer_kwargs["local_model"] is None
+                        ):
+                            text_analyzer_kwargs["local_model"] = get_pii_model()
+                        if (
+                            "tokenizer" not in text_analyzer_kwargs
+                            or text_analyzer_kwargs["tokenizer"] is None
+                        ) and USE_LLAMA_CPP != "True":
+                            text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+                        print("Using local transformers PII model for entity detection")
 
-                    # Merge redaction bounding boxes that are close together
-                    page_merged_redaction_bboxes = merge_img_bboxes(
-                        page_redaction_bounding_boxes,
-                        page_line_level_ocr_results_with_words["results"],
-                        page_signature_recogniser_results,
-                        page_handwriting_recogniser_results,
-                        handwrite_signature_checkbox,
+                    # Call analyze_text for all PII detection methods (Local, AWS Comprehend, LLM, Inference Server)
+                    page_redaction_bounding_boxes, comprehend_query_number_new = (
+                        image_analyser.analyze_text(
+                            page_line_level_ocr_results["results"],
+                            page_line_level_ocr_results_with_words["results"],
+                            chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+                            chosen_llm_entities=chosen_llm_entities,
+                            pii_identification_method=pii_identification_method,
+                            comprehend_client=comprehend_client,
+                            bedrock_runtime=bedrock_runtime,
+                            custom_entities=chosen_redact_entities,
+                            language=language,
+                            allow_list=allow_list,
+                            score_threshold=score_threshold,
+                            nlp_analyser=nlp_analyser,
+                            custom_llm_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=int(reported_page_number),
+                            **text_analyzer_kwargs,
+                        )
+                    )
+
+                    comprehend_query_number = (
+                        comprehend_query_number + comprehend_query_number_new
                     )
 
                 else:
-                    page_merged_redaction_bboxes = list()
+                    page_redaction_bounding_boxes = list()
 
-                if is_pdf(file_path) is True:
-                    if redact_whole_page_list:
-                        int_reported_page_number = int(reported_page_number)
-                        if int_reported_page_number in redact_whole_page_list:
-                            redact_whole_page = True
-                        else:
-                            redact_whole_page = False
+                # Merge redaction bounding boxes that are close together
+                # This happens regardless of whether entities were chosen, as long as PII detection is enabled
+                page_merged_redaction_bboxes = merge_img_bboxes(
+                    page_redaction_bounding_boxes,
+                    page_line_level_ocr_results_with_words["results"],
+                    page_signature_recogniser_results,
+                    page_handwriting_recogniser_results,
+                    handwrite_signature_checkbox,
+                )
+
+            else:
+                page_merged_redaction_bboxes = list()
+
+            if is_pdf(file_path) is True:
+                if redact_whole_page_list:
+                    int_reported_page_number = int(reported_page_number)
+                    if int_reported_page_number in redact_whole_page_list:
+                        redact_whole_page = True
                     else:
                         redact_whole_page = False
+                else:
+                    redact_whole_page = False
 
-                    # Check if there are question answer boxes
-                    if form_key_value_results_list:
-                        page_merged_redaction_bboxes.extend(
-                            convert_page_question_answer_to_custom_image_recognizer_results(
-                                form_key_value_results_list,
-                                page_sizes_df,
-                                reported_page_number,
-                            )
+                # Check if there are question answer boxes
+                if form_key_value_results_list:
+                    page_merged_redaction_bboxes.extend(
+                        convert_page_question_answer_to_custom_image_recognizer_results(
+                            form_key_value_results_list,
+                            page_sizes_df,
+                            reported_page_number,
                         )
-
-                    # 3. Draw the merged boxes
-                    ## Apply annotations to pdf with pymupdf
-                    redact_result = redact_page_with_pymupdf(
-                        pymupdf_page,
-                        page_merged_redaction_bboxes,
-                        image_path,
-                        redact_whole_page=redact_whole_page,
-                        original_cropbox=original_cropbox,
-                        page_sizes_df=page_sizes_df,
-                        input_folder=input_folder,
                     )
 
-                    # Handle dual page objects if returned
-                    if isinstance(redact_result[0], tuple):
-                        (
-                            pymupdf_page,
-                            pymupdf_applied_redaction_page,
-                        ), page_image_annotations = redact_result
-                        # Store the final page with its original page number for later use
-                        if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
-                            redact_image_pdf._applied_redaction_pages = list()
-                        redact_image_pdf._applied_redaction_pages.append(
-                            (pymupdf_applied_redaction_page, page_no)
-                        )
-                    else:
-                        pymupdf_page, page_image_annotations = redact_result
+                # 3. Draw the merged boxes
+                ## Apply annotations to pdf with pymupdf
+                redact_result = redact_page_with_pymupdf(
+                    pymupdf_page,
+                    page_merged_redaction_bboxes,
+                    image_path,
+                    redact_whole_page=redact_whole_page,
+                    original_cropbox=original_cropbox,
+                    page_sizes_df=page_sizes_df,
+                    input_folder=input_folder,
+                )
+
+                # Handle dual page objects if returned
+                if isinstance(redact_result[0], tuple):
+                    (
+                        pymupdf_page,
+                        pymupdf_applied_redaction_page,
+                    ), page_image_annotations = redact_result
+                    # Store the final page with its original page number for later use
+                    if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
+                        redact_image_pdf._applied_redaction_pages = list()
+                    redact_image_pdf._applied_redaction_pages.append(
+                        (pymupdf_applied_redaction_page, page_no)
+                    )
+                # else:
+                #     pymupdf_page, page_image_annotations = redact_result
 
                 # If an image_path file, draw onto the image_path
                 elif is_pdf(file_path) is False:
@@ -4239,8 +4660,6 @@ def redact_image_pdf(
                         "boxes": all_image_annotations_boxes,
                     }
 
-                    redacted_image = image.copy()
-
             # Convert decision process to table
             decision_process_table = pd.DataFrame(
                 [
@@ -4277,7 +4696,7 @@ def redact_image_pdf(
             if time_taken > max_time:
                 print("Processing for", max_time, "seconds, breaking loop.")
                 page_break_return = True
-                progress.close(_tqdm=progress_bar)
+                progress.close(_tqdm=pii_progress_bar)
                 tqdm._instances.clear()
 
                 if is_pdf(file_path) is False:
@@ -4372,7 +4791,7 @@ def redact_image_pdf(
             # Append new annotation if it doesn't exist
             annotations_all_pages.append(page_image_annotations)
 
-        current_loop_page += 1
+        current_loop_page = page_no + 1
 
         # Break if new page is a multiple of chosen page_break_val
         if current_loop_page % page_break_val == 0:
@@ -4380,7 +4799,7 @@ def redact_image_pdf(
                 f"current_loop_page: {current_loop_page} is a multiple of page_break_val: {page_break_val}, breaking loop"
             )
             page_break_return = True
-            progress.close(_tqdm=progress_bar)
+            progress.close(_tqdm=pii_progress_bar)
             tqdm._instances.clear()
 
             if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
@@ -4918,6 +5337,10 @@ def redact_text_pdf(
     max_time: int = int(MAX_TIME_VALUE),
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     progress: Progress = Progress(track_tqdm=True),  # Progress tracking object
+    bedrock_runtime=None,
+    model_choice: str = LLM_MODEL_CHOICE,
+    custom_llm_instructions: str = "",
+    chosen_llm_entities: List[str] = None,
 ):
     """
     Redact chosen entities from a PDF that is made up of multiple pages that are not images.
@@ -5001,7 +5424,7 @@ def redact_text_pdf(
     pikepdf_pdf = Pdf.open(file_path)
     number_of_pages = len(pikepdf_pdf.pages)
 
-    # file_name = get_file_name_without_type(file_path)
+    file_name = get_file_name_without_type(file_path)
 
     if not all_page_line_level_ocr_results_with_words:
         all_page_line_level_ocr_results_with_words = list()
@@ -5187,6 +5610,13 @@ def redact_text_pdf(
                             score_threshold,
                             custom_entities,
                             comprehend_query_number,
+                            bedrock_runtime=bedrock_runtime,
+                            model_choice=model_choice,
+                            custom_llm_instructions=custom_llm_instructions,
+                            chosen_llm_entities=chosen_llm_entities,
+                            output_folder=output_folder,
+                            file_name=file_name,
+                            page_number=int(reported_page_number),
                         )
 
                         # Annotate redactions on page

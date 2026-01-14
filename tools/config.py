@@ -482,7 +482,7 @@ CSV_FEEDBACK_LOG_HEADERS = get_or_create_env_var(
 )  # If blank, uses component labels
 CSV_USAGE_LOG_HEADERS = get_or_create_env_var(
     "CSV_USAGE_LOG_HEADERS",
-    '["session_hash_textbox", "doc_full_file_name_textbox", "data_full_file_name_textbox", "actual_time_taken_number",	"total_page_count",	"textract_query_number", "pii_detection_method", "comprehend_query_number",  "cost_code", "textract_handwriting_signature", "host_name_textbox", "text_extraction_method", "is_this_a_textract_api_call", "task"]',
+    '["session_hash_textbox", "doc_full_file_name_textbox", "data_full_file_name_textbox", "actual_time_taken_number",	"total_page_count",	"textract_query_number", "pii_detection_method", "comprehend_query_number",  "cost_code", "textract_handwriting_signature", "host_name_textbox", "text_extraction_method", "is_this_a_textract_api_call", "task", "vlm_model_name", "vlm_total_input_tokens", "vlm_total_output_tokens", "llm_model_name", "llm_total_input_tokens", "llm_total_output_tokens"]',
 )  # If blank, uses component labels
 
 ### DYNAMODB logs. Whether to save to DynamoDB, and the headers of the table
@@ -610,6 +610,15 @@ TESSERACT_TEXT_EXTRACT_OPTION = get_or_create_env_var(
 TEXTRACT_TEXT_EXTRACT_OPTION = get_or_create_env_var(
     "TEXTRACT_TEXT_EXTRACT_OPTION", "AWS Textract service - all PDF types"
 )
+BEDROCK_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
+    "BEDROCK_VLM_TEXT_EXTRACT_OPTION", "AWS Bedrock VLM OCR - all PDF types"
+)
+GEMINI_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
+    "GEMINI_VLM_TEXT_EXTRACT_OPTION", "Google Gemini VLM OCR - all PDF types"
+)
+AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
+    "AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION", "Azure/OpenAI VLM OCR - all PDF types"
+)
 
 # PII detection models
 NO_REDACTION_PII_OPTION = get_or_create_env_var(
@@ -617,6 +626,13 @@ NO_REDACTION_PII_OPTION = get_or_create_env_var(
 )
 LOCAL_PII_OPTION = get_or_create_env_var("LOCAL_PII_OPTION", "Local")
 AWS_PII_OPTION = get_or_create_env_var("AWS_PII_OPTION", "AWS Comprehend")
+LLM_PII_OPTION = get_or_create_env_var("LLM_PII_OPTION", "LLM (AWS Bedrock)")
+INFERENCE_SERVER_PII_OPTION = get_or_create_env_var(
+    "INFERENCE_SERVER_PII_OPTION", "Local inference server"
+)
+LOCAL_TRANSFORMERS_LLM_PII_OPTION = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_OPTION", "Local transformers LLM"
+)
 
 SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS", "True")
@@ -624,13 +640,29 @@ SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
 SHOW_AWS_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_AWS_TEXT_EXTRACTION_OPTIONS", "True")
 )
+SHOW_BEDROCK_VLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_BEDROCK_VLM_MODELS", "False")
+)
+SHOW_GEMINI_VLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_GEMINI_VLM_MODELS", "False")
+)
+SHOW_AZURE_OPENAI_VLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AZURE_OPENAI_VLM_MODELS", "False")
+)
 
 # Show at least local options if everything mistakenly removed
-if not SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS and not SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
+if (
+    not SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS
+    and not SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+    and not SHOW_BEDROCK_VLM_MODELS
+    and not SHOW_GEMINI_VLM_MODELS
+    and not SHOW_AZURE_OPENAI_VLM_MODELS
+):
     SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = True
 
 local_model_options = list()
 aws_model_options = list()
+cloud_vlm_model_options = list()
 text_extraction_models = list()
 
 if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS:
@@ -640,7 +672,18 @@ if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS:
 if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
     aws_model_options.append(TEXTRACT_TEXT_EXTRACT_OPTION)
 
-TEXT_EXTRACTION_MODELS = local_model_options + aws_model_options
+if SHOW_BEDROCK_VLM_MODELS:
+    cloud_vlm_model_options.append(BEDROCK_VLM_TEXT_EXTRACT_OPTION)
+
+if SHOW_GEMINI_VLM_MODELS:
+    cloud_vlm_model_options.append(GEMINI_VLM_TEXT_EXTRACT_OPTION)
+
+if SHOW_AZURE_OPENAI_VLM_MODELS:
+    cloud_vlm_model_options.append(AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION)
+
+TEXT_EXTRACTION_MODELS = (
+    local_model_options + aws_model_options + cloud_vlm_model_options
+)
 DO_INITIAL_TABULAR_DATA_CLEAN = convert_string_to_boolean(
     get_or_create_env_var("DO_INITIAL_TABULAR_DATA_CLEAN", "True")
 )
@@ -651,8 +694,23 @@ SHOW_LOCAL_PII_DETECTION_OPTIONS = convert_string_to_boolean(
 SHOW_AWS_PII_DETECTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_AWS_PII_DETECTION_OPTIONS", "True")
 )
+SHOW_LLM_PII_DETECTION_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LLM_PII_DETECTION_OPTIONS", "False")
+)
+SHOW_INFERENCE_SERVER_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_PII_OPTIONS", "False")
+)
+SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS", "False")
+)
 
-if not SHOW_LOCAL_PII_DETECTION_OPTIONS and not SHOW_AWS_PII_DETECTION_OPTIONS:
+if (
+    not SHOW_LOCAL_PII_DETECTION_OPTIONS
+    and not SHOW_AWS_PII_DETECTION_OPTIONS
+    and not SHOW_LLM_PII_DETECTION_OPTIONS
+    and not SHOW_INFERENCE_SERVER_PII_OPTIONS
+    and not SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS
+):
     SHOW_LOCAL_PII_DETECTION_OPTIONS = True
 
 local_model_options = [NO_REDACTION_PII_OPTION]
@@ -664,6 +722,15 @@ if SHOW_LOCAL_PII_DETECTION_OPTIONS:
 
 if SHOW_AWS_PII_DETECTION_OPTIONS:
     aws_model_options.append(AWS_PII_OPTION)
+
+if SHOW_LLM_PII_DETECTION_OPTIONS:
+    aws_model_options.append(LLM_PII_OPTION)
+
+if SHOW_INFERENCE_SERVER_PII_OPTIONS:
+    local_model_options.append(INFERENCE_SERVER_PII_OPTION)
+
+if SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS:
+    local_model_options.append(LOCAL_TRANSFORMERS_LLM_PII_OPTION)
 
 PII_DETECTION_MODELS = local_model_options + aws_model_options
 
@@ -708,13 +775,13 @@ SHOW_VLM_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_VLM_MODEL_OPTIONS", "False")
 )  # Whether to show the VLM model options in the UI
 
-SELECTED_MODEL = get_or_create_env_var(
-    "SELECTED_MODEL", "Qwen3-VL-4B-Instruct"
+SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL = get_or_create_env_var(
+    "SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL", "Qwen3-VL-4B-Instruct"
 )  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "Qwen3-VL-30B-A3B-Instruct", "Qwen3-VL-235B-A22B-Instruct", "PaddleOCR-VL"
 
 if SHOW_VLM_MODEL_OPTIONS:
     VLM_MODEL_OPTIONS = [
-        SELECTED_MODEL,
+        SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     ]
 
 MAX_SPACES_GPU_RUN_TIME = int(
@@ -831,6 +898,7 @@ if VLM_DEFAULT_PRESENCE_PENALTY and VLM_DEFAULT_PRESENCE_PENALTY.strip():
 else:
     VLM_DEFAULT_PRESENCE_PENALTY = None
 
+
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
@@ -926,6 +994,16 @@ if SHOW_INFERENCE_SERVER_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(inference_server_options)
     CHOSEN_LOCAL_MODEL_INTRO_TEXT += INFERENCE_SERVER_OCR_INTRO_TEXT
 
+# Cloud VLM options
+if SHOW_BEDROCK_VLM_MODELS:
+    LOCAL_OCR_MODEL_OPTIONS.append("bedrock-vlm")
+
+if SHOW_GEMINI_VLM_MODELS:
+    LOCAL_OCR_MODEL_OPTIONS.append("gemini-vlm")
+
+if SHOW_AZURE_OPENAI_VLM_MODELS:
+    LOCAL_OCR_MODEL_OPTIONS.append("azure-openai-vlm")
+
 # Inference-server API configuration
 INFERENCE_SERVER_API_URL = get_or_create_env_var(
     "INFERENCE_SERVER_API_URL", "http://localhost:8080"
@@ -938,6 +1016,14 @@ INFERENCE_SERVER_MODEL_NAME = get_or_create_env_var(
 INFERENCE_SERVER_TIMEOUT = int(
     get_or_create_env_var("INFERENCE_SERVER_TIMEOUT", "300")
 )  # Timeout in seconds for API requests
+
+DEFAULT_INFERENCE_SERVER_VLM_MODEL = get_or_create_env_var(
+    "DEFAULT_INFERENCE_SERVER_VLM_MODEL", "qwen_3_vl_30b_a3b_it"
+)  # Default model name for inference-server VLM API calls. If empty, uses INFERENCE_SERVER_MODEL_NAME or server default
+
+DEFAULT_INFERENCE_SERVER_PII_MODEL = get_or_create_env_var(
+    "DEFAULT_INFERENCE_SERVER_PII_MODEL", "gemma_3_12b"
+)  # Default model name for inference-server PII detection API calls. If empty, uses INFERENCE_SERVER_MODEL_NAME, CHOSEN_INFERENCE_SERVER_MODEL, or server default
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)
@@ -1022,6 +1108,474 @@ SAVE_VLM_INPUT_IMAGES = convert_string_to_boolean(
     get_or_create_env_var("SAVE_VLM_INPUT_IMAGES", "False")
 )  # Whether to save input images sent to VLM OCR for debugging.
 
+### LLM options
+RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
+
+# Gemini settings
+RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
+GEMINI_API_KEY = get_or_create_env_var("GEMINI_API_KEY", "")
+# Azure/OpenAI AI Inference settings
+RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "1")
+AZURE_OPENAI_API_KEY = get_or_create_env_var("AZURE_OPENAI_API_KEY", "")
+AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var(
+    "AZURE_OPENAI_INFERENCE_ENDPOINT", ""
+)
+# Local / Llama-server settings
+RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "0")
+RUN_INFERENCE_SERVER = get_or_create_env_var("RUN_INFERENCE_SERVER", "0")
+API_URL = get_or_create_env_var("API_URL", "http://localhost:8080")
+
+# Build up options for models
+model_full_names = list()
+model_short_names = list()
+model_source = list()
+
+CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var(
+    "CHOSEN_LOCAL_MODEL_TYPE", "Qwen 3 4B"
+)  # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
+
+USE_LLAMA_SWAP = get_or_create_env_var("USE_LLAMA_SWAP", "False")
+if USE_LLAMA_SWAP == "True":
+    USE_LLAMA_SWAP = True
+else:
+    USE_LLAMA_SWAP = False
+
+if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
+    model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
+    model_short_names.append(CHOSEN_LOCAL_MODEL_TYPE)
+    model_source.append("Local")
+
+if RUN_AWS_BEDROCK_MODELS == "1":
+    amazon_models = [
+        "anthropic.claude-3-haiku-20240307-v1:0",
+        "anthropic.claude-3-7-sonnet-20250219-v1:0",
+        "anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "amazon.nova-micro-v1:0",
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-pro-v1:0",
+        "deepseek.v3-v1:0",
+        "openai.gpt-oss-20b-1:0",
+        "openai.gpt-oss-120b-1:0",
+        "google.gemma-3-12b-it",
+        "mistral.ministral-3-14b-instruct",
+    ]
+    model_full_names.extend(amazon_models)
+    model_short_names.extend(
+        [
+            "haiku",
+            "sonnet_3_7",
+            "sonnet_4_5",
+            "nova_micro",
+            "nova_lite",
+            "nova_pro",
+            "deepseek_v3",
+            "gpt_oss_20b_aws",
+            "gpt_oss_120b_aws",
+            "gemma_3_12b_it",
+            "ministral_3_14b_instruct",
+        ]
+    )
+    model_source.extend(["AWS"] * len(amazon_models))
+
+if RUN_GEMINI_MODELS == "1":
+    gemini_models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+    model_full_names.extend(gemini_models)
+    model_short_names.extend(
+        ["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"]
+    )
+    model_source.extend(["Gemini"] * len(gemini_models))
+
+# Register Azure/OpenAI AI models (model names must match your Azure/OpenAI deployments)
+if RUN_AZURE_MODELS == "1":
+    # Example deployments; adjust to the deployments you actually create in Azure/OpenAI
+    azure_models = ["gpt-5-mini", "gpt-4o-mini"]
+    model_full_names.extend(azure_models)
+    model_short_names.extend(["gpt-5-mini", "gpt-4o-mini"])
+    model_source.extend(["Azure/OpenAI"] * len(azure_models))
+
+# Register inference-server models
+CHOSEN_INFERENCE_SERVER_MODEL = ""
+if RUN_INFERENCE_SERVER == "1":
+    # Example inference-server models; adjust to the models you have available on your server
+    inference_server_models = [
+        "unnamed-inference-server-model",
+        "qwen_3_4b_it",
+        "qwen_3_4b_think",
+        "gpt_oss_20b",
+        "gemma_3_12b",
+        "ministral_3_14b_it",
+    ]
+    model_full_names.extend(inference_server_models)
+    model_short_names.extend(inference_server_models)
+    model_source.extend(["inference-server"] * len(inference_server_models))
+
+    CHOSEN_INFERENCE_SERVER_MODEL = get_or_create_env_var(
+        "CHOSEN_INFERENCE_SERVER_MODEL", inference_server_models[0]
+    )
+
+    # If the chosen inference server model is not in the list of inference server models, add it to the list
+    if CHOSEN_INFERENCE_SERVER_MODEL not in inference_server_models:
+        model_full_names.append(CHOSEN_INFERENCE_SERVER_MODEL)
+        model_short_names.append(CHOSEN_INFERENCE_SERVER_MODEL)
+        model_source.append("inference-server")
+
+model_name_map = {
+    full: {"short_name": short, "source": source}
+    for full, short, source in zip(model_full_names, model_short_names, model_source)
+}
+
+if RUN_LOCAL_MODEL == "1":
+    default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
+elif RUN_INFERENCE_SERVER == "1":
+    default_model_choice = CHOSEN_INFERENCE_SERVER_MODEL
+elif RUN_AWS_FUNCTIONS == "1":
+    default_model_choice = amazon_models[0]
+else:
+    default_model_choice = gemini_models[0]
+
+default_model_source = model_name_map[default_model_choice]["source"]
+model_sources = list(
+    set([model_name_map[model]["source"] for model in model_full_names])
+)
+
+DIRECT_MODE_INFERENCE_SERVER_MODEL = get_or_create_env_var(
+    "DIRECT_MODE_INFERENCE_SERVER_MODEL",
+    CHOSEN_INFERENCE_SERVER_MODEL if CHOSEN_INFERENCE_SERVER_MODEL else "",
+)
+
+
+def update_model_choice_config(default_model_source, model_name_map):
+    # Filter models by source and return the first matching model name
+    matching_models = [
+        model_name
+        for model_name, model_info in model_name_map.items()
+        if model_info["source"] == default_model_source
+    ]
+
+    output_model = matching_models[0] if matching_models else model_full_names[0]
+
+    return output_model, matching_models
+
+
+default_model_choice, default_source_models = update_model_choice_config(
+    default_model_source, model_name_map
+)
+
+# LLM Model Choice for PII Detection (defaults to first AWS Bedrock model if available)
+# Note: This should be set after amazon_models is defined
+LLM_MODEL_CHOICE = get_or_create_env_var(
+    "LLM_MODEL_CHOICE",
+    "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Default AWS Bedrock model for PII detection
+)
+
+# VLM Model Choice for cloud VLM OCR (defaults to first available cloud model)
+# Note: This should be set after model lists are defined
+VLM_MODEL_CHOICE = get_or_create_env_var(
+    "VLM_MODEL_CHOICE",
+    "qwen.qwen3-vl-235b-a22b",  # Will be set to default below if empty
+)  # Default model choice for cloud VLM OCR (Bedrock, Gemini, or Azure/OpenAI)
+
+# Set default VLM_MODEL_CHOICE if not provided
+if not VLM_MODEL_CHOICE or not VLM_MODEL_CHOICE.strip():
+    # Set default based on available models (priority: AWS Bedrock > Gemini > Azure/OpenAI)
+    if RUN_AWS_BEDROCK_MODELS == "1" and amazon_models:
+        VLM_MODEL_CHOICE = amazon_models[0]  # Default to first AWS Bedrock model
+    elif RUN_GEMINI_MODELS == "1" and gemini_models:
+        VLM_MODEL_CHOICE = gemini_models[0]  # Default to first Gemini model
+    elif RUN_AZURE_MODELS == "1" and azure_models:
+        VLM_MODEL_CHOICE = azure_models[0]  # Default to first Azure/OpenAI model
+    else:
+        VLM_MODEL_CHOICE = ""  # No default available
+else:
+    # Use the value from environment variable
+    VLM_MODEL_CHOICE = VLM_MODEL_CHOICE.strip()
+
+# print("model_name_map:", model_name_map)
+
+# HF token may or may not be needed for downloading models from Hugging Face
+HF_TOKEN = get_or_create_env_var("HF_TOKEN", "")
+
+LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var("LOAD_LOCAL_MODEL_AT_START", "False")
+
+# If you are using a system with low VRAM, you can set this to True to reduce the memory requirements
+LOW_VRAM_SYSTEM = get_or_create_env_var("LOW_VRAM_SYSTEM", "False")
+
+MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var("MULTIMODAL_PROMPT_FORMAT", "False")
+
+if LOW_VRAM_SYSTEM == "True":
+    print("Using settings for low VRAM system")
+    USE_LLAMA_CPP = get_or_create_env_var("USE_LLAMA_CPP", "True")
+    LLM_MAX_NEW_TOKENS = int(get_or_create_env_var("LLM_MAX_NEW_TOKENS", "4096"))
+    LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "16384"))
+    LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "512"))
+    K_QUANT_LEVEL = int(
+        get_or_create_env_var("K_QUANT_LEVEL", "2")
+    )  # 2 = q4_0, 8 = q8_0, 4 = fp16
+    V_QUANT_LEVEL = int(
+        get_or_create_env_var("V_QUANT_LEVEL", "2")
+    )  # 2 = q4_0, 8 = q8_0, 4 = fp16
+
+USE_LLAMA_CPP = get_or_create_env_var(
+    "USE_LLAMA_CPP", "True"
+)  # Llama.cpp or transformers with unsloth
+
+LOCAL_REPO_ID = get_or_create_env_var("LOCAL_REPO_ID", "")
+LOCAL_MODEL_FILE = get_or_create_env_var("LOCAL_MODEL_FILE", "")
+LOCAL_MODEL_FOLDER = get_or_create_env_var("LOCAL_MODEL_FOLDER", "")
+
+# Local Transformers LLM PII Detection Model Configuration
+# These variables allow you to specify a different Hugging Face model specifically for PII detection
+# If LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is empty, the app will use LOCAL_REPO_ID, LOCAL_MODEL_FILE, and LOCAL_MODEL_FOLDER
+LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID", "unsloth/gemma-3-4b-it-bnb-4bit"
+)  # Hugging Face repository ID for PII detection model (e.g., "unsloth/gemma-3-4b-it-bnb-4bit")
+LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"
+)  # Optional: Specific model filename if needed. If empty, uses the default from the repo.
+LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER", "model/gemma3_4b"
+)  # Optional: Local folder for PII model. If empty, uses LOCAL_MODEL_FOLDER or MODEL_CACHE_PATH
+
+GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
+GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GEMMA2_2B_REPO_TRANSFORMERS_ID", "unsloth/gemma-2-2b-it-bnb-4bit"
+)
+if USE_LLAMA_CPP == "False":
+    GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
+GEMMA2_MODEL_FILE = get_or_create_env_var(
+    "GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it.q8_0.gguf"
+)
+GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
+
+GEMMA3_4B_REPO_ID = get_or_create_env_var(
+    "GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF"
+)
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-bnb-4bit"
+)
+if USE_LLAMA_CPP == "False":
+    GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
+GEMMA3_4B_MODEL_FILE = get_or_create_env_var(
+    "GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"
+)
+GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var(
+    "GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b"
+)
+
+GEMMA3_12B_REPO_ID = get_or_create_env_var(
+    "GEMMA3_12B_REPO_ID", "unsloth/gemma-3-12b-it-GGUF"
+)
+GEMMA3_12B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GEMMA3_12B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-12b-it-bnb-4bit"
+)
+if USE_LLAMA_CPP == "False":
+    GEMMA3_12B_REPO_ID = GEMMA3_12B_REPO_TRANSFORMERS_ID
+GEMMA3_12B_MODEL_FILE = get_or_create_env_var(
+    "GEMMA3_12B_MODEL_FILE", "gemma-3-12b-it-UD-Q4_K_XL.gguf"
+)
+GEMMA3_12B_MODEL_FOLDER = get_or_create_env_var(
+    "GEMMA3_12B_MODEL_FOLDER", "model/gemma3_12b"
+)
+
+GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
+GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GPT_OSS_REPO_TRANSFORMERS_ID", "unsloth/gpt-oss-20b-unsloth-bnb-4bit"
+)
+if USE_LLAMA_CPP == "False":
+    GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
+GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F16.gguf")
+GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
+
+QWEN3_4B_REPO_ID = get_or_create_env_var(
+    "QWEN3_4B_REPO_ID", "unsloth/Qwen3-4B-Instruct-2507-GGUF"
+)
+QWEN3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "QWEN3_4B_REPO_TRANSFORMERS_ID", "unsloth/Qwen3-4B-unsloth-bnb-4bit"
+)
+if USE_LLAMA_CPP == "False":
+    QWEN3_4B_REPO_ID = QWEN3_4B_REPO_TRANSFORMERS_ID
+
+QWEN3_4B_MODEL_FILE = get_or_create_env_var(
+    "QWEN3_4B_MODEL_FILE", "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf"
+)
+QWEN3_4B_MODEL_FOLDER = get_or_create_env_var("QWEN3_4B_MODEL_FOLDER", "model/qwen")
+
+GRANITE_4_TINY_REPO_ID = get_or_create_env_var(
+    "GRANITE_4_TINY_REPO_ID", "unsloth/granite-4.0-h-tiny-GGUF"
+)
+GRANITE_4_TINY_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GRANITE_4_TINY_REPO_TRANSFORMERS_ID", "unsloth/granite-4.0-h-tiny-FP8-Dynamic"
+)
+if USE_LLAMA_CPP == "False":
+    GRANITE_4_TINY_REPO_ID = GRANITE_4_TINY_REPO_TRANSFORMERS_ID
+GRANITE_4_TINY_MODEL_FILE = get_or_create_env_var(
+    "GRANITE_4_TINY_MODEL_FILE", "granite-4.0-h-tiny-UD-Q4_K_XL.gguf"
+)
+GRANITE_4_TINY_MODEL_FOLDER = get_or_create_env_var(
+    "GRANITE_4_TINY_MODEL_FOLDER", "model/granite"
+)
+
+GRANITE_4_3B_REPO_ID = get_or_create_env_var(
+    "GRANITE_4_3B_REPO_ID", "unsloth/granite-4.0-h-micro-GGUF"
+)
+GRANITE_4_3B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GRANITE_4_3B_REPO_TRANSFORMERS_ID", "unsloth/granite-4.0-micro-unsloth-bnb-4bit"
+)
+if USE_LLAMA_CPP == "False":
+    GRANITE_4_3B_REPO_ID = GRANITE_4_3B_REPO_TRANSFORMERS_ID
+GRANITE_4_3B_MODEL_FILE = get_or_create_env_var(
+    "GRANITE_4_3B_MODEL_FILE", "granite-4.0-h-micro-UD-Q4_K_XL.gguf"
+)
+GRANITE_4_3B_MODEL_FOLDER = get_or_create_env_var(
+    "GRANITE_4_3B_MODEL_FOLDER", "model/granite"
+)
+
+if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 2b":
+    LOCAL_REPO_ID = GEMMA2_REPO_ID
+    LOCAL_MODEL_FILE = GEMMA2_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GEMMA2_MODEL_FOLDER
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
+    LOCAL_REPO_ID = GEMMA3_4B_REPO_ID
+    LOCAL_MODEL_FILE = GEMMA3_4B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GEMMA3_4B_MODEL_FOLDER
+    MULTIMODAL_PROMPT_FORMAT = "True"
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 12B":
+    LOCAL_REPO_ID = GEMMA3_12B_REPO_ID
+    LOCAL_MODEL_FILE = GEMMA3_12B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GEMMA3_12B_MODEL_FOLDER
+    MULTIMODAL_PROMPT_FORMAT = "True"
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B":
+    LOCAL_REPO_ID = QWEN3_4B_REPO_ID
+    LOCAL_MODEL_FILE = QWEN3_4B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = QWEN3_4B_MODEL_FOLDER
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
+    LOCAL_REPO_ID = GPT_OSS_REPO_ID
+    LOCAL_MODEL_FILE = GPT_OSS_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 Tiny":
+    LOCAL_REPO_ID = GRANITE_4_TINY_REPO_ID
+    LOCAL_MODEL_FILE = GRANITE_4_TINY_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GRANITE_4_TINY_MODEL_FOLDER
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 Micro":
+    LOCAL_REPO_ID = GRANITE_4_3B_REPO_ID
+    LOCAL_MODEL_FILE = GRANITE_4_3B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GRANITE_4_3B_MODEL_FOLDER
+
+elif not CHOSEN_LOCAL_MODEL_TYPE:
+    print("No local model type chosen")
+    LOCAL_REPO_ID = ""
+    LOCAL_MODEL_FILE = ""
+    LOCAL_MODEL_FOLDER = ""
+else:
+    print("CHOSEN_LOCAL_MODEL_TYPE not found")
+    LOCAL_REPO_ID = ""
+    LOCAL_MODEL_FILE = ""
+    LOCAL_MODEL_FOLDER = ""
+
+LLM_MAX_GPU_LAYERS = int(
+    get_or_create_env_var("LLM_MAX_GPU_LAYERS", "-1")
+)  # Maximum possible
+LLM_TEMPERATURE = float(get_or_create_env_var("LLM_TEMPERATURE", "0.6"))
+LLM_TOP_K = int(
+    get_or_create_env_var("LLM_TOP_K", "64")
+)  # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
+LLM_MIN_P = float(get_or_create_env_var("LLM_MIN_P", "0"))
+LLM_TOP_P = float(get_or_create_env_var("LLM_TOP_P", "0.95"))
+LLM_REPETITION_PENALTY = float(get_or_create_env_var("LLM_REPETITION_PENALTY", "1.0"))
+LLM_LAST_N_TOKENS = int(get_or_create_env_var("LLM_LAST_N_TOKENS", "512"))
+LLM_MAX_NEW_TOKENS = int(get_or_create_env_var("LLM_MAX_NEW_TOKENS", "4096"))
+LLM_SEED = int(get_or_create_env_var("LLM_SEED", "42"))
+LLM_RESET = get_or_create_env_var("LLM_RESET", "False")
+LLM_STREAM = get_or_create_env_var("LLM_STREAM", "True")
+LLM_THREADS = int(get_or_create_env_var("LLM_THREADS", "-1"))
+LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "2048"))
+LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "24576"))
+LLM_SAMPLE = get_or_create_env_var("LLM_SAMPLE", "True")
+LLM_STOP_STRINGS = get_or_create_env_var("LLM_STOP_STRINGS", r"['\n\n\n\n\n\n']")
+
+SPECULATIVE_DECODING = get_or_create_env_var("SPECULATIVE_DECODING", "False")
+NUM_PRED_TOKENS = int(get_or_create_env_var("NUM_PRED_TOKENS", "2"))
+K_QUANT_LEVEL = get_or_create_env_var(
+    "K_QUANT_LEVEL", ""
+)  # 2 = q4_0, 8 = q8_0, 4 = fp16
+V_QUANT_LEVEL = get_or_create_env_var(
+    "V_QUANT_LEVEL", ""
+)  # 2 = q4_0, 8 = q8_0, 4 = fp16
+
+if not K_QUANT_LEVEL:
+    K_QUANT_LEVEL = None
+else:
+    K_QUANT_LEVEL = int(K_QUANT_LEVEL)
+if not V_QUANT_LEVEL:
+    V_QUANT_LEVEL = None
+else:
+    V_QUANT_LEVEL = int(V_QUANT_LEVEL)
+
+# LLM-specific configs for PII detection
+# These can be overridden via environment variables, otherwise use general LLM configs
+LLM_PII_TEMPERATURE = float(
+    get_or_create_env_var("LLM_PII_TEMPERATURE", str(LLM_TEMPERATURE))
+)
+LLM_PII_MAX_TOKENS = int(
+    get_or_create_env_var("LLM_PII_MAX_TOKENS", str(LLM_MAX_NEW_TOKENS))
+)
+LLM_PII_NUMBER_OF_RETRY_ATTEMPTS = int(
+    get_or_create_env_var("LLM_PII_NUMBER_OF_RETRY_ATTEMPTS", "3")
+)
+LLM_PII_TIMEOUT_WAIT = int(get_or_create_env_var("LLM_PII_TIMEOUT_WAIT", "5"))
+
+# LLM inference method for PII detection (similar to VLM options)
+# Options: "aws-bedrock", "local", "inference-server", "azure-openai", "gemini"
+CHOSEN_LLM_PII_INFERENCE_METHOD = get_or_create_env_var(
+    "CHOSEN_LLM_PII_INFERENCE_METHOD", "aws-bedrock"
+)  # Default to AWS Bedrock for backward compatibility
+
+SHOW_LOCAL_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOCAL_LLM_PII_OPTIONS", "False")
+)  # Whether to show local LLM options for PII detection
+
+SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS", "False")
+)  # Whether to show inference-server options for PII detection
+
+SHOW_AZURE_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AZURE_LLM_PII_OPTIONS", "False")
+)  # Whether to show Azure/OpenAI options for PII detection
+
+SHOW_GEMINI_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_GEMINI_LLM_PII_OPTIONS", "False")
+)  # Whether to show Gemini options for PII detection
+
+# Build list of available LLM inference methods for PII detection
+LLM_PII_INFERENCE_METHODS = ["aws-bedrock"]  # Always available
+
+if SHOW_LOCAL_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("local")
+
+if SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("inference-server")
+
+if SHOW_AZURE_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("azure-openai")
+
+if SHOW_GEMINI_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("gemini")
+
+# If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
+if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
+    REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "Reasoning: low")
+elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B" and USE_LLAMA_CPP == "False":
+    REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "/nothink")
+else:
+    REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "")
+
+
 # Entities for redaction
 CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var(
     "CHOSEN_COMPREHEND_ENTITIES",
@@ -1031,6 +1585,17 @@ CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var(
 FULL_COMPREHEND_ENTITY_LIST = get_or_create_env_var(
     "FULL_COMPREHEND_ENTITY_LIST",
     "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE','SSN','DATE_TIME','PASSPORT_NUMBER','DRIVER_ID','URL','AGE','USERNAME','PASSWORD','AWS_ACCESS_KEY','AWS_SECRET_KEY','IP_ADDRESS','MAC_ADDRESS','ALL','LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER','CA_SOCIAL_INSURANCE_NUMBER','US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER','UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER','IN_PERMANENT_ACCOUNT_NUMBER','IN_NREGA','INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER','CA_HEALTH_NUMBER','IN_AADHAAR','IN_VOTER_NUMBER', 'CUSTOM_FUZZY']",
+)
+
+FULL_LLM_ENTITY_LIST = get_or_create_env_var(
+    "FULL_LLM_ENTITY_LIST",
+    "['EMAIL','ADDRESS','NAME','PHONE', 'DATE_TIME', 'URL', 'IP_ADDRESS', 'MAC_ADDRESS', 'AGE', 'BANK_ACCOUNT_NUMBER', 'PASSPORT_NUMBER', 'CA_HEALTH_NUMBER', 'CUSTOM', 'CUSTOM_FUZZY']",
+)
+
+# Entities for LLM-based PII redaction option
+CHOSEN_LLM_ENTITIES = get_or_create_env_var(
+    "CHOSEN_LLM_ENTITIES",
+    "['EMAIL','ADDRESS','NAME','PHONE']",
 )
 
 
@@ -1577,6 +2142,10 @@ if CHOSEN_COMPREHEND_ENTITIES:
     CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)
 if FULL_COMPREHEND_ENTITY_LIST:
     FULL_COMPREHEND_ENTITY_LIST = _get_env_list(FULL_COMPREHEND_ENTITY_LIST)
+if FULL_LLM_ENTITY_LIST:
+    FULL_LLM_ENTITY_LIST = _get_env_list(FULL_LLM_ENTITY_LIST)
+if CHOSEN_LLM_ENTITIES:
+    CHOSEN_LLM_ENTITIES = _get_env_list(CHOSEN_LLM_ENTITIES)
 if CHOSEN_REDACT_ENTITIES:
     CHOSEN_REDACT_ENTITIES = _get_env_list(CHOSEN_REDACT_ENTITIES)
 if FULL_ENTITY_LIST:

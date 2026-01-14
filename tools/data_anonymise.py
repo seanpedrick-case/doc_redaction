@@ -31,6 +31,12 @@ from tools.config import (
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
     DO_INITIAL_TABULAR_DATA_CLEAN,
+    INFERENCE_SERVER_PII_OPTION,
+    LLM_MODEL_CHOICE,
+    LLM_PII_MAX_TOKENS,
+    LLM_PII_OPTION,
+    LLM_PII_TEMPERATURE,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_SIMULTANEOUS_FILES,
     MAX_TABLE_COLUMNS,
     MAX_TABLE_ROWS,
@@ -44,6 +50,7 @@ from tools.helper_functions import (
     get_file_name_without_type,
     read_file,
 )
+from tools.llm_entity_detection import call_llm_for_entity_detection
 from tools.load_spacy_model_custom_recognisers import (
     CustomWordFuzzyRecognizer,
     create_nlp_analyser,
@@ -1062,9 +1069,15 @@ def anonymise_script(
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     do_initial_clean: bool = DO_INITIAL_TABULAR_DATA_CLEAN,
     progress: Progress = Progress(track_tqdm=True),
+    bedrock_runtime=None,
+    model_choice: str = LLM_MODEL_CHOICE,
+    custom_llm_instructions: str = "",
+    chosen_llm_entities: List[str] = None,
+    file_name: Optional[str] = None,
+    **text_analyzer_kwargs,
 ):
     """
-    Conduct anonymisation of a dataframe using Presidio and/or AWS Comprehend if chosen.
+    Conduct anonymisation of a dataframe using Presidio, AWS Comprehend, or LLM if chosen.
 
     Args:
         df (pd.DataFrame): The input DataFrame containing text to be anonymised.
@@ -1074,14 +1087,20 @@ def anonymise_script(
         in_allow_list (List[str], optional): A list of terms to explicitly allow and not redact. Defaults to an empty list.
         in_deny_list (List[str], optional): A list of terms to explicitly deny and always redact. Defaults to an empty list.
         max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of fuzzy spelling mistakes to tolerate for custom recognizers. Defaults to 0.
-        pii_identification_method (str, optional): The method for PII identification ("Local", "AWS Comprehend", or "Both"). Defaults to "Local".
-        chosen_redact_comprehend_entities (List[str], optional): A list of entity types to redact using AWS Comprehend. Defaults to an empty list.
-        comprehend_query_number (int, optional): The number of queries to send to AWS Comprehend per batch. Defaults to 0.
+        pii_identification_method (str, optional): The method for PII identification ("Local", "AWS Comprehend", or "LLM (AWS Bedrock)"). Defaults to "Local".
+        chosen_redact_comprehend_entities (List[str], optional): A list of entity types to redact using AWS Comprehend or LLM. Defaults to an empty list.
+        comprehend_query_number (int, optional): The number of queries to send to AWS Comprehend or LLM per batch. Defaults to 0.
         comprehend_client (botocore.client.BaseClient, optional): An initialized AWS Comprehend client. Defaults to an empty string.
         custom_entities (List[str], optional): A list of custom entities to be recognized. Defaults to `custom_entities`.
         nlp_analyser (AnalyzerEngine, optional): The Presidio AnalyzerEngine instance to use. Defaults to `nlp_analyser`.
         do_initial_clean (bool, optional): Whether to perform an initial cleaning of the text. Defaults to True.
         progress (Progress, optional): Gradio Progress object for tracking progress. Defaults to Progress(track_tqdm=False).
+        bedrock_runtime (optional): AWS Bedrock runtime client for LLM-based entity detection.
+        model_choice (str, optional): LLM model choice for entity detection. Defaults to LLM_MODEL_CHOICE.
+        custom_llm_instructions (str, optional): Custom instructions for LLM entity detection. Defaults to empty string.
+        chosen_llm_entities (List[str], optional): List of entity types to detect using LLM. Defaults to None (uses chosen_redact_comprehend_entities).
+        file_name (Optional[str], optional): File name for logging purposes. Defaults to None.
+        **text_analyzer_kwargs: Additional keyword arguments for text analyzer (e.g., temperature, max_tokens, inference_method).
     """
 
     print("Identifying personal information")
@@ -1281,6 +1300,254 @@ def anonymise_script(
 
     elif (pii_identification_method == "AWS Comprehend") & (not comprehend_client):
         raise ("Unable to redact, Comprehend connection details not found.")
+
+    # LLM-based entity detection
+    elif pii_identification_method == LLM_PII_OPTION:
+
+        if not bedrock_runtime and text_analyzer_kwargs.get("inference_method") not in [
+            "local",
+            "inference-server",
+            "azure-openai",
+            "gemini",
+        ]:
+            raise ValueError(
+                "bedrock_runtime is required when using LLM-based PII detection with AWS Bedrock"
+            )
+    elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+        # LLM-based entity detection using inference server
+        from tools.config import (
+            CHOSEN_INFERENCE_SERVER_MODEL,
+            DEFAULT_INFERENCE_SERVER_PII_MODEL,
+            INFERENCE_SERVER_API_URL,
+        )
+
+        # Set inference method to inference-server if not already set
+        if text_analyzer_kwargs.get("inference_method") is None:
+            text_analyzer_kwargs["inference_method"] = "inference-server"
+
+        # Set API URL if not already set
+        if text_analyzer_kwargs.get("api_url") is None:
+            text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
+
+        # Set model choice if not already set
+        if text_analyzer_kwargs.get("model_choice") is None:
+            inference_server_pii_model = (
+                DEFAULT_INFERENCE_SERVER_PII_MODEL
+                if DEFAULT_INFERENCE_SERVER_PII_MODEL
+                else (
+                    CHOSEN_INFERENCE_SERVER_MODEL
+                    if CHOSEN_INFERENCE_SERVER_MODEL
+                    else LLM_MODEL_CHOICE
+                )
+            )
+            text_analyzer_kwargs["model_choice"] = inference_server_pii_model
+
+        # Use the same logic as LLM_PII_OPTION for the rest
+        # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+        if chosen_llm_entities is None:
+            chosen_llm_entities = chosen_redact_comprehend_entities
+
+    elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
+        # LLM-based entity detection using local transformers models
+        # Set inference method to local if not already set
+        if text_analyzer_kwargs.get("inference_method") is None:
+            text_analyzer_kwargs["inference_method"] = "local"
+
+        # Set model choice if not already set - use LLM_MODEL_CHOICE as default
+        if text_analyzer_kwargs.get("model_choice") is None:
+            text_analyzer_kwargs["model_choice"] = LLM_MODEL_CHOICE
+
+        # Load PII-specific model and tokenizer if not already provided
+        if (
+            text_analyzer_kwargs.get("local_model") is None
+            and text_analyzer_kwargs.get("inference_method") == "local"
+        ):
+            from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
+
+            try:
+                text_analyzer_kwargs["local_model"] = get_pii_model()
+            except Exception as e:
+                print(
+                    f"Warning: Failed to load PII model: {e}. "
+                    f"Will attempt to load model on-demand."
+                )
+        if (
+            text_analyzer_kwargs.get("tokenizer") is None
+            and text_analyzer_kwargs.get("inference_method") == "local"
+            and USE_LLAMA_CPP != "True"
+        ):
+            from tools.llm_funcs import get_pii_tokenizer
+
+            try:
+                text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+            except Exception as e:
+                print(
+                    f"Warning: Failed to load PII tokenizer: {e}. "
+                    f"Will attempt to load tokenizer on-demand."
+                )
+
+        # Use the same logic as LLM_PII_OPTION for the rest
+        # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+        if chosen_llm_entities is None:
+            chosen_llm_entities = chosen_redact_comprehend_entities
+
+        # Handle custom entities first (same as AWS Comprehend)
+        if custom_entities:
+            custom_redact_entities = [
+                entity for entity in chosen_llm_entities if entity in custom_entities
+            ]
+
+            if custom_redact_entities:
+                # Get valid language entities
+                valid_language_entities = nlp_analyser.registry.get_supported_entities(
+                    languages=[language]
+                )
+                if "CUSTOM" not in valid_language_entities:
+                    valid_language_entities.append("CUSTOM")
+                if "CUSTOM_FUZZY" not in valid_language_entities:
+                    valid_language_entities.append("CUSTOM_FUZZY")
+
+                # Filter entities to only include those supported by the language
+                from tools.custom_image_analyser_engine import (
+                    filter_entities_for_language,
+                )
+
+                language_supported_entities = filter_entities_for_language(
+                    custom_redact_entities, valid_language_entities, language
+                )
+
+                if language_supported_entities:
+                    custom_results = analyze_dict(
+                        batch_analyzer,
+                        df_dict,
+                        language=language,
+                        entities=language_supported_entities,
+                        score_threshold=score_threshold,
+                        return_decision_process=True,
+                        allow_list=in_allow_list_flat,
+                    )
+
+                    # Initialize results_by_column with custom entity results
+                    for result in custom_results:
+                        results_by_column[result.key] = result
+
+        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+        llm_chosen_redact_entities = [
+            entity for entity in chosen_llm_entities if entity != "CUSTOM"
+        ]
+
+        if not llm_chosen_redact_entities:
+            # If no LLM entities to detect, just use custom results
+            analyzer_results = list(results_by_column.values())
+        else:
+            max_retries = 3
+            retry_delay = 3
+
+            # Process each text column in the dictionary
+            for column_name, texts in progress.tqdm(
+                df_dict.items(), desc="Querying LLM service.", unit="Columns"
+            ):
+                # Get or create DictAnalyzerResult for this column
+                if column_name in results_by_column:
+                    column_results = results_by_column[column_name]
+                else:
+                    column_results = DictAnalyzerResult(
+                        recognizer_results=[[] for _ in texts],
+                        key=column_name,
+                        value=texts,
+                    )
+
+                # Process each text in the column
+                for text_idx, text in progress.tqdm(
+                    enumerate(texts), desc="Querying LLM service.", unit="Row"
+                ):
+                    text_str = str(text) if text else ""
+
+                    if not text_str.strip():
+                        continue
+
+                    for attempt in range(max_retries):
+                        try:
+                            # Call LLM for entity detection
+                            entities = call_llm_for_entity_detection(
+                                text=text_str,
+                                entities_to_detect=llm_chosen_redact_entities,
+                                language=language,
+                                bedrock_runtime=bedrock_runtime,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=OUTPUT_FOLDER,
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=None,  # Not applicable for tabular data
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                local_model=text_analyzer_kwargs.get("local_model"),
+                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                assistant_model=text_analyzer_kwargs.get(
+                                    "assistant_model"
+                                ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+
+                            comprehend_query_number += 1
+
+                            # Convert LLM entity results to RecognizerResult format
+                            for entity in entities:
+                                # Extract entity information (format: Type, BeginOffset, EndOffset, Score, Text)
+                                entity_type = entity.get("Type", "")
+                                begin_offset = entity.get("BeginOffset", 0)
+                                end_offset = entity.get("EndOffset", 0)
+                                entity_text = entity.get(
+                                    "Text", text_str[begin_offset:end_offset]
+                                )
+
+                                # Filter by allow_list if entity text matches
+                                if (
+                                    in_allow_list_flat
+                                    and entity_text in in_allow_list_flat
+                                ):
+                                    continue
+
+                                # Only add entities that are in the chosen list
+                                if entity_type not in llm_chosen_redact_entities:
+                                    continue
+
+                                recognizer_result = RecognizerResult(
+                                    entity_type=entity_type,
+                                    start=begin_offset,
+                                    end=end_offset,
+                                    score=entity.get("Score", 0.0),
+                                )
+                                column_results.recognizer_results[text_idx].append(
+                                    recognizer_result
+                                )
+
+                            break  # Success, exit retry loop
+
+                        except Exception as e:
+                            if attempt == max_retries - 1:
+                                print(
+                                    f"LLM entity detection failed for text: {text_str[:100]}... due to",
+                                    e,
+                                )
+                                raise
+                            time.sleep(retry_delay)
+
+                # Store or update the column results
+                results_by_column[column_name] = column_results
+
+            # Convert the dictionary of results back to a list
+            analyzer_results = list(results_by_column.values())
 
     else:
         print("Unable to redact.")

@@ -8,18 +8,29 @@ from dotenv import load_dotenv
 from cli_redact import main as cli_main
 from tools.config import (
     AWS_REGION,
+    AZURE_OPENAI_API_KEY,
+    AZURE_OPENAI_INFERENCE_ENDPOINT,
+    CHOSEN_LLM_PII_INFERENCE_METHOD,
     DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
     DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+    DEFAULT_INFERENCE_SERVER_PII_MODEL,
+    DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_MIN_CONSECUTIVE_PAGES,
     DEFAULT_MIN_WORD_COUNT,
     DEFAULT_PAGE_MAX,
     DEFAULT_PAGE_MIN,
+    GEMINI_API_KEY,
     IMAGES_DPI,
+    INFERENCE_SERVER_API_URL,
     LAMBDA_DEFAULT_USERNAME,
     LAMBDA_EXTRACT_SIGNATURES,
     LAMBDA_MAX_POLL_ATTEMPTS,
     LAMBDA_POLL_INTERVAL,
     LAMBDA_PREPARE_IMAGES,
+    LLM_MODEL_CHOICE,
+    LLM_PII_MAX_TOKENS,
+    LLM_PII_TEMPERATURE,
+    VLM_MODEL_CHOICE,
 )
 
 
@@ -426,6 +437,64 @@ def lambda_handler(event, context):
                 "extract_layout",
                 os.getenv("INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION", "False"),
             )
+        ),
+        # VLM OCR Arguments
+        "vlm_model_choice": arguments.get(
+            "vlm_model_choice", os.getenv("VLM_MODEL_CHOICE", VLM_MODEL_CHOICE)
+        ),
+        "inference_server_vlm_model": arguments.get(
+            "inference_server_vlm_model",
+            os.getenv(
+                "DEFAULT_INFERENCE_SERVER_VLM_MODEL", DEFAULT_INFERENCE_SERVER_VLM_MODEL
+            ),
+        ),
+        "inference_server_api_url": arguments.get(
+            "inference_server_api_url",
+            os.getenv("INFERENCE_SERVER_API_URL", INFERENCE_SERVER_API_URL),
+        ),
+        "gemini_api_key": arguments.get(
+            "gemini_api_key", os.getenv("GEMINI_API_KEY", GEMINI_API_KEY)
+        ),
+        "azure_openai_api_key": arguments.get(
+            "azure_openai_api_key",
+            os.getenv("AZURE_OPENAI_API_KEY", AZURE_OPENAI_API_KEY),
+        ),
+        "azure_openai_endpoint": arguments.get(
+            "azure_openai_endpoint",
+            os.getenv(
+                "AZURE_OPENAI_INFERENCE_ENDPOINT", AZURE_OPENAI_INFERENCE_ENDPOINT
+            ),
+        ),
+        # LLM PII Detection Arguments
+        "llm_model_choice": arguments.get(
+            "llm_model_choice", os.getenv("LLM_MODEL_CHOICE", LLM_MODEL_CHOICE)
+        ),
+        "llm_inference_method": arguments.get(
+            "llm_inference_method",
+            os.getenv(
+                "CHOSEN_LLM_PII_INFERENCE_METHOD", CHOSEN_LLM_PII_INFERENCE_METHOD
+            ),
+        ),
+        "inference_server_pii_model": arguments.get(
+            "inference_server_pii_model",
+            os.getenv(
+                "DEFAULT_INFERENCE_SERVER_PII_MODEL", DEFAULT_INFERENCE_SERVER_PII_MODEL
+            ),
+        ),
+        "llm_temperature": float(
+            arguments.get(
+                "llm_temperature",
+                os.getenv("LLM_PII_TEMPERATURE", LLM_PII_TEMPERATURE),
+            )
+        ),
+        "llm_max_tokens": int(
+            arguments.get(
+                "llm_max_tokens",
+                os.getenv("LLM_PII_MAX_TOKENS", LLM_PII_MAX_TOKENS),
+            )
+        ),
+        "custom_llm_instructions": arguments.get(
+            "custom_llm_instructions", os.getenv("CUSTOM_LLM_INSTRUCTIONS", "")
         ),
         # Word/Tabular Anonymisation Arguments
         "anon_strategy": arguments.get(
