@@ -627,6 +627,9 @@ NO_REDACTION_PII_OPTION = get_or_create_env_var(
 LOCAL_PII_OPTION = get_or_create_env_var("LOCAL_PII_OPTION", "Local")
 AWS_PII_OPTION = get_or_create_env_var("AWS_PII_OPTION", "AWS Comprehend")
 LLM_PII_OPTION = get_or_create_env_var("LLM_PII_OPTION", "LLM (AWS Bedrock)")
+INFERENCE_SERVER_PII_OPTION = get_or_create_env_var(
+    "INFERENCE_SERVER_PII_OPTION", "Local inference server"
+)
 
 SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS", "True")
@@ -691,11 +694,15 @@ SHOW_AWS_PII_DETECTION_OPTIONS = convert_string_to_boolean(
 SHOW_LLM_PII_DETECTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LLM_PII_DETECTION_OPTIONS", "False")
 )
+SHOW_INFERENCE_SERVER_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_PII_OPTIONS", "False")
+)
 
 if (
     not SHOW_LOCAL_PII_DETECTION_OPTIONS
     and not SHOW_AWS_PII_DETECTION_OPTIONS
     and not SHOW_LLM_PII_DETECTION_OPTIONS
+    and not SHOW_INFERENCE_SERVER_PII_OPTIONS
 ):
     SHOW_LOCAL_PII_DETECTION_OPTIONS = True
 
@@ -711,6 +718,9 @@ if SHOW_AWS_PII_DETECTION_OPTIONS:
 
 if SHOW_LLM_PII_DETECTION_OPTIONS:
     aws_model_options.append(LLM_PII_OPTION)
+
+if SHOW_INFERENCE_SERVER_PII_OPTIONS:
+    local_model_options.append(INFERENCE_SERVER_PII_OPTION)
 
 PII_DETECTION_MODELS = local_model_options + aws_model_options
 
@@ -1000,6 +1010,10 @@ INFERENCE_SERVER_TIMEOUT = int(
 DEFAULT_INFERENCE_SERVER_VLM_MODEL = get_or_create_env_var(
     "DEFAULT_INFERENCE_SERVER_VLM_MODEL", "qwen_3_vl_30b_a3b_it"
 )  # Default model name for inference-server VLM API calls. If empty, uses INFERENCE_SERVER_MODEL_NAME or server default
+
+DEFAULT_INFERENCE_SERVER_PII_MODEL = get_or_create_env_var(
+    "DEFAULT_INFERENCE_SERVER_PII_MODEL", "gemma_3_12b"
+)  # Default model name for inference-server PII detection API calls. If empty, uses INFERENCE_SERVER_MODEL_NAME, CHOSEN_INFERENCE_SERVER_MODEL, or server default
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)

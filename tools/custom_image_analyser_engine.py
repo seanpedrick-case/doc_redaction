@@ -24,7 +24,9 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 
 from tools.config import (
     AWS_PII_OPTION,
+    CHOSEN_INFERENCE_SERVER_MODEL,
     CONVERT_LINE_TO_WORD_LEVEL,
+    DEFAULT_INFERENCE_SERVER_PII_MODEL,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
     HYBRID_OCR_CONFIDENCE_THRESHOLD,
@@ -32,6 +34,7 @@ from tools.config import (
     HYBRID_OCR_PADDING,
     INFERENCE_SERVER_API_URL,
     INFERENCE_SERVER_MODEL_NAME,
+    INFERENCE_SERVER_PII_OPTION,
     INFERENCE_SERVER_TIMEOUT,
     LLM_MODEL_CHOICE,
     LLM_PII_MAX_TOKENS,
@@ -829,17 +832,6 @@ def _call_inference_server_vlm_api(
     # print(f"Payload: {payload}")
 
     endpoint = f"{api_url}/v1/chat/completions"
-
-    print(f"Payload model: {model_name}")
-    print(f"Payload max_new_tokens: {max_new_tokens}")
-    print(f"Payload temperature: {temperature}")
-    print(f"Payload top_p: {top_p}")
-    print(f"Payload top_k: {top_k}")
-    print(f"Payload repetition_penalty: {repetition_penalty}")
-    print(f"Payload do_sample: {do_sample}")
-    print(f"Payload min_p: {min_p}")
-    print(f"Payload presence_penalty: {presence_penalty}")
-    print(f"Payload seed: {seed}")
 
     try:
         if stream:
@@ -2756,7 +2748,7 @@ def _inference_server_page_ocr_predict(
                     f"{image_name_shortened}_inference_server_page_input_image.png"
                 )
                 filepath = os.path.join(vlm_debug_dir, filename)
-                print(f"Saving inference-server input image to: {filepath}")
+                print(f"Saving inference-server input image to: {filename}")
                 processed_image.save(filepath)
                 # print(f"Saved VLM input image to: {filepath}")
             except Exception as save_error:
@@ -6860,6 +6852,39 @@ class CustomImageAnalyzerEngine:
                 raise ValueError(
                     "bedrock_runtime is required when using LLM-based PII detection"
                 )
+        elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+            # LLM-based entity detection using inference server
+            try:
+                from tools.llm_entity_detection import do_llm_entity_detection_call
+            except ImportError as e:
+                print(f"Error importing LLM entity detection: {e}")
+                raise ImportError(
+                    "LLM entity detection not available. Please ensure llm_funcs.py is accessible."
+                )
+
+            # Set inference method to inference-server if not already set
+            if text_analyzer_kwargs.get("inference_method") is None:
+                text_analyzer_kwargs["inference_method"] = "inference-server"
+
+            # Set API URL if not already set
+            if text_analyzer_kwargs.get("api_url") is None:
+                text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
+
+            # Set model choice if not already set
+            if text_analyzer_kwargs.get("model_choice") is None:
+                inference_server_pii_model = (
+                    DEFAULT_INFERENCE_SERVER_PII_MODEL
+                    if DEFAULT_INFERENCE_SERVER_PII_MODEL
+                    else (
+                        CHOSEN_INFERENCE_SERVER_MODEL
+                        if CHOSEN_INFERENCE_SERVER_MODEL
+                        else model_choice
+                    )
+                )
+                text_analyzer_kwargs["model_choice"] = inference_server_pii_model
+
+            # Update model_choice to use the value from text_analyzer_kwargs
+            model_choice = text_analyzer_kwargs.get("model_choice", model_choice)
 
             # Handle custom entities first (same as AWS Comprehend)
             if custom_entities:
@@ -7815,6 +7840,39 @@ def run_page_text_redaction(
             raise ValueError(
                 "bedrock_runtime is required when using LLM-based PII detection"
             )
+    elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+        # LLM-based entity detection using inference server
+        try:
+            from tools.llm_entity_detection import do_llm_entity_detection_call
+        except ImportError as e:
+            print(f"Error importing LLM entity detection: {e}")
+            raise ImportError(
+                "LLM entity detection not available. Please ensure llm_entity_detection.py is accessible."
+            )
+
+        # Set inference method to inference-server if not already set
+        if text_analyzer_kwargs.get("inference_method") is None:
+            text_analyzer_kwargs["inference_method"] = "inference-server"
+
+        # Set API URL if not already set
+        if text_analyzer_kwargs.get("api_url") is None:
+            text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
+
+        # Set model choice if not already set
+        if text_analyzer_kwargs.get("model_choice") is None:
+            inference_server_pii_model = (
+                DEFAULT_INFERENCE_SERVER_PII_MODEL
+                if DEFAULT_INFERENCE_SERVER_PII_MODEL
+                else (
+                    CHOSEN_INFERENCE_SERVER_MODEL
+                    if CHOSEN_INFERENCE_SERVER_MODEL
+                    else model_choice
+                )
+            )
+            text_analyzer_kwargs["model_choice"] = inference_server_pii_model
+
+        # Update model_choice to use the value from text_analyzer_kwargs
+        model_choice = text_analyzer_kwargs.get("model_choice", model_choice)
 
         # Handle custom entities first (same as AWS Comprehend)
         if custom_entities:

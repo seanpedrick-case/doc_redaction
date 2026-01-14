@@ -48,10 +48,13 @@ from tools.config import (
     CHOSEN_LOCAL_OCR_MODEL,
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
+    DEFAULT_INFERENCE_SERVER_PII_MODEL,
     DEFAULT_LANGUAGE,
     GEMINI_VLM_TEXT_EXTRACT_OPTION,
     IMAGES_DPI,
     INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
+    INFERENCE_SERVER_API_URL,
+    INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     LLM_MODEL_CHOICE,
     LLM_PII_OPTION,
@@ -897,6 +900,10 @@ def choose_and_run_redactor(
             out_message = "Cannot connect to AWS Bedrock service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
             print(out_message)
             raise Exception(out_message)
+    elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+        # For inference server, we don't need bedrock_runtime
+        bedrock_runtime = None
+        print("Using inference server for PII detection")
     else:
         bedrock_runtime = None
 
@@ -4326,6 +4333,30 @@ def redact_image_pdf(
                     # Step 2: Analyse text and identify PII
                     if chosen_redact_entities or chosen_redact_comprehend_entities:
 
+                        # Set up inference server parameters if using inference server for PII detection
+                        text_analyzer_kwargs = {}
+                        if pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+                            text_analyzer_kwargs["inference_method"] = (
+                                "inference-server"
+                            )
+                            text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
+                            # Use DEFAULT_INFERENCE_SERVER_PII_MODEL if set, otherwise use CHOSEN_INFERENCE_SERVER_MODEL or empty
+                            from tools.config import CHOSEN_INFERENCE_SERVER_MODEL
+
+                            inference_server_pii_model = (
+                                DEFAULT_INFERENCE_SERVER_PII_MODEL
+                                if DEFAULT_INFERENCE_SERVER_PII_MODEL
+                                else (
+                                    CHOSEN_INFERENCE_SERVER_MODEL
+                                    if CHOSEN_INFERENCE_SERVER_MODEL
+                                    else ""
+                                )
+                            )
+                            if inference_server_pii_model:
+                                text_analyzer_kwargs["model_choice"] = (
+                                    inference_server_pii_model
+                                )
+
                         page_redaction_bounding_boxes, comprehend_query_number_new = (
                             image_analyser.analyze_text(
                                 page_line_level_ocr_results["results"],
@@ -4343,6 +4374,7 @@ def redact_image_pdf(
                                 custom_llm_instructions=custom_llm_instructions,
                                 file_name=file_name,
                                 page_number=int(reported_page_number),
+                                **text_analyzer_kwargs,
                             )
                         )
 
