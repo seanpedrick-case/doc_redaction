@@ -3536,16 +3536,31 @@ def redact_image_pdf(
             all_pages_decision_process_table.to_dict("records")
         )
 
-    # Go through each page
-    for page_no in progress_bar:
+    # Dictionary to store OCR results and page metadata for two-pass processing
+    # This allows us to do all OCR first, then all PII detection, avoiding model switching
+    ocr_results_by_page = {}
+    page_metadata_by_page = {}
+
+    # FIRST PASS: Perform OCR on all pages
+    # This collects OCR results without doing PII detection, which is more efficient
+    # when using inference servers that need to switch between VLM and LLM models
+    print("First pass: Performing OCR on all pages...")
+    ocr_progress_bar = tqdm(
+        range(page_loop_start, page_loop_end),
+        unit="pages remaining",
+        desc="OCR pass",
+    )
+    
+    for page_no in ocr_progress_bar:
 
         reported_page_number = str(page_no + 1)
-        print(f"Current page: {reported_page_number}")
+        print(f"OCR - Current page: {reported_page_number}")
 
         handwriting_or_signature_boxes = list()
         page_signature_recogniser_results = list()
         page_handwriting_recogniser_results = list()
         page_line_level_ocr_results_with_words = list()
+        page_line_level_ocr_results = None  # Initialize to None, will be set during OCR
         page_break_return = False
 
         # Try to find image location
@@ -4320,129 +4335,221 @@ def redact_image_pdf(
                             f"Warning: Could not determine image for visualization at page {reported_page_number}. Skipping visualization."
                         )
 
-            if (
-                pii_identification_method != NO_REDACTION_PII_OPTION
-                or RETURN_PDF_FOR_REVIEW is True
-            ):
-                page_redaction_bounding_boxes = list()
-                comprehend_query_number = 0
-                comprehend_query_number_new = 0
-                redact_whole_page = False
+            # Store OCR results and page metadata for second pass (PII detection)
+            # This happens after all OCR processing is complete for this page
+            # Only store if we're in the processing range
+            if page_no >= page_min and page_no < page_max:
+                ocr_results_by_page[page_no] = {
+                    "page_line_level_ocr_results": page_line_level_ocr_results,
+                    "page_line_level_ocr_results_with_words": page_line_level_ocr_results_with_words,
+                    "page_signature_recogniser_results": page_signature_recogniser_results,
+                    "page_handwriting_recogniser_results": page_handwriting_recogniser_results,
+                    "handwriting_or_signature_boxes": handwriting_or_signature_boxes,
+                    "image_path": image_path,
+                    "pymupdf_page": pymupdf_page,
+                    "original_cropbox": original_cropbox,
+                    "page_width": page_width,
+                    "page_height": page_height,
+                    "image": image,
+                    "reported_page_number": reported_page_number,
+                }
+            
+            # Skip PII detection and redaction in first pass - we'll do it in second pass
+            # Continue to next page for OCR
+            # Note: Pages outside page_min/page_max range will not have OCR results stored
+            # and will be skipped in the second pass
+            continue
 
-                if pii_identification_method != NO_REDACTION_PII_OPTION:
-                    # Step 2: Analyse text and identify PII
-                    if chosen_redact_entities or chosen_redact_comprehend_entities:
+    
 
-                        # Set up inference server parameters if using inference server for PII detection
-                        text_analyzer_kwargs = {}
-                        if pii_identification_method == INFERENCE_SERVER_PII_OPTION:
-                            text_analyzer_kwargs["inference_method"] = (
-                                "inference-server"
-                            )
-                            text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
-                            # Use DEFAULT_INFERENCE_SERVER_PII_MODEL if set, otherwise use CHOSEN_INFERENCE_SERVER_MODEL or empty
-                            from tools.config import CHOSEN_INFERENCE_SERVER_MODEL
+    # SECOND PASS: Perform PII detection on all pages using stored OCR results
+    print("Second pass: Performing PII detection on all pages...")
+    pii_progress_bar = tqdm(
+        range(page_loop_start, page_loop_end),
+        unit="pages remaining",
+        desc="PII detection pass",
+    )
 
-                            inference_server_pii_model = (
-                                DEFAULT_INFERENCE_SERVER_PII_MODEL
-                                if DEFAULT_INFERENCE_SERVER_PII_MODEL
-                                else (
-                                    CHOSEN_INFERENCE_SERVER_MODEL
-                                    if CHOSEN_INFERENCE_SERVER_MODEL
-                                    else ""
-                                )
-                            )
-                            if inference_server_pii_model:
-                                text_analyzer_kwargs["model_choice"] = (
-                                    inference_server_pii_model
-                                )
+    redacted_image = image.copy()
+    
+    for page_no in pii_progress_bar:
+        
+        reported_page_number = str(page_no + 1)
+        print(f"PII Detection - Current page: {reported_page_number}")
+        
+        # Retrieve stored OCR results and page metadata
+        if page_no not in ocr_results_by_page:
+            print(f"Warning: No OCR results found for page {reported_page_number}, skipping PII detection")
+            continue
+            
+        page_data = ocr_results_by_page[page_no]
+        page_line_level_ocr_results = page_data["page_line_level_ocr_results"]
+        page_line_level_ocr_results_with_words = page_data["page_line_level_ocr_results_with_words"]
+        page_signature_recogniser_results = page_data["page_signature_recogniser_results"]
+        page_handwriting_recogniser_results = page_data["page_handwriting_recogniser_results"]
+        handwriting_or_signature_boxes = page_data["handwriting_or_signature_boxes"]
+        image_path = page_data["image_path"]
+        pymupdf_page = page_data["pymupdf_page"]
+        original_cropbox = page_data["original_cropbox"]
+        page_width = page_data["page_width"]
+        page_height = page_data["page_height"]
+        image = page_data["image"]
+        reported_page_number = page_data["reported_page_number"]
+        
+        page_image_annotations = {"image": image_path, "boxes": []}
+        page_break_return = False
+        
+        # Skip if OCR results are missing or invalid
+        if (not page_line_level_ocr_results 
+            or not isinstance(page_line_level_ocr_results, dict)
+            or "results" not in page_line_level_ocr_results
+            or not page_line_level_ocr_results_with_words
+            or not isinstance(page_line_level_ocr_results_with_words, dict)
+            or "results" not in page_line_level_ocr_results_with_words):
+            print(f"Warning: Missing or invalid OCR results for page {reported_page_number}, skipping PII detection")
+            # Still need to handle page_image_annotations and current_loop_page for consistency
+            page_image_annotations = {"image": image_path, "boxes": []}
+            # Check if the image_path already exists in annotations_all_pages
+            existing_index = next(
+                (
+                    index
+                    for index, ann in enumerate(annotations_all_pages)
+                    if ann.get("image") == page_image_annotations["image"]
+                ),
+                None,
+            )
+            if existing_index is not None:
+                annotations_all_pages[existing_index] = page_image_annotations
+            else:
+                annotations_all_pages.append(page_image_annotations)
+            current_loop_page = page_no + 1
+            continue
 
-                        page_redaction_bounding_boxes, comprehend_query_number_new = (
-                            image_analyser.analyze_text(
-                                page_line_level_ocr_results["results"],
-                                page_line_level_ocr_results_with_words["results"],
-                                chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
-                                chosen_llm_entities=chosen_llm_entities,
-                                pii_identification_method=pii_identification_method,
-                                comprehend_client=comprehend_client,
-                                bedrock_runtime=bedrock_runtime,
-                                custom_entities=chosen_redact_entities,
-                                language=language,
-                                allow_list=allow_list,
-                                score_threshold=score_threshold,
-                                nlp_analyser=nlp_analyser,
-                                custom_llm_instructions=custom_llm_instructions,
-                                file_name=file_name,
-                                page_number=int(reported_page_number),
-                                **text_analyzer_kwargs,
+        if (
+            pii_identification_method != NO_REDACTION_PII_OPTION
+            or RETURN_PDF_FOR_REVIEW is True
+        ):
+            page_redaction_bounding_boxes = list()
+            comprehend_query_number = 0
+            comprehend_query_number_new = 0
+            redact_whole_page = False
+
+            if pii_identification_method != NO_REDACTION_PII_OPTION:
+                # Step 2: Analyse text and identify PII
+                if chosen_redact_entities or chosen_redact_comprehend_entities:
+
+                    # Set up inference server parameters if using inference server for PII detection
+                    text_analyzer_kwargs = {}
+                    if pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+                        text_analyzer_kwargs["inference_method"] = (
+                            "inference-server"
+                        )
+                        text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
+                        # Use DEFAULT_INFERENCE_SERVER_PII_MODEL if set, otherwise use CHOSEN_INFERENCE_SERVER_MODEL or empty
+                        from tools.config import CHOSEN_INFERENCE_SERVER_MODEL
+
+                        inference_server_pii_model = (
+                            DEFAULT_INFERENCE_SERVER_PII_MODEL
+                            if DEFAULT_INFERENCE_SERVER_PII_MODEL
+                            else (
+                                CHOSEN_INFERENCE_SERVER_MODEL
+                                if CHOSEN_INFERENCE_SERVER_MODEL
+                                else ""
                             )
                         )
+                        if inference_server_pii_model:
+                            text_analyzer_kwargs["model_choice"] = (
+                                inference_server_pii_model
+                            )
 
-                        comprehend_query_number = (
-                            comprehend_query_number + comprehend_query_number_new
+                    # Call analyze_text for all PII detection methods (Local, AWS Comprehend, LLM, Inference Server)
+                    page_redaction_bounding_boxes, comprehend_query_number_new = (
+                        image_analyser.analyze_text(
+                            page_line_level_ocr_results["results"],
+                            page_line_level_ocr_results_with_words["results"],
+                            chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+                            chosen_llm_entities=chosen_llm_entities,
+                            pii_identification_method=pii_identification_method,
+                            comprehend_client=comprehend_client,
+                            bedrock_runtime=bedrock_runtime,
+                            custom_entities=chosen_redact_entities,
+                            language=language,
+                            allow_list=allow_list,
+                            score_threshold=score_threshold,
+                            nlp_analyser=nlp_analyser,
+                            custom_llm_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=int(reported_page_number),
+                            **text_analyzer_kwargs,
                         )
+                    )
 
-                    else:
-                        page_redaction_bounding_boxes = list()
-
-                    # Merge redaction bounding boxes that are close together
-                    page_merged_redaction_bboxes = merge_img_bboxes(
-                        page_redaction_bounding_boxes,
-                        page_line_level_ocr_results_with_words["results"],
-                        page_signature_recogniser_results,
-                        page_handwriting_recogniser_results,
-                        handwrite_signature_checkbox,
+                    comprehend_query_number = (
+                        comprehend_query_number + comprehend_query_number_new
                     )
 
                 else:
-                    page_merged_redaction_bboxes = list()
+                    page_redaction_bounding_boxes = list()
 
-                if is_pdf(file_path) is True:
-                    if redact_whole_page_list:
+                # Merge redaction bounding boxes that are close together
+                # This happens regardless of whether entities were chosen, as long as PII detection is enabled
+                page_merged_redaction_bboxes = merge_img_bboxes(
+                    page_redaction_bounding_boxes,
+                    page_line_level_ocr_results_with_words["results"],
+                    page_signature_recogniser_results,
+                    page_handwriting_recogniser_results,
+                    handwrite_signature_checkbox,
+                )
+
+            else:
+                page_merged_redaction_bboxes = list()
+
+            if is_pdf(file_path) is True:
+                if redact_whole_page_list:
                         int_reported_page_number = int(reported_page_number)
                         if int_reported_page_number in redact_whole_page_list:
                             redact_whole_page = True
                         else:
                             redact_whole_page = False
-                    else:
-                        redact_whole_page = False
+                else:
+                    redact_whole_page = False
 
-                    # Check if there are question answer boxes
-                    if form_key_value_results_list:
-                        page_merged_redaction_bboxes.extend(
-                            convert_page_question_answer_to_custom_image_recognizer_results(
-                                form_key_value_results_list,
-                                page_sizes_df,
-                                reported_page_number,
-                            )
+                # Check if there are question answer boxes
+                if form_key_value_results_list:
+                    page_merged_redaction_bboxes.extend(
+                        convert_page_question_answer_to_custom_image_recognizer_results(
+                            form_key_value_results_list,
+                            page_sizes_df,
+                            reported_page_number,
                         )
-
-                    # 3. Draw the merged boxes
-                    ## Apply annotations to pdf with pymupdf
-                    redact_result = redact_page_with_pymupdf(
-                        pymupdf_page,
-                        page_merged_redaction_bboxes,
-                        image_path,
-                        redact_whole_page=redact_whole_page,
-                        original_cropbox=original_cropbox,
-                        page_sizes_df=page_sizes_df,
-                        input_folder=input_folder,
                     )
 
-                    # Handle dual page objects if returned
-                    if isinstance(redact_result[0], tuple):
-                        (
-                            pymupdf_page,
-                            pymupdf_applied_redaction_page,
-                        ), page_image_annotations = redact_result
-                        # Store the final page with its original page number for later use
-                        if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
-                            redact_image_pdf._applied_redaction_pages = list()
-                        redact_image_pdf._applied_redaction_pages.append(
-                            (pymupdf_applied_redaction_page, page_no)
-                        )
-                    else:
-                        pymupdf_page, page_image_annotations = redact_result
+                # 3. Draw the merged boxes
+                ## Apply annotations to pdf with pymupdf
+                redact_result = redact_page_with_pymupdf(
+                    pymupdf_page,
+                    page_merged_redaction_bboxes,
+                    image_path,
+                    redact_whole_page=redact_whole_page,
+                    original_cropbox=original_cropbox,
+                    page_sizes_df=page_sizes_df,
+                    input_folder=input_folder,
+                )
+
+                # Handle dual page objects if returned
+                if isinstance(redact_result[0], tuple):
+                    (
+                        pymupdf_page,
+                        pymupdf_applied_redaction_page,
+                    ), page_image_annotations = redact_result
+                    # Store the final page with its original page number for later use
+                    if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
+                        redact_image_pdf._applied_redaction_pages = list()
+                    redact_image_pdf._applied_redaction_pages.append(
+                        (pymupdf_applied_redaction_page, page_no)
+                    )
+                # else:
+                #     pymupdf_page, page_image_annotations = redact_result
 
                 # If an image_path file, draw onto the image_path
                 elif is_pdf(file_path) is False:
@@ -4518,7 +4625,7 @@ def redact_image_pdf(
                         "boxes": all_image_annotations_boxes,
                     }
 
-                    redacted_image = image.copy()
+                    
 
             # Convert decision process to table
             decision_process_table = pd.DataFrame(
@@ -4556,7 +4663,7 @@ def redact_image_pdf(
             if time_taken > max_time:
                 print("Processing for", max_time, "seconds, breaking loop.")
                 page_break_return = True
-                progress.close(_tqdm=progress_bar)
+                progress.close(_tqdm=pii_progress_bar)
                 tqdm._instances.clear()
 
                 if is_pdf(file_path) is False:
@@ -4651,7 +4758,7 @@ def redact_image_pdf(
             # Append new annotation if it doesn't exist
             annotations_all_pages.append(page_image_annotations)
 
-        current_loop_page += 1
+        current_loop_page = page_no + 1
 
         # Break if new page is a multiple of chosen page_break_val
         if current_loop_page % page_break_val == 0:
@@ -4659,7 +4766,7 @@ def redact_image_pdf(
                 f"current_loop_page: {current_loop_page} is a multiple of page_break_val: {page_break_val}, breaking loop"
             )
             page_break_return = True
-            progress.close(_tqdm=progress_bar)
+            progress.close(_tqdm=pii_progress_bar)
             tqdm._instances.clear()
 
             if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:

@@ -165,14 +165,14 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     print("torch.__version__ =", torch.__version__)
-    print("torch.version.cuda =", torch.version.cuda)
+    # print("torch.version.cuda =", torch.version.cuda)
     print("cuda available:", torch.cuda.is_available())
-    print("cuda device count:", torch.cuda.device_count())
+    # print("cuda device count:", torch.cuda.device_count())
     if torch.cuda.is_available():
-        print("current device:", torch.cuda.current_device())
+        # print("current device:", torch.cuda.current_device())
         print("device name:", torch.cuda.get_device_name(torch.cuda.current_device()))
 
-    print("Using device:", device)
+    # print("Using device:", device)
 
     CACHE_PATH = MODEL_CACHE_PATH
     if not os.path.exists(CACHE_PATH):
