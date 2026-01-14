@@ -482,7 +482,7 @@ CSV_FEEDBACK_LOG_HEADERS = get_or_create_env_var(
 )  # If blank, uses component labels
 CSV_USAGE_LOG_HEADERS = get_or_create_env_var(
     "CSV_USAGE_LOG_HEADERS",
-    '["session_hash_textbox", "doc_full_file_name_textbox", "data_full_file_name_textbox", "actual_time_taken_number",	"total_page_count",	"textract_query_number", "pii_detection_method", "comprehend_query_number",  "cost_code", "textract_handwriting_signature", "host_name_textbox", "text_extraction_method", "is_this_a_textract_api_call", "task"]',
+    '["session_hash_textbox", "doc_full_file_name_textbox", "data_full_file_name_textbox", "actual_time_taken_number",	"total_page_count",	"textract_query_number", "pii_detection_method", "comprehend_query_number",  "cost_code", "textract_handwriting_signature", "host_name_textbox", "text_extraction_method", "is_this_a_textract_api_call", "task", "vlm_model_name", "vlm_total_input_tokens", "vlm_total_output_tokens", "llm_model_name", "llm_total_input_tokens", "llm_total_output_tokens"]',
 )  # If blank, uses component labels
 
 ### DYNAMODB logs. Whether to save to DynamoDB, and the headers of the table

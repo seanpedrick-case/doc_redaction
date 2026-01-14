@@ -15,7 +15,10 @@ from tools.config import (
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
+    AZURE_OPENAI_API_KEY,
+    AZURE_OPENAI_INFERENCE_ENDPOINT,
     CHOSEN_COMPREHEND_ENTITIES,
+    CHOSEN_LLM_PII_INFERENCE_METHOD,
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
     COMPRESS_REDACTED_PDF,
@@ -25,6 +28,8 @@ from tools.config import (
     DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
     DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
     DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+    DEFAULT_INFERENCE_SERVER_PII_MODEL,
+    DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
     DEFAULT_MIN_CONSECUTIVE_PAGES,
     DEFAULT_MIN_WORD_COUNT,
@@ -37,9 +42,15 @@ from tools.config import (
     FEEDBACK_LOGS_FOLDER,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
+    GEMINI_API_KEY,
     GRADIO_TEMP_DIR,
     IMAGES_DPI,
+    INFERENCE_SERVER_API_URL,
     INPUT_FOLDER,
+    LLM_MODEL_CHOICE,
+    LLM_PII_INFERENCE_METHODS,
+    LLM_PII_MAX_TOKENS,
+    LLM_PII_TEMPERATURE,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
     OUTPUT_FOLDER,
@@ -63,6 +74,7 @@ from tools.config import (
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
     USAGE_LOGS_FOLDER,
     USE_GREEDY_DUPLICATE_DETECTION,
+    VLM_MODEL_CHOICE,
     WHOLE_PAGE_REDACTION_LIST_PATH,
     convert_string_to_boolean,
 )
@@ -609,6 +621,72 @@ python cli_redact.py --task textract --textract_action list
         action="store_true",
         help="Extract layout during Textract analysis.",
     )
+    pdf_group.add_argument(
+        "--vlm_model_choice",
+        default=VLM_MODEL_CHOICE,
+        help="VLM model choice for OCR (e.g., 'qwen.qwen3-vl-235b-a22b' for Bedrock, or model name for other providers).",
+    )
+    pdf_group.add_argument(
+        "--inference_server_vlm_model",
+        default=DEFAULT_INFERENCE_SERVER_VLM_MODEL,
+        help="Inference server VLM model name for OCR.",
+    )
+    pdf_group.add_argument(
+        "--inference_server_api_url",
+        default=INFERENCE_SERVER_API_URL,
+        help="Inference server API URL.",
+    )
+    pdf_group.add_argument(
+        "--gemini_api_key",
+        default=GEMINI_API_KEY,
+        help="Google Gemini API key for VLM OCR.",
+    )
+    pdf_group.add_argument(
+        "--azure_openai_api_key",
+        default=AZURE_OPENAI_API_KEY,
+        help="Azure OpenAI API key for VLM OCR.",
+    )
+    pdf_group.add_argument(
+        "--azure_openai_endpoint",
+        default=AZURE_OPENAI_INFERENCE_ENDPOINT,
+        help="Azure OpenAI endpoint URL for VLM OCR.",
+    )
+
+    # --- LLM PII Detection Arguments ---
+    llm_group = parser.add_argument_group("LLM PII Detection Options")
+    llm_group.add_argument(
+        "--llm_model_choice",
+        default=LLM_MODEL_CHOICE,
+        help="LLM model choice for PII detection (e.g., 'anthropic.claude-3-7-sonnet-20250219-v1:0' for Bedrock).",
+    )
+    llm_group.add_argument(
+        "--llm_inference_method",
+        choices=LLM_PII_INFERENCE_METHODS,
+        default=CHOSEN_LLM_PII_INFERENCE_METHOD,
+        help="LLM inference method for PII detection: aws-bedrock, local, inference-server, azure-openai, or gemini.",
+    )
+    llm_group.add_argument(
+        "--inference_server_pii_model",
+        default=DEFAULT_INFERENCE_SERVER_PII_MODEL,
+        help="Inference server PII detection model name.",
+    )
+    llm_group.add_argument(
+        "--llm_temperature",
+        type=float,
+        default=LLM_PII_TEMPERATURE,
+        help="Temperature for LLM PII detection (lower = more deterministic).",
+    )
+    llm_group.add_argument(
+        "--llm_max_tokens",
+        type=int,
+        default=LLM_PII_MAX_TOKENS,
+        help="Maximum tokens in LLM response for PII detection.",
+    )
+    llm_group.add_argument(
+        "--custom_llm_instructions",
+        default="",
+        help="Custom instructions for LLM-based entity detection.",
+    )
 
     # --- Word/Tabular Anonymisation Arguments ---
     tabular_group = parser.add_argument_group(
@@ -977,6 +1055,14 @@ python cli_redact.py --task textract --textract_action list
                 )
                 print(f"Preparation complete. {prep_summary}")
 
+                # Note: VLM and LLM clients are initialized inside choose_and_run_redactor
+                # based on text_extraction_method and pii_identification_method.
+                # Model choices (vlm_model_choice, llm_model_choice) can be overridden via
+                # environment variables (VLM_MODEL_CHOICE, LLM_MODEL_CHOICE) before running the CLI.
+                # For CLI, we pass inference_server_vlm_model and custom_llm_instructions.
+                # Other LLM parameters (temperature, max_tokens, inference_method) are set via
+                # environment variables or config defaults.
+
                 # Step 2: Redact the prepared document
                 print("\nStep 2: Running redaction...")
                 (
@@ -1019,6 +1105,7 @@ python cli_redact.py --task textract --textract_action list
                     pdf_image_file_paths=image_file_paths,
                     chosen_redact_entities=args.local_redact_entities,
                     chosen_redact_comprehend_entities=args.aws_redact_entities,
+                    chosen_llm_entities=args.aws_redact_entities,  # Use same entities for LLM
                     text_extraction_method=args.ocr_method,
                     in_allow_list=args.allow_list_file,
                     in_deny_list=args.deny_list_file,
@@ -1039,6 +1126,16 @@ python cli_redact.py --task textract --textract_action list
                     language=args.language,
                     output_folder=args.output_dir,
                     input_folder=args.input_dir,
+                    custom_llm_instructions=args.custom_llm_instructions,
+                    inference_server_vlm_model=(
+                        args.inference_server_vlm_model
+                        if args.inference_server_vlm_model
+                        else DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                    ),
+                    # Note: bedrock_runtime, gemini_client, gemini_config, azure_openai_client
+                    # are initialized inside choose_and_run_redactor based on text_extraction_method
+                    # but we can pass vlm_model_choice through custom_llm_instructions or other means
+                    # The clients will be initialized in choose_and_run_redactor based on the method
                 )
 
                 # Calculate processing time
@@ -1099,6 +1196,12 @@ python cli_redact.py --task textract --textract_action list
                             save_to_s3=args.upload_logs_to_s3,
                             s3_bucket=args.s3_bucket,
                             s3_key_prefix=args.s3_logs_prefix,
+                            vlm_model_name="",  # TODO: Track from perform_ocr
+                            vlm_total_input_tokens=0,  # TODO: Track from perform_ocr
+                            vlm_total_output_tokens=0,  # TODO: Track from perform_ocr
+                            llm_model_name="",  # TODO: Track from analyze_text
+                            llm_total_input_tokens=0,  # TODO: Track from analyze_text
+                            llm_total_output_tokens=0,  # TODO: Track from analyze_text
                         )
                     except Exception as e:
                         print(f"Warning: Could not log usage data: {e}")
@@ -1147,8 +1250,12 @@ python cli_redact.py --task textract --textract_action list
             try:
                 from tools.data_anonymise import anonymise_files_with_open_text
 
-                # Run the anonymisation function directly
+                # Note: anonymise_files_with_open_text initializes LLM clients internally
+                # based on pii_identification_method. LLM model choices and parameters
+                # can be set via environment variables (LLM_MODEL_CHOICE, LLM_PII_TEMPERATURE, etc.)
+                # before running the CLI.
 
+                # Run the anonymisation function directly
                 (
                     output_summary,
                     output_files,
@@ -1230,6 +1337,12 @@ python cli_redact.py --task textract --textract_action list
                             save_to_s3=args.upload_logs_to_s3,
                             s3_bucket=args.s3_bucket,
                             s3_key_prefix=args.s3_logs_prefix,
+                            vlm_model_name="",  # TODO: Track from perform_ocr
+                            vlm_total_input_tokens=0,  # TODO: Track from perform_ocr
+                            vlm_total_output_tokens=0,  # TODO: Track from perform_ocr
+                            llm_model_name="",  # TODO: Track from anonymise_script
+                            llm_total_input_tokens=0,  # TODO: Track from anonymise_script
+                            llm_total_output_tokens=0,  # TODO: Track from anonymise_script
                         )
                     except Exception as e:
                         print(f"Warning: Could not log usage data: {e}")
@@ -1384,6 +1497,12 @@ python cli_redact.py --task textract --textract_action list
                                 save_to_s3=args.upload_logs_to_s3,
                                 s3_bucket=args.s3_bucket,
                                 s3_key_prefix=args.s3_logs_prefix,
+                                vlm_model_name="",  # Not applicable for duplicate detection
+                                vlm_total_input_tokens=0,
+                                vlm_total_output_tokens=0,
+                                llm_model_name="",  # Not applicable for duplicate detection
+                                llm_total_input_tokens=0,
+                                llm_total_output_tokens=0,
                             )
                         except Exception as e:
                             print(f"Warning: Could not log usage data: {e}")
@@ -1463,6 +1582,12 @@ python cli_redact.py --task textract --textract_action list
                                 save_to_s3=args.upload_logs_to_s3,
                                 s3_bucket=args.s3_bucket,
                                 s3_key_prefix=args.s3_logs_prefix,
+                                vlm_model_name="",  # Not applicable for duplicate detection
+                                vlm_total_input_tokens=0,
+                                vlm_total_output_tokens=0,
+                                llm_model_name="",  # Not applicable for duplicate detection
+                                llm_total_input_tokens=0,
+                                llm_total_output_tokens=0,
                             )
                         except Exception as e:
                             print(f"Warning: Could not log usage data: {e}")
@@ -1614,6 +1739,12 @@ python cli_redact.py --task textract --textract_action list
                             save_to_s3=args.upload_logs_to_s3,
                             s3_bucket=args.s3_bucket,
                             s3_key_prefix=args.s3_logs_prefix,
+                            vlm_model_name="",  # Not applicable for Textract submit
+                            vlm_total_input_tokens=0,
+                            vlm_total_output_tokens=0,
+                            llm_model_name="",  # Not applicable for Textract submit
+                            llm_total_input_tokens=0,
+                            llm_total_output_tokens=0,
                         )
                     except Exception as e:
                         print(f"Warning: Could not log usage data: {e}")
