@@ -580,7 +580,7 @@ def load_model(
 
                 # Prepare load kwargs
                 load_kwargs = {
-                    "max_seq_length": max_context_length,
+                    # "max_seq_length": max_context_length,
                     "device_map": "auto",
                     "token": hf_token,
                 }

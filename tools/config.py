@@ -1342,10 +1342,11 @@ HF_TOKEN = get_or_create_env_var("HF_TOKEN", "")
 
 LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var("LOAD_LOCAL_MODEL_AT_START", "False")
 
+MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var("MULTIMODAL_PROMPT_FORMAT", "False")
+
+# Following is not currently supported
 # If you are using a system with low VRAM, you can set this to True to reduce the memory requirements
 LOW_VRAM_SYSTEM = get_or_create_env_var("LOW_VRAM_SYSTEM", "False")
-
-MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var("MULTIMODAL_PROMPT_FORMAT", "False")
 
 if LOW_VRAM_SYSTEM == "True":
     print("Using settings for low VRAM system")
@@ -1362,13 +1363,7 @@ if LOW_VRAM_SYSTEM == "True":
 
 USE_LLAMA_CPP = get_or_create_env_var(
     "USE_LLAMA_CPP", "False"
-)  # Llama.cpp or transformers with unsloth
-
-# Legacy aliases - these now point to the PII-specific variables for backward compatibility
-# These are defined here (after USE_LLAMA_CPP) so they can be used throughout the rest of the file
-LOCAL_REPO_ID = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-LOCAL_MODEL_FILE = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-LOCAL_MODEL_FOLDER = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
+)  # Not currently supported
 
 GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
 GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var(
@@ -1463,6 +1458,52 @@ GRANITE_4_3B_MODEL_FILE = get_or_create_env_var(
 GRANITE_4_3B_MODEL_FOLDER = get_or_create_env_var(
     "GRANITE_4_3B_MODEL_FOLDER", "model/granite"
 )
+
+# Override LOCAL_TRANSFORMERS_LLM_PII_* variables based on LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+# This allows users to set just the model choice and have the correct repo/file/folder automatically selected
+if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
+    model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
+
+    if "gemma-3-4b" in model_choice_lower or "gemma3-4b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_4B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA3_4B_MODEL_FILE
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GEMMA3_4B_MODEL_FOLDER
+    elif "gemma-3-12b" in model_choice_lower or "gemma3-12b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_12B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA3_12B_MODEL_FILE
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GEMMA3_12B_MODEL_FOLDER
+    elif "gemma-2" in model_choice_lower or "gemma2" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA2_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA2_MODEL_FILE
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GEMMA2_MODEL_FOLDER
+    elif "qwen-3-4b" in model_choice_lower or "qwen3-4b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN3_4B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = QWEN3_4B_MODEL_FILE
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = QWEN3_4B_MODEL_FOLDER
+    elif "gpt-oss" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GPT_OSS_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GPT_OSS_MODEL_FILE
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
+    elif (
+        "granite-4-tiny" in model_choice_lower or "granite4-tiny" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GRANITE_4_TINY_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GRANITE_4_TINY_MODEL_FILE
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GRANITE_4_TINY_MODEL_FOLDER
+    elif (
+        "granite-4-micro" in model_choice_lower
+        or "granite4-micro" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GRANITE_4_3B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GRANITE_4_3B_MODEL_FILE
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GRANITE_4_3B_MODEL_FOLDER
+    # If model choice doesn't match any known model, keep the existing values from environment variables
+
+# Legacy aliases - these now point to the PII-specific variables for backward compatibility
+# These are defined here (after the override logic) so they reflect the overridden values
+LOCAL_REPO_ID = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
+LOCAL_MODEL_FILE = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+LOCAL_MODEL_FOLDER = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
 
 # Set CHOSEN_LOCAL_MODEL_TYPE based on LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for backward compatibility
 # Map the model choice identifier to the old format
