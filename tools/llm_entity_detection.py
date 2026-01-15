@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
-import spaces
 
 from tools.config import (
     CHOSEN_LLM_PII_INFERENCE_METHOD,
@@ -20,7 +19,6 @@ from tools.config import (
     LLM_PII_NUMBER_OF_RETRY_ATTEMPTS,
     LLM_PII_TEMPERATURE,
     LLM_PII_TIMEOUT_WAIT,
-    MAX_SPACES_GPU_RUN_TIME,
     model_name_map,
 )
 from tools.llm_entity_detection_prompts import (
@@ -363,7 +361,6 @@ def save_llm_prompt_response(
     return filepath
 
 
-@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def call_llm_for_entity_detection(
     text: str,
     entities_to_detect: List[str],

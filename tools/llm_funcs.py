@@ -6,6 +6,9 @@ from typing import List, Tuple
 
 import boto3
 import requests
+import spaces
+
+from tools.config import MAX_SPACES_GPU_RUN_TIME
 
 # Import mock patches if in test mode
 if os.environ.get("USE_MOCK_LLM") == "1" or os.environ.get("TEST_MODE") == "1":
@@ -1328,6 +1331,7 @@ def call_aws_bedrock(
     return response
 
 
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def call_transformers_model(
     prompt: str,
     system_prompt: str,
