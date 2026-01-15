@@ -508,6 +508,7 @@ def load_model(
         else:
             from transformers import (
                 AutoModelForCausalLM,
+                AutoTokenizer,
                 BitsAndBytesConfig,
             )
 
@@ -592,12 +593,20 @@ def load_model(
                     load_kwargs["dtype"] = torch_dtype
                     print("Loading model without quantisation")
 
-                model, tokenizer = AutoModelForCausalLM.from_pretrained(
+                # Load model - AutoModelForCausalLM.from_pretrained returns only the model, not a tuple
+                model = AutoModelForCausalLM.from_pretrained(
                     model_id,
                     **load_kwargs,
                 )
 
-                AutoModelForCausalLM.for_inference(model)
+                # Set model to evaluation mode (standard transformers approach)
+                model.eval()
+
+                # Load tokenizer separately
+                tokenizer = AutoTokenizer.from_pretrained(
+                    model_id,
+                    token=hf_token,
+                )
 
                 if not tokenizer.pad_token:
                     tokenizer.pad_token = tokenizer.eos_token
@@ -927,7 +936,16 @@ def get_pii_tokenizer():
 # Initialize model at startup if configured
 if LOAD_LOCAL_MODEL_AT_START == "True" and RUN_LOCAL_MODEL == "1":
     get_model()  # This will trigger loading
-    get_pii_model()
+    get_pii_model()  # Also load PII model at startup
+
+# Initialize PII model at startup if configured (even if RUN_LOCAL_MODEL is not "1")
+# This allows PII model to be loaded independently for PII detection tasks
+if LOAD_LOCAL_MODEL_AT_START == "True":
+    try:
+        get_pii_model()  # This will trigger loading the PII model
+    except Exception as e:
+        print(f"Warning: Could not load PII model at startup: {e}")
+        print("PII model will be loaded on-demand when needed.")
 
 
 def call_llama_cpp_model(formatted_string: str, gen_config: str, model=None):
@@ -1442,7 +1460,7 @@ def call_transformers_model(
     speculative_decoding=speculative_decoding,
 ):
     """
-    This function sends a request to a transformers model (through Unsloth) with the given prompt, system prompt, and generation configuration.
+    This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
     """
     from transformers import TextStreamer
 
