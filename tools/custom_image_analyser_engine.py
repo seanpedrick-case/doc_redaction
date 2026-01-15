@@ -960,7 +960,7 @@ def _call_inference_server_vlm_api(
                             chunk = json.loads(data)
                             # Store the last chunk in case it contains usage info
                             final_chunk = chunk
-                            
+
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta", {})
                                 token = delta.get("content", "")
@@ -989,7 +989,9 @@ def _call_inference_server_vlm_api(
                     # Rough approximation: prompt tokens + image tokens (estimate based on image size)
                     prompt_word_count = len(prompt.split())
                     # Estimate image tokens: roughly 1 token per 100 pixels (very rough approximation)
-                    image_tokens_estimate = max(100, (image.size[0] * image.size[1]) // 100)
+                    image_tokens_estimate = max(
+                        100, (image.size[0] * image.size[1]) // 100
+                    )
                     input_tokens = prompt_word_count + image_tokens_estimate
 
                 return text, input_tokens, output_tokens

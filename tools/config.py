@@ -720,17 +720,14 @@ pii_detection_models = list()
 if SHOW_LOCAL_PII_DETECTION_OPTIONS:
     local_model_options.append(LOCAL_PII_OPTION)
 
-if SHOW_AWS_PII_DETECTION_OPTIONS:
-    aws_model_options.append(AWS_PII_OPTION)
-
 if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS:
-    aws_model_options.append(AWS_LLM_PII_OPTION)
+    local_model_options.append(LOCAL_TRANSFORMERS_LLM_PII_OPTION)
 
 if SHOW_INFERENCE_SERVER_PII_OPTIONS:
     local_model_options.append(INFERENCE_SERVER_PII_OPTION)
 
-if SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS:
-    local_model_options.append(LOCAL_TRANSFORMERS_LLM_PII_OPTION)
+if SHOW_AWS_PII_DETECTION_OPTIONS:
+    aws_model_options.append(AWS_LLM_PII_OPTION)
 
 PII_DETECTION_MODELS = local_model_options + aws_model_options
 
