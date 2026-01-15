@@ -46,19 +46,20 @@ from tools.config import (
     AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
     BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     CHOSEN_LOCAL_OCR_MODEL,
+    CLOUD_LLM_PII_MODEL_CHOICE,
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
-    DEFAULT_INFERENCE_SERVER_PII_MODEL,
     DEFAULT_LANGUAGE,
     GEMINI_VLM_TEXT_EXTRACT_OPTION,
     IMAGES_DPI,
     INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
     INFERENCE_SERVER_API_URL,
+    INFERENCE_SERVER_LLM_PII_MODEL_CHOICE,
     INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
-    LLM_MODEL_CHOICE,
     LLM_PII_OPTION,
     LOAD_TRUNCATED_IMAGES,
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_DOC_PAGES,
     MAX_IMAGE_PIXELS,
@@ -1286,7 +1287,7 @@ def choose_and_run_redactor(
                 output_folder=output_folder,
                 input_folder=input_folder,
                 bedrock_runtime=bedrock_runtime,
-                model_choice=LLM_MODEL_CHOICE,
+                model_choice=CLOUD_LLM_PII_MODEL_CHOICE,
                 custom_llm_instructions=custom_llm_instructions,
                 chosen_llm_entities=chosen_llm_entities,
             )
@@ -4457,27 +4458,17 @@ def redact_image_pdf(
                     if pii_identification_method == INFERENCE_SERVER_PII_OPTION:
                         text_analyzer_kwargs["inference_method"] = "inference-server"
                         text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
-                        # Use DEFAULT_INFERENCE_SERVER_PII_MODEL if set, otherwise use CHOSEN_INFERENCE_SERVER_MODEL or empty
-                        from tools.config import CHOSEN_INFERENCE_SERVER_MODEL
-
-                        inference_server_pii_model = (
-                            DEFAULT_INFERENCE_SERVER_PII_MODEL
-                            if DEFAULT_INFERENCE_SERVER_PII_MODEL
-                            else (
-                                CHOSEN_INFERENCE_SERVER_MODEL
-                                if CHOSEN_INFERENCE_SERVER_MODEL
-                                else ""
-                            )
+                        # Use INFERENCE_SERVER_LLM_PII_MODEL_CHOICE for inference server PII detection
+                        text_analyzer_kwargs["model_choice"] = (
+                            INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
                         )
-                        if inference_server_pii_model:
-                            text_analyzer_kwargs["model_choice"] = (
-                                inference_server_pii_model
-                            )
                     elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
                         # Set up local transformers LLM parameters
                         text_analyzer_kwargs["inference_method"] = "local"
-                        # Use LLM_MODEL_CHOICE as default model for local transformers
-                        text_analyzer_kwargs["model_choice"] = LLM_MODEL_CHOICE
+                        # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE as default model for local transformers
+                        text_analyzer_kwargs["model_choice"] = (
+                            LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                        )
                         # Load PII-specific model and tokenizer if not already loaded
                         from tools.llm_funcs import (
                             USE_LLAMA_CPP,
@@ -5338,7 +5329,7 @@ def redact_text_pdf(
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     progress: Progress = Progress(track_tqdm=True),  # Progress tracking object
     bedrock_runtime=None,
-    model_choice: str = LLM_MODEL_CHOICE,
+    model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
     custom_llm_instructions: str = "",
     chosen_llm_entities: List[str] = None,
 ):

@@ -21,6 +21,7 @@ from tools.config import (
     CHOSEN_LLM_PII_INFERENCE_METHOD,
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
+    CLOUD_LLM_PII_MODEL_CHOICE,
     COMPRESS_REDACTED_PDF,
     CUSTOM_ENTITIES,
     DEFAULT_COMBINE_PAGES,
@@ -47,7 +48,6 @@ from tools.config import (
     IMAGES_DPI,
     INFERENCE_SERVER_API_URL,
     INPUT_FOLDER,
-    LLM_MODEL_CHOICE,
     LLM_PII_INFERENCE_METHODS,
     LLM_PII_MAX_TOKENS,
     LLM_PII_TEMPERATURE,
@@ -656,8 +656,11 @@ python cli_redact.py --task textract --textract_action list
     llm_group = parser.add_argument_group("LLM PII Detection Options")
     llm_group.add_argument(
         "--llm_model_choice",
-        default=LLM_MODEL_CHOICE,
-        help="LLM model choice for PII detection (e.g., 'anthropic.claude-3-7-sonnet-20250219-v1:0' for Bedrock).",
+        default=CLOUD_LLM_PII_MODEL_CHOICE,
+        help="LLM model choice for PII detection. Defaults to CLOUD_LLM_PII_MODEL_CHOICE for Bedrock. "
+        "Note: The actual model used is determined by pii_identification_method - "
+        "CLOUD_LLM_PII_MODEL_CHOICE for Bedrock, INFERENCE_SERVER_LLM_PII_MODEL_CHOICE for inference server, "
+        "LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for local transformers.",
     )
     llm_group.add_argument(
         "--llm_inference_method",

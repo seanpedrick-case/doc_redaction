@@ -32,10 +32,11 @@ from tools.config import (
     DEFAULT_LANGUAGE,
     DO_INITIAL_TABULAR_DATA_CLEAN,
     INFERENCE_SERVER_PII_OPTION,
-    LLM_MODEL_CHOICE,
+    LLM_MODEL_CHOICE,  # Legacy alias for CLOUD_LLM_PII_MODEL_CHOICE
     LLM_PII_MAX_TOKENS,
     LLM_PII_OPTION,
     LLM_PII_TEMPERATURE,
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_SIMULTANEOUS_FILES,
     MAX_TABLE_COLUMNS,
@@ -1316,8 +1317,6 @@ def anonymise_script(
     elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
         # LLM-based entity detection using inference server
         from tools.config import (
-            CHOSEN_INFERENCE_SERVER_MODEL,
-            DEFAULT_INFERENCE_SERVER_PII_MODEL,
             INFERENCE_SERVER_API_URL,
         )
 
@@ -1329,18 +1328,11 @@ def anonymise_script(
         if text_analyzer_kwargs.get("api_url") is None:
             text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
 
-        # Set model choice if not already set
+        # Set model choice if not already set - use INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
         if text_analyzer_kwargs.get("model_choice") is None:
-            inference_server_pii_model = (
-                DEFAULT_INFERENCE_SERVER_PII_MODEL
-                if DEFAULT_INFERENCE_SERVER_PII_MODEL
-                else (
-                    CHOSEN_INFERENCE_SERVER_MODEL
-                    if CHOSEN_INFERENCE_SERVER_MODEL
-                    else LLM_MODEL_CHOICE
-                )
-            )
-            text_analyzer_kwargs["model_choice"] = inference_server_pii_model
+            from tools.config import INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
+
+            text_analyzer_kwargs["model_choice"] = INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
 
         # Use the same logic as LLM_PII_OPTION for the rest
         # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
@@ -1353,9 +1345,11 @@ def anonymise_script(
         if text_analyzer_kwargs.get("inference_method") is None:
             text_analyzer_kwargs["inference_method"] = "local"
 
-        # Set model choice if not already set - use LLM_MODEL_CHOICE as default
+        # Set model choice if not already set - use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
         if text_analyzer_kwargs.get("model_choice") is None:
-            text_analyzer_kwargs["model_choice"] = LLM_MODEL_CHOICE
+            text_analyzer_kwargs["model_choice"] = (
+                LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            )
 
         # Load PII-specific model and tokenizer if not already provided
         if (

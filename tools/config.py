@@ -776,7 +776,7 @@ SHOW_VLM_MODEL_OPTIONS = convert_string_to_boolean(
 )  # Whether to show the VLM model options in the UI
 
 SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL = get_or_create_env_var(
-    "SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL", "Qwen3-VL-4B-Instruct"
+    "SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL", "Qwen3-VL-8B-Instruct"
 )  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "Qwen3-VL-30B-A3B-Instruct", "Qwen3-VL-235B-A22B-Instruct", "PaddleOCR-VL"
 
 if SHOW_VLM_MODEL_OPTIONS:
@@ -1130,9 +1130,29 @@ model_full_names = list()
 model_short_names = list()
 model_source = list()
 
-CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var(
-    "CHOSEN_LOCAL_MODEL_TYPE", "Qwen 3 4B"
-)  # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
+# Local Transformers LLM PII Detection Model Configuration
+# These variables are the primary configuration for local model loading
+# Define these early so they're available for use below
+LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID", "unsloth/gemma-3-4b-it-bnb-4bit"
+)  # Hugging Face repository ID for PII detection model (e.g., "unsloth/gemma-3-4b-it-bnb-4bit")
+LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"
+)  # Optional: Specific model filename if needed. If empty, uses the default from the repo.
+LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER", "model/gemma3_4b"
+)  # Optional: Local folder for PII model. If empty, uses MODEL_CACHE_PATH
+
+# Local Transformers LLM Model Choice for PII Detection
+# This is a simple identifier for the model (e.g., "gemma-3-4b", "qwen-3-4b")
+# The actual model loading uses LOCAL_TRANSFORMERS_LLM_PII_REPO_ID, LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE, and LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
+LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE", "gemma-3-4b"
+)  # Model identifier for local transformers PII detection. This is used for display/logging purposes.
+
+# Legacy alias - use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE instead
+# This will be set after model-specific variables are defined
+CHOSEN_LOCAL_MODEL_TYPE = None  # Will be set below
 
 USE_LLAMA_SWAP = get_or_create_env_var("USE_LLAMA_SWAP", "False")
 if USE_LLAMA_SWAP == "True":
@@ -1140,9 +1160,15 @@ if USE_LLAMA_SWAP == "True":
 else:
     USE_LLAMA_SWAP = False
 
-if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
-    model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
-    model_short_names.append(CHOSEN_LOCAL_MODEL_TYPE)
+if RUN_LOCAL_MODEL == "1" and LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
+    # Use CHOSEN_LOCAL_MODEL_TYPE for display if available, otherwise use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+    display_name = (
+        CHOSEN_LOCAL_MODEL_TYPE
+        if CHOSEN_LOCAL_MODEL_TYPE
+        else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+    )
+    model_full_names.append(display_name)
+    model_short_names.append(display_name)
     model_source.append("Local")
 
 if RUN_AWS_BEDROCK_MODELS == "1":
@@ -1219,13 +1245,29 @@ if RUN_INFERENCE_SERVER == "1":
         model_short_names.append(CHOSEN_INFERENCE_SERVER_MODEL)
         model_source.append("inference-server")
 
+# Inference Server LLM Model Choice for PII Detection
+# This is the primary config variable for choosing inference server models for PII detection
+# Note: This must be defined after CHOSEN_INFERENCE_SERVER_MODEL
+INFERENCE_SERVER_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
+    "INFERENCE_SERVER_LLM_PII_MODEL_CHOICE",
+    (
+        DEFAULT_INFERENCE_SERVER_PII_MODEL
+        if DEFAULT_INFERENCE_SERVER_PII_MODEL
+        else (CHOSEN_INFERENCE_SERVER_MODEL if CHOSEN_INFERENCE_SERVER_MODEL else "")
+    ),
+)  # Model choice for inference-server PII detection. Defaults to DEFAULT_INFERENCE_SERVER_PII_MODEL, then CHOSEN_INFERENCE_SERVER_MODEL
+
 model_name_map = {
     full: {"short_name": short, "source": source}
     for full, short, source in zip(model_full_names, model_short_names, model_source)
 }
 
 if RUN_LOCAL_MODEL == "1":
-    default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
+    default_model_choice = (
+        CHOSEN_LOCAL_MODEL_TYPE
+        if CHOSEN_LOCAL_MODEL_TYPE
+        else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+    )
 elif RUN_INFERENCE_SERVER == "1":
     default_model_choice = CHOSEN_INFERENCE_SERVER_MODEL
 elif RUN_AWS_FUNCTIONS == "1":
@@ -1261,12 +1303,15 @@ default_model_choice, default_source_models = update_model_choice_config(
     default_model_source, model_name_map
 )
 
-# LLM Model Choice for PII Detection (defaults to first AWS Bedrock model if available)
+# Cloud LLM Model Choice for PII Detection (AWS Bedrock)
 # Note: This should be set after amazon_models is defined
-LLM_MODEL_CHOICE = get_or_create_env_var(
-    "LLM_MODEL_CHOICE",
+CLOUD_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
+    "CLOUD_LLM_PII_MODEL_CHOICE",
     "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Default AWS Bedrock model for PII detection
 )
+
+# Legacy support: Keep LLM_MODEL_CHOICE as alias for backward compatibility
+LLM_MODEL_CHOICE = CLOUD_LLM_PII_MODEL_CHOICE
 
 # VLM Model Choice for cloud VLM OCR (defaults to first available cloud model)
 # Note: This should be set after model lists are defined
@@ -1316,25 +1361,14 @@ if LOW_VRAM_SYSTEM == "True":
     )  # 2 = q4_0, 8 = q8_0, 4 = fp16
 
 USE_LLAMA_CPP = get_or_create_env_var(
-    "USE_LLAMA_CPP", "True"
+    "USE_LLAMA_CPP", "False"
 )  # Llama.cpp or transformers with unsloth
 
-LOCAL_REPO_ID = get_or_create_env_var("LOCAL_REPO_ID", "")
-LOCAL_MODEL_FILE = get_or_create_env_var("LOCAL_MODEL_FILE", "")
-LOCAL_MODEL_FOLDER = get_or_create_env_var("LOCAL_MODEL_FOLDER", "")
-
-# Local Transformers LLM PII Detection Model Configuration
-# These variables allow you to specify a different Hugging Face model specifically for PII detection
-# If LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is empty, the app will use LOCAL_REPO_ID, LOCAL_MODEL_FILE, and LOCAL_MODEL_FOLDER
-LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = get_or_create_env_var(
-    "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID", "unsloth/gemma-3-4b-it-bnb-4bit"
-)  # Hugging Face repository ID for PII detection model (e.g., "unsloth/gemma-3-4b-it-bnb-4bit")
-LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = get_or_create_env_var(
-    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"
-)  # Optional: Specific model filename if needed. If empty, uses the default from the repo.
-LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = get_or_create_env_var(
-    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER", "model/gemma3_4b"
-)  # Optional: Local folder for PII model. If empty, uses LOCAL_MODEL_FOLDER or MODEL_CACHE_PATH
+# Legacy aliases - these now point to the PII-specific variables for backward compatibility
+# These are defined here (after USE_LLAMA_CPP) so they can be used throughout the rest of the file
+LOCAL_REPO_ID = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
+LOCAL_MODEL_FILE = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+LOCAL_MODEL_FOLDER = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
 
 GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
 GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var(
@@ -1430,53 +1464,42 @@ GRANITE_4_3B_MODEL_FOLDER = get_or_create_env_var(
     "GRANITE_4_3B_MODEL_FOLDER", "model/granite"
 )
 
-if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 2b":
-    LOCAL_REPO_ID = GEMMA2_REPO_ID
-    LOCAL_MODEL_FILE = GEMMA2_MODEL_FILE
-    LOCAL_MODEL_FOLDER = GEMMA2_MODEL_FOLDER
+# Set CHOSEN_LOCAL_MODEL_TYPE based on LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for backward compatibility
+# Map the model choice identifier to the old format
+if CHOSEN_LOCAL_MODEL_TYPE is None:
+    # Try to get from environment variable first, otherwise derive from LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+    env_value = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "")
+    if env_value:
+        CHOSEN_LOCAL_MODEL_TYPE = env_value
+    else:
+        # Map LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE to CHOSEN_LOCAL_MODEL_TYPE format
+        model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
+        if "gemma-3-4b" in model_choice_lower or "gemma3-4b" in model_choice_lower:
+            CHOSEN_LOCAL_MODEL_TYPE = "Gemma 3 4B"
+        elif "gemma-3-12b" in model_choice_lower or "gemma3-12b" in model_choice_lower:
+            CHOSEN_LOCAL_MODEL_TYPE = "Gemma 3 12B"
+        elif "gemma-2" in model_choice_lower or "gemma2" in model_choice_lower:
+            CHOSEN_LOCAL_MODEL_TYPE = "Gemma 2b"
+        elif "qwen-3-4b" in model_choice_lower or "qwen3-4b" in model_choice_lower:
+            CHOSEN_LOCAL_MODEL_TYPE = "Qwen 3 4B"
+        elif "gpt-oss" in model_choice_lower:
+            CHOSEN_LOCAL_MODEL_TYPE = "gpt-oss-20b"
+        elif (
+            "granite-4-tiny" in model_choice_lower
+            or "granite4-tiny" in model_choice_lower
+        ):
+            CHOSEN_LOCAL_MODEL_TYPE = "Granite 4 Tiny"
+        elif (
+            "granite-4-micro" in model_choice_lower
+            or "granite4-micro" in model_choice_lower
+        ):
+            CHOSEN_LOCAL_MODEL_TYPE = "Granite 4 Micro"
+        else:
+            CHOSEN_LOCAL_MODEL_TYPE = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
 
-elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
-    LOCAL_REPO_ID = GEMMA3_4B_REPO_ID
-    LOCAL_MODEL_FILE = GEMMA3_4B_MODEL_FILE
-    LOCAL_MODEL_FOLDER = GEMMA3_4B_MODEL_FOLDER
+# Set MULTIMODAL_PROMPT_FORMAT based on model choice
+if CHOSEN_LOCAL_MODEL_TYPE in ["Gemma 3 4B", "Gemma 3 12B"]:
     MULTIMODAL_PROMPT_FORMAT = "True"
-
-elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 12B":
-    LOCAL_REPO_ID = GEMMA3_12B_REPO_ID
-    LOCAL_MODEL_FILE = GEMMA3_12B_MODEL_FILE
-    LOCAL_MODEL_FOLDER = GEMMA3_12B_MODEL_FOLDER
-    MULTIMODAL_PROMPT_FORMAT = "True"
-
-elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B":
-    LOCAL_REPO_ID = QWEN3_4B_REPO_ID
-    LOCAL_MODEL_FILE = QWEN3_4B_MODEL_FILE
-    LOCAL_MODEL_FOLDER = QWEN3_4B_MODEL_FOLDER
-
-elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
-    LOCAL_REPO_ID = GPT_OSS_REPO_ID
-    LOCAL_MODEL_FILE = GPT_OSS_MODEL_FILE
-    LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
-
-elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 Tiny":
-    LOCAL_REPO_ID = GRANITE_4_TINY_REPO_ID
-    LOCAL_MODEL_FILE = GRANITE_4_TINY_MODEL_FILE
-    LOCAL_MODEL_FOLDER = GRANITE_4_TINY_MODEL_FOLDER
-
-elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 Micro":
-    LOCAL_REPO_ID = GRANITE_4_3B_REPO_ID
-    LOCAL_MODEL_FILE = GRANITE_4_3B_MODEL_FILE
-    LOCAL_MODEL_FOLDER = GRANITE_4_3B_MODEL_FOLDER
-
-elif not CHOSEN_LOCAL_MODEL_TYPE:
-    print("No local model type chosen")
-    LOCAL_REPO_ID = ""
-    LOCAL_MODEL_FILE = ""
-    LOCAL_MODEL_FOLDER = ""
-else:
-    print("CHOSEN_LOCAL_MODEL_TYPE not found")
-    LOCAL_REPO_ID = ""
-    LOCAL_MODEL_FILE = ""
-    LOCAL_MODEL_FOLDER = ""
 
 LLM_MAX_GPU_LAYERS = int(
     get_or_create_env_var("LLM_MAX_GPU_LAYERS", "-1")
@@ -1530,6 +1553,28 @@ LLM_PII_NUMBER_OF_RETRY_ATTEMPTS = int(
 )
 LLM_PII_TIMEOUT_WAIT = int(get_or_create_env_var("LLM_PII_TIMEOUT_WAIT", "5"))
 
+# Additional LLM configuration options
+ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "")
+BATCH_SIZE_DEFAULT = int(get_or_create_env_var("BATCH_SIZE_DEFAULT", "512"))
+COMPILE_MODE = get_or_create_env_var("COMPILE_MODE", "reduce-overhead")
+COMPILE_TRANSFORMERS = convert_string_to_boolean(
+    get_or_create_env_var("COMPILE_TRANSFORMERS", "False")
+)
+DEDUPLICATION_THRESHOLD = float(get_or_create_env_var("DEDUPLICATION_THRESHOLD", "0.9"))
+INT8_WITH_OFFLOAD_TO_CPU = convert_string_to_boolean(
+    get_or_create_env_var("INT8_WITH_OFFLOAD_TO_CPU", "False")
+)
+MAX_COMMENT_CHARS = int(get_or_create_env_var("MAX_COMMENT_CHARS", "1000"))
+MAX_TIME_FOR_LOOP = int(get_or_create_env_var("MAX_TIME_FOR_LOOP", "3600"))
+MODEL_DTYPE = get_or_create_env_var("MODEL_DTYPE", "bfloat16")
+NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var("NUMBER_OF_RETRY_ATTEMPTS", "3"))
+TIMEOUT_WAIT = int(get_or_create_env_var("TIMEOUT_WAIT", "30"))
+QUANTISE_TRANSFORMERS_LLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("QUANTISE_TRANSFORMERS_LLM_MODELS", "False")
+)
+# Legacy alias for backward compatibility
+USE_BITSANDBYTES = QUANTISE_TRANSFORMERS_LLM_MODELS
+
 # LLM inference method for PII detection (similar to VLM options)
 # Options: "aws-bedrock", "local", "inference-server", "azure-openai", "gemini"
 CHOSEN_LLM_PII_INFERENCE_METHOD = get_or_create_env_var(
@@ -1568,9 +1613,23 @@ if SHOW_GEMINI_LLM_PII_OPTIONS:
     LLM_PII_INFERENCE_METHODS.append("gemini")
 
 # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
-if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
+# Use CHOSEN_LOCAL_MODEL_TYPE if available, otherwise check LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+model_type_for_reasoning = (
+    CHOSEN_LOCAL_MODEL_TYPE
+    if CHOSEN_LOCAL_MODEL_TYPE
+    else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+)
+if model_type_for_reasoning == "gpt-oss-20b" or (
+    model_type_for_reasoning and "gpt-oss" in str(model_type_for_reasoning).lower()
+):
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "Reasoning: low")
-elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B" and USE_LLAMA_CPP == "False":
+elif (
+    model_type_for_reasoning == "Qwen 3 4B"
+    or (
+        model_type_for_reasoning
+        and "qwen-3-4b" in str(model_type_for_reasoning).lower()
+    )
+) and USE_LLAMA_CPP == "False":
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "/nothink")
 else:
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "")
@@ -1589,13 +1648,13 @@ FULL_COMPREHEND_ENTITY_LIST = get_or_create_env_var(
 
 FULL_LLM_ENTITY_LIST = get_or_create_env_var(
     "FULL_LLM_ENTITY_LIST",
-    "['EMAIL','ADDRESS','NAME','PHONE', 'DATE_TIME', 'URL', 'IP_ADDRESS', 'MAC_ADDRESS', 'AGE', 'BANK_ACCOUNT_NUMBER', 'PASSPORT_NUMBER', 'CA_HEALTH_NUMBER', 'CUSTOM', 'CUSTOM_FUZZY']",
+    "['EMAIL_ADDRESS','ADDRESS','NAME','PHONE_NUMBER', 'DATE_OF_BIRTH', 'DATE_TIME', 'URL', 'IP_ADDRESS', 'MAC_ADDRESS', 'AGE', 'BANK_ACCOUNT_NUMBER', 'PASSPORT_NUMBER', 'CA_HEALTH_NUMBER', 'CUSTOM', 'CUSTOM_FUZZY']",
 )
 
 # Entities for LLM-based PII redaction option
 CHOSEN_LLM_ENTITIES = get_or_create_env_var(
     "CHOSEN_LLM_ENTITIES",
-    "['EMAIL','ADDRESS','NAME','PHONE']",
+    "['EMAIL_ADDRESS','ADDRESS','NAME','PHONE_NUMBER', 'DATE_OF_BIRTH']",
 )
 
 
