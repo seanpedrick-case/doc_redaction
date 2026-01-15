@@ -582,12 +582,12 @@ def load_model(
                 # Prepare load kwargs
                 load_kwargs = {
                     # "max_seq_length": max_context_length,
-                    "device_map": "auto",
                     "token": hf_token,
                 }
 
                 if quantization_config is not None:
                     load_kwargs["quantization_config"] = quantization_config
+                    load_kwargs["device_map"] = "auto"
                     print("Loading model with bitsandbytes quantisation")
                 else:
                     load_kwargs["dtype"] = torch_dtype
@@ -598,6 +598,11 @@ def load_model(
                     model_id,
                     **load_kwargs,
                 )
+
+                # For non-quantized models, explicitly move to device (matching VLM behavior)
+                if quantization_config is None:
+                    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+                    model = model.to(device)
 
                 # Set model to evaluation mode (standard transformers approach)
                 model.eval()
@@ -697,7 +702,6 @@ def load_model(
 
             # Prepare load kwargs for assistant model
             assistant_load_kwargs = {
-                "device_map": "auto",
                 "token": hf_token,
             }
 
@@ -705,6 +709,7 @@ def load_model(
                 assistant_load_kwargs["quantization_config"] = (
                     assistant_quantization_config
                 )
+                assistant_load_kwargs["device_map"] = "auto"
                 print("Loading assistant model with bitsandbytes quantisation")
             else:
                 assistant_load_kwargs["dtype"] = torch_dtype
@@ -714,6 +719,11 @@ def load_model(
             assistant_model = AutoModelForCausalLM.from_pretrained(
                 ASSISTANT_MODEL, **assistant_load_kwargs
             )
+
+            # For non-quantized assistant models, explicitly move to device (matching VLM behavior)
+            if assistant_quantization_config is None:
+                device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+                assistant_model = assistant_model.to(device)
 
             # assistant_model.config._name_or_path = model.config._name_or_path
 
@@ -1497,6 +1507,9 @@ def call_transformers_model(
         ]
 
     # 2. Apply the chat template
+    # Get the device from the model (handles both single device and device_map="auto" cases)
+    model_device = next(model.parameters()).device
+    
     try:
         # Try applying chat template
         input_ids = tokenizer.apply_chat_template(
@@ -1504,7 +1517,7 @@ def call_transformers_model(
             add_generation_prompt=True,
             tokenize=True,
             return_tensors="pt",
-        ).to("cuda")
+        ).to(model_device)
     except (TypeError, KeyError, IndexError) as e:
         # If chat template fails, try manual formatting
         print(f"Chat template failed ({e}), using manual tokenization")
@@ -1518,7 +1531,7 @@ def call_transformers_model(
             )
         if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
             raise ValueError("Tokenizer output does not contain input_ids")
-        input_ids = encoded.input_ids.to("cuda")
+        input_ids = encoded.input_ids.to(model_device)
     except Exception as e:
         print("Error applying chat template:", e)
         import traceback
