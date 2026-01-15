@@ -26,15 +26,15 @@ from presidio_anonymizer.entities import OperatorConfig
 
 from tools.config import (
     AWS_ACCESS_KEY,
+    AWS_LLM_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
-    CLOUD_LLM_MODEL_CHOICE,  # Legacy alias for CLOUD_LLM_PII_MODEL_CHOICE
+    CLOUD_LLM_PII_MODEL_CHOICE,  # Legacy alias for CLOUD_LLM_PII_MODEL_CHOICE
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
     DO_INITIAL_TABULAR_DATA_CLEAN,
     INFERENCE_SERVER_PII_OPTION,
     LLM_PII_MAX_TOKENS,
-    LLM_PII_OPTION,
     LLM_PII_TEMPERATURE,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
@@ -1071,7 +1071,7 @@ def anonymise_script(
     do_initial_clean: bool = DO_INITIAL_TABULAR_DATA_CLEAN,
     progress: Progress = Progress(track_tqdm=True),
     bedrock_runtime=None,
-    model_choice: str = CLOUD_LLM_MODEL_CHOICE,
+    model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
     custom_llm_instructions: str = "",
     chosen_llm_entities: List[str] = None,
     file_name: Optional[str] = None,
@@ -1097,7 +1097,7 @@ def anonymise_script(
         do_initial_clean (bool, optional): Whether to perform an initial cleaning of the text. Defaults to True.
         progress (Progress, optional): Gradio Progress object for tracking progress. Defaults to Progress(track_tqdm=False).
         bedrock_runtime (optional): AWS Bedrock runtime client for LLM-based entity detection.
-        model_choice (str, optional): LLM model choice for entity detection. Defaults to CLOUD_LLM_MODEL_CHOICE.
+        model_choice (str, optional): LLM model choice for entity detection. Defaults to CLOUD_LLM_PII_MODEL_CHOICE.
         custom_llm_instructions (str, optional): Custom instructions for LLM entity detection. Defaults to empty string.
         chosen_llm_entities (List[str], optional): List of entity types to detect using LLM. Defaults to None (uses chosen_redact_comprehend_entities).
         file_name (Optional[str], optional): File name for logging purposes. Defaults to None.
@@ -1303,7 +1303,7 @@ def anonymise_script(
         raise ("Unable to redact, Comprehend connection details not found.")
 
     # LLM-based entity detection
-    elif pii_identification_method == LLM_PII_OPTION:
+    elif pii_identification_method == AWS_LLM_PII_OPTION:
 
         if not bedrock_runtime and text_analyzer_kwargs.get("inference_method") not in [
             "local",
@@ -1334,7 +1334,7 @@ def anonymise_script(
 
             text_analyzer_kwargs["model_choice"] = INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
 
-        # Use the same logic as LLM_PII_OPTION for the rest
+        # Use the same logic as AWS_LLM_PII_OPTION for the rest
         # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
         if chosen_llm_entities is None:
             chosen_llm_entities = chosen_redact_comprehend_entities
@@ -1380,7 +1380,7 @@ def anonymise_script(
                     f"Will attempt to load tokenizer on-demand."
                 )
 
-        # Use the same logic as LLM_PII_OPTION for the rest
+        # Use the same logic as AWS_LLM_PII_OPTION for the rest
         # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
         if chosen_llm_entities is None:
             chosen_llm_entities = chosen_redact_comprehend_entities

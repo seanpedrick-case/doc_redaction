@@ -40,6 +40,7 @@ from tools.config import (
     APPLY_REDACTIONS_IMAGES,
     APPLY_REDACTIONS_TEXT,
     AWS_ACCESS_KEY,
+    AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
@@ -58,7 +59,6 @@ from tools.config import (
     INFERENCE_SERVER_LLM_PII_MODEL_CHOICE,
     INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
-    LLM_PII_OPTION,
     LOAD_TRUNCATED_IMAGES,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
@@ -872,7 +872,7 @@ def choose_and_run_redactor(
         comprehend_client = ""
 
     # Try to connect to AWS Bedrock Runtime Client if using LLM-based PII detection
-    if pii_identification_method == LLM_PII_OPTION:
+    if pii_identification_method == AWS_LLM_PII_OPTION:
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Bedrock via existing SSO connection")
             bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)

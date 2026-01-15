@@ -1061,7 +1061,7 @@ python cli_redact.py --task textract --textract_action list
                 # Note: VLM and LLM clients are initialized inside choose_and_run_redactor
                 # based on text_extraction_method and pii_identification_method.
                 # Model choices (vlm_model_choice, llm_model_choice) can be overridden via
-                # environment variables (CLOUD_VLM_MODEL_CHOICE, CLOUD_LLM_MODEL_CHOICE) before running the CLI.
+                # environment variables (CLOUD_VLM_MODEL_CHOICE, CLOUD_LLM_PII_MODEL_CHOICE) before running the CLI.
                 # For CLI, we pass inference_server_vlm_model and custom_llm_instructions.
                 # Other LLM parameters (temperature, max_tokens, inference_method) are set via
                 # environment variables or config defaults.
@@ -1255,7 +1255,7 @@ python cli_redact.py --task textract --textract_action list
 
                 # Note: anonymise_files_with_open_text initializes LLM clients internally
                 # based on pii_identification_method. LLM model choices and parameters
-                # can be set via environment variables (CLOUD_LLM_MODEL_CHOICE, LLM_PII_TEMPERATURE, etc.)
+                # can be set via environment variables (CLOUD_LLM_PII_MODEL_CHOICE, LLM_PII_TEMPERATURE, etc.)
                 # before running the CLI.
 
                 # Run the anonymisation function directly

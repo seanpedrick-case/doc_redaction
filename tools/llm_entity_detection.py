@@ -507,7 +507,7 @@ def call_llm_for_entity_detection(
             except Exception as e:
                 raise ValueError(
                     f"Failed to get local model: {e}. "
-                    f"Ensure LOAD_LOCAL_MODEL_AT_START is True or pass local_model."
+                    f"Ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True or pass local_model."
                 )
         if tokenizer is None and USE_LLAMA_CPP != "True":
             from tools.llm_funcs import get_tokenizer
@@ -517,7 +517,7 @@ def call_llm_for_entity_detection(
             except Exception as e:
                 raise ValueError(
                     f"Failed to get tokenizer: {e}. "
-                    f"Ensure LOAD_LOCAL_MODEL_AT_START is True or pass tokenizer."
+                    f"Ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True or pass tokenizer."
                 )
 
     # Set up API URL for inference-server if needed

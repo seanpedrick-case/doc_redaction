@@ -21,12 +21,12 @@ This implementation adds LLM-based entity detection as an alternative to AWS Com
 ## Files Modified
 
 1. **`tools/config.py`**
-   - Added `LLM_PII_OPTION` constant: `"LLM (AWS Bedrock)"`
-   - Added `SHOW_LLM_PII_DETECTION_OPTIONS` config flag (default: `False`)
+   - Added `AWS_LLM_PII_OPTION` constant: `"LLM (AWS Bedrock)"`
+   - Added `SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS` config flag (default: `False`)
    - Added LLM option to `aws_model_options` when enabled
 
 2. **`tools/custom_image_analyser_engine.py`**
-   - Updated `analyze_text()` method to support `LLM_PII_OPTION`
+   - Updated `analyze_text()` method to support `AWS_LLM_PII_OPTION`
    - Added `bedrock_runtime` and `model_choice` parameters
    - Implemented LLM-based detection branch with same batching logic as AWS Comprehend
 
@@ -75,7 +75,7 @@ Entities are mapped back to line-level results using the same logic as AWS Compr
 
 1. Set environment variable or config:
    ```python
-   SHOW_LLM_PII_DETECTION_OPTIONS = "True"
+   SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS = "True"
    ```
 
 2. Select "LLM (AWS Bedrock)" as the PII identification method in the UI

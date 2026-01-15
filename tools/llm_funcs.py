@@ -5,7 +5,6 @@ import time
 from typing import List, Tuple
 
 import boto3
-import pandas as pd
 import requests
 
 # Import mock patches if in test mode
@@ -63,140 +62,50 @@ _pii_assistant_model = None
 
 # Import config variables with defaults for missing ones
 # This allows llm_funcs.py to work even if some config variables don't exist
-try:
-    from tools.config import (
-        ASSISTANT_MODEL,
-        BATCH_SIZE_DEFAULT,
-        CHOSEN_LOCAL_MODEL_TYPE,
-        COMPILE_MODE,
-        COMPILE_TRANSFORMERS,
-        DEDUPLICATION_THRESHOLD,
-        HF_TOKEN,
-        INT8_WITH_OFFLOAD_TO_CPU,
-        K_QUANT_LEVEL,
-        LLM_BATCH_SIZE,
-        LLM_CONTEXT_LENGTH,
-        LLM_LAST_N_TOKENS,
-        LLM_MAX_GPU_LAYERS,
-        LLM_MAX_NEW_TOKENS,
-        LLM_MIN_P,
-        LLM_REPETITION_PENALTY,
-        LLM_RESET,
-        LLM_SAMPLE,
-        LLM_SEED,
-        LLM_STOP_STRINGS,
-        LLM_STREAM,
-        LLM_TEMPERATURE,
-        LLM_THREADS,
-        LLM_TOP_K,
-        LLM_TOP_P,
-        LOAD_LOCAL_MODEL_AT_START,
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
-        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-        MAX_COMMENT_CHARS,
-        MAX_TIME_FOR_LOOP,
-        MODEL_CACHE_PATH,
-        MODEL_DTYPE,
-        MULTIMODAL_PROMPT_FORMAT,
-        NUM_PRED_TOKENS,
-        NUMBER_OF_RETRY_ATTEMPTS,
-        QUANTISE_TRANSFORMERS_LLM_MODELS,
-        RUN_LOCAL_PII_MODEL,
-        SPECULATIVE_DECODING,
-        TIMEOUT_WAIT,
-        USE_LLAMA_CPP,
-        USE_LLAMA_SWAP,
-        V_QUANT_LEVEL,
-    )
-
-    # Legacy aliases - use PII-specific variables directly
-    LOCAL_REPO_ID = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-    LOCAL_MODEL_FILE = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-    LOCAL_MODEL_FOLDER = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-except ImportError:
-    # Provide defaults for config variables that might not exist
-    # These are only needed for local model loading, not for AWS Bedrock calls
-    ASSISTANT_MODEL = ""
-    BATCH_SIZE_DEFAULT = 512
-    CHOSEN_LOCAL_MODEL_TYPE = None
-    COMPILE_MODE = "reduce-overhead"
-    COMPILE_TRANSFORMERS = False
-    DEDUPLICATION_THRESHOLD = 0.9
-    HF_TOKEN = None
-    INT8_WITH_OFFLOAD_TO_CPU = False
-    K_QUANT_LEVEL = 8
-    LLM_BATCH_SIZE = 512
-    LLM_CONTEXT_LENGTH = 4096
-    LLM_LAST_N_TOKENS = 64
-    LLM_MAX_GPU_LAYERS = 0
-    LLM_MAX_NEW_TOKENS = 4096
-    LLM_MIN_P = 0.0
-    LLM_REPETITION_PENALTY = 1.1
-    LLM_RESET = "False"
-    LLM_SAMPLE = "True"
-    LLM_SEED = -1
-    LLM_STOP_STRINGS = None
-    LLM_STREAM = "False"
-    LLM_TEMPERATURE = 0.7
-    LLM_THREADS = None
-    LLM_TOP_K = 40
-    LLM_TOP_P = 0.9
-    LOAD_LOCAL_MODEL_AT_START = False
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "gemma-3-4b"
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = ""
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = ""
-    LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = ""
-    MAX_COMMENT_CHARS = 1000
-    MODEL_CACHE_PATH = "./model_cache"
-    MAX_TIME_FOR_LOOP = 3600
-    MODEL_DTYPE = "bfloat16"
-    MULTIMODAL_PROMPT_FORMAT = False
-    NUM_PRED_TOKENS = 5
-    NUMBER_OF_RETRY_ATTEMPTS = 3
-    RUN_LOCAL_PII_MODEL = False
-    SPECULATIVE_DECODING = "False"
-    TIMEOUT_WAIT = 30
-    QUANTISE_TRANSFORMERS_LLM_MODELS = False
-    # Legacy alias
-    USE_LLAMA_CPP = "True"
-    USE_LLAMA_SWAP = "False"
-    V_QUANT_LEVEL = 8
-    # Legacy aliases - use PII-specific variables directly
-    LOCAL_REPO_ID = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-    LOCAL_MODEL_FILE = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-    LOCAL_MODEL_FOLDER = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-
-try:
-    from tools.helper_functions import _get_env_list
-except ImportError:
-    # Fallback implementation if helper_functions doesn't have _get_env_list
-    def _get_env_list(env_var_name: str, strip_strings: bool = True) -> List[str]:
-        """Fallback implementation for _get_env_list."""
-        if not env_var_name:
-            return []
-        if (
-            isinstance(env_var_name, str)
-            and env_var_name.startswith("[")
-            and env_var_name.endswith("]")
-        ):
-            value = env_var_name[1:-1].strip().replace('"', "").replace("'", "")
-        else:
-            value = str(env_var_name)
-        if not value:
-            return []
-        result = [s.strip() for s in value.split(",") if s.strip()]
-        if strip_strings:
-            result = [s.strip("\"'") for s in result]
-        return result
-
-
-if SPECULATIVE_DECODING == "True":
-    SPECULATIVE_DECODING = True
-else:
-    SPECULATIVE_DECODING = False
-
+from tools.config import (
+    ASSISTANT_MODEL,
+    BATCH_SIZE_DEFAULT,
+    COMPILE_MODE,
+    COMPILE_TRANSFORMERS,
+    DEDUPLICATION_THRESHOLD,
+    HF_TOKEN,
+    INT8_WITH_OFFLOAD_TO_CPU,
+    K_QUANT_LEVEL,
+    LLM_BATCH_SIZE,
+    LLM_CONTEXT_LENGTH,
+    LLM_LAST_N_TOKENS,
+    LLM_MAX_GPU_LAYERS,
+    LLM_MAX_NEW_TOKENS,
+    LLM_MIN_P,
+    LLM_REPETITION_PENALTY,
+    LLM_RESET,
+    LLM_SAMPLE,
+    LLM_SEED,
+    LLM_STOP_STRINGS,
+    LLM_STREAM,
+    LLM_TEMPERATURE,
+    LLM_THREADS,
+    LLM_TOP_K,
+    LLM_TOP_P,
+    LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START,
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
+    LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
+    MAX_COMMENT_CHARS,
+    MAX_TIME_FOR_LOOP,
+    MODEL_DTYPE,
+    MULTIMODAL_PROMPT_FORMAT,
+    NUM_PRED_TOKENS,
+    NUMBER_OF_RETRY_ATTEMPTS,
+    QUANTISE_TRANSFORMERS_LLM_MODELS,
+    SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
+    SPECULATIVE_DECODING,
+    TIMEOUT_WAIT,
+    USE_LLAMA_CPP,
+    USE_LLAMA_SWAP,
+    V_QUANT_LEVEL,
+)
 
 if isinstance(NUM_PRED_TOKENS, str):
     NUM_PRED_TOKENS = int(NUM_PRED_TOKENS)
@@ -204,24 +113,6 @@ if isinstance(LLM_MAX_GPU_LAYERS, str):
     LLM_MAX_GPU_LAYERS = int(LLM_MAX_GPU_LAYERS)
 if isinstance(LLM_THREADS, str):
     LLM_THREADS = int(LLM_THREADS)
-
-if LLM_RESET == "True":
-    reset = True
-else:
-    reset = False
-
-if LLM_STREAM == "True":
-    stream = True
-else:
-    stream = False
-
-if LLM_SAMPLE == "True":
-    sample = True
-else:
-    sample = False
-
-if LLM_STOP_STRINGS:
-    LLM_STOP_STRINGS = _get_env_list(LLM_STOP_STRINGS, strip_strings=False)
 
 max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -239,8 +130,8 @@ repetition_penalty = LLM_REPETITION_PENALTY
 last_n_tokens = LLM_LAST_N_TOKENS
 LLM_MAX_NEW_TOKENS: int = LLM_MAX_NEW_TOKENS
 seed: int = LLM_SEED
-reset: bool = reset
-stream: bool = stream
+reset: bool = LLM_RESET
+stream: bool = LLM_STREAM
 batch_size: int = LLM_BATCH_SIZE
 context_length: int = LLM_CONTEXT_LENGTH
 sample = LLM_SAMPLE
@@ -425,11 +316,7 @@ def load_model(
 
     # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE if local_model_type is not provided
     if local_model_type is None:
-        local_model_type = (
-            CHOSEN_LOCAL_MODEL_TYPE
-            if CHOSEN_LOCAL_MODEL_TYPE
-            else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-        )
+        local_model_type = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
 
     print("Loading model:", local_model_type)
 
@@ -755,11 +642,7 @@ def get_model():
     global _model, _tokenizer, _assistant_model
     if _model is None:
         _model, _tokenizer, _assistant_model = load_model(
-            local_model_type=(
-                CHOSEN_LOCAL_MODEL_TYPE
-                if CHOSEN_LOCAL_MODEL_TYPE
-                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-            ),
+            local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
             gpu_layers=gpu_layers,
             max_context_length=context_length,
             gpu_config=gpu_config,
@@ -783,11 +666,7 @@ def get_tokenizer():
     global _model, _tokenizer, _assistant_model
     if _tokenizer is None:
         _model, _tokenizer, _assistant_model = load_model(
-            local_model_type=(
-                CHOSEN_LOCAL_MODEL_TYPE
-                if CHOSEN_LOCAL_MODEL_TYPE
-                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-            ),
+            local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
             gpu_layers=gpu_layers,
             max_context_length=context_length,
             gpu_config=gpu_config,
@@ -811,11 +690,7 @@ def get_assistant_model():
     global _model, _tokenizer, _assistant_model
     if _assistant_model is None:
         _model, _tokenizer, _assistant_model = load_model(
-            local_model_type=(
-                CHOSEN_LOCAL_MODEL_TYPE
-                if CHOSEN_LOCAL_MODEL_TYPE
-                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-            ),
+            local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
             gpu_layers=gpu_layers,
             max_context_length=context_length,
             gpu_config=gpu_config,
@@ -846,6 +721,11 @@ def get_pii_model():
     """Get the globally loaded PII detection model. Load it if not already loaded."""
     global _pii_model, _pii_tokenizer, _pii_assistant_model
 
+    # Check if model is already loaded
+    if _pii_model is not None:
+        print("PII model already loaded, reusing existing model instance.")
+        return _pii_model
+
     # Determine which repo_id, model_file, and model_folder to use
     # If PII-specific config is set, use it; otherwise fall back to general local model config
     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
@@ -855,41 +735,32 @@ def get_pii_model():
             if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
             else ""
         )
-        pii_model_folder = (
-            LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-            if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-            else (LOCAL_MODEL_FOLDER if LOCAL_MODEL_FOLDER else MODEL_CACHE_PATH)
-        )
+        pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
     else:
-        # Fall back to general local model config
-        pii_repo_id = LOCAL_REPO_ID
-        pii_model_file = LOCAL_MODEL_FILE
-        pii_model_folder = (
-            LOCAL_MODEL_FOLDER if LOCAL_MODEL_FOLDER else MODEL_CACHE_PATH
+        raise ValueError(
+            "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
+            "Please configure the PII model repository ID."
         )
 
-    if _pii_model is None:
-        _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-            local_model_type=(
-                CHOSEN_LOCAL_MODEL_TYPE
-                if CHOSEN_LOCAL_MODEL_TYPE
-                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-            ),
-            gpu_layers=gpu_layers,
-            max_context_length=context_length,
-            gpu_config=gpu_config,
-            cpu_config=cpu_config,
-            torch_device=torch_device,
-            repo_id=pii_repo_id,
-            model_filename=pii_model_file,
-            model_dir=pii_model_folder,
-            compile_mode=COMPILE_MODE,
-            model_dtype=MODEL_DTYPE,
-            hf_token=HF_TOKEN,
-            model=_pii_model,
-            tokenizer=_pii_tokenizer,
-            assistant_model=_pii_assistant_model,
-        )
+    print("Loading PII model for the first time...")
+    _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
+        local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
+        gpu_layers=gpu_layers,
+        max_context_length=context_length,
+        gpu_config=gpu_config,
+        cpu_config=cpu_config,
+        torch_device=torch_device,
+        repo_id=pii_repo_id,
+        model_filename=pii_model_file,
+        model_dir=pii_model_folder,
+        compile_mode=COMPILE_MODE,
+        model_dtype=MODEL_DTYPE,
+        hf_token=HF_TOKEN,
+        model=_pii_model,
+        tokenizer=_pii_tokenizer,
+        assistant_model=_pii_assistant_model,
+    )
+    print("PII model loaded successfully.")
     return _pii_model
 
 
@@ -897,6 +768,11 @@ def get_pii_tokenizer():
     """Get the globally loaded PII detection tokenizer. Load it if not already loaded."""
     global _pii_model, _pii_tokenizer, _pii_assistant_model
 
+    # Check if tokenizer is already loaded
+    if _pii_tokenizer is not None:
+        print("PII tokenizer already loaded, reusing existing tokenizer instance.")
+        return _pii_tokenizer
+
     # Determine which repo_id, model_file, and model_folder to use
     # If PII-specific config is set, use it; otherwise fall back to general local model config
     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
@@ -906,47 +782,47 @@ def get_pii_tokenizer():
             if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
             else ""
         )
-        pii_model_folder = (
-            LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-            if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-            else (LOCAL_MODEL_FOLDER if LOCAL_MODEL_FOLDER else MODEL_CACHE_PATH)
-        )
+        pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
     else:
-        # Fall back to general local model config
-        pii_repo_id = LOCAL_REPO_ID
-        pii_model_file = LOCAL_MODEL_FILE
-        pii_model_folder = (
-            LOCAL_MODEL_FOLDER if LOCAL_MODEL_FOLDER else MODEL_CACHE_PATH
+        raise ValueError(
+            "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
+            "Please configure the PII model repository ID."
         )
 
-    if _pii_tokenizer is None:
-        _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-            local_model_type=(
-                CHOSEN_LOCAL_MODEL_TYPE
-                if CHOSEN_LOCAL_MODEL_TYPE
-                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-            ),
-            gpu_layers=gpu_layers,
-            max_context_length=context_length,
-            gpu_config=gpu_config,
-            cpu_config=cpu_config,
-            torch_device=torch_device,
-            repo_id=pii_repo_id,
-            model_filename=pii_model_file,
-            model_dir=pii_model_folder,
-            compile_mode=COMPILE_MODE,
-            model_dtype=MODEL_DTYPE,
-            hf_token=HF_TOKEN,
-            model=_pii_model,
-            tokenizer=_pii_tokenizer,
-            assistant_model=_pii_assistant_model,
-        )
+    print("Loading PII tokenizer for the first time...")
+    _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
+        local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
+        gpu_layers=gpu_layers,
+        max_context_length=context_length,
+        gpu_config=gpu_config,
+        cpu_config=cpu_config,
+        torch_device=torch_device,
+        repo_id=pii_repo_id,
+        model_filename=pii_model_file,
+        model_dir=pii_model_folder,
+        compile_mode=COMPILE_MODE,
+        model_dtype=MODEL_DTYPE,
+        hf_token=HF_TOKEN,
+        model=_pii_model,
+        tokenizer=_pii_tokenizer,
+        assistant_model=_pii_assistant_model,
+    )
+    print("PII tokenizer loaded successfully.")
     return _pii_tokenizer
 
 
-# Initialize PII model at startup if configured (even if RUN_LOCAL_PII_MODEL is False)
+# Initialize PII model at startup if configured (even if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS is False)
 # This allows PII model to be loaded independently for PII detection tasks
-if LOAD_LOCAL_MODEL_AT_START and RUN_LOCAL_PII_MODEL:
+print(
+    f"LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START: {LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START}"
+)
+print(
+    f"SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS: {SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS}"
+)
+if (
+    LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START
+    and SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
+):
     try:
         print("Loading local PII model:", LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE)
         get_pii_model()  # This will trigger loading the PII model
@@ -970,7 +846,7 @@ def call_llama_cpp_model(formatted_string: str, gen_config: str, model=None):
 
     if model is None:
         raise ValueError(
-            "No model available. Either pass a model parameter or ensure LOAD_LOCAL_MODEL_AT_START is True."
+            "No model available. Either pass a model parameter or ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True."
         )
 
     # Extracting parameters from the gen_config object
@@ -1019,7 +895,7 @@ def call_llama_cpp_chatmodel(
 
     if model is None:
         raise ValueError(
-            "No model available. Either pass a model parameter or ensure LOAD_LOCAL_MODEL_AT_START is True."
+            "No model available. Either pass a model parameter or ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True."
         )
 
     # Extracting parameters from the gen_config object
@@ -1481,7 +1357,7 @@ def call_transformers_model(
 
     if model is None or tokenizer is None:
         raise ValueError(
-            "No model or tokenizer available. Either pass them as parameters or ensure LOAD_LOCAL_MODEL_AT_START is True."
+            "No model or tokenizer available. Either pass them as parameters or ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True."
         )
 
     # 1. Define the conversation as a list of dictionaries
@@ -2123,202 +1999,3 @@ def process_requests(
         whole_conversation_metadata,
         response_text,
     )
-
-
-def call_llm_with_markdown_table_checks(
-    batch_prompts: List[str],
-    system_prompt: str,
-    conversation_history: List[dict],
-    whole_conversation: List[str],
-    whole_conversation_metadata: List[str],
-    client: ai.Client | OpenAI,
-    client_config: types.GenerateContentConfig,
-    model_choice: str,
-    temperature: float,
-    reported_batch_no: int,
-    local_model: object,
-    tokenizer: object,
-    bedrock_runtime: boto3.Session.client,
-    model_source: str,
-    MAX_OUTPUT_VALIDATION_ATTEMPTS: int,
-    assistant_prefill: str = "",
-    master: bool = False,
-    CHOSEN_LOCAL_MODEL_TYPE: str = None,
-    random_seed: int = seed,
-    api_url: str = None,
-) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
-    """
-    Call the large language model with checks for a valid markdown table.
-
-    Parameters:
-    - batch_prompts (List[str]): A list of prompts to be processed.
-    - system_prompt (str): The system prompt.
-    - conversation_history (List[dict]): The history of the conversation.
-    - whole_conversation (List[str]): The complete conversation including prompts and responses.
-    - whole_conversation_metadata (List[str]): Metadata about the whole conversation.
-    - client (ai.Client | OpenAI): The client object for running Gemini or Azure/OpenAI API calls.
-    - client_config (types.GenerateContentConfig): Configuration for the model.
-    - model_choice (str): The choice of model to use.
-    - temperature (float): The temperature parameter for the model.
-    - reported_batch_no (int): The reported batch number.
-    - local_model (object): The local model to use.
-    - tokenizer (object): The tokenizer to use.
-    - bedrock_runtime (boto3.Session.client): The client object for boto3 Bedrock runtime.
-    - model_source (str): The source of the model, whether in AWS, Gemini, local, or inference-server.
-    - MAX_OUTPUT_VALIDATION_ATTEMPTS (int): The maximum number of attempts to validate the output.
-    - assistant_prefill (str, optional): The text to prefill the LLM response. Currently only working with AWS Claude calls.
-    - master (bool, optional): Boolean to determine whether this call is for the master output table.
-    - CHOSEN_LOCAL_MODEL_TYPE (str, optional): String to determine model type loaded. If None, uses LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.
-    - random_seed (int, optional): The random seed used for LLM generation.
-    - api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
-
-    Returns:
-    - Tuple[List[ResponseObject], List[dict], List[str], List[str], str]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, the updated whole conversation metadata, and the response text.
-    """
-
-    call_temperature = temperature  # This is correct now with the fixed parameter name
-
-    # Update Gemini config with the new temperature settings
-    client_config = types.GenerateContentConfig(
-        temperature=call_temperature, max_output_tokens=max_tokens, seed=random_seed
-    )
-
-    for attempt in range(MAX_OUTPUT_VALIDATION_ATTEMPTS):
-        # Process requests to large language model
-        (
-            responses,
-            conversation_history,
-            whole_conversation,
-            whole_conversation_metadata,
-            response_text,
-        ) = process_requests(
-            batch_prompts,
-            system_prompt,
-            conversation_history,
-            whole_conversation,
-            whole_conversation_metadata,
-            client,
-            client_config,
-            model_choice,
-            call_temperature,
-            bedrock_runtime,
-            model_source,
-            reported_batch_no,
-            local_model,
-            tokenizer=tokenizer,
-            master=master,
-            assistant_prefill=assistant_prefill,
-            api_url=api_url,
-        )
-
-        stripped_response = response_text.strip()
-
-        # Check if response meets our criteria (length and contains table) OR is "No change"
-        if (
-            len(stripped_response) > 120 and "|" in stripped_response
-        ) or stripped_response.lower().startswith("no change"):
-            if stripped_response.lower().startswith("no change"):
-                print(f"Attempt {attempt + 1} produced 'No change' response.")
-            else:
-                print(f"Attempt {attempt + 1} produced response with markdown table.")
-            break  # Success - exit loop
-
-        # Increase temperature for next attempt
-        call_temperature = temperature + (0.1 * (attempt + 1))
-        print(
-            f"Attempt {attempt + 1} resulted in invalid table: {stripped_response}. "
-            f"Trying again with temperature: {call_temperature}"
-        )
-
-    else:  # This runs if no break occurred (all attempts failed)
-        print(
-            f"Failed to get valid response after {MAX_OUTPUT_VALIDATION_ATTEMPTS} attempts"
-        )
-
-    return (
-        responses,
-        conversation_history,
-        whole_conversation,
-        whole_conversation_metadata,
-        stripped_response,
-    )
-
-
-def create_missing_references_df(
-    basic_response_df: pd.DataFrame, existing_reference_df: pd.DataFrame
-) -> pd.DataFrame:
-    """
-    Identifies references in basic_response_df that are not present in existing_reference_df.
-    Returns a DataFrame with the missing references and the character count of their responses.
-
-    Args:
-        basic_response_df (pd.DataFrame): DataFrame containing 'Reference' and 'Response' columns.
-        existing_reference_df (pd.DataFrame): DataFrame containing 'Response References' column.
-
-    Returns:
-        pd.DataFrame: A DataFrame with 'Missing Reference' and 'Response Character Count' columns.
-                      'Response Character Count' will be 0 for empty strings and NaN for actual missing data.
-    """
-    # Ensure columns are treated as strings for robust comparison
-    existing_references_unique = (
-        existing_reference_df["Response References"].astype(str).unique()
-    )
-
-    # Step 1: Identify all rows from basic_response_df that correspond to missing references
-    # We want the entire row to access the 'Response' column later
-    missing_data_rows = basic_response_df[
-        ~basic_response_df["Reference"].astype(str).isin(existing_references_unique)
-    ].copy()  # .copy() to avoid SettingWithCopyWarning
-
-    # Step 2: Create the new DataFrame
-    # Populate the 'Missing Reference' column directly
-    missing_df = pd.DataFrame({"Missing Reference": missing_data_rows["Reference"]})
-
-    # Step 3: Calculate and add 'Response Character Count'
-    # .str.len() works on Series of strings, handling empty strings (0) and NaN (NaN)
-    missing_df["Response Character Count"] = missing_data_rows["Response"].str.len()
-
-    # Optional: Add the actual response text for easier debugging/inspection if needed
-    # missing_df['Response Text'] = missing_data_rows['Response']
-
-    # Reset index to have a clean, sequential index for the new DataFrame
-    missing_df = missing_df.reset_index(drop=True)
-
-    return missing_df
-
-
-def calculate_tokens_from_metadata(
-    metadata_string: str, model_choice: str, model_name_map: dict
-):
-    """
-    Calculate the number of input and output tokens for given queries based on metadata strings.
-
-    Args:
-        metadata_string (str): A string containing all relevant metadata from the string.
-        model_choice (str): A string describing the model name
-        model_name_map (dict): A dictionary mapping model name to source
-    """
-
-    model_name_map[model_choice]["source"]
-
-    # Regex to find the numbers following the keys in the "Query summary metadata" section
-    # This ensures we get the final, aggregated totals for the whole query.
-    input_regex = r"input_tokens: (\d+)"
-    output_regex = r"output_tokens: (\d+)"
-
-    # re.findall returns a list of all matching strings (the captured groups).
-    input_token_strings = re.findall(input_regex, metadata_string)
-    output_token_strings = re.findall(output_regex, metadata_string)
-
-    # Convert the lists of strings to lists of integers and sum them up
-    total_input_tokens = sum([int(token) for token in input_token_strings])
-    total_output_tokens = sum([int(token) for token in output_token_strings])
-
-    number_of_calls = len(input_token_strings)
-
-    print(f"Found {number_of_calls} LLM call entries in metadata.")
-    print("-" * 20)
-    print(f"Total Input Tokens: {total_input_tokens}")
-    print(f"Total Output Tokens: {total_output_tokens}")
-
-    return total_input_tokens, total_output_tokens, number_of_calls

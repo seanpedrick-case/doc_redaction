@@ -164,8 +164,8 @@ from tools.config import (
     SHOW_EXAMPLES,
     SHOW_INFERENCE_SERVER_OPTIONS,
     SHOW_LANGUAGE_SELECTION,
-    SHOW_LLM_PII_DETECTION_OPTIONS,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
+    SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     SPACY_MODEL_PATH,
     TABULAR_PII_DETECTION_MODELS,
@@ -2758,7 +2758,7 @@ with blocks:
                     placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'only redact email addresses, ignore phone numbers'",
                     value="",
                     lines=3,
-                    visible=SHOW_LLM_PII_DETECTION_OPTIONS,
+                    visible=SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
                 )
                 gr.Markdown(
                     "**Note:** This only applies when using 'LLM (AWS Bedrock)' as the PII identification method. "
