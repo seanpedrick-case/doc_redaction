@@ -553,10 +553,10 @@ def extract_text_from_image_vlm(
             Defaults to model-specific value (None for Dots.OCR, "Read all the text in the image." for Qwen3-VL models) or "Read all the text in the image."
 
     Returns:
-        str: The complete generated text response from the model.
+        Tuple[str, int, int]: The complete generated text response, input tokens (estimated), output tokens (estimated).
     """
     if image is None:
-        return "Please upload an image."
+        return "Please upload an image.", 0, 0
 
     # Determine parameter values with priority: function args > model defaults > general defaults
     # Priority order: function argument (if not None) > model default > general default
@@ -723,8 +723,39 @@ def extract_text_from_image_vlm(
     # Print final newline after streaming is complete
     print()  # Add newline at the end
 
-    # Return the complete text only at the end
-    return buffer
+    # Estimate token usage for local models
+    # For local transformers models, we can estimate using the tokenizer if available
+    input_tokens = 0
+    output_tokens = 0
+    try:
+        if (
+            processor
+            and hasattr(processor, "tokenizer")
+            and processor.tokenizer is not None
+        ):
+            # Estimate input tokens from prompt and image
+            # Note: Vision models encode images differently, so this is an approximation
+            prompt_tokens = len(
+                processor.tokenizer.encode(actual_text, add_special_tokens=False)
+            )
+            # Rough estimate: assume image tokens are proportional to image size
+            # This is a rough approximation - actual vision tokenization is more complex
+            image_tokens_estimate = (
+                image.size[0] * image.size[1]
+            ) // 1000  # Rough estimate
+            input_tokens = prompt_tokens + image_tokens_estimate
+
+            # Estimate output tokens from generated text
+            output_tokens = len(
+                processor.tokenizer.encode(buffer, add_special_tokens=False)
+            )
+    except Exception:
+        # If token counting fails, use rough word-based estimates
+        input_tokens = len(actual_text.split()) * 2  # Rough estimate
+        output_tokens = len(buffer.split()) * 2  # Rough estimate
+
+    # Return the complete text and token estimates
+    return buffer, input_tokens, output_tokens
 
 
 full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': 'identified text'}, ...].

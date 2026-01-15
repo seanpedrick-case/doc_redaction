@@ -813,12 +813,6 @@ def get_pii_tokenizer():
 
 # Initialize PII model at startup if configured (even if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS is False)
 # This allows PII model to be loaded independently for PII detection tasks
-print(
-    f"LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START: {LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START}"
-)
-print(
-    f"SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS: {SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS}"
-)
 if (
     LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START
     and SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS

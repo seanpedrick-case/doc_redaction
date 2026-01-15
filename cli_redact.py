@@ -1102,6 +1102,12 @@ python cli_redact.py --task textract --textract_action list
                     _,
                     _,
                     _,
+                    vlm_model_name,
+                    vlm_total_input_tokens,
+                    vlm_total_output_tokens,
+                    llm_model_name,
+                    llm_total_input_tokens,
+                    llm_total_output_tokens,
                 ) = choose_and_run_redactor(
                     file_paths=args.input_file,
                     prepared_pdf_file_paths=prepared_pdf_paths,
@@ -1199,12 +1205,12 @@ python cli_redact.py --task textract --textract_action list
                             save_to_s3=args.upload_logs_to_s3,
                             s3_bucket=args.s3_bucket,
                             s3_key_prefix=args.s3_logs_prefix,
-                            vlm_model_name="",  # TODO: Track from perform_ocr
-                            vlm_total_input_tokens=0,  # TODO: Track from perform_ocr
-                            vlm_total_output_tokens=0,  # TODO: Track from perform_ocr
-                            llm_model_name="",  # TODO: Track from analyze_text
-                            llm_total_input_tokens=0,  # TODO: Track from analyze_text
-                            llm_total_output_tokens=0,  # TODO: Track from analyze_text
+                            vlm_model_name=vlm_model_name,
+                            vlm_total_input_tokens=vlm_total_input_tokens,
+                            vlm_total_output_tokens=vlm_total_output_tokens,
+                            llm_model_name=llm_model_name,
+                            llm_total_input_tokens=llm_total_input_tokens,
+                            llm_total_output_tokens=llm_total_output_tokens,
                         )
                     except Exception as e:
                         print(f"Warning: Could not log usage data: {e}")

@@ -539,7 +539,13 @@ def call_llm_for_entity_detection(
     try:
         # Call send_request which handles all routing, retries, and response parsing
         # Note: send_request signature shows local_model=list() but it's actually used as a single model object
-        response, conversation_history, response_text, _, _ = send_request(
+        (
+            response,
+            conversation_history,
+            response_text,
+            num_transformer_input_tokens,
+            num_transformer_generated_tokens,
+        ) = send_request(
             prompt=user_prompt,
             conversation_history=[],  # Empty for entity detection (no conversation history needed)
             client=client,
@@ -591,7 +597,33 @@ def call_llm_for_entity_detection(
     # Parse the response
     entities = parse_llm_entity_response(response_text, text)
 
-    return entities
+    # Extract token usage from response
+    input_tokens = 0
+    output_tokens = 0
+
+    try:
+        if isinstance(response, dict) and "usage" in response:
+            # inference-server or llama-cpp format
+            input_tokens = response["usage"].get("prompt_tokens", 0)
+            output_tokens = response["usage"].get("completion_tokens", 0)
+        elif hasattr(response, "usage_metadata"):
+            # Check if it's AWS Bedrock format
+            if isinstance(response.usage_metadata, dict):
+                input_tokens = response.usage_metadata.get("inputTokens", 0)
+                output_tokens = response.usage_metadata.get("outputTokens", 0)
+            # Check if it's Gemini format
+            elif hasattr(response.usage_metadata, "prompt_token_count"):
+                input_tokens = response.usage_metadata.prompt_token_count
+                output_tokens = response.usage_metadata.candidates_token_count
+    except (KeyError, AttributeError) as e:
+        print(f"Warning: Could not extract token usage from response: {e}")
+        # Fallback: use transformer token counts if available
+        if num_transformer_input_tokens and num_transformer_input_tokens > 0:
+            input_tokens = num_transformer_input_tokens
+        if num_transformer_generated_tokens and num_transformer_generated_tokens > 0:
+            output_tokens = num_transformer_generated_tokens
+
+    return entities, input_tokens, output_tokens
 
 
 def map_back_llm_entity_results(
@@ -732,7 +764,7 @@ def do_llm_entity_detection_call(
     client=None,
     client_config=None,
     api_url: Optional[str] = None,
-) -> List[Tuple]:
+) -> Tuple[List[Tuple], int, int]:
     """
     Call LLM for entity detection on a batch of text.
     Similar interface to do_aws_comprehend_call.
@@ -762,7 +794,7 @@ def do_llm_entity_detection_call(
         api_url: API URL for inference-server (required for "inference-server" method)
 
     Returns:
-        Updated all_text_line_results
+        Tuple of (updated all_text_line_results, input_tokens, output_tokens)
     """
     if not current_batch:
         return all_text_line_results or []
@@ -775,7 +807,7 @@ def do_llm_entity_detection_call(
         all_text_line_results = []
 
     try:
-        entities = call_llm_for_entity_detection(
+        entities, input_tokens, output_tokens = call_llm_for_entity_detection(
             text=current_batch.strip(),
             entities_to_detect=chosen_redact_comprehend_entities,
             language=language,
@@ -805,7 +837,7 @@ def do_llm_entity_detection_call(
             all_text_line_results,
         )
 
-        return all_text_line_results
+        return all_text_line_results, input_tokens, output_tokens
 
     except Exception as e:
         print(f"LLM entity detection call failed: {e}")

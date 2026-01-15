@@ -386,6 +386,16 @@ def choose_and_run_redactor(
         ocr_review_files = list()
     current_loop_page = 0
 
+    # Initialize LLM token tracking variables
+    llm_model_name = ""
+    llm_total_input_tokens = 0
+    llm_total_output_tokens = 0
+
+    # Initialize VLM token tracking variables
+    vlm_model_name = ""
+    vlm_total_input_tokens = 0
+    vlm_total_output_tokens = 0
+
     # CLI mode may provide options to enter method names in a different format
     if text_extraction_method == "AWS Textract":
         text_extraction_method = TEXTRACT_TEXT_EXTRACT_OPTION
@@ -618,6 +628,12 @@ def choose_and_run_redactor(
             review_file_state,
             task_textbox,
             ocr_review_files,
+            vlm_model_name,
+            vlm_total_input_tokens,
+            vlm_total_output_tokens,
+            llm_model_name,
+            llm_total_input_tokens,
+            llm_total_output_tokens,
         )
     else:
         # ocr_review_files will be replaced by latest file output
@@ -777,6 +793,12 @@ def choose_and_run_redactor(
             review_file_state,
             task_textbox,
             ocr_review_files,
+            vlm_model_name,
+            vlm_total_input_tokens,
+            vlm_total_output_tokens,
+            llm_model_name,
+            llm_total_input_tokens,
+            llm_total_output_tokens,
         )
 
     ### Load/create allow list, deny list, and whole page redaction list
@@ -1186,6 +1208,12 @@ def choose_and_run_redactor(
                 selection_element_results_list_df,
                 form_key_value_results_list_df,
                 out_file_paths,
+                llm_model_name,
+                llm_total_input_tokens,
+                llm_total_output_tokens,
+                vlm_model_name_page,
+                vlm_total_input_tokens_page,
+                vlm_total_output_tokens_page,
             ) = redact_image_pdf(
                 file_path,
                 pdf_image_file_paths,
@@ -1235,6 +1263,12 @@ def choose_and_run_redactor(
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
             out_file_paths = out_file_paths.copy()
 
+            # Accumulate VLM token usage
+            vlm_total_input_tokens += vlm_total_input_tokens_page
+            vlm_total_output_tokens += vlm_total_output_tokens_page
+            if vlm_model_name_page and not vlm_model_name:
+                vlm_model_name = vlm_model_name_page
+
             # Save Textract request metadata (if exists)
             if new_textract_request_metadata and isinstance(
                 new_textract_request_metadata, list
@@ -1259,6 +1293,9 @@ def choose_and_run_redactor(
                 page_break_return,
                 comprehend_query_number,
                 all_page_line_level_ocr_results_with_words,
+                llm_model_name_text,
+                llm_total_input_tokens_text,
+                llm_total_output_tokens_text,
             ) = redact_text_pdf(
                 file_path,
                 language,
@@ -1291,6 +1328,12 @@ def choose_and_run_redactor(
                 custom_llm_instructions=custom_llm_instructions,
                 chosen_llm_entities=chosen_llm_entities,
             )
+
+            # Accumulate LLM token usage from text PDF redaction
+            llm_total_input_tokens += llm_total_input_tokens_text
+            llm_total_output_tokens += llm_total_output_tokens_text
+            if llm_model_name_text and not llm_model_name:
+                llm_model_name = llm_model_name_text
         else:
             out_message = "No redaction method selected"
             print(out_message)
@@ -2000,6 +2043,12 @@ def choose_and_run_redactor(
         review_file_state,
         task_textbox,
         ocr_review_files,
+        vlm_model_name,
+        vlm_total_input_tokens,
+        vlm_total_output_tokens,
+        llm_model_name,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
     )
 
 
@@ -3330,6 +3379,16 @@ def redact_image_pdf(
     inference_server_vlm_model: str = "",
     progress=Progress(track_tqdm=True),
 ):
+    # Initialize LLM token tracking variables
+    llm_total_input_tokens = 0
+    llm_total_output_tokens = 0
+    llm_model_name = ""
+
+    # Initialize VLM token tracking variables
+    vlm_total_input_tokens = 0
+    vlm_total_output_tokens = 0
+    vlm_model_name = ""
+
     """
     This function redacts sensitive information from a PDF document. It takes the following parameters in order:
 
@@ -3825,7 +3884,12 @@ def redact_image_pdf(
                             # Fall back to using the placeholder path (will likely fail, but preserves original behavior)
                             actual_image_path = image_path
 
-                    page_word_level_ocr_results = image_analyser.perform_ocr(
+                    (
+                        page_word_level_ocr_results,
+                        page_vlm_input_tokens,
+                        page_vlm_output_tokens,
+                        page_vlm_model_name,
+                    ) = image_analyser.perform_ocr(
                         actual_image_path,
                         bedrock_runtime=bedrock_runtime,
                         gemini_client=gemini_client,
@@ -3838,6 +3902,12 @@ def redact_image_pdf(
                             else None
                         ),
                     )
+
+                    # Accumulate VLM token usage
+                    vlm_total_input_tokens += page_vlm_input_tokens
+                    vlm_total_output_tokens += page_vlm_output_tokens
+                    if page_vlm_model_name and not vlm_model_name:
+                        vlm_model_name = page_vlm_model_name
 
                     (
                         page_line_level_ocr_results,
@@ -4489,30 +4559,40 @@ def redact_image_pdf(
                         print("Using local transformers PII model for entity detection")
 
                     # Call analyze_text for all PII detection methods (Local, AWS Comprehend, LLM, Inference Server)
-                    page_redaction_bounding_boxes, comprehend_query_number_new = (
-                        image_analyser.analyze_text(
-                            page_line_level_ocr_results["results"],
-                            page_line_level_ocr_results_with_words["results"],
-                            chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
-                            chosen_llm_entities=chosen_llm_entities,
-                            pii_identification_method=pii_identification_method,
-                            comprehend_client=comprehend_client,
-                            bedrock_runtime=bedrock_runtime,
-                            custom_entities=chosen_redact_entities,
-                            language=language,
-                            allow_list=allow_list,
-                            score_threshold=score_threshold,
-                            nlp_analyser=nlp_analyser,
-                            custom_llm_instructions=custom_llm_instructions,
-                            file_name=file_name,
-                            page_number=int(reported_page_number),
-                            **text_analyzer_kwargs,
-                        )
+                    (
+                        page_redaction_bounding_boxes,
+                        comprehend_query_number_new,
+                        llm_model_name_page,
+                        llm_input_tokens_page,
+                        llm_output_tokens_page,
+                    ) = image_analyser.analyze_text(
+                        page_line_level_ocr_results["results"],
+                        page_line_level_ocr_results_with_words["results"],
+                        chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+                        chosen_llm_entities=chosen_llm_entities,
+                        pii_identification_method=pii_identification_method,
+                        comprehend_client=comprehend_client,
+                        bedrock_runtime=bedrock_runtime,
+                        custom_entities=chosen_redact_entities,
+                        language=language,
+                        allow_list=allow_list,
+                        score_threshold=score_threshold,
+                        nlp_analyser=nlp_analyser,
+                        custom_llm_instructions=custom_llm_instructions,
+                        file_name=file_name,
+                        page_number=int(reported_page_number),
+                        **text_analyzer_kwargs,
                     )
 
                     comprehend_query_number = (
                         comprehend_query_number + comprehend_query_number_new
                     )
+
+                    # Accumulate LLM token usage across pages
+                    llm_total_input_tokens += llm_input_tokens_page
+                    llm_total_output_tokens += llm_output_tokens_page
+                    if llm_model_name_page and not llm_model_name:
+                        llm_model_name = llm_model_name_page
 
                 else:
                     page_redaction_bounding_boxes = list()
@@ -4949,6 +5029,12 @@ def redact_image_pdf(
         selection_element_results_list_df,
         form_key_value_results_list_df,
         out_file_paths,
+        llm_model_name,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
+        vlm_model_name,
+        vlm_total_input_tokens,
+        vlm_total_output_tokens,
     )
 
 
@@ -5333,6 +5419,10 @@ def redact_text_pdf(
     custom_llm_instructions: str = "",
     chosen_llm_entities: List[str] = None,
 ):
+    # Initialize LLM token tracking variables
+    llm_total_input_tokens = 0
+    llm_total_output_tokens = 0
+    llm_model_name = ""
     """
     Redact chosen entities from a PDF that is made up of multiple pages that are not images.
 
@@ -5586,7 +5676,12 @@ def redact_text_pdf(
                 ### REDACTION
                 if pii_identification_method != NO_REDACTION_PII_OPTION:
                     if chosen_redact_entities or chosen_redact_comprehend_entities:
-                        page_redaction_bounding_boxes = run_page_text_redaction(
+                        (
+                            page_redaction_bounding_boxes,
+                            llm_model_name_page,
+                            llm_input_tokens_page,
+                            llm_output_tokens_page,
+                        ) = run_page_text_redaction(
                             language,
                             chosen_redact_entities,
                             chosen_redact_comprehend_entities,
@@ -5609,6 +5704,12 @@ def redact_text_pdf(
                             file_name=file_name,
                             page_number=int(reported_page_number),
                         )
+
+                        # Accumulate LLM token usage across pages
+                        llm_total_input_tokens += llm_input_tokens_page
+                        llm_total_output_tokens += llm_output_tokens_page
+                        if llm_model_name_page and not llm_model_name:
+                            llm_model_name = llm_model_name_page
 
                         # Annotate redactions on page
                         pikepdf_redaction_annotations_on_page = (
@@ -5930,6 +6031,9 @@ def redact_text_pdf(
         page_break_return,
         comprehend_query_number,
         all_page_line_level_ocr_results_with_words,
+        llm_model_name,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
     )
 
 

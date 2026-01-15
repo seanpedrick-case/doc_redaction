@@ -813,7 +813,7 @@ def _call_inference_server_vlm_api(
     min_p: float = None,
     presence_penalty: float = None,
     use_llama_swap: bool = USE_LLAMA_SWAP,
-) -> str:
+) -> Tuple[str, int, int]:
     """
     Calls a inference-server API endpoint with an image and text prompt.
 
@@ -840,7 +840,7 @@ def _call_inference_server_vlm_api(
         use_llama_swap: Whether to use llama-swap for the model (defaults to USE_LLAMA_SWAP from config).
             If True and model_name is provided, the model name will be included in the payload.
     Returns:
-        str: The generated text response from the model
+        Tuple[str, int, int]: The generated text response, input tokens, output tokens
 
     Raises:
         ConnectionError: If the API request fails
@@ -944,6 +944,8 @@ def _call_inference_server_vlm_api(
                 response.raise_for_status()
 
                 final_tokens = []
+                output_tokens = 0
+                final_chunk = None
 
                 for line in response.iter_lines():
                     if not line:  # Skip empty lines
@@ -956,13 +958,16 @@ def _call_inference_server_vlm_api(
                             break
                         try:
                             chunk = json.loads(data)
+                            # Store the last chunk in case it contains usage info
+                            final_chunk = chunk
+                            
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta", {})
                                 token = delta.get("content", "")
                                 if token:
                                     print(token, end="", flush=True)
                                     final_tokens.append(token)
-                                    # output_tokens += 1
+                                    output_tokens += 1  # Count tokens as they stream in
                         except json.JSONDecodeError:
                             continue
 
@@ -970,24 +975,24 @@ def _call_inference_server_vlm_api(
 
                 text = "".join(final_tokens)
 
-                # Estimate input tokens (rough approximation)
-                # input_tokens = len(prompt.split())
+                # Try to extract token usage from final chunk if available
+                input_tokens = 0
+                if final_chunk and "usage" in final_chunk:
+                    usage = final_chunk["usage"]
+                    input_tokens = usage.get("prompt_tokens", 0)
+                    # Use the actual output tokens from usage if available, otherwise use our count
+                    output_tokens_from_usage = usage.get("completion_tokens", 0)
+                    if output_tokens_from_usage > 0:
+                        output_tokens = output_tokens_from_usage
+                else:
+                    # Estimate input tokens based on prompt length and image
+                    # Rough approximation: prompt tokens + image tokens (estimate based on image size)
+                    prompt_word_count = len(prompt.split())
+                    # Estimate image tokens: roughly 1 token per 100 pixels (very rough approximation)
+                    image_tokens_estimate = max(100, (image.size[0] * image.size[1]) // 100)
+                    input_tokens = prompt_word_count + image_tokens_estimate
 
-                # return {
-                #     "choices": [
-                #         {
-                #             "index": 0,
-                #             "finish_reason": "stop",
-                #             "message": {"role": "assistant", "content": text},
-                #         }
-                #     ],
-                #     "usage": {
-                #         "prompt_tokens": input_tokens,
-                #         "completion_tokens": output_tokens,
-                #         "total_tokens": input_tokens + output_tokens,
-                #     },
-                # }
-                return text
+                return text, input_tokens, output_tokens
 
             else:
                 # Handle non-streaming response
@@ -1015,7 +1020,15 @@ def _call_inference_server_vlm_api(
                         "Invalid response format from inference-server: no content in message"
                     )
 
-                return content
+                # Extract token usage from response
+                input_tokens = 0
+                output_tokens = 0
+                if "usage" in result:
+                    usage = result["usage"]
+                    input_tokens = usage.get("prompt_tokens", 0)
+                    output_tokens = usage.get("completion_tokens", 0)
+
+                return content, input_tokens, output_tokens
 
         except (
             requests.exceptions.RequestException,
@@ -1052,7 +1065,7 @@ def _call_bedrock_vlm_api(
     temperature: float = None,
     top_p: float = None,
     timeout: int = 60,
-) -> str:
+) -> Tuple[str, int, int]:
     """
     Calls AWS Bedrock API with an image and text prompt for vision models.
 
@@ -1067,7 +1080,7 @@ def _call_bedrock_vlm_api(
         timeout: Request timeout in seconds
 
     Returns:
-        str: The generated text response from the model
+        Tuple[str, int, int]: The generated text response, input tokens, output tokens
 
     Raises:
         ConnectionError: If the API request fails
@@ -1128,7 +1141,15 @@ def _call_bedrock_vlm_api(
         else:
             raise ValueError("No content in Bedrock response")
 
-        return text
+        # Extract token usage from API response
+        input_tokens = 0
+        output_tokens = 0
+        if "usage" in api_response:
+            usage = api_response["usage"]
+            input_tokens = usage.get("inputTokens", 0)
+            output_tokens = usage.get("outputTokens", 0)
+
+        return text, input_tokens, output_tokens
 
     except Exception as e:
         raise ConnectionError(f"Failed to call Bedrock API: {str(e)}")
@@ -1143,7 +1164,7 @@ def _call_gemini_vlm_api(
     max_new_tokens: int = None,
     temperature: float = None,
     timeout: int = 60,
-) -> str:
+) -> Tuple[str, int, int]:
     """
     Calls Gemini API with an image and text prompt for vision models.
 
@@ -1158,7 +1179,7 @@ def _call_gemini_vlm_api(
         timeout: Request timeout in seconds
 
     Returns:
-        str: The generated text response from the model
+        Tuple[str, int, int]: The generated text response, input tokens, output tokens
 
     Raises:
         ConnectionError: If the API request fails
@@ -1214,8 +1235,9 @@ def _call_gemini_vlm_api(
         )
 
         # Extract text from response
+        text = ""
         if hasattr(response, "text"):
-            return response.text
+            text = response.text
         elif hasattr(response, "candidates") and len(response.candidates) > 0:
             if hasattr(response.candidates[0], "content"):
                 if hasattr(response.candidates[0].content, "parts"):
@@ -1223,9 +1245,25 @@ def _call_gemini_vlm_api(
                     for part in response.candidates[0].content.parts:
                         if hasattr(part, "text"):
                             text_parts.append(part.text)
-                    return "".join(text_parts)
-        else:
+                    text = "".join(text_parts)
+
+        if not text:
             raise ValueError("No text content in Gemini response")
+
+        # Extract token usage from response
+        input_tokens = 0
+        output_tokens = 0
+        try:
+            if hasattr(response, "usage_metadata"):
+                usage = response.usage_metadata
+                if hasattr(usage, "prompt_token_count"):
+                    input_tokens = usage.prompt_token_count
+                if hasattr(usage, "candidates_token_count"):
+                    output_tokens = usage.candidates_token_count
+        except Exception:
+            pass  # Token usage not available, return 0
+
+        return text, input_tokens, output_tokens
 
     except Exception as e:
         raise ConnectionError(f"Failed to call Gemini API: {str(e)}")
@@ -1239,7 +1277,7 @@ def _call_azure_openai_vlm_api(
     max_new_tokens: int = None,
     temperature: float = None,
     timeout: int = 60,
-) -> str:
+) -> Tuple[str, int, int]:
     """
     Calls Azure/OpenAI API with an image and text prompt for vision models.
 
@@ -1253,7 +1291,7 @@ def _call_azure_openai_vlm_api(
         timeout: Request timeout in seconds
 
     Returns:
-        str: The generated text response from the model
+        Tuple[str, int, int]: The generated text response, input tokens, output tokens
 
     Raises:
         ConnectionError: If the API request fails
@@ -1296,14 +1334,30 @@ def _call_azure_openai_vlm_api(
         )
 
         # Extract text from response
+        text = ""
         if response.choices and len(response.choices) > 0:
             message = response.choices[0].message
             if hasattr(message, "content") and message.content:
-                return message.content
+                text = message.content
             else:
                 raise ValueError("No content in OpenAI response")
         else:
             raise ValueError("No choices in OpenAI response")
+
+        # Extract token usage from response
+        input_tokens = 0
+        output_tokens = 0
+        try:
+            if hasattr(response, "usage"):
+                usage = response.usage
+                if hasattr(usage, "prompt_tokens"):
+                    input_tokens = usage.prompt_tokens
+                if hasattr(usage, "completion_tokens"):
+                    output_tokens = usage.completion_tokens
+        except Exception:
+            pass  # Token usage not available, return 0
+
+        return text, input_tokens, output_tokens
 
     except Exception as e:
         raise ConnectionError(f"Failed to call Azure/OpenAI API: {str(e)}")
@@ -1364,7 +1418,7 @@ def _vlm_ocr_predict(
         # Pass None for parameters to prioritize model-specific defaults from run_vlm.py
         # If model defaults are not available, general defaults will be used (matching current values)
         # print(f"Calling extract_text_from_image_vlm with image size: {width}x{height}")
-        extracted_text = extract_text_from_image_vlm(
+        extracted_text, _, _ = extract_text_from_image_vlm(
             text=prompt,
             image=image,
             max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
@@ -1766,7 +1820,7 @@ def _gemini_vlm_ocr_predict(
 
         for attempt in range(1, max_retries + 1):
             try:
-                extracted_text = _call_gemini_vlm_api(
+                extracted_text, _, _ = _call_gemini_vlm_api(
                     image=image,
                     prompt=prompt,
                     client=client,
@@ -1890,7 +1944,7 @@ def _azure_openai_vlm_ocr_predict(
 
         for attempt in range(1, max_retries + 1):
             try:
-                extracted_text = _call_azure_openai_vlm_api(
+                extracted_text, _, _ = _call_azure_openai_vlm_api(
                     image=image,
                     prompt=prompt,
                     client=client,
@@ -2224,7 +2278,7 @@ def _vlm_page_ocr_predict(
     detect_people_only: bool = False,
     detect_signatures_only: bool = False,
     progress: Optional[gr.Progress] = gr.Progress(),
-) -> Dict[str, List]:
+) -> Tuple[Dict[str, List], int, int, str]:
     """
     VLM page-level OCR prediction that returns structured line-level results with bounding boxes.
 
@@ -2387,18 +2441,20 @@ def _vlm_page_ocr_predict(
 
         # Use the VLM to extract structured text
         # Pass explicit model_default_* values for consistency with _inference_server_page_ocr_predict
-        extracted_text = extract_text_from_image_vlm(
-            text=prompt,
-            image=processed_image,
-            max_new_tokens=model_default_max_new_tokens,
-            temperature=model_default_temperature,
-            top_p=model_default_top_p,
-            min_p=model_default_min_p,
-            top_k=model_default_top_k,
-            repetition_penalty=model_default_repetition_penalty,
-            presence_penalty=model_default_presence_penalty,
-            seed=model_default_seed,
-            do_sample=model_default_do_sample,
+        extracted_text, vlm_input_tokens, vlm_output_tokens = (
+            extract_text_from_image_vlm(
+                text=prompt,
+                image=processed_image,
+                max_new_tokens=model_default_max_new_tokens,
+                temperature=model_default_temperature,
+                top_p=model_default_top_p,
+                min_p=model_default_min_p,
+                top_k=model_default_top_k,
+                repetition_penalty=model_default_repetition_penalty,
+                presence_penalty=model_default_presence_penalty,
+                seed=model_default_seed,
+                do_sample=model_default_do_sample,
+            )
         )
 
         # Check if extracted_text is None or empty
@@ -2406,15 +2462,24 @@ def _vlm_page_ocr_predict(
             print(
                 "VLM page OCR warning: extract_text_from_image_vlm returned None or invalid type"
             )
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                (
+                    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    else "VLM"
+                ),
+            )
 
         # Try to parse JSON from the response
         # The VLM might return JSON wrapped in markdown code blocks or with extra text
@@ -2685,22 +2750,34 @@ def _vlm_page_ocr_predict(
             result["conf"].append(int(round(confidence)))
             result["model"].append("VLM")
 
-        return result
+        # Get model name for tracking
+        vlm_model_name = (
+            SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+            if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+            else "VLM"
+        )
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
 
     except Exception as e:
         print(f"VLM page OCR error: {e}")
         import traceback
 
         print(f"VLM page OCR error traceback: {traceback.format_exc()}")
-        return {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
-            "model": [],
-        }
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            "VLM",
+        )
 
 
 def _inference_server_page_ocr_predict(
@@ -2712,7 +2789,7 @@ def _inference_server_page_ocr_predict(
     detect_signatures_only: bool = False,
     progress: Optional[gr.Progress] = gr.Progress(),
     model_name: str = None,
-) -> Dict[str, List]:
+) -> Tuple[Dict[str, List], int, int, str]:
     """
     Inference-server page-level OCR prediction that returns structured line-level results with bounding boxes.
     Calls an external inference-server API instead of a local model.
@@ -2897,20 +2974,22 @@ def _inference_server_page_ocr_predict(
                 INFERENCE_SERVER_MODEL_NAME if INFERENCE_SERVER_MODEL_NAME else None
             )
 
-        extracted_text = _call_inference_server_vlm_api(
-            image=processed_image,
-            prompt=prompt,
-            model_name=final_model_name,
-            max_new_tokens=model_default_max_new_tokens,
-            temperature=model_default_temperature,
-            top_p=model_default_top_p,
-            top_k=model_default_top_k,
-            repetition_penalty=model_default_repetition_penalty,
-            seed=model_default_seed,
-            do_sample=model_default_do_sample,
-            min_p=model_default_min_p,
-            presence_penalty=model_default_presence_penalty,
-            use_llama_swap=USE_LLAMA_SWAP,
+        extracted_text, vlm_input_tokens, vlm_output_tokens = (
+            _call_inference_server_vlm_api(
+                image=processed_image,
+                prompt=prompt,
+                model_name=final_model_name,
+                max_new_tokens=model_default_max_new_tokens,
+                temperature=model_default_temperature,
+                top_p=model_default_top_p,
+                top_k=model_default_top_k,
+                repetition_penalty=model_default_repetition_penalty,
+                seed=model_default_seed,
+                do_sample=model_default_do_sample,
+                min_p=model_default_min_p,
+                presence_penalty=model_default_presence_penalty,
+                use_llama_swap=USE_LLAMA_SWAP,
+            )
         )
 
         # Save prompt and response to file
@@ -2953,15 +3032,20 @@ def _inference_server_page_ocr_predict(
             print(
                 "Inference-server page OCR warning: API returned None or invalid type"
             )
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                final_model_name or "Inference Server",
+            )
 
         # Try to parse JSON from the response
         # The API might return JSON wrapped in markdown code blocks or with extra text
@@ -3231,22 +3315,37 @@ def _inference_server_page_ocr_predict(
             result["conf"].append(int(round(confidence)))
             result["model"].append("Inference server")
 
-        return result
+        # Get model name for tracking
+        vlm_model_name = final_model_name or "Inference Server"
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
 
     except Exception as e:
         print(f"Inference-server page OCR error: {e}")
         import traceback
 
         print(f"Inference-server page OCR error traceback: {traceback.format_exc()}")
-        return {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
-            "model": [],
-        }
+        # Determine model name for error case
+        error_model_name = (
+            model_name
+            or DEFAULT_INFERENCE_SERVER_VLM_MODEL
+            or INFERENCE_SERVER_MODEL_NAME
+            or "Inference Server"
+        )
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            error_model_name,
+        )
 
 
 def _parse_vlm_page_ocr_response(
@@ -3456,7 +3555,7 @@ def _bedrock_page_ocr_predict(
     progress: Optional[gr.Progress] = gr.Progress(),
     model_choice: str = None,
     bedrock_runtime=None,
-) -> Dict[str, List]:
+) -> Tuple[Dict[str, List], int, int, str]:
     """
     Bedrock page-level OCR prediction that returns structured line-level results with bounding boxes.
 
@@ -3638,7 +3737,7 @@ def _bedrock_page_ocr_predict(
                 print(f"Warning: Could not save Bedrock VLM input image: {save_error}")
 
         # Call Bedrock API
-        extracted_text = _call_bedrock_vlm_api(
+        extracted_text, vlm_input_tokens, vlm_output_tokens = _call_bedrock_vlm_api(
             image=processed_image,
             prompt=prompt,
             model_choice=model_choice,
@@ -3685,15 +3784,20 @@ def _bedrock_page_ocr_predict(
 
         if extracted_text is None or not isinstance(extracted_text, str):
             print("Bedrock page OCR warning: No valid response")
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                model_choice or "Bedrock",
+            )
 
         # Plot bounding boxes from VLM response if enabled
         if SAVE_VLM_INPUT_IMAGES:
@@ -3719,7 +3823,7 @@ def _bedrock_page_ocr_predict(
                 )
 
         # Parse response using shared helper
-        return _parse_vlm_page_ocr_response(
+        result = _parse_vlm_page_ocr_response(
             extracted_text=extracted_text,
             processed_image=processed_image,
             processed_width=processed_width,
@@ -3730,20 +3834,30 @@ def _bedrock_page_ocr_predict(
             model_name="Bedrock",
         )
 
+        # Get model name for tracking
+        vlm_model_name = model_choice or "Bedrock"
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
+
     except Exception as e:
         print(f"Bedrock page OCR error: {e}")
         import traceback
 
         print(f"Bedrock page OCR error traceback: {traceback.format_exc()}")
-        return {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
-            "model": [],
-        }
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            model_choice or "Bedrock",
+        )
 
 
 def _gemini_page_ocr_predict(
@@ -3757,7 +3871,7 @@ def _gemini_page_ocr_predict(
     model_choice: str = None,
     client=None,
     config=None,
-) -> Dict[str, List]:
+) -> Tuple[Dict[str, List], int, int, str]:
     """
     Gemini page-level OCR prediction that returns structured line-level results with bounding boxes.
 
@@ -3873,7 +3987,7 @@ def _gemini_page_ocr_predict(
             prompt = full_page_ocr_vlm_prompt
 
         # Call Gemini API
-        extracted_text = _call_gemini_vlm_api(
+        extracted_text, vlm_input_tokens, vlm_output_tokens = _call_gemini_vlm_api(
             image=processed_image,
             prompt=prompt,
             client=client,
@@ -3919,18 +4033,23 @@ def _gemini_page_ocr_predict(
 
         if extracted_text is None or not isinstance(extracted_text, str):
             print("Gemini page OCR warning: No valid response")
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                model_choice or "Gemini",
+            )
 
         # Parse response using shared helper
-        return _parse_vlm_page_ocr_response(
+        result = _parse_vlm_page_ocr_response(
             extracted_text=extracted_text,
             processed_image=processed_image,
             processed_width=processed_width,
@@ -3941,20 +4060,30 @@ def _gemini_page_ocr_predict(
             model_name="Gemini",
         )
 
+        # Get model name for tracking
+        vlm_model_name = model_choice or "Gemini"
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
+
     except Exception as e:
         print(f"Gemini page OCR error: {e}")
         import traceback
 
         print(f"Gemini page OCR error traceback: {traceback.format_exc()}")
-        return {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
-            "model": [],
-        }
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            model_choice or "Gemini",
+        )
 
 
 def _azure_openai_page_ocr_predict(
@@ -3967,7 +4096,7 @@ def _azure_openai_page_ocr_predict(
     progress: Optional[gr.Progress] = gr.Progress(),
     model_choice: str = None,
     client=None,
-) -> Dict[str, List]:
+) -> Tuple[Dict[str, List], int, int, str]:
     """
     Azure/OpenAI page-level OCR prediction that returns structured line-level results with bounding boxes.
 
@@ -4084,13 +4213,15 @@ def _azure_openai_page_ocr_predict(
             prompt = full_page_ocr_vlm_prompt
 
         # Call Azure/OpenAI API
-        extracted_text = _call_azure_openai_vlm_api(
-            image=processed_image,
-            prompt=prompt,
-            client=client,
-            model_choice=model_choice,
-            max_new_tokens=model_default_max_new_tokens,
-            temperature=model_default_temperature,
+        extracted_text, vlm_input_tokens, vlm_output_tokens = (
+            _call_azure_openai_vlm_api(
+                image=processed_image,
+                prompt=prompt,
+                client=client,
+                model_choice=model_choice,
+                max_new_tokens=model_default_max_new_tokens,
+                temperature=model_default_temperature,
+            )
         )
 
         # Save prompt and response to file
@@ -4129,18 +4260,23 @@ def _azure_openai_page_ocr_predict(
 
         if extracted_text is None or not isinstance(extracted_text, str):
             print("Azure/OpenAI page OCR warning: No valid response")
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                model_choice or "Azure/OpenAI",
+            )
 
         # Parse response using shared helper
-        return _parse_vlm_page_ocr_response(
+        result = _parse_vlm_page_ocr_response(
             extracted_text=extracted_text,
             processed_image=processed_image,
             processed_width=processed_width,
@@ -4151,20 +4287,30 @@ def _azure_openai_page_ocr_predict(
             model_name="Azure/OpenAI",
         )
 
+        # Get model name for tracking
+        vlm_model_name = model_choice or "Azure/OpenAI"
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
+
     except Exception as e:
         print(f"Azure/OpenAI page OCR error: {e}")
         import traceback
 
         print(f"Azure/OpenAI page OCR error traceback: {traceback.format_exc()}")
-        return {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
-            "model": [],
-        }
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            model_choice or "Azure/OpenAI",
+        )
 
 
 class CustomImageAnalyzerEngine:
@@ -6215,7 +6361,7 @@ class CustomImageAnalyzerEngine:
         azure_openai_client=None,
         vlm_model_choice: str = None,
         inference_server_model_name: str = None,
-    ) -> List[OCRResult]:
+    ) -> Tuple[List[OCRResult], int, int, str]:
         """
         Performs OCR on the given image using the configured engine.
         """
@@ -6284,7 +6430,12 @@ class CustomImageAnalyzerEngine:
             # Try hybrid VLM with original image for cropping:
             ocr_data = self._perform_hybrid_ocr(image, image_name=image_name)
 
-        elif self.ocr_engine == "vlm":
+        # Initialize VLM token tracking variables
+        vlm_total_input_tokens = 0
+        vlm_total_output_tokens = 0
+        vlm_model_name = ""
+
+        if self.ocr_engine == "vlm":
             # VLM page-level OCR - sends whole page to VLM and gets structured line-level results
             # Use original image (before preprocessing) for VLM since coordinates should be in original space
             vlm_image = (
@@ -6292,9 +6443,13 @@ class CustomImageAnalyzerEngine:
                 if original_image_for_visualization is not None
                 else image
             )
-            ocr_data = _vlm_page_ocr_predict(
-                vlm_image, image_name=image_name, output_folder=self.output_folder
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _vlm_page_ocr_predict(
+                    vlm_image, image_name=image_name, output_folder=self.output_folder
+                )
             )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
             # VLM returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "inference-server":
@@ -6305,13 +6460,17 @@ class CustomImageAnalyzerEngine:
                 if original_image_for_visualization is not None
                 else image
             )
-            ocr_data = _inference_server_page_ocr_predict(
-                inference_server_image,
-                image_name=image_name,
-                normalised_coords_range=999,
-                output_folder=self.output_folder,
-                model_name=inference_server_model_name,
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _inference_server_page_ocr_predict(
+                    inference_server_image,
+                    image_name=image_name,
+                    normalised_coords_range=999,
+                    output_folder=self.output_folder,
+                    model_name=inference_server_model_name,
+                )
             )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
             # Inference-server returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "bedrock-vlm":
@@ -6335,14 +6494,18 @@ class CustomImageAnalyzerEngine:
             if model_choice and "qwen" in model_choice.lower():
                 normalised_coords_range = 999
 
-            ocr_data = _bedrock_page_ocr_predict(
-                bedrock_image,
-                image_name=image_name,
-                normalised_coords_range=normalised_coords_range,
-                output_folder=self.output_folder,
-                model_choice=model_choice,
-                bedrock_runtime=bedrock_runtime,
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _bedrock_page_ocr_predict(
+                    bedrock_image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=self.output_folder,
+                    model_choice=model_choice,
+                    bedrock_runtime=bedrock_runtime,
+                )
             )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
             # Bedrock returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "gemini-vlm":
@@ -6359,15 +6522,19 @@ class CustomImageAnalyzerEngine:
             model_choice = (
                 vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
             )
-            ocr_data = _gemini_page_ocr_predict(
-                gemini_image,
-                image_name=image_name,
-                normalised_coords_range=None,  # Gemini typically returns absolute coordinates
-                output_folder=self.output_folder,
-                model_choice=model_choice,
-                client=gemini_client,
-                config=gemini_config,
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _gemini_page_ocr_predict(
+                    gemini_image,
+                    image_name=image_name,
+                    normalised_coords_range=None,  # Gemini typically returns absolute coordinates
+                    output_folder=self.output_folder,
+                    model_choice=model_choice,
+                    client=gemini_client,
+                    config=gemini_config,
+                )
             )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
             # Gemini returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "azure-openai-vlm":
@@ -6384,14 +6551,18 @@ class CustomImageAnalyzerEngine:
             model_choice = (
                 vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
             )
-            ocr_data = _azure_openai_page_ocr_predict(
-                azure_image,
-                image_name=image_name,
-                normalised_coords_range=None,  # Azure/OpenAI typically returns absolute coordinates
-                output_folder=self.output_folder,
-                model_choice=model_choice,
-                client=azure_openai_client,
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _azure_openai_page_ocr_predict(
+                    azure_image,
+                    image_name=image_name,
+                    normalised_coords_range=None,  # Azure/OpenAI typically returns absolute coordinates
+                    output_folder=self.output_folder,
+                    model_choice=model_choice,
+                    client=azure_openai_client,
+                )
             )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
             # Azure/OpenAI returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "tesseract":
@@ -6845,7 +7016,7 @@ class CustomImageAnalyzerEngine:
             for i in valid_indices
         ]
 
-        return output
+        return output, vlm_total_input_tokens, vlm_total_output_tokens, vlm_model_name
 
     def analyze_text(
         self,
@@ -6870,6 +7041,11 @@ class CustomImageAnalyzerEngine:
         page_text_mapping = list()
         all_text_line_results = list()
         comprehend_query_number = 0
+
+        # Track LLM token usage
+        llm_total_input_tokens = 0
+        llm_total_output_tokens = 0
+        llm_model_name = ""
 
         # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
         if chosen_llm_entities is None:
@@ -7186,6 +7362,9 @@ class CustomImageAnalyzerEngine:
                     "model_choice", CLOUD_LLM_PII_MODEL_CHOICE
                 )
 
+            # Set LLM model name for tracking
+            llm_model_name = model_choice or ""
+
             # Handle custom entities first (same as AWS Comprehend)
             if custom_entities:
                 custom_redact_entities = [
@@ -7288,7 +7467,11 @@ class CustomImageAnalyzerEngine:
                                 if entity != "CUSTOM"
                             ]
                             # Process current batch
-                            all_text_line_results = do_llm_entity_detection_call(
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
                                 current_batch,
                                 current_batch_mapping,
                                 bedrock_runtime=bedrock_runtime,
@@ -7320,6 +7503,9 @@ class CustomImageAnalyzerEngine:
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
                             )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
                             comprehend_query_number += 1
 
                             # Reset batch
@@ -7382,7 +7568,11 @@ class CustomImageAnalyzerEngine:
                                 if entity != "CUSTOM"
                             ]
                             # Process current batch
-                            all_text_line_results = do_llm_entity_detection_call(
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
                                 current_batch,
                                 current_batch_mapping,
                                 bedrock_runtime=bedrock_runtime,
@@ -7414,6 +7604,9 @@ class CustomImageAnalyzerEngine:
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
                             )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
                             comprehend_query_number += 1
 
                             # Reset batch
@@ -7452,34 +7645,39 @@ class CustomImageAnalyzerEngine:
                 llm_chosen_redact_comprehend_entities = [
                     entity for entity in chosen_llm_entities if entity != "CUSTOM"
                 ]
-                all_text_line_results = do_llm_entity_detection_call(
-                    current_batch,
-                    current_batch_mapping,
-                    bedrock_runtime=bedrock_runtime,
-                    language=aws_language,
-                    allow_list=text_analyzer_kwargs.get("allow_list", []),
-                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
-                    all_text_line_results=all_text_line_results,
-                    model_choice=model_choice,
-                    temperature=text_analyzer_kwargs.get(
-                        "temperature", LLM_PII_TEMPERATURE
-                    ),
-                    max_tokens=text_analyzer_kwargs.get(
-                        "max_tokens", LLM_PII_MAX_TOKENS
-                    ),
-                    output_folder=getattr(self, "output_folder", None),
-                    batch_number=comprehend_query_number + 1,
-                    custom_instructions=custom_llm_instructions,
-                    file_name=file_name,
-                    page_number=page_number,
-                    inference_method=text_analyzer_kwargs.get("inference_method"),
-                    local_model=text_analyzer_kwargs.get("local_model"),
-                    tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                    assistant_model=text_analyzer_kwargs.get("assistant_model"),
-                    client=text_analyzer_kwargs.get("client"),
-                    client_config=text_analyzer_kwargs.get("client_config"),
-                    api_url=text_analyzer_kwargs.get("api_url"),
+                all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                    do_llm_entity_detection_call(
+                        current_batch,
+                        current_batch_mapping,
+                        bedrock_runtime=bedrock_runtime,
+                        language=aws_language,
+                        allow_list=text_analyzer_kwargs.get("allow_list", []),
+                        chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                        all_text_line_results=all_text_line_results,
+                        model_choice=model_choice,
+                        temperature=text_analyzer_kwargs.get(
+                            "temperature", LLM_PII_TEMPERATURE
+                        ),
+                        max_tokens=text_analyzer_kwargs.get(
+                            "max_tokens", LLM_PII_MAX_TOKENS
+                        ),
+                        output_folder=getattr(self, "output_folder", None),
+                        batch_number=comprehend_query_number + 1,
+                        custom_instructions=custom_llm_instructions,
+                        file_name=file_name,
+                        page_number=page_number,
+                        inference_method=text_analyzer_kwargs.get("inference_method"),
+                        local_model=text_analyzer_kwargs.get("local_model"),
+                        tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                        assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                        client=text_analyzer_kwargs.get("client"),
+                        client_config=text_analyzer_kwargs.get("client_config"),
+                        api_url=text_analyzer_kwargs.get("api_url"),
+                    )
                 )
+                # Accumulate token usage
+                llm_total_input_tokens += batch_input_tokens
+                llm_total_output_tokens += batch_output_tokens
                 comprehend_query_number += 1
         elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
             # LLM-based entity detection using inference server
@@ -7501,9 +7699,13 @@ class CustomImageAnalyzerEngine:
 
             # Set model choice if not already set - use INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
             if text_analyzer_kwargs.get("model_choice") is None:
-                text_analyzer_kwargs["model_choice"] = (
-                    INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
-                )
+                model_choice = INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
+                text_analyzer_kwargs["model_choice"] = model_choice
+            else:
+                model_choice = text_analyzer_kwargs.get("model_choice")
+
+            # Set LLM model name for tracking
+            llm_model_name = model_choice or ""
 
             # Update model_choice to use the value from text_analyzer_kwargs
             model_choice = text_analyzer_kwargs.get(
@@ -7612,7 +7814,11 @@ class CustomImageAnalyzerEngine:
                                 if entity != "CUSTOM"
                             ]
                             # Process current batch
-                            all_text_line_results = do_llm_entity_detection_call(
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
                                 current_batch,
                                 current_batch_mapping,
                                 bedrock_runtime=bedrock_runtime,
@@ -7644,6 +7850,9 @@ class CustomImageAnalyzerEngine:
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
                             )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
                             comprehend_query_number += 1
 
                             # Reset batch
@@ -7706,7 +7915,11 @@ class CustomImageAnalyzerEngine:
                                 if entity != "CUSTOM"
                             ]
                             # Process current batch
-                            all_text_line_results = do_llm_entity_detection_call(
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
                                 current_batch,
                                 current_batch_mapping,
                                 bedrock_runtime=bedrock_runtime,
@@ -7738,6 +7951,9 @@ class CustomImageAnalyzerEngine:
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
                             )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
                             comprehend_query_number += 1
 
                             # Reset batch
@@ -7776,34 +7992,39 @@ class CustomImageAnalyzerEngine:
                 llm_chosen_redact_comprehend_entities = [
                     entity for entity in chosen_llm_entities if entity != "CUSTOM"
                 ]
-                all_text_line_results = do_llm_entity_detection_call(
-                    current_batch,
-                    current_batch_mapping,
-                    bedrock_runtime=bedrock_runtime,
-                    language=aws_language,
-                    allow_list=text_analyzer_kwargs.get("allow_list", []),
-                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
-                    all_text_line_results=all_text_line_results,
-                    model_choice=model_choice,
-                    temperature=text_analyzer_kwargs.get(
-                        "temperature", LLM_PII_TEMPERATURE
-                    ),
-                    max_tokens=text_analyzer_kwargs.get(
-                        "max_tokens", LLM_PII_MAX_TOKENS
-                    ),
-                    output_folder=getattr(self, "output_folder", None),
-                    batch_number=comprehend_query_number + 1,
-                    custom_instructions=custom_llm_instructions,
-                    file_name=file_name,
-                    page_number=page_number,
-                    inference_method=text_analyzer_kwargs.get("inference_method"),
-                    local_model=text_analyzer_kwargs.get("local_model"),
-                    tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                    assistant_model=text_analyzer_kwargs.get("assistant_model"),
-                    client=text_analyzer_kwargs.get("client"),
-                    client_config=text_analyzer_kwargs.get("client_config"),
-                    api_url=text_analyzer_kwargs.get("api_url"),
+                all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                    do_llm_entity_detection_call(
+                        current_batch,
+                        current_batch_mapping,
+                        bedrock_runtime=bedrock_runtime,
+                        language=aws_language,
+                        allow_list=text_analyzer_kwargs.get("allow_list", []),
+                        chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                        all_text_line_results=all_text_line_results,
+                        model_choice=model_choice,
+                        temperature=text_analyzer_kwargs.get(
+                            "temperature", LLM_PII_TEMPERATURE
+                        ),
+                        max_tokens=text_analyzer_kwargs.get(
+                            "max_tokens", LLM_PII_MAX_TOKENS
+                        ),
+                        output_folder=getattr(self, "output_folder", None),
+                        batch_number=comprehend_query_number + 1,
+                        custom_instructions=custom_llm_instructions,
+                        file_name=file_name,
+                        page_number=page_number,
+                        inference_method=text_analyzer_kwargs.get("inference_method"),
+                        local_model=text_analyzer_kwargs.get("local_model"),
+                        tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                        assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                        client=text_analyzer_kwargs.get("client"),
+                        client_config=text_analyzer_kwargs.get("client_config"),
+                        api_url=text_analyzer_kwargs.get("api_url"),
+                    )
                 )
+                # Accumulate token usage
+                llm_total_input_tokens += batch_input_tokens
+                llm_total_output_tokens += batch_output_tokens
                 comprehend_query_number += 1
 
         elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
@@ -7962,7 +8183,11 @@ class CustomImageAnalyzerEngine:
                                 if entity != "CUSTOM"
                             ]
                             # Process current batch
-                            all_text_line_results = do_llm_entity_detection_call(
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
                                 current_batch,
                                 current_batch_mapping,
                                 bedrock_runtime=bedrock_runtime,
@@ -7994,6 +8219,9 @@ class CustomImageAnalyzerEngine:
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
                             )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
                             comprehend_query_number += 1
 
                             # Reset batch
@@ -8056,7 +8284,11 @@ class CustomImageAnalyzerEngine:
                                 if entity != "CUSTOM"
                             ]
                             # Process current batch
-                            all_text_line_results = do_llm_entity_detection_call(
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
                                 current_batch,
                                 current_batch_mapping,
                                 bedrock_runtime=bedrock_runtime,
@@ -8088,6 +8320,9 @@ class CustomImageAnalyzerEngine:
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
                             )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
                             comprehend_query_number += 1
 
                             # Reset batch
@@ -8126,34 +8361,39 @@ class CustomImageAnalyzerEngine:
                 llm_chosen_redact_comprehend_entities = [
                     entity for entity in chosen_llm_entities if entity != "CUSTOM"
                 ]
-                all_text_line_results = do_llm_entity_detection_call(
-                    current_batch,
-                    current_batch_mapping,
-                    bedrock_runtime=bedrock_runtime,
-                    language=aws_language,
-                    allow_list=text_analyzer_kwargs.get("allow_list", []),
-                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
-                    all_text_line_results=all_text_line_results,
-                    model_choice=model_choice,
-                    temperature=text_analyzer_kwargs.get(
-                        "temperature", LLM_PII_TEMPERATURE
-                    ),
-                    max_tokens=text_analyzer_kwargs.get(
-                        "max_tokens", LLM_PII_MAX_TOKENS
-                    ),
-                    output_folder=getattr(self, "output_folder", None),
-                    batch_number=comprehend_query_number + 1,
-                    custom_instructions=custom_llm_instructions,
-                    file_name=file_name,
-                    page_number=page_number,
-                    inference_method=text_analyzer_kwargs.get("inference_method"),
-                    local_model=text_analyzer_kwargs.get("local_model"),
-                    tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                    assistant_model=text_analyzer_kwargs.get("assistant_model"),
-                    client=text_analyzer_kwargs.get("client"),
-                    client_config=text_analyzer_kwargs.get("client_config"),
-                    api_url=text_analyzer_kwargs.get("api_url"),
+                all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                    do_llm_entity_detection_call(
+                        current_batch,
+                        current_batch_mapping,
+                        bedrock_runtime=bedrock_runtime,
+                        language=aws_language,
+                        allow_list=text_analyzer_kwargs.get("allow_list", []),
+                        chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                        all_text_line_results=all_text_line_results,
+                        model_choice=model_choice,
+                        temperature=text_analyzer_kwargs.get(
+                            "temperature", LLM_PII_TEMPERATURE
+                        ),
+                        max_tokens=text_analyzer_kwargs.get(
+                            "max_tokens", LLM_PII_MAX_TOKENS
+                        ),
+                        output_folder=getattr(self, "output_folder", None),
+                        batch_number=comprehend_query_number + 1,
+                        custom_instructions=custom_llm_instructions,
+                        file_name=file_name,
+                        page_number=page_number,
+                        inference_method=text_analyzer_kwargs.get("inference_method"),
+                        local_model=text_analyzer_kwargs.get("local_model"),
+                        tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                        assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                        client=text_analyzer_kwargs.get("client"),
+                        client_config=text_analyzer_kwargs.get("client_config"),
+                        api_url=text_analyzer_kwargs.get("api_url"),
+                    )
                 )
+                # Accumulate token usage
+                llm_total_input_tokens += batch_input_tokens
+                llm_total_output_tokens += batch_output_tokens
                 comprehend_query_number += 1
 
         # Process results and create bounding boxes
@@ -8187,7 +8427,13 @@ class CustomImageAnalyzerEngine:
                     )
                     combined_results.extend(bbox_results)
 
-        return combined_results, comprehend_query_number
+        return (
+            combined_results,
+            comprehend_query_number,
+            llm_model_name,
+            llm_total_input_tokens,
+            llm_total_output_tokens,
+        )
 
     @staticmethod
     def map_analyzer_results_to_bounding_boxes(
@@ -8573,6 +8819,11 @@ def run_page_text_redaction(
     all_text_line_results = list()
     comprehend_query_number = 0
 
+    # Track LLM token usage
+    llm_total_input_tokens = 0
+    llm_total_output_tokens = 0
+    llm_model_name = ""
+
     # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
     if chosen_llm_entities is None:
         chosen_llm_entities = chosen_redact_comprehend_entities
@@ -8887,6 +9138,9 @@ def run_page_text_redaction(
                 "model_choice", CLOUD_LLM_PII_MODEL_CHOICE
             )
 
+        # Set LLM model name for tracking
+        llm_model_name = model_choice or ""
+
         # Handle custom entities first (same as AWS Comprehend)
         if custom_entities:
             custom_redact_entities = [
@@ -8989,7 +9243,11 @@ def run_page_text_redaction(
                             if entity != "CUSTOM"
                         ]
                         # Process current batch
-                        all_text_line_results = do_llm_entity_detection_call(
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
                             current_batch,
                             current_batch_mapping,
                             bedrock_runtime=bedrock_runtime,
@@ -9080,7 +9338,11 @@ def run_page_text_redaction(
                             if entity != "CUSTOM"
                         ]
                         # Process current batch
-                        all_text_line_results = do_llm_entity_detection_call(
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
                             current_batch,
                             current_batch_mapping,
                             bedrock_runtime=bedrock_runtime,
@@ -9197,7 +9459,12 @@ def run_page_text_redaction(
             text_analyzer_kwargs["model_choice"] = INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
 
         # Update model_choice to use the value from text_analyzer_kwargs
-        model_choice = text_analyzer_kwargs.get("model_choice", model_choice)
+        model_choice = text_analyzer_kwargs.get(
+            "model_choice", INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
+        )
+
+        # Set LLM model name for tracking
+        llm_model_name = model_choice or ""
 
         # Handle custom entities first (same as AWS Comprehend)
         if custom_entities:
@@ -9301,7 +9568,11 @@ def run_page_text_redaction(
                             if entity != "CUSTOM"
                         ]
                         # Process current batch
-                        all_text_line_results = do_llm_entity_detection_call(
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
                             current_batch,
                             current_batch_mapping,
                             bedrock_runtime=bedrock_runtime,
@@ -9392,7 +9663,11 @@ def run_page_text_redaction(
                             if entity != "CUSTOM"
                         ]
                         # Process current batch
-                        all_text_line_results = do_llm_entity_detection_call(
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
                             current_batch,
                             current_batch_mapping,
                             bedrock_runtime=bedrock_runtime,
@@ -9459,32 +9734,39 @@ def run_page_text_redaction(
             llm_chosen_redact_comprehend_entities = [
                 entity for entity in chosen_llm_entities if entity != "CUSTOM"
             ]
-            all_text_line_results = do_llm_entity_detection_call(
-                current_batch,
-                current_batch_mapping,
-                bedrock_runtime=bedrock_runtime,
-                language=aws_language,
-                allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
-                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
-                all_text_line_results=all_text_line_results,
-                model_choice=model_choice,
-                temperature=text_analyzer_kwargs.get(
-                    "temperature", LLM_PII_TEMPERATURE
-                ),
-                max_tokens=text_analyzer_kwargs.get("max_tokens", LLM_PII_MAX_TOKENS),
-                output_folder=output_folder,
-                batch_number=comprehend_query_number + 1,
-                custom_instructions=custom_llm_instructions,
-                file_name=file_name,
-                page_number=page_number,
-                inference_method=text_analyzer_kwargs.get("inference_method"),
-                local_model=text_analyzer_kwargs.get("local_model"),
-                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                assistant_model=text_analyzer_kwargs.get("assistant_model"),
-                client=text_analyzer_kwargs.get("client"),
-                client_config=text_analyzer_kwargs.get("client_config"),
-                api_url=text_analyzer_kwargs.get("api_url"),
+            all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                do_llm_entity_detection_call(
+                    current_batch,
+                    current_batch_mapping,
+                    bedrock_runtime=bedrock_runtime,
+                    language=aws_language,
+                    allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
+                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                    all_text_line_results=all_text_line_results,
+                    model_choice=model_choice,
+                    temperature=text_analyzer_kwargs.get(
+                        "temperature", LLM_PII_TEMPERATURE
+                    ),
+                    max_tokens=text_analyzer_kwargs.get(
+                        "max_tokens", LLM_PII_MAX_TOKENS
+                    ),
+                    output_folder=output_folder,
+                    batch_number=comprehend_query_number + 1,
+                    custom_instructions=custom_llm_instructions,
+                    file_name=file_name,
+                    page_number=page_number,
+                    inference_method=text_analyzer_kwargs.get("inference_method"),
+                    local_model=text_analyzer_kwargs.get("local_model"),
+                    tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    client=text_analyzer_kwargs.get("client"),
+                    client_config=text_analyzer_kwargs.get("client_config"),
+                    api_url=text_analyzer_kwargs.get("api_url"),
+                )
             )
+            # Accumulate token usage
+            llm_total_input_tokens += batch_input_tokens
+            llm_total_output_tokens += batch_output_tokens
             comprehend_query_number += 1
 
     elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
@@ -9643,7 +9925,11 @@ def run_page_text_redaction(
                             if entity != "CUSTOM"
                         ]
                         # Process current batch
-                        all_text_line_results = do_llm_entity_detection_call(
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
                             current_batch,
                             current_batch_mapping,
                             bedrock_runtime=bedrock_runtime,
@@ -9694,9 +9980,7 @@ def run_page_text_redaction(
                         # Continue adding words until we find phrase-ending punctuation or end of line
                         while lookahead_idx < len(words):
                             lookahead_word = words[lookahead_idx]
-                            (
-                                len(lookahead_batch) + len(lookahead_word) + 1
-                            )
+                            (len(lookahead_batch) + len(lookahead_word) + 1)
 
                             # Add the word to lookahead batch
                             if lookahead_batch:
@@ -9736,7 +10020,11 @@ def run_page_text_redaction(
                             if entity != "CUSTOM"
                         ]
                         # Process current batch
-                        all_text_line_results = do_llm_entity_detection_call(
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
                             current_batch,
                             current_batch_mapping,
                             bedrock_runtime=bedrock_runtime,
@@ -9803,32 +10091,39 @@ def run_page_text_redaction(
             llm_chosen_redact_comprehend_entities = [
                 entity for entity in chosen_llm_entities if entity != "CUSTOM"
             ]
-            all_text_line_results = do_llm_entity_detection_call(
-                current_batch,
-                current_batch_mapping,
-                bedrock_runtime=bedrock_runtime,
-                language=aws_language,
-                allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
-                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
-                all_text_line_results=all_text_line_results,
-                model_choice=model_choice,
-                temperature=text_analyzer_kwargs.get(
-                    "temperature", LLM_PII_TEMPERATURE
-                ),
-                max_tokens=text_analyzer_kwargs.get("max_tokens", LLM_PII_MAX_TOKENS),
-                output_folder=output_folder,
-                batch_number=comprehend_query_number + 1,
-                custom_instructions=custom_llm_instructions,
-                file_name=file_name,
-                page_number=page_number,
-                inference_method=text_analyzer_kwargs.get("inference_method"),
-                local_model=text_analyzer_kwargs.get("local_model"),
-                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                assistant_model=text_analyzer_kwargs.get("assistant_model"),
-                client=text_analyzer_kwargs.get("client"),
-                client_config=text_analyzer_kwargs.get("client_config"),
-                api_url=text_analyzer_kwargs.get("api_url"),
+            all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                do_llm_entity_detection_call(
+                    current_batch,
+                    current_batch_mapping,
+                    bedrock_runtime=bedrock_runtime,
+                    language=aws_language,
+                    allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
+                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                    all_text_line_results=all_text_line_results,
+                    model_choice=model_choice,
+                    temperature=text_analyzer_kwargs.get(
+                        "temperature", LLM_PII_TEMPERATURE
+                    ),
+                    max_tokens=text_analyzer_kwargs.get(
+                        "max_tokens", LLM_PII_MAX_TOKENS
+                    ),
+                    output_folder=output_folder,
+                    batch_number=comprehend_query_number + 1,
+                    custom_instructions=custom_llm_instructions,
+                    file_name=file_name,
+                    page_number=page_number,
+                    inference_method=text_analyzer_kwargs.get("inference_method"),
+                    local_model=text_analyzer_kwargs.get("local_model"),
+                    tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    client=text_analyzer_kwargs.get("client"),
+                    client_config=text_analyzer_kwargs.get("client_config"),
+                    api_url=text_analyzer_kwargs.get("api_url"),
+                )
             )
+            # Accumulate token usage
+            llm_total_input_tokens += batch_input_tokens
+            llm_total_output_tokens += batch_output_tokens
             comprehend_query_number += 1
 
     # Process results for each line
@@ -9845,7 +10140,12 @@ def run_page_text_redaction(
             page_analyser_results.extend(line_results)
             page_analysed_bounding_boxes.extend(text_line_bounding_boxes)
 
-    return page_analysed_bounding_boxes
+    return (
+        page_analysed_bounding_boxes,
+        llm_model_name,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
+    )
 
 
 def merge_text_bounding_boxes(
