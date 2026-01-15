@@ -36,6 +36,7 @@ from tools.config import (
     CHOSEN_LOCAL_MODEL_INTRO_TEXT,
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
+    CLOUD_LLM_PII_MODEL_CHOICE,
     COGNITO_AUTH,
     CONFIG_FOLDER,
     COST_CODES_PATH,
@@ -123,7 +124,6 @@ from tools.config import (
     INPUT_FOLDER,
     INTRO_TEXT,
     LANGUAGE_CHOICES,
-    LLM_MODEL_CHOICE,
     LLM_PII_MAX_TOKENS,
     LLM_PII_TEMPERATURE,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
@@ -7266,7 +7266,9 @@ with blocks:
                 "azure_openai_api_key": AZURE_OPENAI_API_KEY,
                 "azure_openai_endpoint": AZURE_OPENAI_INFERENCE_ENDPOINT,
                 # LLM PII Detection Arguments
-                "llm_model_choice": LLM_MODEL_CHOICE,
+                # Note: The actual model used is determined by pii_identification_method in the downstream code
+                # This is just the default - it will be overridden based on the selected PII method
+                "llm_model_choice": CLOUD_LLM_PII_MODEL_CHOICE,
                 "llm_inference_method": CHOSEN_LLM_PII_INFERENCE_METHOD,
                 "inference_server_pii_model": DEFAULT_INFERENCE_SERVER_PII_MODEL,
                 "llm_temperature": LLM_PII_TEMPERATURE,

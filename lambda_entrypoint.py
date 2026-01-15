@@ -11,6 +11,7 @@ from tools.config import (
     AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_INFERENCE_ENDPOINT,
     CHOSEN_LLM_PII_INFERENCE_METHOD,
+    CLOUD_LLM_PII_MODEL_CHOICE,
     DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
     DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
     DEFAULT_INFERENCE_SERVER_PII_MODEL,
@@ -27,7 +28,6 @@ from tools.config import (
     LAMBDA_MAX_POLL_ATTEMPTS,
     LAMBDA_POLL_INTERVAL,
     LAMBDA_PREPARE_IMAGES,
-    LLM_MODEL_CHOICE,
     LLM_PII_MAX_TOKENS,
     LLM_PII_TEMPERATURE,
     VLM_MODEL_CHOICE,
@@ -466,8 +466,11 @@ def lambda_handler(event, context):
             ),
         ),
         # LLM PII Detection Arguments
+        # Note: The actual model used is determined by pii_identification_method in the downstream code
+        # This is just the default - it will be overridden based on the selected PII method
         "llm_model_choice": arguments.get(
-            "llm_model_choice", os.getenv("LLM_MODEL_CHOICE", LLM_MODEL_CHOICE)
+            "llm_model_choice",
+            os.getenv("CLOUD_LLM_PII_MODEL_CHOICE", CLOUD_LLM_PII_MODEL_CHOICE),
         ),
         "llm_inference_method": arguments.get(
             "llm_inference_method",

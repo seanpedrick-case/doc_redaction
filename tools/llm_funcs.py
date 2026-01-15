@@ -91,9 +91,7 @@ try:
         LLM_TOP_K,
         LLM_TOP_P,
         LOAD_LOCAL_MODEL_AT_START,
-        LOCAL_MODEL_FILE,
-        LOCAL_MODEL_FOLDER,
-        LOCAL_REPO_ID,
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
@@ -104,20 +102,25 @@ try:
         MULTIMODAL_PROMPT_FORMAT,
         NUM_PRED_TOKENS,
         NUMBER_OF_RETRY_ATTEMPTS,
+        QUANTISE_TRANSFORMERS_LLM_MODELS,
         RUN_LOCAL_MODEL,
         SPECULATIVE_DECODING,
         TIMEOUT_WAIT,
-        USE_BITSANDBYTES,
         USE_LLAMA_CPP,
         USE_LLAMA_SWAP,
         V_QUANT_LEVEL,
     )
+
+    # Legacy aliases - use PII-specific variables directly
+    LOCAL_REPO_ID = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
+    LOCAL_MODEL_FILE = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+    LOCAL_MODEL_FOLDER = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
 except ImportError:
     # Provide defaults for config variables that might not exist
     # These are only needed for local model loading, not for AWS Bedrock calls
     ASSISTANT_MODEL = ""
     BATCH_SIZE_DEFAULT = 512
-    CHOSEN_LOCAL_MODEL_TYPE = "llama-cpp"
+    CHOSEN_LOCAL_MODEL_TYPE = None
     COMPILE_MODE = "reduce-overhead"
     COMPILE_TRANSFORMERS = "False"
     DEDUPLICATION_THRESHOLD = 0.9
@@ -141,9 +144,7 @@ except ImportError:
     LLM_TOP_K = 40
     LLM_TOP_P = 0.9
     LOAD_LOCAL_MODEL_AT_START = "False"
-    LOCAL_MODEL_FILE = ""
-    LOCAL_MODEL_FOLDER = ""
-    LOCAL_REPO_ID = ""
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "gemma-3-4b"
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = ""
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = ""
     LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = ""
@@ -157,10 +158,16 @@ except ImportError:
     RUN_LOCAL_MODEL = "0"
     SPECULATIVE_DECODING = "False"
     TIMEOUT_WAIT = 30
+    QUANTISE_TRANSFORMERS_LLM_MODELS = "False"
+    # Legacy alias
     USE_BITSANDBYTES = "False"
     USE_LLAMA_CPP = "True"
     USE_LLAMA_SWAP = "False"
     V_QUANT_LEVEL = 8
+    # Legacy aliases - use PII-specific variables directly
+    LOCAL_REPO_ID = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
+    LOCAL_MODEL_FILE = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+    LOCAL_MODEL_FOLDER = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
 
 try:
     from tools.helper_functions import _get_env_list
@@ -331,9 +338,9 @@ class ResponseObject:
 
 
 def get_model_path(
-    repo_id=LOCAL_REPO_ID,
-    model_filename=LOCAL_MODEL_FILE,
-    model_dir=LOCAL_MODEL_FOLDER,
+    repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
+    model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
+    model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
     hf_token=HF_TOKEN,
 ):
     # Construct the expected local path
@@ -370,15 +377,15 @@ def get_model_path(
 
 
 def load_model(
-    local_model_type: str = CHOSEN_LOCAL_MODEL_TYPE,
+    local_model_type: str = None,
     gpu_layers: int = gpu_layers,
     max_context_length: int = context_length,
     gpu_config: llama_cpp_init_config_gpu = gpu_config,
     cpu_config: llama_cpp_init_config_cpu = cpu_config,
     torch_device: str = torch_device,
-    repo_id=LOCAL_REPO_ID,
-    model_filename=LOCAL_MODEL_FILE,
-    model_dir=LOCAL_MODEL_FOLDER,
+    repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
+    model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
+    model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
     compile_mode=COMPILE_MODE,
     model_dtype=MODEL_DTYPE,
     hf_token=HF_TOKEN,
@@ -416,6 +423,14 @@ def load_model(
 
     if model:
         return model, tokenizer, assistant_model
+
+    # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE if local_model_type is not provided
+    if local_model_type is None:
+        local_model_type = (
+            CHOSEN_LOCAL_MODEL_TYPE
+            if CHOSEN_LOCAL_MODEL_TYPE
+            else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+        )
 
     print("Loading model:", local_model_type)
 
@@ -522,7 +537,7 @@ def load_model(
             print(f"Using model id: {model_id}")
             print(f"Using dtype: {torch_dtype}")
             print(f"Using compile mode: {compile_mode}")
-            print(f"Using bitsandbytes: {USE_BITSANDBYTES}")
+            print(f"Using quantization: {QUANTISE_TRANSFORMERS_LLM_MODELS}")
             print("--------------------------\n")
 
             # --- Load Tokenizer and Model ---
@@ -532,53 +547,57 @@ def load_model(
                 # Load Tokenizer and Model
                 # tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-                if USE_BITSANDBYTES == "True":
-
-                    if INT8_WITH_OFFLOAD_TO_CPU == "True":
-                        # This will be very slow. Requires at least 4GB of VRAM and 32GB of RAM
+                # Setup quantization config if enabled
+                quantization_config = None
+                if QUANTISE_TRANSFORMERS_LLM_MODELS == "True":
+                    if not torch.cuda.is_available():
                         print(
-                            "Using bitsandbytes for quantisation to 8 bits, with offloading to CPU"
+                            "Warning: Quantisation requires CUDA, but CUDA is not available."
                         )
-                        max_memory = {0: "4GB", "cpu": "32GB"}
-                        BitsAndBytesConfig(
-                            load_in_8bit=True,
-                            max_memory=max_memory,
-                            llm_int8_enable_fp32_cpu_offload=True,  # Note: if bitsandbytes has to offload to CPU, inference will be slow
-                        )
+                        print("Falling back to loading models without quantisation")
+                        quantization_config = None
                     else:
-                        # For Gemma 4B, requires at least 6GB of VRAM
-                        print("Using bitsandbytes for quantisation to 4 bits")
-                        BitsAndBytesConfig(
-                            load_in_4bit=True,
-                            bnb_4bit_quant_type="nf4",  # Use the modern NF4 quantisation for better performance
-                            bnb_4bit_compute_dtype=torch_dtype,
-                            bnb_4bit_use_double_quant=True,  # Optional: uses a second quantisation step to save even more memory
-                        )
+                        if INT8_WITH_OFFLOAD_TO_CPU == "True":
+                            # This will be very slow. Requires at least 4GB of VRAM and 32GB of RAM
+                            print(
+                                "Using bitsandbytes for quantisation to 8 bits, with offloading to CPU"
+                            )
+                            max_memory = {0: "4GB", "cpu": "32GB"}
+                            quantization_config = BitsAndBytesConfig(
+                                load_in_8bit=True,
+                                max_memory=max_memory,
+                                llm_int8_enable_fp32_cpu_offload=True,  # Note: if bitsandbytes has to offload to CPU, inference will be slow
+                            )
+                        else:
+                            # For Gemma 4B, requires at least 6GB of VRAM
+                            print("Using bitsandbytes for quantisation to 4 bits")
+                            quantization_config = BitsAndBytesConfig(
+                                load_in_4bit=True,
+                                bnb_4bit_quant_type="nf4",  # Use the modern NF4 quantisation for better performance
+                                bnb_4bit_compute_dtype=torch_dtype,
+                                bnb_4bit_use_double_quant=True,  # Optional: uses a second quantisation step to save even more memory
+                            )
 
-                    # print("Loading model with bitsandbytes quantisation config:", quantisation_config)
+                # Prepare load kwargs
+                load_kwargs = {
+                    "max_seq_length": max_context_length,
+                    "device_map": "auto",
+                    "token": hf_token,
+                }
 
-                    model, tokenizer = AutoModelForCausalLM.from_pretrained(
-                        model_id,
-                        max_seq_length=max_context_length,
-                        dtype=torch_dtype,
-                        device_map="auto",
-                        load_in_4bit=True,
-                        # quantization_config=quantisation_config, # Not actually used in Unsloth
-                        token=hf_token,
-                    )
-
-                    AutoModelForCausalLM.for_inference(model)
+                if quantization_config is not None:
+                    load_kwargs["quantization_config"] = quantization_config
+                    print("Loading model with bitsandbytes quantisation")
                 else:
-                    print("Loading model without bitsandbytes quantisation")
-                    model, tokenizer = AutoModelForCausalLM.from_pretrained(
-                        model_id,
-                        max_seq_length=max_context_length,
-                        dtype=torch_dtype,
-                        device_map="auto",
-                        token=hf_token,
-                    )
+                    load_kwargs["dtype"] = torch_dtype
+                    print("Loading model without quantisation")
 
-                    AutoModelForCausalLM.for_inference(model)
+                model, tokenizer = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    **load_kwargs,
+                )
+
+                AutoModelForCausalLM.for_inference(model)
 
                 if not tokenizer.pad_token:
                     tokenizer.pad_token = tokenizer.eos_token
@@ -644,11 +663,47 @@ def load_model(
     if speculative_decoding and USE_LLAMA_CPP == "False" and torch_device == "cuda":
         print("Loading assistant model for speculative decoding:", ASSISTANT_MODEL)
         try:
-            from transformers import AutoModelForCausalLM
+            from transformers import (
+                AutoModelForCausalLM,
+                BitsAndBytesConfig,
+            )
+
+            # Setup quantization config for assistant model (same as main model)
+            assistant_quantization_config = None
+            if QUANTISE_TRANSFORMERS_LLM_MODELS == "True" and torch.cuda.is_available():
+                if INT8_WITH_OFFLOAD_TO_CPU == "True":
+                    max_memory = {0: "4GB", "cpu": "32GB"}
+                    assistant_quantization_config = BitsAndBytesConfig(
+                        load_in_8bit=True,
+                        max_memory=max_memory,
+                        llm_int8_enable_fp32_cpu_offload=True,
+                    )
+                else:
+                    assistant_quantization_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_compute_dtype=torch_dtype,
+                        bnb_4bit_use_double_quant=True,
+                    )
+
+            # Prepare load kwargs for assistant model
+            assistant_load_kwargs = {
+                "device_map": "auto",
+                "token": hf_token,
+            }
+
+            if assistant_quantization_config is not None:
+                assistant_load_kwargs["quantization_config"] = (
+                    assistant_quantization_config
+                )
+                print("Loading assistant model with bitsandbytes quantisation")
+            else:
+                assistant_load_kwargs["dtype"] = torch_dtype
+                print("Loading assistant model without quantisation")
 
             # Load the assistant model with the same configuration as the main model
             assistant_model = AutoModelForCausalLM.from_pretrained(
-                ASSISTANT_MODEL, dtype=torch_dtype, device_map="auto", token=hf_token
+                ASSISTANT_MODEL, **assistant_load_kwargs
             )
 
             # assistant_model.config._name_or_path = model.config._name_or_path
@@ -680,15 +735,19 @@ def get_model():
     global _model, _tokenizer, _assistant_model
     if _model is None:
         _model, _tokenizer, _assistant_model = load_model(
-            local_model_type=CHOSEN_LOCAL_MODEL_TYPE,
+            local_model_type=(
+                CHOSEN_LOCAL_MODEL_TYPE
+                if CHOSEN_LOCAL_MODEL_TYPE
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            ),
             gpu_layers=gpu_layers,
             max_context_length=context_length,
             gpu_config=gpu_config,
             cpu_config=cpu_config,
             torch_device=torch_device,
-            repo_id=LOCAL_REPO_ID,
-            model_filename=LOCAL_MODEL_FILE,
-            model_dir=LOCAL_MODEL_FOLDER,
+            repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
+            model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
+            model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
             compile_mode=COMPILE_MODE,
             model_dtype=MODEL_DTYPE,
             hf_token=HF_TOKEN,
@@ -704,15 +763,19 @@ def get_tokenizer():
     global _model, _tokenizer, _assistant_model
     if _tokenizer is None:
         _model, _tokenizer, _assistant_model = load_model(
-            local_model_type=CHOSEN_LOCAL_MODEL_TYPE,
+            local_model_type=(
+                CHOSEN_LOCAL_MODEL_TYPE
+                if CHOSEN_LOCAL_MODEL_TYPE
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            ),
             gpu_layers=gpu_layers,
             max_context_length=context_length,
             gpu_config=gpu_config,
             cpu_config=cpu_config,
             torch_device=torch_device,
-            repo_id=LOCAL_REPO_ID,
-            model_filename=LOCAL_MODEL_FILE,
-            model_dir=LOCAL_MODEL_FOLDER,
+            repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
+            model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
+            model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
             compile_mode=COMPILE_MODE,
             model_dtype=MODEL_DTYPE,
             hf_token=HF_TOKEN,
@@ -728,15 +791,19 @@ def get_assistant_model():
     global _model, _tokenizer, _assistant_model
     if _assistant_model is None:
         _model, _tokenizer, _assistant_model = load_model(
-            local_model_type=CHOSEN_LOCAL_MODEL_TYPE,
+            local_model_type=(
+                CHOSEN_LOCAL_MODEL_TYPE
+                if CHOSEN_LOCAL_MODEL_TYPE
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            ),
             gpu_layers=gpu_layers,
             max_context_length=context_length,
             gpu_config=gpu_config,
             cpu_config=cpu_config,
             torch_device=torch_device,
-            repo_id=LOCAL_REPO_ID,
-            model_filename=LOCAL_MODEL_FILE,
-            model_dir=LOCAL_MODEL_FOLDER,
+            repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
+            model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
+            model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
             compile_mode=COMPILE_MODE,
             model_dtype=MODEL_DTYPE,
             hf_token=HF_TOKEN,
@@ -783,7 +850,11 @@ def get_pii_model():
 
     if _pii_model is None:
         _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-            local_model_type=CHOSEN_LOCAL_MODEL_TYPE,
+            local_model_type=(
+                CHOSEN_LOCAL_MODEL_TYPE
+                if CHOSEN_LOCAL_MODEL_TYPE
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            ),
             gpu_layers=gpu_layers,
             max_context_length=context_length,
             gpu_config=gpu_config,
@@ -830,7 +901,11 @@ def get_pii_tokenizer():
 
     if _pii_tokenizer is None:
         _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-            local_model_type=CHOSEN_LOCAL_MODEL_TYPE,
+            local_model_type=(
+                CHOSEN_LOCAL_MODEL_TYPE
+                if CHOSEN_LOCAL_MODEL_TYPE
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            ),
             gpu_layers=gpu_layers,
             max_context_length=context_length,
             gpu_config=gpu_config,
@@ -2039,7 +2114,7 @@ def call_llm_with_markdown_table_checks(
     MAX_OUTPUT_VALIDATION_ATTEMPTS: int,
     assistant_prefill: str = "",
     master: bool = False,
-    CHOSEN_LOCAL_MODEL_TYPE: str = CHOSEN_LOCAL_MODEL_TYPE,
+    CHOSEN_LOCAL_MODEL_TYPE: str = None,
     random_seed: int = seed,
     api_url: str = None,
 ) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
@@ -2064,7 +2139,7 @@ def call_llm_with_markdown_table_checks(
     - MAX_OUTPUT_VALIDATION_ATTEMPTS (int): The maximum number of attempts to validate the output.
     - assistant_prefill (str, optional): The text to prefill the LLM response. Currently only working with AWS Claude calls.
     - master (bool, optional): Boolean to determine whether this call is for the master output table.
-    - CHOSEN_LOCAL_MODEL_TYPE (str, optional): String to determine model type loaded.
+    - CHOSEN_LOCAL_MODEL_TYPE (str, optional): String to determine model type loaded. If None, uses LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.
     - random_seed (int, optional): The random seed used for LLM generation.
     - api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
 

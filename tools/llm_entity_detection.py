@@ -13,8 +13,8 @@ import boto3
 
 from tools.config import (
     CHOSEN_LLM_PII_INFERENCE_METHOD,
+    CLOUD_LLM_PII_MODEL_CHOICE,
     INFERENCE_SERVER_API_URL,
-    LLM_MODEL_CHOICE,
     LLM_PII_MAX_TOKENS,
     LLM_PII_NUMBER_OF_RETRY_ATTEMPTS,
     LLM_PII_TEMPERATURE,
@@ -366,7 +366,7 @@ def call_llm_for_entity_detection(
     entities_to_detect: List[str],
     language: str,
     bedrock_runtime: Optional[boto3.Session.client] = None,
-    model_choice: str = LLM_MODEL_CHOICE,
+    model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
     temperature: float = LLM_PII_TEMPERATURE,
     max_tokens: int = LLM_PII_MAX_TOKENS,
     max_retries: int = LLM_PII_NUMBER_OF_RETRY_ATTEMPTS,
@@ -714,7 +714,7 @@ def do_llm_entity_detection_call(
     allow_list: List[str] = None,
     chosen_redact_comprehend_entities: List[str] = None,
     all_text_line_results: List[Tuple] = None,
-    model_choice: str = LLM_MODEL_CHOICE,
+    model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
     temperature: float = LLM_PII_TEMPERATURE,
     max_tokens: int = LLM_PII_MAX_TOKENS,
     output_folder: Optional[str] = None,
