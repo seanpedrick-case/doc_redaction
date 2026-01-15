@@ -1023,7 +1023,7 @@ DEFAULT_INFERENCE_SERVER_VLM_MODEL = get_or_create_env_var(
 
 DEFAULT_INFERENCE_SERVER_PII_MODEL = get_or_create_env_var(
     "DEFAULT_INFERENCE_SERVER_PII_MODEL", "gemma_3_12b"
-)  # Default model name for inference-server PII detection API calls. If empty, uses INFERENCE_SERVER_MODEL_NAME, CHOSEN_INFERENCE_SERVER_MODEL, or server default
+)  # Default model name for inference-server PII detection API calls. If empty, uses INFERENCE_SERVER_MODEL_NAME, CHOSEN_INFERENCE_SERVER_PII_MODEL, or server default
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
 MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)
@@ -1109,20 +1109,30 @@ SAVE_VLM_INPUT_IMAGES = convert_string_to_boolean(
 )  # Whether to save input images sent to VLM OCR for debugging.
 
 ### LLM options
-RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
+RUN_AWS_BEDROCK_PII_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("RUN_AWS_BEDROCK_PII_MODELS", "False")
+)
 
 # Gemini settings
-RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
+RUN_GEMINI_PII_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("RUN_GEMINI_PII_MODELS", "False")
+)
 GEMINI_API_KEY = get_or_create_env_var("GEMINI_API_KEY", "")
 # Azure/OpenAI AI Inference settings
-RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "1")
+RUN_AZURE_PII_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("RUN_AZURE_PII_MODELS", "False")
+)
 AZURE_OPENAI_API_KEY = get_or_create_env_var("AZURE_OPENAI_API_KEY", "")
 AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var(
     "AZURE_OPENAI_INFERENCE_ENDPOINT", ""
 )
 # Local / Llama-server settings
-RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "0")
-RUN_INFERENCE_SERVER = get_or_create_env_var("RUN_INFERENCE_SERVER", "0")
+RUN_LOCAL_PII_MODEL = convert_string_to_boolean(
+    get_or_create_env_var("RUN_LOCAL_PII_MODEL", "False")
+)
+RUN_PII_INFERENCE_SERVER = convert_string_to_boolean(
+    get_or_create_env_var("RUN_PII_INFERENCE_SERVER", "False")
+)
 API_URL = get_or_create_env_var("API_URL", "http://localhost:8080")
 
 # Build up options for models
@@ -1160,7 +1170,7 @@ if USE_LLAMA_SWAP == "True":
 else:
     USE_LLAMA_SWAP = False
 
-if RUN_LOCAL_MODEL == "1" and LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
+if RUN_LOCAL_PII_MODEL and LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     # Use CHOSEN_LOCAL_MODEL_TYPE for display if available, otherwise use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
     display_name = (
         CHOSEN_LOCAL_MODEL_TYPE
@@ -1171,7 +1181,7 @@ if RUN_LOCAL_MODEL == "1" and LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     model_short_names.append(display_name)
     model_source.append("Local")
 
-if RUN_AWS_BEDROCK_MODELS == "1":
+if RUN_AWS_BEDROCK_PII_MODELS:
     amazon_models = [
         "anthropic.claude-3-haiku-20240307-v1:0",
         "anthropic.claude-3-7-sonnet-20250219-v1:0",
@@ -1203,7 +1213,7 @@ if RUN_AWS_BEDROCK_MODELS == "1":
     )
     model_source.extend(["AWS"] * len(amazon_models))
 
-if RUN_GEMINI_MODELS == "1":
+if RUN_GEMINI_PII_MODELS:
     gemini_models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
     model_full_names.extend(gemini_models)
     model_short_names.extend(
@@ -1212,7 +1222,7 @@ if RUN_GEMINI_MODELS == "1":
     model_source.extend(["Gemini"] * len(gemini_models))
 
 # Register Azure/OpenAI AI models (model names must match your Azure/OpenAI deployments)
-if RUN_AZURE_MODELS == "1":
+if RUN_AZURE_PII_MODELS:
     # Example deployments; adjust to the deployments you actually create in Azure/OpenAI
     azure_models = ["gpt-5-mini", "gpt-4o-mini"]
     model_full_names.extend(azure_models)
@@ -1220,8 +1230,8 @@ if RUN_AZURE_MODELS == "1":
     model_source.extend(["Azure/OpenAI"] * len(azure_models))
 
 # Register inference-server models
-CHOSEN_INFERENCE_SERVER_MODEL = ""
-if RUN_INFERENCE_SERVER == "1":
+CHOSEN_INFERENCE_SERVER_PII_MODEL = ""
+if RUN_PII_INFERENCE_SERVER:
     # Example inference-server models; adjust to the models you have available on your server
     inference_server_models = [
         "unnamed-inference-server-model",
@@ -1235,41 +1245,45 @@ if RUN_INFERENCE_SERVER == "1":
     model_short_names.extend(inference_server_models)
     model_source.extend(["inference-server"] * len(inference_server_models))
 
-    CHOSEN_INFERENCE_SERVER_MODEL = get_or_create_env_var(
-        "CHOSEN_INFERENCE_SERVER_MODEL", inference_server_models[0]
+    CHOSEN_INFERENCE_SERVER_PII_MODEL = get_or_create_env_var(
+        "CHOSEN_INFERENCE_SERVER_PII_MODEL", inference_server_models[0]
     )
 
     # If the chosen inference server model is not in the list of inference server models, add it to the list
-    if CHOSEN_INFERENCE_SERVER_MODEL not in inference_server_models:
-        model_full_names.append(CHOSEN_INFERENCE_SERVER_MODEL)
-        model_short_names.append(CHOSEN_INFERENCE_SERVER_MODEL)
+    if CHOSEN_INFERENCE_SERVER_PII_MODEL not in inference_server_models:
+        model_full_names.append(CHOSEN_INFERENCE_SERVER_PII_MODEL)
+        model_short_names.append(CHOSEN_INFERENCE_SERVER_PII_MODEL)
         model_source.append("inference-server")
 
 # Inference Server LLM Model Choice for PII Detection
 # This is the primary config variable for choosing inference server models for PII detection
-# Note: This must be defined after CHOSEN_INFERENCE_SERVER_MODEL
+# Note: This must be defined after CHOSEN_INFERENCE_SERVER_PII_MODEL
 INFERENCE_SERVER_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
     "INFERENCE_SERVER_LLM_PII_MODEL_CHOICE",
     (
         DEFAULT_INFERENCE_SERVER_PII_MODEL
         if DEFAULT_INFERENCE_SERVER_PII_MODEL
-        else (CHOSEN_INFERENCE_SERVER_MODEL if CHOSEN_INFERENCE_SERVER_MODEL else "")
+        else (
+            CHOSEN_INFERENCE_SERVER_PII_MODEL
+            if CHOSEN_INFERENCE_SERVER_PII_MODEL
+            else ""
+        )
     ),
-)  # Model choice for inference-server PII detection. Defaults to DEFAULT_INFERENCE_SERVER_PII_MODEL, then CHOSEN_INFERENCE_SERVER_MODEL
+)  # Model choice for inference-server PII detection. Defaults to DEFAULT_INFERENCE_SERVER_PII_MODEL, then CHOSEN_INFERENCE_SERVER_PII_MODEL
 
 model_name_map = {
     full: {"short_name": short, "source": source}
     for full, short, source in zip(model_full_names, model_short_names, model_source)
 }
 
-if RUN_LOCAL_MODEL == "1":
+if RUN_LOCAL_PII_MODEL:
     default_model_choice = (
         CHOSEN_LOCAL_MODEL_TYPE
         if CHOSEN_LOCAL_MODEL_TYPE
         else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
     )
-elif RUN_INFERENCE_SERVER == "1":
-    default_model_choice = CHOSEN_INFERENCE_SERVER_MODEL
+elif RUN_PII_INFERENCE_SERVER == "1":
+    default_model_choice = CHOSEN_INFERENCE_SERVER_PII_MODEL
 elif RUN_AWS_FUNCTIONS == "1":
     default_model_choice = amazon_models[0]
 else:
@@ -1282,7 +1296,7 @@ model_sources = list(
 
 DIRECT_MODE_INFERENCE_SERVER_MODEL = get_or_create_env_var(
     "DIRECT_MODE_INFERENCE_SERVER_MODEL",
-    CHOSEN_INFERENCE_SERVER_MODEL if CHOSEN_INFERENCE_SERVER_MODEL else "",
+    CHOSEN_INFERENCE_SERVER_PII_MODEL if CHOSEN_INFERENCE_SERVER_PII_MODEL else "",
 )
 
 
@@ -1310,45 +1324,48 @@ CLOUD_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
     "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Default AWS Bedrock model for PII detection
 )
 
-# Legacy support: Keep LLM_MODEL_CHOICE as alias for backward compatibility
-LLM_MODEL_CHOICE = CLOUD_LLM_PII_MODEL_CHOICE
-
 # VLM Model Choice for cloud VLM OCR (defaults to first available cloud model)
 # Note: This should be set after model lists are defined
-VLM_MODEL_CHOICE = get_or_create_env_var(
-    "VLM_MODEL_CHOICE",
+CLOUD_VLM_MODEL_CHOICE = get_or_create_env_var(
+    "CLOUD_VLM_MODEL_CHOICE",
     "qwen.qwen3-vl-235b-a22b",  # Will be set to default below if empty
 )  # Default model choice for cloud VLM OCR (Bedrock, Gemini, or Azure/OpenAI)
 
-# Set default VLM_MODEL_CHOICE if not provided
-if not VLM_MODEL_CHOICE or not VLM_MODEL_CHOICE.strip():
+# Set default CLOUD_VLM_MODEL_CHOICE if not provided
+if not CLOUD_VLM_MODEL_CHOICE or not CLOUD_VLM_MODEL_CHOICE.strip():
     # Set default based on available models (priority: AWS Bedrock > Gemini > Azure/OpenAI)
-    if RUN_AWS_BEDROCK_MODELS == "1" and amazon_models:
-        VLM_MODEL_CHOICE = amazon_models[0]  # Default to first AWS Bedrock model
-    elif RUN_GEMINI_MODELS == "1" and gemini_models:
-        VLM_MODEL_CHOICE = gemini_models[0]  # Default to first Gemini model
-    elif RUN_AZURE_MODELS == "1" and azure_models:
-        VLM_MODEL_CHOICE = azure_models[0]  # Default to first Azure/OpenAI model
+    if RUN_AWS_BEDROCK_PII_MODELS and amazon_models:
+        CLOUD_VLM_MODEL_CHOICE = amazon_models[0]  # Default to first AWS Bedrock model
+    elif RUN_GEMINI_PII_MODELS and gemini_models:
+        CLOUD_VLM_MODEL_CHOICE = gemini_models[0]  # Default to first Gemini model
+    elif RUN_AZURE_PII_MODELS and azure_models:
+        CLOUD_VLM_MODEL_CHOICE = azure_models[0]  # Default to first Azure/OpenAI model
     else:
-        VLM_MODEL_CHOICE = ""  # No default available
+        CLOUD_VLM_MODEL_CHOICE = ""  # No default available
 else:
     # Use the value from environment variable
-    VLM_MODEL_CHOICE = VLM_MODEL_CHOICE.strip()
+    CLOUD_VLM_MODEL_CHOICE = CLOUD_VLM_MODEL_CHOICE.strip()
 
 # print("model_name_map:", model_name_map)
 
 # HF token may or may not be needed for downloading models from Hugging Face
 HF_TOKEN = get_or_create_env_var("HF_TOKEN", "")
 
-LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var("LOAD_LOCAL_MODEL_AT_START", "False")
+LOAD_LOCAL_MODEL_AT_START = convert_string_to_boolean(
+    get_or_create_env_var("LOAD_LOCAL_MODEL_AT_START", "False")
+)
 
-MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var("MULTIMODAL_PROMPT_FORMAT", "False")
+MULTIMODAL_PROMPT_FORMAT = convert_string_to_boolean(
+    get_or_create_env_var("MULTIMODAL_PROMPT_FORMAT", "False")
+)
 
 # Following is not currently supported
 # If you are using a system with low VRAM, you can set this to True to reduce the memory requirements
-LOW_VRAM_SYSTEM = get_or_create_env_var("LOW_VRAM_SYSTEM", "False")
+LOW_VRAM_SYSTEM = convert_string_to_boolean(
+    get_or_create_env_var("LOW_VRAM_SYSTEM", "False")
+)
 
-if LOW_VRAM_SYSTEM == "True":
+if LOW_VRAM_SYSTEM:
     print("Using settings for low VRAM system")
     USE_LLAMA_CPP = get_or_create_env_var("USE_LLAMA_CPP", "True")
     LLM_MAX_NEW_TOKENS = int(get_or_create_env_var("LLM_MAX_NEW_TOKENS", "4096"))
@@ -1540,7 +1557,7 @@ if CHOSEN_LOCAL_MODEL_TYPE is None:
 
 # Set MULTIMODAL_PROMPT_FORMAT based on model choice
 if CHOSEN_LOCAL_MODEL_TYPE in ["Gemma 3 4B", "Gemma 3 12B"]:
-    MULTIMODAL_PROMPT_FORMAT = "True"
+    MULTIMODAL_PROMPT_FORMAT = True
 
 LLM_MAX_GPU_LAYERS = int(
     get_or_create_env_var("LLM_MAX_GPU_LAYERS", "-1")
@@ -1599,11 +1616,11 @@ ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "")
 BATCH_SIZE_DEFAULT = int(get_or_create_env_var("BATCH_SIZE_DEFAULT", "512"))
 COMPILE_MODE = get_or_create_env_var("COMPILE_MODE", "reduce-overhead")
 COMPILE_TRANSFORMERS = convert_string_to_boolean(
-    get_or_create_env_var("COMPILE_TRANSFORMERS", "False")
+    get_or_create_env_var("COMPILE_TRANSFORMERS", False)
 )
 DEDUPLICATION_THRESHOLD = float(get_or_create_env_var("DEDUPLICATION_THRESHOLD", "0.9"))
 INT8_WITH_OFFLOAD_TO_CPU = convert_string_to_boolean(
-    get_or_create_env_var("INT8_WITH_OFFLOAD_TO_CPU", "False")
+    get_or_create_env_var("INT8_WITH_OFFLOAD_TO_CPU", False)
 )
 MAX_COMMENT_CHARS = int(get_or_create_env_var("MAX_COMMENT_CHARS", "1000"))
 MAX_TIME_FOR_LOOP = int(get_or_create_env_var("MAX_TIME_FOR_LOOP", "3600"))
@@ -1611,10 +1628,8 @@ MODEL_DTYPE = get_or_create_env_var("MODEL_DTYPE", "bfloat16")
 NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var("NUMBER_OF_RETRY_ATTEMPTS", "3"))
 TIMEOUT_WAIT = int(get_or_create_env_var("TIMEOUT_WAIT", "30"))
 QUANTISE_TRANSFORMERS_LLM_MODELS = convert_string_to_boolean(
-    get_or_create_env_var("QUANTISE_TRANSFORMERS_LLM_MODELS", "False")
+    get_or_create_env_var("QUANTISE_TRANSFORMERS_LLM_MODELS", False)
 )
-# Legacy alias for backward compatibility
-USE_BITSANDBYTES = QUANTISE_TRANSFORMERS_LLM_MODELS
 
 # LLM inference method for PII detection (similar to VLM options)
 # Options: "aws-bedrock", "local", "inference-server", "azure-openai", "gemini"
@@ -1623,7 +1638,7 @@ CHOSEN_LLM_PII_INFERENCE_METHOD = get_or_create_env_var(
 )  # Default to AWS Bedrock for backward compatibility
 
 SHOW_LOCAL_LLM_PII_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_LOCAL_LLM_PII_OPTIONS", "False")
+    get_or_create_env_var("SHOW_LOCAL_LLM_PII_OPTIONS", False)
 )  # Whether to show local LLM options for PII detection
 
 SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS = convert_string_to_boolean(
@@ -1639,7 +1654,7 @@ SHOW_GEMINI_LLM_PII_OPTIONS = convert_string_to_boolean(
 )  # Whether to show Gemini options for PII detection
 
 # Build list of available LLM inference methods for PII detection
-LLM_PII_INFERENCE_METHODS = ["aws-bedrock"]  # Always available
+LLM_PII_INFERENCE_METHODS = []  # Always available
 
 if SHOW_LOCAL_LLM_PII_OPTIONS:
     LLM_PII_INFERENCE_METHODS.append("local")
@@ -1652,6 +1667,9 @@ if SHOW_AZURE_LLM_PII_OPTIONS:
 
 if SHOW_GEMINI_LLM_PII_OPTIONS:
     LLM_PII_INFERENCE_METHODS.append("gemini")
+
+if SHOW_AWS_PII_DETECTION_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("aws-bedrock")
 
 # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
 # Use CHOSEN_LOCAL_MODEL_TYPE if available, otherwise check LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE

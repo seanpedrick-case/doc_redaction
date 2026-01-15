@@ -25,6 +25,7 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 
 from tools.config import (
     AWS_PII_OPTION,
+    CLOUD_LLM_MODEL_CHOICE,  # Legacy alias for CLOUD_LLM_PII_MODEL_CHOICE
     CLOUD_LLM_PII_MODEL_CHOICE,
     CONVERT_LINE_TO_WORD_LEVEL,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
@@ -37,7 +38,6 @@ from tools.config import (
     INFERENCE_SERVER_MODEL_NAME,
     INFERENCE_SERVER_PII_OPTION,
     INFERENCE_SERVER_TIMEOUT,
-    LLM_MODEL_CHOICE,  # Legacy alias for CLOUD_LLM_PII_MODEL_CHOICE
     LLM_PII_MAX_TOKENS,
     LLM_PII_OPTION,
     LLM_PII_TEMPERATURE,
@@ -6324,9 +6324,11 @@ class CustomImageAnalyzerEngine:
                 else image
             )
             # Get model choice from parameter or config
-            from tools.config import VLM_MODEL_CHOICE
+            from tools.config import CLOUD_VLM_MODEL_CHOICE
 
-            model_choice = vlm_model_choice if vlm_model_choice else VLM_MODEL_CHOICE
+            model_choice = (
+                vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
+            )
 
             # Qwen 3-VL models on Bedrock return normalized coordinates (0-999 range)
             # Other Bedrock models typically return absolute pixel coordinates
@@ -6353,9 +6355,11 @@ class CustomImageAnalyzerEngine:
                 else image
             )
             # Get model choice from parameter or config
-            from tools.config import VLM_MODEL_CHOICE
+            from tools.config import CLOUD_VLM_MODEL_CHOICE
 
-            model_choice = vlm_model_choice if vlm_model_choice else VLM_MODEL_CHOICE
+            model_choice = (
+                vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
+            )
             ocr_data = _gemini_page_ocr_predict(
                 gemini_image,
                 image_name=image_name,
@@ -6376,9 +6380,11 @@ class CustomImageAnalyzerEngine:
                 else image
             )
             # Get model choice from parameter or config
-            from tools.config import VLM_MODEL_CHOICE
+            from tools.config import CLOUD_VLM_MODEL_CHOICE
 
-            model_choice = vlm_model_choice if vlm_model_choice else VLM_MODEL_CHOICE
+            model_choice = (
+                vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
+            )
             ocr_data = _azure_openai_page_ocr_predict(
                 azure_image,
                 image_name=image_name,
@@ -6853,7 +6859,7 @@ class CustomImageAnalyzerEngine:
         language: Optional[str] = DEFAULT_LANGUAGE,
         nlp_analyser: AnalyzerEngine = None,
         bedrock_runtime=None,
-        model_choice: str = LLM_MODEL_CHOICE,
+        model_choice: str = CLOUD_LLM_MODEL_CHOICE,
         custom_llm_instructions: str = "",
         chosen_llm_entities: List[str] = None,
         file_name: Optional[str] = None,
@@ -8527,7 +8533,7 @@ def run_page_text_redaction(
     custom_entities: List[str] = None,
     comprehend_query_number: int = 0,
     bedrock_runtime=None,
-    model_choice: str = LLM_MODEL_CHOICE,
+    model_choice: str = CLOUD_LLM_MODEL_CHOICE,
     custom_llm_instructions: str = "",
     chosen_llm_entities: List[str] = None,
     output_folder: str = None,
@@ -8554,7 +8560,7 @@ def run_page_text_redaction(
         custom_entities (List[str], optional): A list of custom entities for redaction. Defaults to None.
         comprehend_query_number (int, optional): A counter for the number of Comprehend queries made. Defaults to 0.
         bedrock_runtime: The AWS Bedrock runtime client for LLM-based entity detection. Defaults to None.
-        model_choice (str, optional): The LLM model choice for entity detection. Defaults to LLM_MODEL_CHOICE.
+        model_choice (str, optional): The LLM model choice for entity detection. Defaults to CLOUD_LLM_MODEL_CHOICE.
         custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to "".
         chosen_llm_entities (List[str], optional): A list of entities for LLM-based detection. Defaults to None.
         output_folder (str, optional): Output folder for saving LLM prompts and responses. Defaults to None.

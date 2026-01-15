@@ -12,6 +12,7 @@ from tools.config import (
     AZURE_OPENAI_INFERENCE_ENDPOINT,
     CHOSEN_LLM_PII_INFERENCE_METHOD,
     CLOUD_LLM_PII_MODEL_CHOICE,
+    CLOUD_VLM_MODEL_CHOICE,
     DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
     DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
     DEFAULT_INFERENCE_SERVER_PII_MODEL,
@@ -30,7 +31,6 @@ from tools.config import (
     LAMBDA_PREPARE_IMAGES,
     LLM_PII_MAX_TOKENS,
     LLM_PII_TEMPERATURE,
-    VLM_MODEL_CHOICE,
 )
 
 
@@ -440,7 +440,8 @@ def lambda_handler(event, context):
         ),
         # VLM OCR Arguments
         "vlm_model_choice": arguments.get(
-            "vlm_model_choice", os.getenv("VLM_MODEL_CHOICE", VLM_MODEL_CHOICE)
+            "vlm_model_choice",
+            os.getenv("CLOUD_VLM_MODEL_CHOICE", CLOUD_VLM_MODEL_CHOICE),
         ),
         "inference_server_vlm_model": arguments.get(
             "inference_server_vlm_model",

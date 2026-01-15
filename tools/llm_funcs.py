@@ -103,7 +103,7 @@ try:
         NUM_PRED_TOKENS,
         NUMBER_OF_RETRY_ATTEMPTS,
         QUANTISE_TRANSFORMERS_LLM_MODELS,
-        RUN_LOCAL_MODEL,
+        RUN_LOCAL_PII_MODEL,
         SPECULATIVE_DECODING,
         TIMEOUT_WAIT,
         USE_LLAMA_CPP,
@@ -122,10 +122,10 @@ except ImportError:
     BATCH_SIZE_DEFAULT = 512
     CHOSEN_LOCAL_MODEL_TYPE = None
     COMPILE_MODE = "reduce-overhead"
-    COMPILE_TRANSFORMERS = "False"
+    COMPILE_TRANSFORMERS = False
     DEDUPLICATION_THRESHOLD = 0.9
     HF_TOKEN = None
-    INT8_WITH_OFFLOAD_TO_CPU = "False"
+    INT8_WITH_OFFLOAD_TO_CPU = False
     K_QUANT_LEVEL = 8
     LLM_BATCH_SIZE = 512
     LLM_CONTEXT_LENGTH = 4096
@@ -143,7 +143,7 @@ except ImportError:
     LLM_THREADS = None
     LLM_TOP_K = 40
     LLM_TOP_P = 0.9
-    LOAD_LOCAL_MODEL_AT_START = "False"
+    LOAD_LOCAL_MODEL_AT_START = False
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "gemma-3-4b"
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = ""
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = ""
@@ -152,15 +152,14 @@ except ImportError:
     MODEL_CACHE_PATH = "./model_cache"
     MAX_TIME_FOR_LOOP = 3600
     MODEL_DTYPE = "bfloat16"
-    MULTIMODAL_PROMPT_FORMAT = "False"
+    MULTIMODAL_PROMPT_FORMAT = False
     NUM_PRED_TOKENS = 5
     NUMBER_OF_RETRY_ATTEMPTS = 3
-    RUN_LOCAL_MODEL = "0"
+    RUN_LOCAL_PII_MODEL = False
     SPECULATIVE_DECODING = "False"
     TIMEOUT_WAIT = 30
-    QUANTISE_TRANSFORMERS_LLM_MODELS = "False"
+    QUANTISE_TRANSFORMERS_LLM_MODELS = False
     # Legacy alias
-    USE_BITSANDBYTES = "False"
     USE_LLAMA_CPP = "True"
     USE_LLAMA_SWAP = "False"
     V_QUANT_LEVEL = 8
@@ -550,7 +549,7 @@ def load_model(
 
                 # Setup quantization config if enabled
                 quantization_config = None
-                if QUANTISE_TRANSFORMERS_LLM_MODELS == "True":
+                if QUANTISE_TRANSFORMERS_LLM_MODELS:
                     if not torch.cuda.is_available():
                         print(
                             "Warning: Quantisation requires CUDA, but CUDA is not available."
@@ -558,7 +557,7 @@ def load_model(
                         print("Falling back to loading models without quantisation")
                         quantization_config = None
                     else:
-                        if INT8_WITH_OFFLOAD_TO_CPU == "True":
+                        if INT8_WITH_OFFLOAD_TO_CPU:
                             # This will be very slow. Requires at least 4GB of VRAM and 32GB of RAM
                             print(
                                 "Using bitsandbytes for quantisation to 8 bits, with offloading to CPU"
@@ -601,7 +600,9 @@ def load_model(
 
                 # For non-quantized models, explicitly move to device (matching VLM behavior)
                 if quantization_config is None:
-                    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+                    device = torch.device(
+                        "cuda:0" if torch.cuda.is_available() else "cpu"
+                    )
                     model = model.to(device)
 
                 # Set model to evaluation mode (standard transformers approach)
@@ -623,7 +624,7 @@ def load_model(
                 )
 
             # Compile the Model with the selected mode 🚀
-            if COMPILE_TRANSFORMERS == "True":
+            if COMPILE_TRANSFORMERS:
                 try:
                     model = torch.compile(model, mode=compile_mode, fullgraph=True)
                 except Exception as e:
@@ -684,8 +685,8 @@ def load_model(
 
             # Setup quantization config for assistant model (same as main model)
             assistant_quantization_config = None
-            if QUANTISE_TRANSFORMERS_LLM_MODELS == "True" and torch.cuda.is_available():
-                if INT8_WITH_OFFLOAD_TO_CPU == "True":
+            if QUANTISE_TRANSFORMERS_LLM_MODELS and torch.cuda.is_available():
+                if INT8_WITH_OFFLOAD_TO_CPU:
                     max_memory = {0: "4GB", "cpu": "32GB"}
                     assistant_quantization_config = BitsAndBytesConfig(
                         load_in_8bit=True,
@@ -728,7 +729,7 @@ def load_model(
             # assistant_model.config._name_or_path = model.config._name_or_path
 
             # Compile the assistant model if compilation is enabled
-            if COMPILE_TRANSFORMERS == "True":
+            if COMPILE_TRANSFORMERS:
                 try:
                     assistant_model = torch.compile(
                         assistant_model, mode=compile_mode, fullgraph=True
@@ -943,16 +944,13 @@ def get_pii_tokenizer():
     return _pii_tokenizer
 
 
-# Initialize model at startup if configured
-if LOAD_LOCAL_MODEL_AT_START == "True" and RUN_LOCAL_MODEL == "1":
-    get_model()  # This will trigger loading
-    get_pii_model()  # Also load PII model at startup
-
-# Initialize PII model at startup if configured (even if RUN_LOCAL_MODEL is not "1")
+# Initialize PII model at startup if configured (even if RUN_LOCAL_PII_MODEL is False)
 # This allows PII model to be loaded independently for PII detection tasks
-if LOAD_LOCAL_MODEL_AT_START == "True":
+if LOAD_LOCAL_MODEL_AT_START and RUN_LOCAL_PII_MODEL:
     try:
+        print("Loading local PII model:", LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE)
         get_pii_model()  # This will trigger loading the PII model
+        print("PII model loaded successfully")
     except Exception as e:
         print(f"Warning: Could not load PII model at startup: {e}")
         print("PII model will be loaded on-demand when needed.")
@@ -1492,7 +1490,7 @@ def call_transformers_model(
 
     # Always use string format for text-only content, regardless of MULTIMODAL_PROMPT_FORMAT setting
     # MULTIMODAL_PROMPT_FORMAT should only be used when you actually have multimodal inputs (images, etc.)
-    if MULTIMODAL_PROMPT_FORMAT == "True":
+    if MULTIMODAL_PROMPT_FORMAT:
         conversation = [
             {
                 "role": "system",
@@ -1509,7 +1507,7 @@ def call_transformers_model(
     # 2. Apply the chat template
     # Get the device from the model (handles both single device and device_map="auto" cases)
     model_device = next(model.parameters()).device
-    
+
     try:
         # Try applying chat template
         input_ids = tokenizer.apply_chat_template(

@@ -37,6 +37,7 @@ from tools.config import (
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
     CLOUD_LLM_PII_MODEL_CHOICE,
+    CLOUD_VLM_MODEL_CHOICE,
     COGNITO_AUTH,
     CONFIG_FOLDER,
     COST_CODES_PATH,
@@ -180,7 +181,6 @@ from tools.config import (
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
     USE_GREEDY_DUPLICATE_DETECTION,
-    VLM_MODEL_CHOICE,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
 from tools.custom_csvlogger import CSVLogger_custom
@@ -7259,7 +7259,7 @@ with blocks:
                 "extract_signatures": DIRECT_MODE_EXTRACT_SIGNATURES,
                 "match_fuzzy_whole_phrase_bool": DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
                 # VLM OCR Arguments
-                "vlm_model_choice": VLM_MODEL_CHOICE,
+                "vlm_model_choice": CLOUD_VLM_MODEL_CHOICE,
                 "inference_server_vlm_model": DEFAULT_INFERENCE_SERVER_VLM_MODEL,
                 "inference_server_api_url": INFERENCE_SERVER_API_URL,
                 "gemini_api_key": GEMINI_API_KEY,

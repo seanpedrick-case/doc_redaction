@@ -47,6 +47,7 @@ from tools.config import (
     BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     CHOSEN_LOCAL_OCR_MODEL,
     CLOUD_LLM_PII_MODEL_CHOICE,
+    CLOUD_VLM_MODEL_CHOICE,
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
@@ -78,7 +79,6 @@ from tools.config import (
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
-    VLM_MODEL_CHOICE,
     aws_comprehend_language_choices,
     textract_language_choices,
 )
@@ -1003,7 +1003,7 @@ def choose_and_run_redactor(
             gemini_client, gemini_config = construct_gemini_generative_model(
                 in_api_key="",  # Will use environment variable
                 temperature=0.0,  # Use low temperature for OCR
-                model_choice=VLM_MODEL_CHOICE,
+                model_choice=CLOUD_VLM_MODEL_CHOICE,
                 system_prompt="",  # No system prompt needed for OCR
                 max_tokens=4096,  # Reasonable default for OCR
             )
@@ -3831,7 +3831,7 @@ def redact_image_pdf(
                         gemini_client=gemini_client,
                         gemini_config=gemini_config,
                         azure_openai_client=azure_openai_client,
-                        vlm_model_choice=VLM_MODEL_CHOICE,
+                        vlm_model_choice=CLOUD_VLM_MODEL_CHOICE,
                         inference_server_model_name=(
                             inference_server_vlm_model
                             if inference_server_vlm_model
