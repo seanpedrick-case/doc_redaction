@@ -700,8 +700,8 @@ SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS = convert_string_to_boolean(
 SHOW_INFERENCE_SERVER_PII_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_INFERENCE_SERVER_PII_OPTIONS", "False")
 )
-SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS", "False")
+SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS", "False")
 )
 
 if (
@@ -709,7 +709,7 @@ if (
     and not SHOW_AWS_PII_DETECTION_OPTIONS
     and not SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
     and not SHOW_INFERENCE_SERVER_PII_OPTIONS
-    and not SHOW_LOCAL_TRANSFORMERS_LLM_PII_OPTIONS
+    and not SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
 ):
     SHOW_LOCAL_PII_DETECTION_OPTIONS = True
 
@@ -1656,24 +1656,18 @@ if SHOW_AWS_PII_DETECTION_OPTIONS:
 
 # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
 # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE if available, otherwise check LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-model_type_for_reasoning = (
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-    if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-    else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-)
-if model_type_for_reasoning == "gpt-oss-20b" or (
-    model_type_for_reasoning and "gpt-oss" in str(model_type_for_reasoning).lower()
-):
+model_type_for_reasoning = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+
+print("model_type_for_reasoning:", model_type_for_reasoning)
+
+if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "gpt-oss-20b":
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "Reasoning: low")
-elif (
-    model_type_for_reasoning == "Qwen 3 4B"
-    or (
-        model_type_for_reasoning
-        and "qwen-3-4b" in str(model_type_for_reasoning).lower()
-    )
-) and USE_LLAMA_CPP == "False":
+    print("Using REASONING_SUFFIX: Reasoning: low")
+elif LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "Qwen 3 4B":
+    print("Using REASONING_SUFFIX: /nothink")
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "/nothink")
 else:
+    print("No reasoning suffix applied")
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "")
 
 

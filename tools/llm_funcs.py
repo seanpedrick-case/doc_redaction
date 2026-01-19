@@ -102,6 +102,7 @@ from tools.config import (
     NUM_PRED_TOKENS,
     NUMBER_OF_RETRY_ATTEMPTS,
     QUANTISE_TRANSFORMERS_LLM_MODELS,
+    REASONING_SUFFIX,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SPECULATIVE_DECODING,
     TIMEOUT_WAIT,
@@ -1357,6 +1358,10 @@ def call_transformers_model(
         raise ValueError(
             "No model or tokenizer available. Either pass them as parameters or ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True."
         )
+
+    # Apply reasoning suffix to prompt if configured
+    if REASONING_SUFFIX and REASONING_SUFFIX.strip():
+        prompt = f"{prompt} {REASONING_SUFFIX}".strip()
 
     # 1. Define the conversation as a list of dictionaries
     # Note: The multimodal format [{"type": "text", "text": text}] is only needed for actual multimodal models

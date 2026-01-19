@@ -672,7 +672,7 @@ python cli_redact.py --task textract --textract_action list
         "--inference_server_pii_model",
         default=DEFAULT_INFERENCE_SERVER_PII_MODEL,
         help="Inference server PII detection model name.",
-    )
+    )    
     llm_group.add_argument(
         "--llm_temperature",
         type=float,
