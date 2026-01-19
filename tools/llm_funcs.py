@@ -8,7 +8,7 @@ import boto3
 import requests
 import spaces
 
-from tools.config import MAX_SPACES_GPU_RUN_TIME
+from tools.config import MAX_SPACES_GPU_RUN_TIME, PRINT_TRANSFORMERS_USER_PROMPT
 
 # Import mock patches if in test mode
 if os.environ.get("USE_MOCK_LLM") == "1" or os.environ.get("TEST_MODE") == "1":
@@ -1382,6 +1382,10 @@ def call_transformers_model(
             {"role": "system", "content": str(system_prompt)},
             {"role": "user", "content": str(prompt)},
         ]
+
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print("System prompt:", system_prompt)
+        print("User prompt:", prompt)
 
     # 2. Apply the chat template
     # Get the device from the model (handles both single device and device_map="auto" cases)

@@ -1613,6 +1613,9 @@ TIMEOUT_WAIT = int(get_or_create_env_var("TIMEOUT_WAIT", "30"))
 QUANTISE_TRANSFORMERS_LLM_MODELS = convert_string_to_boolean(
     get_or_create_env_var("QUANTISE_TRANSFORMERS_LLM_MODELS", "False")
 )
+PRINT_TRANSFORMERS_USER_PROMPT = convert_string_to_boolean(
+    get_or_create_env_var("PRINT_TRANSFORMERS_USER_PROMPT", "False")
+)
 
 # LLM inference method for PII detection (similar to VLM options)
 # Options: "aws-bedrock", "local", "inference-server", "azure-openai", "gemini"
