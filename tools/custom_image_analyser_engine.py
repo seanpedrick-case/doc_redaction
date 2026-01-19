@@ -5534,53 +5534,6 @@ class CustomImageAnalyzerEngine:
         # Create a deep copy of paddle_results to modify
         copied_paddle_results = copy.deepcopy(paddle_results)
 
-        def _normalize_paddle_result_lists(rec_texts, rec_scores, rec_polys):
-            """
-            Normalizes PaddleOCR result lists to ensure they all have the same length.
-            Pads missing entries with appropriate defaults:
-            - rec_texts: empty string ""
-            - rec_scores: 0.0 (low confidence)
-            - rec_polys: empty list []
-
-            Args:
-                rec_texts: List of recognized text strings
-                rec_scores: List of confidence scores
-                rec_polys: List of bounding box polygons
-
-            Returns:
-                Tuple of (normalized_rec_texts, normalized_rec_scores, normalized_rec_polys, max_length)
-            """
-            len_texts = len(rec_texts)
-            len_scores = len(rec_scores)
-            len_polys = len(rec_polys)
-            max_length = max(len_texts, len_scores, len_polys)
-
-            # Only normalize if there's a mismatch
-            if max_length > 0 and (
-                len_texts != max_length
-                or len_scores != max_length
-                or len_polys != max_length
-            ):
-                print(
-                    f"Warning: List length mismatch detected - rec_texts: {len_texts}, "
-                    f"rec_scores: {len_scores}, rec_polys: {len_polys}. "
-                    f"Padding to length {max_length}."
-                )
-
-                # Pad rec_texts
-                if len_texts < max_length:
-                    rec_texts = list(rec_texts) + [""] * (max_length - len_texts)
-
-                # Pad rec_scores
-                if len_scores < max_length:
-                    rec_scores = list(rec_scores) + [0.0] * (max_length - len_scores)
-
-                # Pad rec_polys
-                if len_polys < max_length:
-                    rec_polys = list(rec_polys) + [[]] * (max_length - len_polys)
-
-            return rec_texts, rec_scores, rec_polys, max_length
-
         @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
         def _process_page_result_with_hybrid_vlm_ocr(
             page_results: list,
@@ -5619,6 +5572,55 @@ class CustomImageAnalyzerEngine:
             Returns:
                 Modified page_results with VLM replacements for low-confidence lines.
             """
+
+            def _normalize_paddle_result_lists(rec_texts, rec_scores, rec_polys):
+                """
+                Normalizes PaddleOCR result lists to ensure they all have the same length.
+                Pads missing entries with appropriate defaults:
+                - rec_texts: empty string ""
+                - rec_scores: 0.0 (low confidence)
+                - rec_polys: empty list []
+
+                Args:
+                    rec_texts: List of recognized text strings
+                    rec_scores: List of confidence scores
+                    rec_polys: List of bounding box polygons
+
+                Returns:
+                    Tuple of (normalized_rec_texts, normalized_rec_scores, normalized_rec_polys, max_length)
+                """
+                len_texts = len(rec_texts)
+                len_scores = len(rec_scores)
+                len_polys = len(rec_polys)
+                max_length = max(len_texts, len_scores, len_polys)
+
+                # Only normalize if there's a mismatch
+                if max_length > 0 and (
+                    len_texts != max_length
+                    or len_scores != max_length
+                    or len_polys != max_length
+                ):
+                    print(
+                        f"Warning: List length mismatch detected - rec_texts: {len_texts}, "
+                        f"rec_scores: {len_scores}, rec_polys: {len_polys}. "
+                        f"Padding to length {max_length}."
+                    )
+
+                    # Pad rec_texts
+                    if len_texts < max_length:
+                        rec_texts = list(rec_texts) + [""] * (max_length - len_texts)
+
+                    # Pad rec_scores
+                    if len_scores < max_length:
+                        rec_scores = list(rec_scores) + [0.0] * (
+                            max_length - len_scores
+                        )
+
+                    # Pad rec_polys
+                    if len_polys < max_length:
+                        rec_polys = list(rec_polys) + [[]] * (max_length - len_polys)
+
+                return rec_texts, rec_scores, rec_polys, max_length
 
             # Helper function to create safe filename (inlined to avoid needing instance_self)
             def _create_safe_filename_with_confidence(
@@ -8506,6 +8508,46 @@ class CustomImageAnalyzerEngine:
                                 top=top,
                                 width=right - left,
                                 height=bottom - top,
+                                text=matched_text,
+                            )
+                        )
+                    else:
+                        # Fallback: Use line-level bounding box when word-level boxes aren't available
+                        # This happens when OCR only provides line-level results (e.g., VLM OCR)
+                        # Calculate proportional bounding box based on character positions
+                        line_left = redaction_relevant_ocr_result.left
+                        line_top = redaction_relevant_ocr_result.top
+                        line_width = redaction_relevant_ocr_result.width
+                        line_height = redaction_relevant_ocr_result.height
+
+                        # Calculate proportional width based on text length
+                        if line_length > 0:
+                            text_proportion = len(matched_text) / line_length
+                            # Estimate left offset based on start position
+                            char_width_estimate = line_width / line_length
+                            estimated_left_offset = start_in_line * char_width_estimate
+
+                            left = line_left + estimated_left_offset
+                            top = line_top
+                            width = text_proportion * line_width
+                            height = line_height
+                        else:
+                            # If line_length is 0, use the full line box
+                            left = line_left
+                            top = line_top
+                            width = line_width
+                            height = line_height
+
+                        redaction_bboxes.append(
+                            CustomImageRecognizerResult(
+                                entity_type=redaction_result.entity_type,
+                                start=start_in_line,
+                                end=end_in_line,
+                                score=round(redaction_result.score, 2),
+                                left=left,
+                                top=top,
+                                width=width,
+                                height=height,
                                 text=matched_text,
                             )
                         )
