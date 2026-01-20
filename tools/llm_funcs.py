@@ -486,17 +486,19 @@ def load_model(
                         )
 
             # Prepare load kwargs
+            # Match VLM behavior: always use device_map="auto" for better device handling
             load_kwargs = {
                 # "max_seq_length": max_context_length,
                 "token": hf_token,
+                "device_map": "auto",  # Always use device_map="auto" like VLM
             }
 
             if quantization_config is not None:
                 load_kwargs["quantization_config"] = quantization_config
-                load_kwargs["device_map"] = "auto"
                 print("Loading model with bitsandbytes quantisation")
             else:
-                load_kwargs["dtype"] = torch_dtype
+                # Use "auto" dtype like VLM for better compatibility
+                load_kwargs["dtype"] = "auto" if model_dtype == "auto" else torch_dtype
                 print("Loading model without quantisation")
 
             # Load tokenizer FIRST to validate the model_id is accessible
@@ -518,13 +520,8 @@ def load_model(
                 **load_kwargs,
             )
 
-            # For non-quantized models, explicitly move to device (matching VLM behavior)
-            if quantization_config is None:
-                device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-                model = model.to(device)
-                print("Model moved to device:", device)
-
             # Set model to evaluation mode (standard transformers approach)
+            # Note: With device_map="auto", don't manually move model - let it handle device placement
             model.eval()
             print("Model loaded successfully")
 
@@ -1526,10 +1523,10 @@ def call_transformers_model(
             else:
                 model_device = torch.device("cpu")
         else:
-            # Last resort: check if CUDA is available, but prefer CPU for Zero GPU spaces
+            # Last resort: check if CUDA is available, prefer GPU for Zero GPU spaces
             if RUNNING_ON_HF_ZEROGPU:
                 # On Zero GPU spaces, models run on CPU
-                model_device = torch.device("cpu")
+                model_device = torch.device("cuda")
             else:
                 model_device = torch.device(
                     "cuda" if torch.cuda.is_available() else "cpu"
@@ -1541,12 +1538,20 @@ def call_transformers_model(
 
     try:
         # Try applying chat template with system prompt (if present)
+        # Create inputs dict like VLM does - this allows model to handle device placement automatically
         input_ids = tokenizer.apply_chat_template(
             conversation,
             add_generation_prompt=True,
             tokenize=True,
             return_tensors="pt",
-        ).to(model_device)
+        )
+
+        # Don't manually move to device - let the model handle it when using device_map="auto"
+        # Only move if we can determine the device and it's not using device_map="auto"
+        if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
+            # Model is on a single device, move input_ids to match
+            input_ids = input_ids.to(model_device)
+        # If using device_map="auto", let the model handle device placement
 
         if PRINT_TRANSFORMERS_USER_PROMPT:
             print("Input IDs:", input_ids)
@@ -1574,7 +1579,10 @@ def call_transformers_model(
                     add_generation_prompt=True,
                     tokenize=True,
                     return_tensors="pt",
-                ).to(model_device)
+                )
+                # Don't manually move to device if using device_map="auto"
+                if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
+                    input_ids = input_ids.to(model_device)
                 print("Successfully applied chat template without system prompt")
 
                 if PRINT_TRANSFORMERS_USER_PROMPT:
@@ -1605,7 +1613,10 @@ def call_transformers_model(
                     )
                 if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
                     raise ValueError("Tokenizer output does not contain input_ids")
-                input_ids = encoded.input_ids.to(model_device)
+                input_ids = encoded.input_ids
+                # Don't manually move to device if using device_map="auto"
+                if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
+                    input_ids = input_ids.to(model_device)
         else:
             # No system prompt, but chat template still failed - use manual tokenization
             print(f"Chat template failed ({e}), using manual tokenization")
@@ -1619,7 +1630,10 @@ def call_transformers_model(
                 )
             if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
                 raise ValueError("Tokenizer output does not contain input_ids")
-            input_ids = encoded.input_ids.to(model_device)
+            input_ids = encoded.input_ids
+            # Don't manually move to device if using device_map="auto"
+            if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
+                input_ids = input_ids.to(model_device)
     except Exception as e:
         print("Error applying chat template:", e)
         import traceback
@@ -1639,7 +1653,12 @@ def call_transformers_model(
             attention_mask = torch.ones_like(input_ids, dtype=torch.long)
 
     # Ensure attention_mask is on the same device as input_ids
-    attention_mask = attention_mask.to(model_device)
+    # Match VLM behavior: let model handle device placement when using device_map="auto"
+    if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
+        attention_mask = attention_mask.to(model_device)
+    else:
+        # With device_map="auto", keep attention_mask on same device as input_ids
+        attention_mask = attention_mask.to(input_ids.device)
 
     # Map LlamaCPP parameters to transformers parameters
     generation_kwargs = {
@@ -1720,15 +1739,105 @@ def call_transformers_model(
     end_time = time.time()
 
     # --- Decode and Display Results ---
-    new_tokens = outputs[0][input_ids.shape[-1] :]
-    assistant_reply = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    # Extract only the newly generated tokens (exclude input tokens)
+    input_length = input_ids.shape[-1]
 
-    num_input_tokens = input_ids.shape[
-        -1
-    ]  # This gets the sequence length (number of tokens)
-    num_generated_tokens = len(new_tokens)
+    # Handle different output formats from model.generate()
+    # model.generate() returns a tensor with shape [batch_size, sequence_length]
+    # that includes both input and generated tokens
+    if isinstance(outputs, torch.Tensor):
+        # If outputs is a tensor, extract the new tokens
+        if outputs.dim() == 2:
+            # Shape: [batch_size, sequence_length]
+            new_tokens = outputs[0, input_length:].clone()
+        elif outputs.dim() == 1:
+            # Shape: [sequence_length] (single sequence)
+            new_tokens = outputs[input_length:].clone()
+        else:
+            raise ValueError(f"Unexpected output tensor shape: {outputs.shape}")
+    else:
+        # If outputs is a sequence or other format
+        if hasattr(outputs, "__getitem__"):
+            new_tokens = (
+                outputs[0][input_length:]
+                if len(outputs) > 0
+                else outputs[input_length:]
+            )
+        else:
+            raise ValueError(f"Unexpected output type: {type(outputs)}")
+
+    # Ensure new_tokens is a tensor and on CPU for decoding
+    if isinstance(new_tokens, torch.Tensor):
+        new_tokens = new_tokens.cpu().clone()
+        # Convert to list for decoding (some tokenizers prefer lists)
+        new_tokens_list = new_tokens.tolist()
+    else:
+        new_tokens_list = (
+            list(new_tokens) if hasattr(new_tokens, "__iter__") else [new_tokens]
+        )
+
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print(f"Input length: {input_length}")
+        print(f"Output shape: {outputs.shape if hasattr(outputs, 'shape') else 'N/A'}")
+        print(f"New tokens count: {len(new_tokens_list)}")
+        print(f"First 20 new token IDs: {new_tokens_list[:20]}")
+
+    # Decode the tokens
+    # Use the token list for decoding (more reliable than tensor)
+    try:
+        assistant_reply = tokenizer.decode(
+            new_tokens_list, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        )
+    except Exception as e:
+        print(f"Warning: Error decoding tokens: {e}")
+        print(f"New tokens count: {len(new_tokens_list)}")
+        print(f"New tokens (first 20): {new_tokens_list[:20]}")
+        # Try alternative decoding methods
+        try:
+            # Try with tensor directly
+            if isinstance(new_tokens, torch.Tensor):
+                assistant_reply = tokenizer.decode(
+                    new_tokens,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=True,
+                )
+            else:
+                raise e
+        except Exception as e2:
+            print(f"Error with tensor decoding: {e2}")
+            # Last resort: try to decode each token individually to see which ones fail
+            try:
+                decoded_parts = []
+                failed_tokens = []
+                for i, token_id in enumerate(
+                    new_tokens_list[:200]
+                ):  # Limit to first 200 to avoid issues
+                    try:
+                        decoded = tokenizer.decode([token_id], skip_special_tokens=True)
+                        decoded_parts.append(decoded)
+                    except Exception as token_error:
+                        failed_tokens.append((i, token_id, str(token_error)))
+                        decoded_parts.append(f"<TOKEN_ERROR_{token_id}>")
+                if failed_tokens:
+                    print(
+                        f"Warning: {len(failed_tokens)} tokens failed to decode individually"
+                    )
+                    print(f"First few failed tokens: {failed_tokens[:5]}")
+                assistant_reply = "".join(decoded_parts)
+            except Exception as e3:
+                print(f"Error with individual token decoding: {e3}")
+                assistant_reply = f"<DECODING_ERROR: {str(e3)}>"
+
+    num_input_tokens = input_length
+    num_generated_tokens = (
+        len(new_tokens_list) if hasattr(new_tokens_list, "__len__") else 0
+    )
     duration = end_time - start_time
-    tokens_per_second = num_generated_tokens / duration
+    tokens_per_second = num_generated_tokens / duration if duration > 0 else 0
+
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print(f"\nDecoded output length: {len(assistant_reply)} characters")
+        print(f"First 200 chars of output: {assistant_reply[:200]}")
 
     print("\n--- Performance ---")
     print(f"Time taken: {duration:.2f} seconds")
