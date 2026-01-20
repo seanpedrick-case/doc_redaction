@@ -824,7 +824,6 @@ if (
     try:
         print("Loading local PII model:", LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE)
         get_pii_model()  # This will trigger loading the PII model
-        print("PII model loaded successfully")
     except Exception as e:
         print(f"Warning: Could not load PII model at startup: {e}")
         print("PII model will be loaded on-demand when needed.")
@@ -1391,6 +1390,9 @@ def call_transformers_model(
     # Get the device from the model (handles both single device and device_map="auto" cases)
     model_device = next(model.parameters()).device
 
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print("Model device:", model_device)
+
     try:
         # Try applying chat template
         input_ids = tokenizer.apply_chat_template(
@@ -1399,6 +1401,19 @@ def call_transformers_model(
             tokenize=True,
             return_tensors="pt",
         ).to(model_device)
+
+        if PRINT_TRANSFORMERS_USER_PROMPT:
+            print("Input IDs:", input_ids)
+
+            print("Rendered prompt:")
+            rendered = tokenizer.apply_chat_template(
+                conversation,
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+            print(rendered[:500])
+            print("-" * 50)
+
     except (TypeError, KeyError, IndexError) as e:
         # If chat template fails, try manual formatting
         print(f"Chat template failed ({e}), using manual tokenization")
@@ -1439,6 +1454,9 @@ def call_transformers_model(
     if hasattr(gen_config, "repeat_penalty"):
         generation_kwargs["repetition_penalty"] = gen_config.repeat_penalty
 
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print("Generation kwargs:", generation_kwargs)
+
     # --- Timed Inference Test ---
     print("\nStarting model inference...")
     start_time = time.time()
@@ -1446,7 +1464,8 @@ def call_transformers_model(
     # Use speculative decoding if assistant model is available
     try:
         if speculative_decoding and assistant_model is not None:
-            # print("Using speculative decoding with assistant model")
+            if PRINT_TRANSFORMERS_USER_PROMPT:
+                print("Using speculative decoding with assistant model")
             outputs = model.generate(
                 input_ids,
                 assistant_model=assistant_model,
@@ -1454,7 +1473,8 @@ def call_transformers_model(
                 streamer=streamer,
             )
         else:
-            # print("Generating without speculative decoding")
+            if PRINT_TRANSFORMERS_USER_PROMPT:
+                print("Generating without speculative decoding")
             outputs = model.generate(input_ids, **generation_kwargs, streamer=streamer)
     except Exception as e:
         error_msg = str(e)
