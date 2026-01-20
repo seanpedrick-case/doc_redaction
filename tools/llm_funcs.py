@@ -73,7 +73,6 @@ from tools.config import (
     DEDUPLICATION_THRESHOLD,
     HF_TOKEN,
     INT8_WITH_OFFLOAD_TO_CPU,
-    K_QUANT_LEVEL,
     LLM_BATCH_SIZE,
     LLM_CONTEXT_LENGTH,
     LLM_LAST_N_TOKENS,
@@ -103,12 +102,12 @@ from tools.config import (
     NUMBER_OF_RETRY_ATTEMPTS,
     QUANTISE_TRANSFORMERS_LLM_MODELS,
     REASONING_SUFFIX,
+    RUNNING_ON_HF_ZEROGPU,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SPECULATIVE_DECODING,
     TIMEOUT_WAIT,
     USE_LLAMA_CPP,
     USE_LLAMA_SWAP,
-    V_QUANT_LEVEL,
 )
 
 if isinstance(NUM_PRED_TOKENS, str):
@@ -315,7 +314,28 @@ def load_model(
             - assistant_model (transformers model): The assistant model for speculative decoding (if speculative_decoding is True).
     """
 
+    # If model is provided, validate that tokenizer is also provided and compatible
     if model:
+        if tokenizer is None:
+            print(
+                "Warning: Model provided but tokenizer is None. Attempting to load matching tokenizer..."
+            )
+            # Try to determine model_id from model config
+            try:
+                if hasattr(model, "config") and hasattr(model.config, "_name_or_path"):
+                    model_id = model.config._name_or_path
+                    from transformers import AutoTokenizer
+
+                    tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+                    if not tokenizer.pad_token:
+                        tokenizer.pad_token = tokenizer.eos_token
+                    print(f"Loaded matching tokenizer from {model_id}")
+                else:
+                    print(
+                        "Warning: Could not determine model source to load matching tokenizer"
+                    )
+            except Exception as e:
+                print(f"Warning: Failed to load matching tokenizer: {e}")
         return model, tokenizer, assistant_model
 
     # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE if local_model_type is not provided
@@ -360,166 +380,182 @@ def load_model(
         gpu_config.update_context(max_context_length)
 
         # Llama.cpp python support not currently implemented
-        if USE_LLAMA_CPP == "True":
-            from llama_cpp import Llama
-            from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
+        # if USE_LLAMA_CPP == "True":
+        #     from llama_cpp import Llama
+        #     from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
 
-            model_path = get_model_path(
-                repo_id=repo_id, model_filename=model_filename, model_dir=model_dir
-            )
+        #     model_path = get_model_path(
+        #         repo_id=repo_id, model_filename=model_filename, model_dir=model_dir
+        #     )
 
-            try:
-                print("GPU load variables:", vars(gpu_config))
-                if speculative_decoding:
-                    model = Llama(
-                        model_path=model_path,
-                        type_k=K_QUANT_LEVEL,
-                        type_v=V_QUANT_LEVEL,
-                        flash_attn=True,
-                        draft_model=LlamaPromptLookupDecoding(
-                            num_pred_tokens=NUM_PRED_TOKENS
-                        ),
-                        **vars(gpu_config),
-                    )
-                else:
-                    model = Llama(
-                        model_path=model_path,
-                        type_k=K_QUANT_LEVEL,
-                        type_v=V_QUANT_LEVEL,
-                        flash_attn=True,
-                        **vars(gpu_config),
-                    )
+        #     try:
+        #         print("GPU load variables:", vars(gpu_config))
+        #         if speculative_decoding:
+        #             model = Llama(
+        #                 model_path=model_path,
+        #                 type_k=K_QUANT_LEVEL,
+        #                 type_v=V_QUANT_LEVEL,
+        #                 flash_attn=True,
+        #                 draft_model=LlamaPromptLookupDecoding(
+        #                     num_pred_tokens=NUM_PRED_TOKENS
+        #                 ),
+        #                 **vars(gpu_config),
+        #             )
+        #         else:
+        #             model = Llama(
+        #                 model_path=model_path,
+        #                 type_k=K_QUANT_LEVEL,
+        #                 type_v=V_QUANT_LEVEL,
+        #                 flash_attn=True,
+        #                 **vars(gpu_config),
+        #             )
 
-            except Exception as e:
-                print("GPU load failed due to:", e, "Loading model in CPU mode")
-                # If fails, go to CPU mode
-                model = Llama(model_path=model_path, **vars(cpu_config))
+        #     except Exception as e:
+        #         print("GPU load failed due to:", e, "Loading model in CPU mode")
+        #         # If fails, go to CPU mode
+        #         model = Llama(model_path=model_path, **vars(cpu_config))
 
+        # else:
+        from transformers import (
+            AutoModelForCausalLM,
+            AutoTokenizer,
+            BitsAndBytesConfig,
+        )
+
+        print("Loading model from transformers")
+        # Use the official model ID for Gemma 3 4B
+        model_id = repo_id
+        # 1. Set Data Type (dtype)
+        # For H200/Hopper: 'bfloat16'
+        # For RTX 3060/Ampere: 'float16'
+        dtype_str = model_dtype  # os.environ.get("MODEL_DTYPE", "bfloat16").lower()
+        if dtype_str == "bfloat16":
+            torch_dtype = torch.bfloat16
+        elif dtype_str == "float16":
+            torch_dtype = torch.float16
+        elif dtype_str == "auto":
+            torch_dtype = None
         else:
-            from transformers import (
-                AutoModelForCausalLM,
-                AutoTokenizer,
-                BitsAndBytesConfig,
-            )
+            torch_dtype = torch.float32  # A safe fallback
 
-            print("Loading model from transformers")
-            # Use the official model ID for Gemma 3 4B
-            model_id = (
-                repo_id.split("https://huggingface.co/")[-1]
-                if "https://huggingface.co/" in repo_id
-                else repo_id
-            )
-            # 1. Set Data Type (dtype)
-            # For H200/Hopper: 'bfloat16'
-            # For RTX 3060/Ampere: 'float16'
-            dtype_str = model_dtype  # os.environ.get("MODEL_DTYPE", "bfloat16").lower()
-            if dtype_str == "bfloat16":
-                torch_dtype = torch.bfloat16
-            elif dtype_str == "float16":
-                torch_dtype = torch.float16
-            else:
-                torch_dtype = torch.float32  # A safe fallback
+        # 2. Set Compilation Mode
+        # 'max-autotune' is great for both but can be slow initially.
+        # 'reduce-overhead' is a faster alternative for compiling.
 
-            # 2. Set Compilation Mode
-            # 'max-autotune' is great for both but can be slow initially.
-            # 'reduce-overhead' is a faster alternative for compiling.
+        print("--- System Configuration ---")
+        print(f"Using model id: {model_id}")
+        print(f"Using dtype: {torch_dtype}")
+        print(f"Using compile mode: {compile_mode}")
+        print(f"Using quantization: {QUANTISE_TRANSFORMERS_LLM_MODELS}")
+        print("--------------------------\n")
 
-            print("--- System Configuration ---")
-            print(f"Using model id: {model_id}")
-            print(f"Using dtype: {torch_dtype}")
-            print(f"Using compile mode: {compile_mode}")
-            print(f"Using quantization: {QUANTISE_TRANSFORMERS_LLM_MODELS}")
-            print("--------------------------\n")
+        # --- Load Tokenizer and Model Atomically ---
+        # Ensure both model and tokenizer are loaded from the same source
+        # If either fails, both should fail together to prevent mismatched pairs
 
-            # --- Load Tokenizer and Model ---
-
-            try:
-
-                # Load Tokenizer and Model
-                # tokenizer = AutoTokenizer.from_pretrained(model_id)
-
-                # Setup quantization config if enabled
-                quantization_config = None
-                if QUANTISE_TRANSFORMERS_LLM_MODELS:
-                    if not torch.cuda.is_available():
-                        print(
-                            "Warning: Quantisation requires CUDA, but CUDA is not available."
-                        )
-                        print("Falling back to loading models without quantisation")
-                        quantization_config = None
-                    else:
-                        if INT8_WITH_OFFLOAD_TO_CPU:
-                            # This will be very slow. Requires at least 4GB of VRAM and 32GB of RAM
-                            print(
-                                "Using bitsandbytes for quantisation to 8 bits, with offloading to CPU"
-                            )
-                            max_memory = {0: "4GB", "cpu": "32GB"}
-                            quantization_config = BitsAndBytesConfig(
-                                load_in_8bit=True,
-                                max_memory=max_memory,
-                                llm_int8_enable_fp32_cpu_offload=True,  # Note: if bitsandbytes has to offload to CPU, inference will be slow
-                            )
-                        else:
-                            # For Gemma 4B, requires at least 6GB of VRAM
-                            print("Using bitsandbytes for quantisation to 4 bits")
-                            quantization_config = BitsAndBytesConfig(
-                                load_in_4bit=True,
-                                bnb_4bit_quant_type="nf4",  # Use the modern NF4 quantisation for better performance
-                                bnb_4bit_compute_dtype=torch_dtype,
-                                bnb_4bit_use_double_quant=True,  # Optional: uses a second quantisation step to save even more memory
-                            )
-
-                # Prepare load kwargs
-                load_kwargs = {
-                    # "max_seq_length": max_context_length,
-                    "token": hf_token,
-                }
-
-                if quantization_config is not None:
-                    load_kwargs["quantization_config"] = quantization_config
-                    load_kwargs["device_map"] = "auto"
-                    print("Loading model with bitsandbytes quantisation")
-                else:
-                    load_kwargs["dtype"] = torch_dtype
-                    print("Loading model without quantisation")
-
-                # Load model - AutoModelForCausalLM.from_pretrained returns only the model, not a tuple
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_id,
-                    **load_kwargs,
-                )
-
-                # For non-quantized models, explicitly move to device (matching VLM behavior)
-                if quantization_config is None:
-                    device = torch.device(
-                        "cuda:0" if torch.cuda.is_available() else "cpu"
+        try:
+            # Setup quantization config if enabled
+            quantization_config = None
+            if QUANTISE_TRANSFORMERS_LLM_MODELS:
+                if not torch.cuda.is_available():
+                    print(
+                        "Warning: Quantisation requires CUDA, but CUDA is not available."
                     )
-                    model = model.to(device)
+                    print("Falling back to loading models without quantisation")
+                    quantization_config = None
+                else:
+                    if INT8_WITH_OFFLOAD_TO_CPU:
+                        # This will be very slow. Requires at least 4GB of VRAM and 32GB of RAM
+                        print(
+                            "Using bitsandbytes for quantisation to 8 bits, with offloading to CPU"
+                        )
+                        max_memory = {0: "4GB", "cpu": "32GB"}
+                        quantization_config = BitsAndBytesConfig(
+                            load_in_8bit=True,
+                            max_memory=max_memory,
+                            llm_int8_enable_fp32_cpu_offload=True,  # Note: if bitsandbytes has to offload to CPU, inference will be slow
+                        )
+                    else:
+                        # For Gemma 4B, requires at least 6GB of VRAM
+                        print("Using bitsandbytes for quantisation to 4 bits")
+                        quantization_config = BitsAndBytesConfig(
+                            load_in_4bit=True,
+                            bnb_4bit_quant_type="nf4",  # Use the modern NF4 quantisation for better performance
+                            bnb_4bit_compute_dtype=torch_dtype,
+                            bnb_4bit_use_double_quant=True,  # Optional: uses a second quantisation step to save even more memory
+                        )
 
-                # Set model to evaluation mode (standard transformers approach)
-                model.eval()
+            # Prepare load kwargs
+            load_kwargs = {
+                # "max_seq_length": max_context_length,
+                "token": hf_token,
+            }
 
-                # Load tokenizer separately
-                tokenizer = AutoTokenizer.from_pretrained(
-                    model_id,
-                    token=hf_token,
-                )
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+                load_kwargs["device_map"] = "auto"
+                print("Loading model with bitsandbytes quantisation")
+            else:
+                load_kwargs["dtype"] = torch_dtype
+                print("Loading model without quantisation")
 
-                if not tokenizer.pad_token:
-                    tokenizer.pad_token = tokenizer.eos_token
+            # Load tokenizer FIRST to validate the model_id is accessible
+            # This ensures we catch tokenizer errors before loading the (larger) model
+            print(f"Loading tokenizer from {model_id}...")
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id,
+                token=hf_token,
+            )
 
+            if not tokenizer.pad_token:
+                tokenizer.pad_token = tokenizer.eos_token
+            print("Tokenizer loaded successfully")
+
+            # Load model from the SAME model_id to ensure compatibility
+            print(f"Loading model from {model_id}...")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                **load_kwargs,
+            )
+
+            # For non-quantized models, explicitly move to device (matching VLM behavior)
+            if quantization_config is None:
+                device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+                model = model.to(device)
+                print("Model moved to device:", device)
+
+            # Set model to evaluation mode (standard transformers approach)
+            model.eval()
+            print("Model loaded successfully")
+
+            # Validate that model and tokenizer are from the same source
+            if hasattr(model, "config") and hasattr(model.config, "_name_or_path"):
+                model_source = model.config._name_or_path
+                if hasattr(tokenizer, "name_or_path"):
+                    tokenizer_source = tokenizer.name_or_path
+                    if model_source != tokenizer_source and model_id not in [
+                        model_source,
+                        tokenizer_source,
+                    ]:
+                        print(
+                            f"Warning: Model source ({model_source}) and tokenizer source ({tokenizer_source}) may differ. Using model_id: {model_id}"
+                        )
+
+        except Exception as e:
+            # If loading fails, ensure both model and tokenizer are None to prevent partial state
+            print(f"Error loading model and tokenizer: {e}")
+            model = None
+            tokenizer = None
+            raise RuntimeError(
+                f"Failed to load model and tokenizer from {model_id}: {e}"
+            ) from e
+
+        # Compile the Model with the selected mode 🚀
+        if COMPILE_TRANSFORMERS:
+            try:
+                model = torch.compile(model, mode=compile_mode, fullgraph=True)
             except Exception as e:
-                print("Error loading model with bitsandbytes quantisation config:", e)
-                raise Warning(
-                    "Error loading model with bitsandbytes quantisation config:", e
-                )
-
-            # Compile the Model with the selected mode 🚀
-            if COMPILE_TRANSFORMERS:
-                try:
-                    model = torch.compile(model, mode=compile_mode, fullgraph=True)
-                except Exception as e:
-                    print(f"Could not compile model: {e}. Running in eager mode.")
+                print(f"Could not compile model: {e}. Running in eager mode.")
 
         print(
             "Loading with",
@@ -535,25 +571,56 @@ def load_model(
                 "Using transformers model in CPU mode is not supported. Please change your config variable USE_LLAMA_CPP to True if you want to do CPU inference."
             )
 
-        model_path = get_model_path(
-            repo_id=repo_id, model_filename=model_filename, model_dir=model_dir
-        )
+        # from llama_cpp import Llama
+        # from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
 
-        # gpu_config.update_gpu(gpu_layers)
-        cpu_config.update_gpu(gpu_layers)
+        # model_path = get_model_path(
+        #     repo_id=repo_id, model_filename=model_filename, model_dir=model_dir
+        # )
 
-        # Update context length according to slider
-        # gpu_config.update_context(max_context_length)
-        cpu_config.update_context(max_context_length)
+        # # gpu_config.update_gpu(gpu_layers)
+        # cpu_config.update_gpu(gpu_layers)
 
-        if speculative_decoding:
-            model = Llama(
-                model_path=model_path,
-                draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS),
-                **vars(cpu_config),
+        # # Update context length according to slider
+        # # gpu_config.update_context(max_context_length)
+        # cpu_config.update_context(max_context_length)
+
+        # # Load model
+        # if speculative_decoding:
+        #     model = Llama(
+        #         model_path=model_path,
+        #         draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS),
+        #         **vars(cpu_config),
+        #     )
+        # else:
+        #     model = Llama(model_path=model_path, **vars(cpu_config))
+
+        # For llama-cpp models, tokenizer is not used directly (model handles tokenization internally)
+        # However, we still load it for compatibility with code that expects a tokenizer
+        # Load tokenizer from the same repo_id to ensure compatibility if needed
+        try:
+            from transformers import AutoTokenizer
+
+            model_id = (
+                repo_id.split("https://huggingface.co/")[-1]
+                if "https://huggingface.co/" in repo_id
+                else repo_id
             )
-        else:
-            model = Llama(model_path=model_path, **vars(cpu_config))
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id,
+                token=hf_token,
+            )
+            if not tokenizer.pad_token:
+                tokenizer.pad_token = tokenizer.eos_token
+            print(
+                f"Loaded tokenizer from {model_id} for compatibility (llama-cpp handles tokenization internally)"
+            )
+        except Exception as e:
+            print(f"Warning: Could not load tokenizer for llama-cpp model: {e}")
+            print(
+                "Note: llama-cpp models handle tokenization internally, so tokenizer may not be needed"
+            )
+            tokenizer = None
 
         print(
             "Loading with",
@@ -566,6 +633,8 @@ def load_model(
     print("GPU layers assigned to cuda:", gpu_layers)
 
     # Load assistant model for speculative decoding if enabled
+    # Note: Assistant model typically shares the same tokenizer as the main model
+    # for speculative decoding, so we don't load a separate tokenizer for it
     if speculative_decoding and USE_LLAMA_CPP == "False" and torch_device == "cuda":
         print("Loading assistant model for speculative decoding:", ASSISTANT_MODEL)
         try:
@@ -607,7 +676,10 @@ def load_model(
                 assistant_load_kwargs["dtype"] = torch_dtype
                 print("Loading assistant model without quantisation")
 
-            # Load the assistant model with the same configuration as the main model
+            # Load the assistant model from ASSISTANT_MODEL
+            # Note: Assistant model should be compatible with the main model's tokenizer
+            # for speculative decoding to work correctly
+            print(f"Loading assistant model from {ASSISTANT_MODEL}...")
             assistant_model = AutoModelForCausalLM.from_pretrained(
                 ASSISTANT_MODEL, **assistant_load_kwargs
             )
@@ -617,7 +689,21 @@ def load_model(
                 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
                 assistant_model = assistant_model.to(device)
 
-            # assistant_model.config._name_or_path = model.config._name_or_path
+            # Validate that assistant model can work with the main tokenizer
+            # For speculative decoding, both models should use compatible tokenizers
+            if hasattr(assistant_model, "config") and hasattr(
+                assistant_model.config, "_name_or_path"
+            ):
+                assistant_source = assistant_model.config._name_or_path
+                if hasattr(tokenizer, "name_or_path"):
+                    tokenizer_source = tokenizer.name_or_path
+                    if assistant_source != tokenizer_source:
+                        print(
+                            f"Warning: Assistant model ({assistant_source}) and tokenizer ({tokenizer_source}) are from different sources."
+                        )
+                        print(
+                            "This may cause issues with speculative decoding. Ensure they are compatible."
+                        )
 
             # Compile the assistant model if compilation is enabled
             if COMPILE_TRANSFORMERS:
@@ -631,6 +717,7 @@ def load_model(
                     )
 
             print("Successfully loaded assistant model for speculative decoding")
+            print("Note: Assistant model uses the same tokenizer as the main model")
 
         except Exception as e:
             print(f"Error loading assistant model: {e}")
@@ -642,8 +729,13 @@ def load_model(
 
 
 def get_model():
-    """Get the globally loaded model. Load it if not already loaded."""
+    """Get the globally loaded model. Load it if not already loaded.
+
+    Note: This function ensures model and tokenizer are loaded together atomically
+    to prevent mismatches. If model is None, both model and tokenizer will be loaded.
+    """
     global _model, _tokenizer, _assistant_model
+    # If model is None, load both model and tokenizer together atomically
     if _model is None:
         _model, _tokenizer, _assistant_model = load_model(
             local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
@@ -666,8 +758,14 @@ def get_model():
 
 
 def get_tokenizer():
-    """Get the globally loaded tokenizer. Load it if not already loaded."""
+    """Get the globally loaded tokenizer. Load it if not already loaded.
+
+    Note: This function ensures model and tokenizer are loaded together atomically
+    to prevent mismatches. If tokenizer is None, both model and tokenizer will be loaded.
+    """
     global _model, _tokenizer, _assistant_model
+    # If tokenizer is None, load both model and tokenizer together atomically
+    # This ensures they're always from the same source
     if _tokenizer is None:
         _model, _tokenizer, _assistant_model = load_model(
             local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
@@ -687,6 +785,21 @@ def get_tokenizer():
             assistant_model=_assistant_model,
         )
     return _tokenizer
+
+
+def get_model_and_tokenizer():
+    """Get both the globally loaded model and tokenizer together.
+
+    This is the recommended way to get both when you need them, as it ensures
+    they're loaded atomically from the same source and prevents mismatches.
+
+    Returns:
+        tuple: (model, tokenizer) - Both loaded and guaranteed to be from the same source
+    """
+    # Ensure both are loaded by calling get_model() which loads both atomically
+    model = get_model()
+    tokenizer = get_tokenizer()
+    return model, tokenizer
 
 
 def get_assistant_model():
@@ -734,11 +847,7 @@ def get_pii_model():
     # If PII-specific config is set, use it; otherwise fall back to general local model config
     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
         pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-        pii_model_file = (
-            LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-            if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-            else ""
-        )
+        pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
         pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
     else:
         raise ValueError(
@@ -781,11 +890,7 @@ def get_pii_tokenizer():
     # If PII-specific config is set, use it; otherwise fall back to general local model config
     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
         pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-        pii_model_file = (
-            LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-            if LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-            else ""
-        )
+        pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
         pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
     else:
         raise ValueError(
@@ -1346,10 +1451,16 @@ def call_transformers_model(
     """
     from transformers import TextStreamer
 
-    if model is None:
-        model = get_model()
-    if tokenizer is None:
-        tokenizer = get_tokenizer()
+    # Load model and tokenizer together to ensure they're from the same source
+    # This prevents mismatches that could occur if they're loaded separately
+    if model is None or tokenizer is None:
+        # Use get_model_and_tokenizer() to ensure both are loaded atomically
+        # This is safer than calling get_model() and get_tokenizer() separately
+        loaded_model, loaded_tokenizer = get_model_and_tokenizer()
+        if model is None:
+            model = loaded_model
+        if tokenizer is None:
+            tokenizer = loaded_tokenizer
     if assistant_model is None and speculative_decoding:
         assistant_model = get_assistant_model()
 
@@ -1366,21 +1477,28 @@ def call_transformers_model(
     # Note: The multimodal format [{"type": "text", "text": text}] is only needed for actual multimodal models
     # with images/videos. For text-only content, even multimodal models expect plain strings.
 
+    # Check if system_prompt is meaningful (not empty/None)
+    has_system_prompt = system_prompt and str(system_prompt).strip()
+
     # Always use string format for text-only content, regardless of MULTIMODAL_PROMPT_FORMAT setting
     # MULTIMODAL_PROMPT_FORMAT should only be used when you actually have multimodal inputs (images, etc.)
     if MULTIMODAL_PROMPT_FORMAT:
-        conversation = [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": str(system_prompt)}],
-            },
-            {"role": "user", "content": [{"type": "text", "text": str(prompt)}]},
-        ]
+        conversation = []
+        if has_system_prompt:
+            conversation.append(
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": str(system_prompt)}],
+                }
+            )
+        conversation.append(
+            {"role": "user", "content": [{"type": "text", "text": str(prompt)}]}
+        )
     else:
-        conversation = [
-            {"role": "system", "content": str(system_prompt)},
-            {"role": "user", "content": str(prompt)},
-        ]
+        conversation = []
+        if has_system_prompt:
+            conversation.append({"role": "system", "content": str(system_prompt)})
+        conversation.append({"role": "user", "content": str(prompt)})
 
     if PRINT_TRANSFORMERS_USER_PROMPT:
         print("System prompt:", system_prompt)
@@ -1388,13 +1506,20 @@ def call_transformers_model(
 
     # 2. Apply the chat template
     # Get the device from the model (handles both single device and device_map="auto" cases)
-    model_device = next(model.parameters()).device
+    try:
+        model_device = next(model.parameters()).device
+    except (StopIteration, AttributeError):
+        # Fallback to cuda if we can't determine device
+        model_device = "cuda"
+
+    if RUNNING_ON_HF_ZEROGPU:
+        model_device = "cuda"
 
     if PRINT_TRANSFORMERS_USER_PROMPT:
         print("Model device:", model_device)
 
     try:
-        # Try applying chat template
+        # Try applying chat template with system prompt (if present)
         input_ids = tokenizer.apply_chat_template(
             conversation,
             add_generation_prompt=True,
@@ -1411,23 +1536,69 @@ def call_transformers_model(
                 add_generation_prompt=True,
                 tokenize=False,
             )
-            print(rendered[:500])
+            print(rendered)
             print("-" * 50)
 
-    except (TypeError, KeyError, IndexError) as e:
-        # If chat template fails, try manual formatting
-        print(f"Chat template failed ({e}), using manual tokenization")
-        # Combine system and user prompts manually
-        full_prompt = f"{system_prompt}\n\n{prompt}"
-        # Tokenize manually with special tokens
-        encoded = tokenizer(full_prompt, return_tensors="pt", add_special_tokens=True)
-        if encoded is None:
-            raise ValueError(
-                "Tokenizer returned None - tokenizer may not be properly initialized"
+    except (TypeError, KeyError, IndexError, ValueError) as e:
+        # If chat template fails, try without system prompt (some models don't support it)
+        if has_system_prompt:
+            print(
+                f"Chat template failed with system prompt ({e}), trying without system prompt..."
             )
-        if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
-            raise ValueError("Tokenizer output does not contain input_ids")
-        input_ids = encoded.input_ids.to(model_device)
+            # Try again with only user prompt
+            user_only_conversation = [{"role": "user", "content": str(prompt)}]
+            try:
+                input_ids = tokenizer.apply_chat_template(
+                    user_only_conversation,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_tensors="pt",
+                ).to(model_device)
+                print("Successfully applied chat template without system prompt")
+
+                if PRINT_TRANSFORMERS_USER_PROMPT:
+                    print("Input IDs:", input_ids)
+                    print("Rendered prompt (without system):")
+                    rendered = tokenizer.apply_chat_template(
+                        user_only_conversation,
+                        add_generation_prompt=True,
+                        tokenize=False,
+                    )
+                    print(rendered)
+                    print("-" * 50)
+            except Exception as e2:
+                print(
+                    f"Chat template failed without system prompt ({e2}), using manual tokenization"
+                )
+                # Combine system and user prompts manually as fallback
+                full_prompt = (
+                    f"{system_prompt}\n\n{prompt}" if has_system_prompt else prompt
+                )
+                # Tokenize manually with special tokens
+                encoded = tokenizer(
+                    full_prompt, return_tensors="pt", add_special_tokens=True
+                )
+                if encoded is None:
+                    raise ValueError(
+                        "Tokenizer returned None - tokenizer may not be properly initialized"
+                    )
+                if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
+                    raise ValueError("Tokenizer output does not contain input_ids")
+                input_ids = encoded.input_ids.to(model_device)
+        else:
+            # No system prompt, but chat template still failed - use manual tokenization
+            print(f"Chat template failed ({e}), using manual tokenization")
+            full_prompt = str(prompt)
+            encoded = tokenizer(
+                full_prompt, return_tensors="pt", add_special_tokens=True
+            )
+            if encoded is None:
+                raise ValueError(
+                    "Tokenizer returned None - tokenizer may not be properly initialized"
+                )
+            if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
+                raise ValueError("Tokenizer output does not contain input_ids")
+            input_ids = encoded.input_ids.to(model_device)
     except Exception as e:
         print("Error applying chat template:", e)
         import traceback

@@ -649,6 +649,9 @@ SHOW_GEMINI_VLM_MODELS = convert_string_to_boolean(
 SHOW_AZURE_OPENAI_VLM_MODELS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_AZURE_OPENAI_VLM_MODELS", "False")
 )
+RUNNING_ON_HF_ZEROGPU = convert_string_to_boolean(
+    get_or_create_env_var("RUNNING_ON_HF_ZEROGPU", "False")
+)
 
 # Show at least local options if everything mistakenly removed
 if (
