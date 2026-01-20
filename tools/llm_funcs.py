@@ -54,11 +54,15 @@ full_text = (
 )
 
 # Global variables for model and tokenizer
+# Note: These are kept for backward compatibility but are no longer used.
+# All model loading now uses the PII globals (_pii_model, _pii_tokenizer, _pii_assistant_model)
+# via get_pii_model(), get_pii_tokenizer(), etc.
 _model = None
 _tokenizer = None
 _assistant_model = None
 
 # Global variables for PII detection model and tokenizer
+# These are now used for all LLM model loading (both general and PII-specific)
 _pii_model = None
 _pii_tokenizer = None
 _pii_assistant_model = None
@@ -102,7 +106,6 @@ from tools.config import (
     NUMBER_OF_RETRY_ATTEMPTS,
     QUANTISE_TRANSFORMERS_LLM_MODELS,
     REASONING_SUFFIX,
-    RUNNING_ON_HF_ZEROGPU,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SPECULATIVE_DECODING,
     TIMEOUT_WAIT,
@@ -550,7 +553,7 @@ def load_model(
         # Compile the Model with the selected mode 🚀
         if COMPILE_TRANSFORMERS:
             try:
-                model = torch.compile(model, mode=compile_mode, fullgraph=True)
+                model = torch.compile(model, mode=compile_mode, fullgraph=False)
             except Exception as e:
                 print(f"Could not compile model: {e}. Running in eager mode.")
 
@@ -706,7 +709,7 @@ def load_model(
             if COMPILE_TRANSFORMERS:
                 try:
                     assistant_model = torch.compile(
-                        assistant_model, mode=compile_mode, fullgraph=True
+                        assistant_model, mode=compile_mode, fullgraph=False
                     )
                 except Exception as e:
                     print(
@@ -728,60 +731,19 @@ def load_model(
 def get_model():
     """Get the globally loaded model. Load it if not already loaded.
 
-    Note: This function ensures model and tokenizer are loaded together atomically
-    to prevent mismatches. If model is None, both model and tokenizer will be loaded.
+    Note: This function is an alias for get_pii_model() to maintain backward compatibility.
+    Both functions use the same underlying implementation and config variables.
     """
-    global _model, _tokenizer, _assistant_model
-    # If model is None, load both model and tokenizer together atomically
-    if _model is None:
-        _model, _tokenizer, _assistant_model = load_model(
-            local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-            gpu_layers=gpu_layers,
-            max_context_length=context_length,
-            gpu_config=gpu_config,
-            cpu_config=cpu_config,
-            torch_device=torch_device,
-            repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-            model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-            model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
-            compile_mode=COMPILE_MODE,
-            model_dtype=MODEL_DTYPE,
-            hf_token=HF_TOKEN,
-            model=_model,
-            tokenizer=_tokenizer,
-            assistant_model=_assistant_model,
-        )
-    return _model
+    return get_pii_model()
 
 
 def get_tokenizer():
     """Get the globally loaded tokenizer. Load it if not already loaded.
 
-    Note: This function ensures model and tokenizer are loaded together atomically
-    to prevent mismatches. If tokenizer is None, both model and tokenizer will be loaded.
+    Note: This function is an alias for get_pii_tokenizer() to maintain backward compatibility.
+    Both functions use the same underlying implementation and config variables.
     """
-    global _model, _tokenizer, _assistant_model
-    # If tokenizer is None, load both model and tokenizer together atomically
-    # This ensures they're always from the same source
-    if _tokenizer is None:
-        _model, _tokenizer, _assistant_model = load_model(
-            local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-            gpu_layers=gpu_layers,
-            max_context_length=context_length,
-            gpu_config=gpu_config,
-            cpu_config=cpu_config,
-            torch_device=torch_device,
-            repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-            model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-            model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
-            compile_mode=COMPILE_MODE,
-            model_dtype=MODEL_DTYPE,
-            hf_token=HF_TOKEN,
-            model=_model,
-            tokenizer=_tokenizer,
-            assistant_model=_assistant_model,
-        )
-    return _tokenizer
+    return get_pii_tokenizer()
 
 
 def get_model_and_tokenizer():
@@ -793,42 +755,32 @@ def get_model_and_tokenizer():
     Returns:
         tuple: (model, tokenizer) - Both loaded and guaranteed to be from the same source
     """
-    # Ensure both are loaded by calling get_model() which loads both atomically
-    model = get_model()
-    tokenizer = get_tokenizer()
+    # Use PII versions which have better error handling
+    model = get_pii_model()
+    tokenizer = get_pii_tokenizer()
     return model, tokenizer
 
 
 def get_assistant_model():
     """Get the globally loaded assistant model. Load it if not already loaded."""
-    global _model, _tokenizer, _assistant_model
-    if _assistant_model is None:
-        _model, _tokenizer, _assistant_model = load_model(
-            local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-            gpu_layers=gpu_layers,
-            max_context_length=context_length,
-            gpu_config=gpu_config,
-            cpu_config=cpu_config,
-            torch_device=torch_device,
-            repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-            model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-            model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
-            compile_mode=COMPILE_MODE,
-            model_dtype=MODEL_DTYPE,
-            hf_token=HF_TOKEN,
-            model=_model,
-            tokenizer=_tokenizer,
-            assistant_model=_assistant_model,
-        )
-    return _assistant_model
+    global _pii_model, _pii_tokenizer, _pii_assistant_model
+    # Use PII globals to match get_pii_model() behavior
+    if _pii_assistant_model is None:
+        # Ensure model and tokenizer are loaded first
+        get_pii_model()
+        get_pii_tokenizer()
+    return _pii_assistant_model
 
 
 def set_model(model, tokenizer, assistant_model=None):
-    """Set the global model, tokenizer, and assistant model."""
-    global _model, _tokenizer, _assistant_model
-    _model = model
-    _tokenizer = tokenizer
-    _assistant_model = assistant_model
+    """Set the global model, tokenizer, and assistant model.
+
+    Note: This function now sets the PII globals to maintain consistency.
+    """
+    global _pii_model, _pii_tokenizer, _pii_assistant_model
+    _pii_model = model
+    _pii_tokenizer = tokenizer
+    _pii_assistant_model = assistant_model
 
 
 def get_pii_model():
@@ -1502,39 +1454,15 @@ def call_transformers_model(
         print("System prompt:", system_prompt)
         print("User prompt:", prompt)
 
-    # 2. Apply the chat template
-    # Get the device from the model (handles both single device and device_map="auto" cases)
-    # Always use the actual model device, not a hardcoded value
-    try:
-        model_device = next(model.parameters()).device
-    except (StopIteration, AttributeError):
-        # Fallback: try to determine device from model's device attribute
-        if hasattr(model, "device"):
-            model_device = model.device
-        elif hasattr(model, "hf_device_map"):
-            # For models with device_map="auto", get the first device
-            device_map = model.hf_device_map
-            if device_map:
-                first_device = next(iter(device_map.values()))
-                if isinstance(first_device, torch.device):
-                    model_device = first_device
-                else:
-                    model_device = torch.device(first_device)
-            else:
-                model_device = torch.device("cpu")
-        else:
-            # Last resort: check if CUDA is available, prefer GPU for Zero GPU spaces
-            if RUNNING_ON_HF_ZEROGPU:
-                # On Zero GPU spaces, models run on CPU
-                model_device = torch.device("cuda")
-            else:
-                model_device = torch.device(
-                    "cuda" if torch.cuda.is_available() else "cpu"
-                )
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+
+    if assistant_model is not None:
+        assistant_model = assistant_model.to(device)
 
     if PRINT_TRANSFORMERS_USER_PROMPT:
-        print("Model device:", model_device)
-        print("Model device type:", type(model_device))
+        print("Model device:", device)
+        print("Model device type:", type(device))
 
     try:
         # Try applying chat template with system prompt (if present)
@@ -1544,18 +1472,12 @@ def call_transformers_model(
             add_generation_prompt=True,
             tokenize=True,
             return_tensors="pt",
-        )
-
-        # Don't manually move to device - let the model handle it when using device_map="auto"
-        # Only move if we can determine the device and it's not using device_map="auto"
-        if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
-            # Model is on a single device, move input_ids to match
-            input_ids = input_ids.to(model_device)
-        # If using device_map="auto", let the model handle device placement
+        ).to(
+            device
+        )  # Ensure inputs match model device
 
         if PRINT_TRANSFORMERS_USER_PROMPT:
             print("Input IDs:", input_ids)
-
             print("Rendered prompt:")
             rendered = tokenizer.apply_chat_template(
                 conversation,
@@ -1579,11 +1501,7 @@ def call_transformers_model(
                     add_generation_prompt=True,
                     tokenize=True,
                     return_tensors="pt",
-                )
-                # Don't manually move to device if using device_map="auto"
-                if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
-                    input_ids = input_ids.to(model_device)
-                print("Successfully applied chat template without system prompt")
+                ).to(device)
 
                 if PRINT_TRANSFORMERS_USER_PROMPT:
                     print("Input IDs:", input_ids)
@@ -1604,36 +1522,18 @@ def call_transformers_model(
                     f"{system_prompt}\n\n{prompt}" if has_system_prompt else prompt
                 )
                 # Tokenize manually with special tokens
-                encoded = tokenizer(
+                input_ids = tokenizer(
                     full_prompt, return_tensors="pt", add_special_tokens=True
-                )
-                if encoded is None:
-                    raise ValueError(
-                        "Tokenizer returned None - tokenizer may not be properly initialized"
-                    )
-                if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
-                    raise ValueError("Tokenizer output does not contain input_ids")
-                input_ids = encoded.input_ids
-                # Don't manually move to device if using device_map="auto"
-                if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
-                    input_ids = input_ids.to(model_device)
+                ).to(device)
+
         else:
             # No system prompt, but chat template still failed - use manual tokenization
             print(f"Chat template failed ({e}), using manual tokenization")
             full_prompt = str(prompt)
-            encoded = tokenizer(
+            input_ids = tokenizer(
                 full_prompt, return_tensors="pt", add_special_tokens=True
-            )
-            if encoded is None:
-                raise ValueError(
-                    "Tokenizer returned None - tokenizer may not be properly initialized"
-                )
-            if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
-                raise ValueError("Tokenizer output does not contain input_ids")
-            input_ids = encoded.input_ids
-            # Don't manually move to device if using device_map="auto"
-            if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
-                input_ids = input_ids.to(model_device)
+            ).to(device)
+
     except Exception as e:
         print("Error applying chat template:", e)
         import traceback
@@ -1641,24 +1541,7 @@ def call_transformers_model(
         traceback.print_exc()
         raise
 
-    # Create attention mask to avoid warnings when pad_token == eos_token
-    # This ensures the model knows which tokens are padding vs actual content
-    import torch
-
-    attention_mask = torch.ones_like(input_ids, dtype=torch.long)
-    # If pad_token is same as eos_token, we need to explicitly set attention_mask
-    if hasattr(tokenizer, "pad_token") and hasattr(tokenizer, "eos_token"):
-        if tokenizer.pad_token == tokenizer.eos_token:
-            # All tokens are valid (no padding in input_ids at this point)
-            attention_mask = torch.ones_like(input_ids, dtype=torch.long)
-
-    # Ensure attention_mask is on the same device as input_ids
-    # Match VLM behavior: let model handle device placement when using device_map="auto"
-    if not hasattr(model, "hf_device_map") or model.hf_device_map is None:
-        attention_mask = attention_mask.to(model_device)
-    else:
-        # With device_map="auto", keep attention_mask on same device as input_ids
-        attention_mask = attention_mask.to(input_ids.device)
+    attention_mask = torch.ones_like(input_ids).to(device)
 
     # Map LlamaCPP parameters to transformers parameters
     generation_kwargs = {
@@ -1682,6 +1565,11 @@ def call_transformers_model(
 
     if PRINT_TRANSFORMERS_USER_PROMPT:
         print("Generation kwargs:", generation_kwargs)
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model.config.pad_token_id = tokenizer.pad_token_id
 
     # --- Timed Inference Test ---
     print("\nStarting model inference...")

@@ -6951,7 +6951,7 @@ class CustomImageAnalyzerEngine:
         # Determine default model based on OCR engine if model field is not present
         if "model" in ocr_result:
             # Model field exists and has correct length - use it
-            def get_model(idx):
+            def get_model_name(idx):
                 return ocr_result["model"][idx]
 
         else:
@@ -7004,7 +7004,7 @@ class CustomImageAnalyzerEngine:
                 )
             )
 
-            def get_model(idx):
+            def get_model_name(idx):
                 return default_model
 
         output = [
@@ -7015,7 +7015,7 @@ class CustomImageAnalyzerEngine:
                 width=ocr_result["width"][i],
                 height=ocr_result["height"][i],
                 conf=round(float(ocr_result["conf"][i]), 0),
-                model=get_model(i),
+                model=get_model_name(i),
             )
             for i in valid_indices
         ]
