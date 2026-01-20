@@ -1449,6 +1449,7 @@ def call_transformers_model(
     """
     This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
     """
+    import torch
     from transformers import TextStreamer
 
     # Load model and tokenizer together to ensure they're from the same source
@@ -1506,17 +1507,37 @@ def call_transformers_model(
 
     # 2. Apply the chat template
     # Get the device from the model (handles both single device and device_map="auto" cases)
+    # Always use the actual model device, not a hardcoded value
     try:
         model_device = next(model.parameters()).device
     except (StopIteration, AttributeError):
-        # Fallback to cuda if we can't determine device
-        model_device = "cuda"
-
-    if RUNNING_ON_HF_ZEROGPU:
-        model_device = "cuda"
+        # Fallback: try to determine device from model's device attribute
+        if hasattr(model, "device"):
+            model_device = model.device
+        elif hasattr(model, "hf_device_map"):
+            # For models with device_map="auto", get the first device
+            device_map = model.hf_device_map
+            if device_map:
+                first_device = next(iter(device_map.values()))
+                if isinstance(first_device, torch.device):
+                    model_device = first_device
+                else:
+                    model_device = torch.device(first_device)
+            else:
+                model_device = torch.device("cpu")
+        else:
+            # Last resort: check if CUDA is available, but prefer CPU for Zero GPU spaces
+            if RUNNING_ON_HF_ZEROGPU:
+                # On Zero GPU spaces, models run on CPU
+                model_device = torch.device("cpu")
+            else:
+                model_device = torch.device(
+                    "cuda" if torch.cuda.is_available() else "cpu"
+                )
 
     if PRINT_TRANSFORMERS_USER_PROMPT:
         print("Model device:", model_device)
+        print("Model device type:", type(model_device))
 
     try:
         # Try applying chat template with system prompt (if present)
@@ -1606,6 +1627,20 @@ def call_transformers_model(
         traceback.print_exc()
         raise
 
+    # Create attention mask to avoid warnings when pad_token == eos_token
+    # This ensures the model knows which tokens are padding vs actual content
+    import torch
+
+    attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+    # If pad_token is same as eos_token, we need to explicitly set attention_mask
+    if hasattr(tokenizer, "pad_token") and hasattr(tokenizer, "eos_token"):
+        if tokenizer.pad_token == tokenizer.eos_token:
+            # All tokens are valid (no padding in input_ids at this point)
+            attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+
+    # Ensure attention_mask is on the same device as input_ids
+    attention_mask = attention_mask.to(model_device)
+
     # Map LlamaCPP parameters to transformers parameters
     generation_kwargs = {
         "max_new_tokens": gen_config.max_tokens,
@@ -1613,6 +1648,7 @@ def call_transformers_model(
         "top_p": gen_config.top_p,
         "top_k": gen_config.top_k,
         "do_sample": True,
+        "attention_mask": attention_mask,
         #'pad_token_id': tokenizer.eos_token_id
     }
 
