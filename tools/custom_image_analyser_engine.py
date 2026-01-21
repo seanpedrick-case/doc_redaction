@@ -2952,10 +2952,12 @@ def _inference_server_page_ocr_predict(
         # Create prompt that requests structured JSON output with bounding boxes
         if detect_people_only:
             progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
             prompt = full_page_ocr_people_vlm_prompt
             task_type = "person"
         elif detect_signatures_only:
             progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
             task_type = "signature"
         else:
@@ -3667,9 +3669,11 @@ def _bedrock_page_ocr_predict(
         # Create prompt
         if detect_people_only:
             progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
             prompt = full_page_ocr_people_vlm_prompt
         elif detect_signatures_only:
             progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
         else:
             prompt = full_page_ocr_vlm_prompt
@@ -3983,9 +3987,11 @@ def _gemini_page_ocr_predict(
         # Create prompt
         if detect_people_only:
             progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
             prompt = full_page_ocr_people_vlm_prompt
         elif detect_signatures_only:
             progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
         else:
             prompt = full_page_ocr_vlm_prompt
@@ -4209,9 +4215,11 @@ def _azure_openai_page_ocr_predict(
         # Create prompt
         if detect_people_only:
             progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
             prompt = full_page_ocr_people_vlm_prompt
         elif detect_signatures_only:
             progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
         else:
             prompt = full_page_ocr_vlm_prompt

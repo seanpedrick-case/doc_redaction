@@ -3957,7 +3957,7 @@ def redact_image_pdf(
                             "hybrid-vlm",
                             "hybrid-paddle-vlm",
                         ]:
-                            people_ocr = _vlm_page_ocr_predict(
+                            people_ocr_result = _vlm_page_ocr_predict(
                                 image,
                                 image_name=image_name,
                                 normalised_coords_range=999,
@@ -3965,13 +3965,20 @@ def redact_image_pdf(
                                 detect_people_only=True,
                             )
                         else:  # inference-server based hybrids
-                            people_ocr = _inference_server_page_ocr_predict(
+                            people_ocr_result = _inference_server_page_ocr_predict(
                                 image,
                                 image_name=image_name,
                                 normalised_coords_range=999,
                                 output_folder=output_folder,
                                 detect_people_only=True,
                             )
+
+                        # Unpack tuple: (Dict[str, List], int, int, str) -> extract the dict
+                        people_ocr = (
+                            people_ocr_result[0]
+                            if isinstance(people_ocr_result, tuple)
+                            else people_ocr_result
+                        )
 
                         # Convert people_ocr outputs into additional word-level entries
                         texts = people_ocr.get("text", [])
@@ -4063,7 +4070,7 @@ def redact_image_pdf(
                             "hybrid-vlm",
                             "hybrid-paddle-vlm",
                         ]:
-                            sig_ocr = _vlm_page_ocr_predict(
+                            sig_ocr_result = _vlm_page_ocr_predict(
                                 image,
                                 image_name=image_name,
                                 normalised_coords_range=999,
@@ -4071,13 +4078,20 @@ def redact_image_pdf(
                                 detect_signatures_only=True,
                             )
                         else:  # inference-server based hybrids
-                            sig_ocr = _inference_server_page_ocr_predict(
+                            sig_ocr_result = _inference_server_page_ocr_predict(
                                 image,
                                 image_name=image_name,
                                 normalised_coords_range=999,
                                 output_folder=output_folder,
                                 detect_signatures_only=True,
                             )
+
+                        # Unpack tuple: (Dict[str, List], int, int, str) -> extract the dict
+                        sig_ocr = (
+                            sig_ocr_result[0]
+                            if isinstance(sig_ocr_result, tuple)
+                            else sig_ocr_result
+                        )
 
                         # Convert sig_ocr outputs into additional word-level entries
                         texts = sig_ocr.get("text", [])
