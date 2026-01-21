@@ -30,7 +30,7 @@ def create_entity_detection_prompt(
             f"\n\nIMPORTANT CUSTOM INSTRUCTIONS:\n{custom_instructions.strip()}\n"
         )
 
-    prompt = f"""You are an expert at identifying Personally Identifiable Information (PII) in text. Your task is to analyze the provided text and identify all instances of the following entity types: {entities_list}.{custom_instructions_section}
+    prompt = f"""You are an expert at identifying Personally Identifiable Information (PII) in text. Your task is to analyse the provided text and identify all instances of the following entity types/labels: {entities_list}.{custom_instructions_section}
 
 IMPORTANT: You must return your response as a valid JSON object with the following structure:
 {{
@@ -47,15 +47,16 @@ IMPORTANT: You must return your response as a valid JSON object with the followi
 
 Rules:
 1. Character positions (BeginOffset and EndOffset) must be exact character indices in the original text (0-based indexing)
-2. BeginOffset is the position of the first character of the entity
-3. EndOffset is the position AFTER the last character of the entity (exclusive, like Python string slicing)
+2. BeginOffset is the position of the first character of the entity/label
+3. EndOffset is the position AFTER the last character of the entity/label (exclusive, like Python string slicing)
 4. Score should be a decimal between 0.0 and 1.0 representing your confidence
 5. Text should be the exact substring from the original text
-6. Only return entities that match the requested types: {entities_list}
-7. If no entities are found, return: {{"entities": []}}
+6. Only return entities/labels that match the requested types/labels: {entities_list}
+7. If no entities/labels are found, return: {{"entities": []}}
 8. The JSON must be valid and parseable - do not include any explanatory text outside the JSON
+9. If IMPORTANT CUSTOM INSTRUCTIONS are provided, follow them carefully. They override all other instructions.
 
-Text to analyze:
+Text to analyse:
 {text}
 
 Return only the JSON object, nothing else:"""

@@ -7061,6 +7061,12 @@ class CustomImageAnalyzerEngine:
         llm_total_output_tokens = 0
         llm_model_name = ""
 
+        # Extract allow_list from text_analyzer_kwargs if provided
+        # This allows allow_list terms to "overrule" LLM PII detection results
+        allow_list = text_analyzer_kwargs.get("allow_list", [])
+        if allow_list is None:
+            allow_list = []
+
         # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
         if chosen_llm_entities is None:
             chosen_llm_entities = chosen_redact_comprehend_entities
@@ -7104,6 +7110,7 @@ class CustomImageAnalyzerEngine:
                 raise Warning(out_message)
 
             # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+            # Also exclude allow_list since we pass it explicitly
             presidio_kwargs = {
                 k: v
                 for k, v in text_analyzer_kwargs.items()
@@ -7120,14 +7127,21 @@ class CustomImageAnalyzerEngine:
                     "temperature",
                     "max_tokens",
                     "custom_instructions",
+                    "allow_list",
                 ]
             }
 
             analyzer_result = nlp_analyser.analyze(
-                text=page_text, language=language, **presidio_kwargs
+                text=page_text,
+                language=language,
+                allow_list=allow_list,
+                **presidio_kwargs,
             )
             all_text_line_results = map_back_entity_results(
-                analyzer_result, page_text_mapping, all_text_line_results
+                analyzer_result,
+                page_text_mapping,
+                all_text_line_results,
+                allow_list=allow_list,
             )
 
         elif pii_identification_method == AWS_PII_OPTION:
@@ -7166,14 +7180,21 @@ class CustomImageAnalyzerEngine:
                             "temperature",
                             "max_tokens",
                             "custom_instructions",
+                            "allow_list",
                         ]
                     }
 
                     page_analyser_result = nlp_analyser.analyze(
-                        text=page_text, language=language, **presidio_kwargs
+                        text=page_text,
+                        language=language,
+                        allow_list=allow_list,
+                        **presidio_kwargs,
                     )
                     all_text_line_results = map_back_entity_results(
-                        page_analyser_result, page_text_mapping, all_text_line_results
+                        page_analyser_result,
+                        page_text_mapping,
+                        all_text_line_results,
+                        allow_list=allow_list,
                     )
 
             # Process text in batches for AWS Comprehend
@@ -7413,14 +7434,21 @@ class CustomImageAnalyzerEngine:
                             "temperature",
                             "max_tokens",
                             "custom_instructions",
+                            "allow_list",
                         ]
                     }
 
                     page_analyser_result = nlp_analyser.analyze(
-                        text=page_text, language=language, **presidio_kwargs
+                        text=page_text,
+                        language=language,
+                        allow_list=allow_list,
+                        **presidio_kwargs,
                     )
                     all_text_line_results = map_back_entity_results(
-                        page_analyser_result, page_text_mapping, all_text_line_results
+                        page_analyser_result,
+                        page_text_mapping,
+                        all_text_line_results,
+                        allow_list=allow_list,
                     )
 
             # Process text in batches for LLM (same batching logic as AWS Comprehend)
@@ -7760,14 +7788,21 @@ class CustomImageAnalyzerEngine:
                             "temperature",
                             "max_tokens",
                             "custom_instructions",
+                            "allow_list",
                         ]
                     }
 
                     page_analyser_result = nlp_analyser.analyze(
-                        text=page_text, language=language, **presidio_kwargs
+                        text=page_text,
+                        language=language,
+                        allow_list=allow_list,
+                        **presidio_kwargs,
                     )
                     all_text_line_results = map_back_entity_results(
-                        page_analyser_result, page_text_mapping, all_text_line_results
+                        page_analyser_result,
+                        page_text_mapping,
+                        all_text_line_results,
+                        allow_list=allow_list,
                     )
 
             # Process text in batches for LLM (same batching logic as AWS Comprehend)
@@ -8129,14 +8164,21 @@ class CustomImageAnalyzerEngine:
                             "temperature",
                             "max_tokens",
                             "custom_instructions",
+                            "allow_list",
                         ]
                     }
 
                     page_analyser_result = nlp_analyser.analyze(
-                        text=page_text, language=language, **presidio_kwargs
+                        text=page_text,
+                        language=language,
+                        allow_list=allow_list,
+                        **presidio_kwargs,
                     )
                     all_text_line_results = map_back_entity_results(
-                        page_analyser_result, page_text_mapping, all_text_line_results
+                        page_analyser_result,
+                        page_text_mapping,
+                        all_text_line_results,
+                        allow_list=allow_list,
                     )
 
             # Process text in batches for LLM (same batching logic as AWS Comprehend)
@@ -8466,9 +8508,20 @@ class CustomImageAnalyzerEngine:
             redaction_text = redaction_relevant_ocr_result.text
 
             for redaction_result in text_analyzer_results:
-                # Check if the redaction text is not in the allow list
+                # Check if the redaction text is not in the allow list (case-insensitive)
+                # Normalize for case-insensitive matching
+                if allow_list:
+                    allow_list_normalized = [
+                        item.strip().lower() for item in allow_list if item
+                    ]
+                    redaction_text_normalized = redaction_text.strip().lower()
+                    is_in_allow_list = (
+                        redaction_text_normalized in allow_list_normalized
+                    )
+                else:
+                    is_in_allow_list = False
 
-                if redaction_text not in allow_list:
+                if not is_in_allow_list:
 
                     # Adjust start and end to be within line bounds
                     start_in_line = max(0, redaction_result.start)
@@ -8653,7 +8706,23 @@ def map_back_entity_results(
     page_analyser_result: dict,
     page_text_mapping: dict,
     all_text_line_results: List[Tuple],
+    allow_list: List[str] = None,
 ):
+    """
+    Map Presidio analyzer results back to line-level results.
+
+    Args:
+        page_analyser_result: Results from Presidio analyzer
+        page_text_mapping: Mapping of batch positions to line indices
+        all_text_line_results: Existing line-level results to append to
+        allow_list: List of allowed text values (to skip) - case-insensitive matching
+    """
+    # Normalize allow_list for case-insensitive matching
+    if allow_list:
+        allow_list_normalized = [item.strip().lower() for item in allow_list if item]
+    else:
+        allow_list_normalized = []
+
     for entity in page_analyser_result:
         entity_start = entity.start
         entity_end = entity.end
@@ -8675,25 +8744,37 @@ def map_back_entity_results(
                     entity_end - batch_start, len(original_line.text)
                 )  # Adjust end relative to the line
 
-                # Create a new adjusted entity
-                adjusted_entity = copy.deepcopy(entity)
-                adjusted_entity.start = relative_start
-                adjusted_entity.end = relative_end
+                # Get the text for this entity to check against allow_list
+                result_text = original_line.text[relative_start:relative_end]
 
-                # Check if this line already has an entry
-                existing_entry = next(
-                    (entry for idx, entry in all_text_line_results if idx == line_idx),
-                    None,
-                )
+                # Check if result_text is in allow_list (case-insensitive)
+                # If allow_list contains this text, skip adding it as a PII entity
+                # This allows allow_list terms to "overrule" PII detection
+                result_text_normalized = result_text.strip().lower()
+                if result_text_normalized not in allow_list_normalized:
+                    # Create a new adjusted entity
+                    adjusted_entity = copy.deepcopy(entity)
+                    adjusted_entity.start = relative_start
+                    adjusted_entity.end = relative_end
 
-                if existing_entry is None:
-                    all_text_line_results.append((line_idx, [adjusted_entity]))
-                else:
-                    existing_entry.append(
-                        adjusted_entity
-                    )  # Append to the existing list of entities
+                    # Check if this line already has an entry
+                    existing_entry = next(
+                        (
+                            entry
+                            for idx, entry in all_text_line_results
+                            if idx == line_idx
+                        ),
+                        None,
+                    )
 
-                added_to_line = True
+                    if existing_entry is None:
+                        all_text_line_results.append((line_idx, [adjusted_entity]))
+                    else:
+                        existing_entry.append(
+                            adjusted_entity
+                        )  # Append to the existing list of entities
+
+                    added_to_line = True
 
         # If the entity spans multiple lines, you may want to handle that here
         if not added_to_line:
@@ -8710,8 +8791,24 @@ def map_back_comprehend_entity_results(
     chosen_redact_comprehend_entities: List[str],
     all_text_line_results: List[Tuple],
 ):
+    """
+    Map AWS Comprehend entity results back to line-level results.
+
+    Args:
+        response: AWS Comprehend response object
+        current_batch_mapping: Mapping of batch positions to line indices
+        allow_list: List of allowed text values (to skip) - case-insensitive matching
+        chosen_redact_comprehend_entities: List of entity types to include
+        all_text_line_results: Existing line-level results to append to
+    """
     if not response or "Entities" not in response:
         return all_text_line_results
+
+    # Normalize allow_list for case-insensitive matching
+    if allow_list:
+        allow_list_normalized = [item.strip().lower() for item in allow_list if item]
+    else:
+        allow_list_normalized = []
 
     for entity in response["Entities"]:
         if entity.get("Type") not in chosen_redact_comprehend_entities:
@@ -8745,7 +8842,11 @@ def map_back_comprehend_entity_results(
 
                 result_text = original_line.text[relative_start:relative_end]
 
-                if result_text not in allow_list:
+                # Check if result_text is in allow_list (case-insensitive)
+                # If allow_list contains this text, skip adding it as a PII entity
+                # This allows allow_list terms to "overrule" AWS Comprehend PII detection
+                result_text_normalized = result_text.strip().lower()
+                if result_text_normalized not in allow_list_normalized:
                     adjusted_entity = entity.copy()
                     adjusted_entity["BeginOffset"] = (
                         relative_start  # Now relative to the full line
@@ -8919,6 +9020,7 @@ def run_page_text_redaction(
             raise Warning(out_message)
 
         # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+        # Also exclude allow_list since we pass it explicitly
         presidio_kwargs = {
             k: v
             for k, v in text_analyzer_kwargs.items()
@@ -8935,6 +9037,7 @@ def run_page_text_redaction(
                 "temperature",
                 "max_tokens",
                 "custom_instructions",
+                "allow_list",
             ]
         }
 
@@ -8948,7 +9051,10 @@ def run_page_text_redaction(
         )
 
         all_text_line_results = map_back_entity_results(
-            page_analyser_result, page_text_mapping, all_text_line_results
+            page_analyser_result,
+            page_text_mapping,
+            all_text_line_results,
+            allow_list=allow_list,
         )
 
     elif pii_identification_method == AWS_PII_OPTION:
@@ -8971,6 +9077,7 @@ def run_page_text_redaction(
                     text_analyzer_kwargs["entities"] = language_supported_entities
 
                 # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                # Also exclude allow_list since we pass it explicitly
                 presidio_kwargs = {
                     k: v
                     for k, v in text_analyzer_kwargs.items()
@@ -8987,6 +9094,7 @@ def run_page_text_redaction(
                         "temperature",
                         "max_tokens",
                         "custom_instructions",
+                        "allow_list",
                     ]
                 }
 
@@ -9211,6 +9319,7 @@ def run_page_text_redaction(
                     text_analyzer_kwargs["entities"] = language_supported_entities
 
                 # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                # Also exclude allow_list since we pass it explicitly
                 presidio_kwargs = {
                     k: v
                     for k, v in text_analyzer_kwargs.items()
@@ -9227,6 +9336,7 @@ def run_page_text_redaction(
                         "temperature",
                         "max_tokens",
                         "custom_instructions",
+                        "allow_list",
                     ]
                 }
 
@@ -9536,6 +9646,7 @@ def run_page_text_redaction(
                     text_analyzer_kwargs["entities"] = language_supported_entities
 
                 # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                # Also exclude allow_list since we pass it explicitly
                 presidio_kwargs = {
                     k: v
                     for k, v in text_analyzer_kwargs.items()
@@ -9552,6 +9663,7 @@ def run_page_text_redaction(
                         "temperature",
                         "max_tokens",
                         "custom_instructions",
+                        "allow_list",
                     ]
                 }
 
@@ -9893,6 +10005,7 @@ def run_page_text_redaction(
                     text_analyzer_kwargs["entities"] = language_supported_entities
 
                 # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                # Also exclude allow_list since we pass it explicitly
                 presidio_kwargs = {
                     k: v
                     for k, v in text_analyzer_kwargs.items()
@@ -9909,6 +10022,7 @@ def run_page_text_redaction(
                         "temperature",
                         "max_tokens",
                         "custom_instructions",
+                        "allow_list",
                     ]
                 }
 

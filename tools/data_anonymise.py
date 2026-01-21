@@ -1255,11 +1255,13 @@ def anonymise_script(
             for text_idx, text in progress.tqdm(
                 enumerate(texts), desc="Querying AWS Comprehend service.", unit="Row"
             ):
+                # Convert text to string once for consistency
+                text_str = str(text) if text else ""
 
                 for attempt in range(max_retries):
                     try:
                         response = comprehend_client.detect_pii_entities(
-                            Text=str(text), LanguageCode=language
+                            Text=text_str, LanguageCode=language
                         )
 
                         comprehend_query_number += 1
@@ -1271,6 +1273,25 @@ def anonymise_script(
                                 not in chosen_redact_comprehend_entities
                             ):
                                 continue
+
+                            # Extract entity text to check against allow_list
+                            entity_text = text_str[
+                                entity["BeginOffset"] : entity["EndOffset"]
+                            ]
+
+                            # Filter by allow_list (case-insensitive)
+                            # If allow_list contains this text, skip adding it as a PII entity
+                            # This allows allow_list terms to "overrule" AWS Comprehend PII detection
+                            if in_allow_list_flat:
+                                # Normalize for case-insensitive matching
+                                allow_list_normalized = [
+                                    item.strip().lower()
+                                    for item in in_allow_list_flat
+                                    if item
+                                ]
+                                entity_text_normalized = entity_text.strip().lower()
+                                if entity_text_normalized in allow_list_normalized:
+                                    continue
 
                             recognizer_result = RecognizerResult(
                                 entity_type=entity["Type"],
@@ -1505,12 +1526,19 @@ def anonymise_script(
                                     "Text", text_str[begin_offset:end_offset]
                                 )
 
-                                # Filter by allow_list if entity text matches
-                                if (
-                                    in_allow_list_flat
-                                    and entity_text in in_allow_list_flat
-                                ):
-                                    continue
+                                # Filter by allow_list (case-insensitive)
+                                # If allow_list contains this text, skip adding it as a PII entity
+                                # This allows allow_list terms to "overrule" LLM PII detection
+                                if in_allow_list_flat:
+                                    # Normalize for case-insensitive matching
+                                    allow_list_normalized = [
+                                        item.strip().lower()
+                                        for item in in_allow_list_flat
+                                        if item
+                                    ]
+                                    entity_text_normalized = entity_text.strip().lower()
+                                    if entity_text_normalized in allow_list_normalized:
+                                        continue
 
                                 # Only add entities that are in the chosen list
                                 if entity_type not in llm_chosen_redact_entities:

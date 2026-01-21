@@ -162,9 +162,11 @@ from tools.config import (
     SHOW_COSTS,
     SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
-    SHOW_INFERENCE_SERVER_OPTIONS,
+    SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
     SHOW_LANGUAGE_SELECTION,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
+    SHOW_OCR_GUI_OPTIONS,
+    SHOW_PII_IDENTIFICATION_OPTIONS,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     SPACY_MODEL_PATH,
@@ -345,16 +347,25 @@ total_pdf_page_count = gr.Number(
     interactive=False,
 )
 
+# Override options if OCR GUI is not shown
+if not SHOW_OCR_GUI_OPTIONS:
+    SHOW_AWS_TEXT_EXTRACTION_OPTIONS = False
+    SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS = False
+    SHOW_LOCAL_OCR_MODEL_OPTIONS = False
+
 text_extract_method_radio = gr.Radio(
     label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
     value=DEFAULT_TEXT_EXTRACTION_MODEL,
     choices=TEXT_EXTRACTION_MODELS,
+    visible=SHOW_OCR_GUI_OPTIONS,
 )
 
-pii_identification_method_drop = gr.Radio(
-    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
-    value=DEFAULT_PII_DETECTION_MODEL,
-    choices=PII_DETECTION_MODELS,
+local_ocr_method_radio = gr.Radio(
+    label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
+    value=CHOSEN_LOCAL_OCR_MODEL,
+    choices=LOCAL_OCR_MODEL_OPTIONS,
+    interactive=True,
+    visible=SHOW_LOCAL_OCR_MODEL_OPTIONS,
 )
 
 handwrite_signature_checkbox = gr.CheckboxGroup(
@@ -364,17 +375,42 @@ handwrite_signature_checkbox = gr.CheckboxGroup(
     visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
 )
 
+inference_server_vlm_model_textbox = gr.Textbox(
+    label="Inference Server VLM Model Name",
+    placeholder="e.g., 'qwen2-vl-7b-instruct' or leave empty to use default",
+    value=(
+        DEFAULT_INFERENCE_SERVER_VLM_MODEL if DEFAULT_INFERENCE_SERVER_VLM_MODEL else ""
+    ),
+    lines=1,
+    visible=SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
+)
+
+# PII identification components
+
+# Override options if PII identification is not shown
+if not SHOW_PII_IDENTIFICATION_OPTIONS:
+    SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS = False
+
+pii_identification_method_drop = gr.Radio(
+    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+    value=DEFAULT_PII_DETECTION_MODEL,
+    choices=PII_DETECTION_MODELS,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+)
+
 in_redact_entities = gr.Dropdown(
     value=CHOSEN_REDACT_ENTITIES,
     choices=FULL_ENTITY_LIST,
     multiselect=True,
     label="Local PII identification model (click empty space in box for full list)",
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
 )
 in_redact_comprehend_entities = gr.Dropdown(
     value=CHOSEN_COMPREHEND_ENTITIES,
     choices=FULL_COMPREHEND_ENTITY_LIST,
     multiselect=True,
     label="AWS Comprehend PII identification model (click empty space in box for full list)",
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
 )
 
 in_redact_llm_entities = gr.Dropdown(
@@ -382,6 +418,53 @@ in_redact_llm_entities = gr.Dropdown(
     choices=FULL_LLM_ENTITY_LIST,
     multiselect=True,
     label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+)
+
+custom_llm_instructions_textbox = gr.Textbox(
+    label="Custom instructions for LLM-based entity detection",
+    placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'redact all company names with the label COMPANY_NAME'",
+    value="",
+    lines=3,
+    visible=SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
+)
+
+# Allow / deny / fully redacted lists
+
+in_deny_list_state = gr.Dataframe(
+    value=pd.DataFrame(),
+    headers=["Always redact these words"],
+    col_count=(1, "fixed"),
+    row_count=(0, "dynamic"),
+    label="Deny list (always redact these words)",
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+    type="pandas",
+    interactive=True,
+    wrap=True,
+)
+
+in_allow_list_state = gr.Dataframe(
+    value=pd.DataFrame(),
+    headers=["Never redact these words"],
+    col_count=(1, "fixed"),
+    row_count=(0, "dynamic"),
+    label="Allow list (always exclude these words from redaction)",
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+    type="pandas",
+    interactive=True,
+    wrap=True,
+)
+
+in_fully_redacted_list_state = gr.Dataframe(
+    value=pd.DataFrame(),
+    headers=["Fully redacted pages list"],
+    col_count=(1, "fixed"),
+    row_count=(0, "dynamic"),
+    label="Fully redacted pages (fully redact these page numbers)",
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+    type="pandas",
+    interactive=True,
+    wrap=True,
 )
 
 in_deny_list = gr.File(
@@ -390,35 +473,13 @@ in_deny_list = gr.File(
     height=FILE_INPUT_HEIGHT,
 )
 
-in_deny_list_state = gr.Dataframe(
-    value=pd.DataFrame(),
-    headers=["deny_list"],
-    col_count=(1, "fixed"),
-    row_count=(0, "dynamic"),
-    label="Deny list",
-    visible=True,
-    type="pandas",
-    interactive=True,
-    wrap=True,
-)
-
 in_fully_redacted_list = gr.File(
     label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.",
     file_count="multiple",
     height=FILE_INPUT_HEIGHT,
 )
 
-in_fully_redacted_list_state = gr.Dataframe(
-    value=pd.DataFrame(),
-    headers=["fully_redacted_pages_list"],
-    col_count=(1, "fixed"),
-    row_count=(0, "dynamic"),
-    label="Fully redacted pages",
-    visible=True,
-    type="pandas",
-    interactive=True,
-    wrap=True,
-)
+## Page options
 
 page_min = gr.Number(
     value=DEFAULT_PAGE_MIN,
@@ -435,16 +496,6 @@ page_max = gr.Number(
     maximum=9999,
     label="Highest page to redact (set to 0 to redact to the last page)",
 )
-
-
-local_ocr_method_radio = gr.Radio(
-    label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
-    value=CHOSEN_LOCAL_OCR_MODEL,
-    choices=LOCAL_OCR_MODEL_OPTIONS,
-    interactive=True,
-    visible=SHOW_LOCAL_OCR_MODEL_OPTIONS,
-)
-
 
 ## Deduplication examples
 in_duplicate_pages = gr.File(
@@ -1551,57 +1602,87 @@ with blocks:
                 ):
                     text_extract_method_radio.render()
 
-                    if SHOW_LOCAL_OCR_MODEL_OPTIONS:
+                    if SHOW_OCR_GUI_OPTIONS:
                         with gr.Accordion(
-                            label="Change default local OCR model",
-                            open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                            "Change default text extraction OCR method",
+                            open=True,
+                            visible=SHOW_OCR_GUI_OPTIONS,
                         ):
-                            local_ocr_method_radio.render()
+                            with gr.Accordion(
+                                label="Change default local OCR model",
+                                open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                            ):
+                                local_ocr_method_radio.render()
+
+                            with gr.Accordion(
+                                "Inference Server VLM Model (for inference-server OCR only)",
+                                open=False,
+                                visible=SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
+                            ):
+                                inference_server_vlm_model_textbox.render()
+
+                            with gr.Accordion(
+                                "Enable AWS Textract signature detection (default is off)",
+                                open=False,
+                                visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
+                            ):
+                                handwrite_signature_checkbox.render()
                     else:
                         local_ocr_method_radio.render()
-
-                    if SHOW_INFERENCE_SERVER_OPTIONS:
-                        with gr.Accordion(
-                            "Inference Server VLM Model (for inference-server OCR only)",
-                            open=False,
-                        ):
-                            inference_server_vlm_model_textbox = gr.Textbox(
-                                label="Inference Server VLM Model Name",
-                                placeholder="e.g., 'qwen2-vl-7b-instruct' or leave empty to use default",
-                                value=(
-                                    DEFAULT_INFERENCE_SERVER_VLM_MODEL
-                                    if DEFAULT_INFERENCE_SERVER_VLM_MODEL
-                                    else ""
-                                ),
-                                lines=1,
-                                visible=SHOW_INFERENCE_SERVER_OPTIONS,
-                            )
-                            gr.Markdown(
-                                "**Note:** This only applies when using 'inference-server' or 'hybrid-paddle-inference-server' as the OCR method. "
-                                "If left empty, uses the default model from configuration."
-                            )
-                    else:
-                        inference_server_vlm_model_textbox = gr.Textbox(
-                            label="Inference Server VLM Model Name",
-                            value=(
-                                DEFAULT_INFERENCE_SERVER_VLM_MODEL
-                                if DEFAULT_INFERENCE_SERVER_VLM_MODEL
-                                else ""
-                            ),
-                            visible=False,
-                        )
-
-                    if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
-                        with gr.Accordion(
-                            "Enable AWS Textract signature detection (default is off)",
-                            open=False,
-                        ):
-                            handwrite_signature_checkbox.render()
-                    else:
+                        inference_server_vlm_model_textbox.render()
                         handwrite_signature_checkbox.render()
 
-                    with gr.Row(equal_height=True):
+                    if SHOW_PII_IDENTIFICATION_OPTIONS:
+                        with gr.Accordion(
+                            "Change PII identification method",
+                            open=True,
+                            visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+                        ):
+                            with gr.Row(equal_height=True):
+                                pii_identification_method_drop.render()
+
+                                with gr.Accordion(
+                                    "Select entity types to redact", open=True
+                                ):
+                                    with gr.Accordion(
+                                        "Local model PII identification model entities",
+                                        open=False,
+                                    ):
+                                        in_redact_entities.render()
+                                    with gr.Accordion(
+                                        "AWS Comprehend PII identification model entities",
+                                        open=False,
+                                    ):
+                                        in_redact_comprehend_entities.render()
+                                    with gr.Accordion(
+                                        "LLM PII identification model entities",
+                                        open=False,
+                                    ):
+                                        in_redact_llm_entities.render()
+                                with gr.Accordion(
+                                    "LLM Custom Instructions (for LLM-based PII detection only)",
+                                    open=True,
+                                ):
+                                    custom_llm_instructions_textbox.render()
+                            with gr.Row(equal_height=True):
+                                with gr.Accordion(
+                                    "Manually modify terms to always exclude from redaction (allow list), always redact (deny list), or whole page numbers to fully redact (fully redacted pages list). Click the plus button to add the first row, thereafter click the three dots to the right of the row - add row below - to add more. (NOTE: you need to press Enter after modifying/adding an entry to the lists to apply them)",
+                                    open=True,
+                                ):
+                                    with gr.Row():
+                                        in_allow_list_state.render()
+                                        in_deny_list_state.render()
+                                        in_fully_redacted_list_state.render()
+
+                    else:
                         pii_identification_method_drop.render()
+                        in_redact_entities.render()
+                        in_redact_comprehend_entities.render()
+                        in_redact_llm_entities.render()
+                        custom_llm_instructions_textbox.render()
+                        in_allow_list_state.render()
+                        in_deny_list_state.render()
+                        in_fully_redacted_list_state.render()
 
                 if SHOW_COSTS:
                     with gr.Accordion(
@@ -2696,26 +2777,7 @@ with blocks:
                         in_fully_redacted_list_text = gr.Textbox(
                             label="Fully redacted page list load status"
                         )
-                with gr.Accordion(
-                    "Manually modify custom allow, deny, and full page redaction lists (NOTE: you need to press Enter after modifying/adding an entry to the lists to apply them)",
-                    open=False,
-                ):
-                    with gr.Row():
-                        in_allow_list_state = gr.Dataframe(
-                            value=pd.DataFrame(),
-                            headers=["allow_list"],
-                            col_count=(1, "fixed"),
-                            row_count=(0, "dynamic"),
-                            label="Allow list",
-                            visible=True,
-                            type="pandas",
-                            interactive=True,
-                            wrap=True,
-                        )
 
-                        in_deny_list_state.render()  # Defined at beginning of file
-
-                        in_fully_redacted_list_state.render()  # Defined at beginning of file
                     with gr.Row():
                         with gr.Column(scale=2):
                             markdown_placeholder = gr.Markdown("")
@@ -2726,16 +2788,6 @@ with blocks:
                             )
 
             with gr.Accordion("Select entity types to redact", open=True):
-                with gr.Accordion(
-                    "Local PII identification model entities", open=False
-                ):
-                    in_redact_entities.render()
-                with gr.Accordion(
-                    "AWS Comprehend PII identification model entities", open=False
-                ):
-                    in_redact_comprehend_entities.render()
-                with gr.Accordion("LLM PII identification model entities", open=False):
-                    in_redact_llm_entities.render()
 
                 with gr.Row():
                     max_fuzzy_spelling_mistakes_num = gr.Number(
@@ -2749,21 +2801,6 @@ with blocks:
                         label="Should fuzzy search match on entire phrases in deny list (as opposed to each word individually)?",
                         value=True,
                     )
-
-            with gr.Accordion(
-                "LLM Custom Instructions (for LLM-based PII detection only)", open=False
-            ):
-                custom_llm_instructions_textbox = gr.Textbox(
-                    label="Custom instructions for LLM-based entity detection",
-                    placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'only redact email addresses, ignore phone numbers'",
-                    value="",
-                    lines=3,
-                    visible=SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
-                )
-                gr.Markdown(
-                    "**Note:** This only applies when using 'LLM (AWS Bedrock)' as the PII identification method. "
-                    "These instructions will be included in the prompt sent to the LLM to guide its entity detection behavior."
-                )
 
             with gr.Accordion("Redact only selected pages", open=False):
                 with gr.Row():

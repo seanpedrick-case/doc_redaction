@@ -372,6 +372,10 @@ MAX_IMAGE_PIXELS = get_or_create_env_var(
     "MAX_IMAGE_PIXELS", ""
 )  # Changed to None if blank in file_conversion.py
 
+MAX_SPACES_GPU_RUN_TIME = int(
+    get_or_create_env_var("MAX_SPACES_GPU_RUN_TIME", "60")
+)  # Maximum number of seconds to run the GPU on Spaces
+
 ###
 # File I/O options
 ###
@@ -599,8 +603,9 @@ EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = convert_string_to_boolean(
     get_or_create_env_var("EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT", "True")
 )
 
-# List of models to use for text extraction and PII detection
-# Text extraction models
+### VLM model options and display
+
+# List of models to use for text extraction
 SELECTABLE_TEXT_EXTRACT_OPTION = get_or_create_env_var(
     "SELECTABLE_TEXT_EXTRACT_OPTION", "Local model - selectable text"
 )
@@ -618,20 +623,6 @@ GEMINI_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
 )
 AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
     "AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION", "Azure/OpenAI VLM OCR - all PDF types"
-)
-
-# PII detection models
-NO_REDACTION_PII_OPTION = get_or_create_env_var(
-    "NO_REDACTION_PII_OPTION", "Only extract text (no redaction)"
-)
-LOCAL_PII_OPTION = get_or_create_env_var("LOCAL_PII_OPTION", "Local")
-AWS_PII_OPTION = get_or_create_env_var("AWS_PII_OPTION", "AWS Comprehend")
-AWS_LLM_PII_OPTION = get_or_create_env_var("AWS_LLM_PII_OPTION", "LLM (AWS Bedrock)")
-INFERENCE_SERVER_PII_OPTION = get_or_create_env_var(
-    "INFERENCE_SERVER_PII_OPTION", "Local inference server"
-)
-LOCAL_TRANSFORMERS_LLM_PII_OPTION = get_or_create_env_var(
-    "LOCAL_TRANSFORMERS_LLM_PII_OPTION", "Local transformers LLM"
 )
 
 SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
@@ -660,17 +651,16 @@ if (
 ):
     SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = True
 
-local_model_options = list()
-aws_model_options = list()
+local_text_extraction_model_options = list()
+aws_text_extraction_model_options = list()
 cloud_vlm_model_options = list()
-text_extraction_models = list()
 
 if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS:
-    local_model_options.append(SELECTABLE_TEXT_EXTRACT_OPTION)
-    local_model_options.append(TESSERACT_TEXT_EXTRACT_OPTION)
+    local_text_extraction_model_options.append(SELECTABLE_TEXT_EXTRACT_OPTION)
+    local_text_extraction_model_options.append(TESSERACT_TEXT_EXTRACT_OPTION)
 
 if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
-    aws_model_options.append(TEXTRACT_TEXT_EXTRACT_OPTION)
+    aws_text_extraction_model_options.append(TEXTRACT_TEXT_EXTRACT_OPTION)
 
 if SHOW_BEDROCK_VLM_MODELS:
     cloud_vlm_model_options.append(BEDROCK_VLM_TEXT_EXTRACT_OPTION)
@@ -682,10 +672,28 @@ if SHOW_AZURE_OPENAI_VLM_MODELS:
     cloud_vlm_model_options.append(AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION)
 
 TEXT_EXTRACTION_MODELS = (
-    local_model_options + aws_model_options + cloud_vlm_model_options
+    local_text_extraction_model_options
+    + aws_text_extraction_model_options
+    + cloud_vlm_model_options
 )
 DO_INITIAL_TABULAR_DATA_CLEAN = convert_string_to_boolean(
     get_or_create_env_var("DO_INITIAL_TABULAR_DATA_CLEAN", "True")
+)
+
+### PII model options and display
+
+# PII detection models
+NO_REDACTION_PII_OPTION = get_or_create_env_var(
+    "NO_REDACTION_PII_OPTION", "Only extract text (no redaction)"
+)
+LOCAL_PII_OPTION = get_or_create_env_var("LOCAL_PII_OPTION", "Local")
+AWS_PII_OPTION = get_or_create_env_var("AWS_PII_OPTION", "AWS Comprehend")
+AWS_LLM_PII_OPTION = get_or_create_env_var("AWS_LLM_PII_OPTION", "LLM (AWS Bedrock)")
+INFERENCE_SERVER_PII_OPTION = get_or_create_env_var(
+    "INFERENCE_SERVER_PII_OPTION", "Local inference server"
+)
+LOCAL_TRANSFORMERS_LLM_PII_OPTION = get_or_create_env_var(
+    "LOCAL_TRANSFORMERS_LLM_PII_OPTION", "Local transformers LLM"
 )
 
 SHOW_LOCAL_PII_DETECTION_OPTIONS = convert_string_to_boolean(
@@ -713,23 +721,22 @@ if (
 ):
     SHOW_LOCAL_PII_DETECTION_OPTIONS = True
 
-local_model_options = [NO_REDACTION_PII_OPTION]
-aws_model_options = list()
-pii_detection_models = list()
+local_pii_model_options = [NO_REDACTION_PII_OPTION]
+aws_pii_model_options = list()
 
 if SHOW_LOCAL_PII_DETECTION_OPTIONS:
-    local_model_options.append(LOCAL_PII_OPTION)
+    local_pii_model_options.append(LOCAL_PII_OPTION)
 
 if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS:
-    local_model_options.append(LOCAL_TRANSFORMERS_LLM_PII_OPTION)
+    local_pii_model_options.append(LOCAL_TRANSFORMERS_LLM_PII_OPTION)
 
 if SHOW_INFERENCE_SERVER_PII_OPTIONS:
-    local_model_options.append(INFERENCE_SERVER_PII_OPTION)
+    local_pii_model_options.append(INFERENCE_SERVER_PII_OPTION)
 
 if SHOW_AWS_PII_DETECTION_OPTIONS:
-    aws_model_options.append(AWS_LLM_PII_OPTION)
+    aws_pii_model_options.append(AWS_LLM_PII_OPTION)
 
-PII_DETECTION_MODELS = local_model_options + aws_model_options
+PII_DETECTION_MODELS = local_pii_model_options + aws_pii_model_options
 
 if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
     DEFAULT_TEXT_EXTRACTION_MODEL = get_or_create_env_var(
@@ -748,6 +755,50 @@ else:
     DEFAULT_PII_DETECTION_MODEL = get_or_create_env_var(
         "DEFAULT_PII_DETECTION_MODEL", LOCAL_PII_OPTION
     )
+
+SHOW_PII_IDENTIFICATION_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_PII_IDENTIFICATION_OPTIONS", "True")
+)
+
+# LLM inference method for PII detection (similar to VLM options)
+# Options: "aws-bedrock", "local", "inference-server", "azure-openai", "gemini"
+CHOSEN_LLM_PII_INFERENCE_METHOD = get_or_create_env_var(
+    "CHOSEN_LLM_PII_INFERENCE_METHOD", "aws-bedrock"
+)  # Default to AWS Bedrock for backward compatibility
+
+SHOW_LOCAL_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOCAL_LLM_PII_OPTIONS", "False")
+)  # Whether to show local LLM options for PII detection
+
+SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS", "False")
+)  # Whether to show inference-server options for PII detection
+
+SHOW_AZURE_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AZURE_LLM_PII_OPTIONS", "False")
+)  # Whether to show Azure/OpenAI options for PII detection
+
+SHOW_GEMINI_LLM_PII_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_GEMINI_LLM_PII_OPTIONS", "False")
+)  # Whether to show Gemini options for PII detection
+
+# Build list of available LLM inference methods for PII detection
+LLM_PII_INFERENCE_METHODS = []  # Always available
+
+if SHOW_LOCAL_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("local")
+
+if SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("inference-server")
+
+if SHOW_AZURE_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("azure-openai")
+
+if SHOW_GEMINI_LLM_PII_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("gemini")
+
+if SHOW_AWS_PII_DETECTION_OPTIONS:
+    LLM_PII_INFERENCE_METHODS.append("aws-bedrock")
 
 # Create list of PII detection models for tabular redaction
 TABULAR_PII_DETECTION_MODELS = PII_DETECTION_MODELS.copy()
@@ -781,9 +832,6 @@ if SHOW_VLM_MODEL_OPTIONS:
         SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     ]
 
-MAX_SPACES_GPU_RUN_TIME = int(
-    get_or_create_env_var("MAX_SPACES_GPU_RUN_TIME", "60")
-)  # Maximum number of seconds to run the GPU on Spaces
 
 MAX_NEW_TOKENS = int(
     get_or_create_env_var("MAX_NEW_TOKENS", "4096")
@@ -901,6 +949,9 @@ CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
     "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
 )  # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "hybrid-paddle-inference-server", "vlm", "inference-server"
 
+SHOW_OCR_GUI_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_OCR_GUI_OPTIONS", "True")
+)
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "False")
@@ -910,8 +961,12 @@ SHOW_PADDLE_MODEL_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_PADDLE_MODEL_OPTIONS", "False")
 )
 
-SHOW_INFERENCE_SERVER_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_INFERENCE_SERVER_OPTIONS", "False")
+SHOW_INFERENCE_SERVER_VLM_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_VLM_OPTIONS", "False")
+)
+
+SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS", "False")
 )
 
 SHOW_HYBRID_MODELS = convert_string_to_boolean(
@@ -982,12 +1037,16 @@ if SHOW_PADDLE_MODEL_OPTIONS and SHOW_VLM_MODEL_OPTIONS and SHOW_HYBRID_MODELS:
     LOCAL_OCR_MODEL_OPTIONS.append("hybrid-paddle-vlm")
     CHOSEN_LOCAL_MODEL_INTRO_TEXT += HYBRID_PADDLE_VLM_INTRO_TEXT
 
-if SHOW_PADDLE_MODEL_OPTIONS and SHOW_INFERENCE_SERVER_OPTIONS and SHOW_HYBRID_MODELS:
+if (
+    SHOW_PADDLE_MODEL_OPTIONS
+    and SHOW_INFERENCE_SERVER_VLM_OPTIONS
+    and SHOW_HYBRID_MODELS
+):
     LOCAL_OCR_MODEL_OPTIONS.append("hybrid-paddle-inference-server")
     CHOSEN_LOCAL_MODEL_INTRO_TEXT += HYBRID_PADDLE_INFERENCE_SERVER_INTRO_TEXT
 
 inference_server_options = ["inference-server"]
-if SHOW_INFERENCE_SERVER_OPTIONS:
+if SHOW_INFERENCE_SERVER_VLM_OPTIONS:
     LOCAL_OCR_MODEL_OPTIONS.extend(inference_server_options)
     CHOSEN_LOCAL_MODEL_INTRO_TEXT += INFERENCE_SERVER_OCR_INTRO_TEXT
 
@@ -1565,21 +1624,7 @@ SPECULATIVE_DECODING = convert_string_to_boolean(
     get_or_create_env_var("SPECULATIVE_DECODING", "False")
 )
 NUM_PRED_TOKENS = int(get_or_create_env_var("NUM_PRED_TOKENS", "2"))
-K_QUANT_LEVEL = get_or_create_env_var(
-    "K_QUANT_LEVEL", ""
-)  # 2 = q4_0, 8 = q8_0, 4 = fp16
-V_QUANT_LEVEL = get_or_create_env_var(
-    "V_QUANT_LEVEL", ""
-)  # 2 = q4_0, 8 = q8_0, 4 = fp16
 
-if not K_QUANT_LEVEL:
-    K_QUANT_LEVEL = None
-else:
-    K_QUANT_LEVEL = int(K_QUANT_LEVEL)
-if not V_QUANT_LEVEL:
-    V_QUANT_LEVEL = None
-else:
-    V_QUANT_LEVEL = int(V_QUANT_LEVEL)
 
 # LLM-specific configs for PII detection
 # These can be overridden via environment variables, otherwise use general LLM configs
@@ -1617,51 +1662,10 @@ PRINT_TRANSFORMERS_USER_PROMPT = convert_string_to_boolean(
     get_or_create_env_var("PRINT_TRANSFORMERS_USER_PROMPT", "False")
 )
 
-# LLM inference method for PII detection (similar to VLM options)
-# Options: "aws-bedrock", "local", "inference-server", "azure-openai", "gemini"
-CHOSEN_LLM_PII_INFERENCE_METHOD = get_or_create_env_var(
-    "CHOSEN_LLM_PII_INFERENCE_METHOD", "aws-bedrock"
-)  # Default to AWS Bedrock for backward compatibility
-
-SHOW_LOCAL_LLM_PII_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_LOCAL_LLM_PII_OPTIONS", "False")
-)  # Whether to show local LLM options for PII detection
-
-SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS", "False")
-)  # Whether to show inference-server options for PII detection
-
-SHOW_AZURE_LLM_PII_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_AZURE_LLM_PII_OPTIONS", "False")
-)  # Whether to show Azure/OpenAI options for PII detection
-
-SHOW_GEMINI_LLM_PII_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_GEMINI_LLM_PII_OPTIONS", "False")
-)  # Whether to show Gemini options for PII detection
-
-# Build list of available LLM inference methods for PII detection
-LLM_PII_INFERENCE_METHODS = []  # Always available
-
-if SHOW_LOCAL_LLM_PII_OPTIONS:
-    LLM_PII_INFERENCE_METHODS.append("local")
-
-if SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS:
-    LLM_PII_INFERENCE_METHODS.append("inference-server")
-
-if SHOW_AZURE_LLM_PII_OPTIONS:
-    LLM_PII_INFERENCE_METHODS.append("azure-openai")
-
-if SHOW_GEMINI_LLM_PII_OPTIONS:
-    LLM_PII_INFERENCE_METHODS.append("gemini")
-
-if SHOW_AWS_PII_DETECTION_OPTIONS:
-    LLM_PII_INFERENCE_METHODS.append("aws-bedrock")
 
 # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
 # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE if available, otherwise check LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
 model_type_for_reasoning = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-
-print("model_type_for_reasoning:", model_type_for_reasoning)
 
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "gpt-oss-20b":
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "Reasoning: low")
@@ -1677,12 +1681,12 @@ else:
 # Entities for redaction
 CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var(
     "CHOSEN_COMPREHEND_ENTITIES",
-    "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD', 'IP_ADDRESS','MAC_ADDRESS', 'LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER', 'INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER']",
+    "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD', 'IP_ADDRESS','MAC_ADDRESS', 'LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER', 'INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER', 'CUSTOM']",
 )
 
 FULL_COMPREHEND_ENTITY_LIST = get_or_create_env_var(
     "FULL_COMPREHEND_ENTITY_LIST",
-    "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE','SSN','DATE_TIME','PASSPORT_NUMBER','DRIVER_ID','URL','AGE','USERNAME','PASSWORD','AWS_ACCESS_KEY','AWS_SECRET_KEY','IP_ADDRESS','MAC_ADDRESS','ALL','LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER','CA_SOCIAL_INSURANCE_NUMBER','US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER','UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER','IN_PERMANENT_ACCOUNT_NUMBER','IN_NREGA','INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER','CA_HEALTH_NUMBER','IN_AADHAAR','IN_VOTER_NUMBER', 'CUSTOM_FUZZY']",
+    "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE','SSN','DATE_TIME','PASSPORT_NUMBER','DRIVER_ID','URL','AGE','USERNAME','PASSWORD','AWS_ACCESS_KEY','AWS_SECRET_KEY','IP_ADDRESS','MAC_ADDRESS','ALL','LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER','CA_SOCIAL_INSURANCE_NUMBER','US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER','UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER','IN_PERMANENT_ACCOUNT_NUMBER','IN_NREGA','INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER','CA_HEALTH_NUMBER','IN_AADHAAR','IN_VOTER_NUMBER', 'CUSTOM', 'CUSTOM_FUZZY']",
 )
 
 FULL_LLM_ENTITY_LIST = get_or_create_env_var(
@@ -1693,7 +1697,7 @@ FULL_LLM_ENTITY_LIST = get_or_create_env_var(
 # Entities for LLM-based PII redaction option
 CHOSEN_LLM_ENTITIES = get_or_create_env_var(
     "CHOSEN_LLM_ENTITIES",
-    "['EMAIL_ADDRESS','ADDRESS','NAME','PHONE_NUMBER']",
+    "['EMAIL_ADDRESS','ADDRESS','NAME','PHONE_NUMBER', 'CUSTOM']",
 )
 
 
@@ -2249,7 +2253,7 @@ if CHOSEN_REDACT_ENTITIES:
 if FULL_ENTITY_LIST:
     FULL_ENTITY_LIST = _get_env_list(FULL_ENTITY_LIST)
 
-if SHOW_VLM_MODEL_OPTIONS or SHOW_INFERENCE_SERVER_OPTIONS:
+if SHOW_VLM_MODEL_OPTIONS or SHOW_INFERENCE_SERVER_VLM_OPTIONS:
     FULL_ENTITY_LIST.extend(["CUSTOM_VLM_PERSON", "CUSTOM_VLM_SIGNATURE"])
     FULL_COMPREHEND_ENTITY_LIST.extend(["CUSTOM_VLM_PERSON", "CUSTOM_VLM_SIGNATURE"])
 

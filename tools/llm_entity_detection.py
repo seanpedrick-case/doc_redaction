@@ -180,6 +180,15 @@ def parse_llm_entity_response(
     """
     entities = []
 
+    # Remove <think> tags and their content (common in some LLM outputs)
+    # This handles cases where LLMs include thinking/reasoning tags
+    response_text = re.sub(
+        r"<think>.*?</think>", "", response_text, flags=re.DOTALL | re.IGNORECASE
+    )
+    response_text = re.sub(
+        r"<thinking>.*?</thinking>", "", response_text, flags=re.DOTALL | re.IGNORECASE
+    )
+
     # Try to extract JSON from the response
     # LLMs sometimes wrap JSON in markdown code blocks or add explanatory text
     json_match = re.search(
@@ -199,7 +208,78 @@ def parse_llm_entity_response(
             json_str = re.sub(r"^```\s*", "", json_str, flags=re.MULTILINE)
             json_str = json_str.strip()
 
-            data = json.loads(json_str)
+            # Fix common JSON issues:
+            # 1. Remove trailing commas before closing brackets/braces
+            json_str = re.sub(r",\s*}", "}", json_str)
+            json_str = re.sub(r",\s*]", "]", json_str)
+
+            # 2. Fix unquoted string values (e.g., "Type": NAME should be "Type": "NAME")
+            # This handles cases where LLMs output unquoted identifiers as values
+            # Pattern: "key": VALUE where VALUE is an unquoted identifier
+            def fix_unquoted_value(match):
+                key_part = match.group(1)  # The key (e.g., "Type")
+                value = match.group(2)  # The unquoted value
+                separator = match.group(3)  # The separator (comma, closing brace, etc.)
+                # Only fix if it looks like an identifier (alphanumeric/underscore, not a number or boolean)
+                if re.match(
+                    r"^[A-Za-z_][A-Za-z0-9_]*$", value
+                ) and value.lower() not in ["true", "false", "null"]:
+                    return f'{key_part}: "{value}"{separator}'
+                return match.group(0)  # Return original if it doesn't need fixing
+
+            # Fix unquoted string values after colons (common in LLM outputs)
+            # Match: "key": VALUE where VALUE is unquoted identifier followed by comma, }, or ]
+            # This pattern handles: "Type": NAME, or "Type": EMAIL_ADDRESS}
+            json_str = re.sub(
+                r'("[\w]+")\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*([,}\]])',
+                fix_unquoted_value,
+                json_str,
+            )
+
+            # Also handle cases where unquoted value is at end of line or followed by newline
+            json_str = re.sub(
+                r'("[\w]+")\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*(\n)',
+                r'\1: "\2"\3',
+                json_str,
+            )
+
+            # Try to parse the JSON
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                # If parsing still fails, try a more aggressive fix for unquoted values
+                # This is a fallback that quotes any unquoted identifiers after colons
+                print(
+                    f"Initial JSON parse failed: {e}. Attempting more aggressive fixes..."
+                )
+
+                # More aggressive fix: quote any unquoted word after a colon that's not already quoted
+                # Pattern: ": WORD" where WORD is not in quotes and not a number/boolean
+                def quote_unquoted_identifier(match):
+                    prefix = match.group(1)  # Everything before the colon
+                    value = match.group(2)  # The unquoted value
+                    suffix = match.group(3)  # Everything after (comma, brace, etc.)
+                    # Only quote if it's a valid identifier and not a boolean/null
+                    if re.match(
+                        r"^[A-Za-z_][A-Za-z0-9_]*$", value
+                    ) and value.lower() not in ["true", "false", "null"]:
+                        return f'{prefix}: "{value}"{suffix}'
+                    return match.group(0)
+
+                # Try fixing unquoted values more aggressively
+                json_str = re.sub(
+                    r"(:\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*[,}\]])",
+                    quote_unquoted_identifier,
+                    json_str,
+                )
+
+                # Try parsing again
+                try:
+                    data = json.loads(json_str)
+                except json.JSONDecodeError as e2:
+                    print(f"JSON parsing failed after fixes: {e2}")
+                    print(f"Cleaned JSON string (first 1000 chars): {json_str[:1000]}")
+                    raise e2
 
             if "entities" in data and isinstance(data["entities"], list):
                 for entity in data["entities"]:
@@ -627,7 +707,7 @@ def map_back_llm_entity_results(
     Args:
         entities: List of entity dictionaries from LLM
         current_batch_mapping: Mapping of batch positions to line indices
-        allow_list: List of allowed text values (to skip)
+        allow_list: List of allowed text values (to skip) - case-insensitive matching
         chosen_redact_comprehend_entities: List of entity types to include
         all_text_line_results: Existing line-level results to append to
 
@@ -636,6 +716,12 @@ def map_back_llm_entity_results(
     """
     if not entities:
         return all_text_line_results
+
+    # Normalize allow_list for case-insensitive matching
+    if allow_list:
+        allow_list_normalized = [item.strip().lower() for item in allow_list if item]
+    else:
+        allow_list_normalized = []
 
     for entity in entities:
         entity_type = entity.get("Type")
@@ -687,7 +773,11 @@ def map_back_llm_entity_results(
 
                 result_text = original_line.text[relative_start:relative_end]
 
-                if result_text not in allow_list:
+                # Check if result_text is in allow_list (case-insensitive)
+                # If allow_list contains this text, skip adding it as a PII entity
+                # This allows allow_list terms to "overrule" LLM PII detection
+                result_text_normalized = result_text.strip().lower()
+                if result_text_normalized not in allow_list_normalized:
                     # Create entity dict in Comprehend-like format
                     adjusted_entity = {
                         "Type": entity_type,

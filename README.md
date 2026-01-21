@@ -1021,7 +1021,7 @@ When VLM options are enabled, the following settings are available:
 
 ### Using an alternative OCR model
 
-If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_OPTIONS are set to 'True' in your app_config.env file, you should see the following options available under 'Change default redaction settings...' on the front tab. The different OCR options can be used in different contexts.
+If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_VLM_OPTIONS are set to 'True' in your app_config.env file, you should see the following options available under 'Change default redaction settings...' on the front tab. The different OCR options can be used in different contexts.
 
 - **Tesseract (option 'tesseract')**: Best for documents with clear, well-formatted text, providing a good balance of speed and accuracy with precise word-level bounding boxes. But struggles a lot with handwriting or 'noisy' documents (e.g. scanned documents).
 - **PaddleOCR (option 'paddle')**: More powerful than Tesseract, but slower. Does a decent job with unclear typed text on scanned documents. Also, bounding boxes may not all be accurate as they will be calculated from the line-level bounding boxes produced by Paddle after analysis.
@@ -1064,7 +1064,7 @@ llama-server \
 If running llama.cpp on the same computer as the doc redaction app, you can then set the following variable in config/app_config.env to run:
 
 ```
-SHOW_INFERENCE_SERVER_OPTIONS=True
+SHOW_INFERENCE_SERVER_VLM_OPTIONS=True
 INFERENCE_SERVER_API_URL=http://localhost:7862
 ```
 

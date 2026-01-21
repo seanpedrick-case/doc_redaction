@@ -427,7 +427,7 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** If set to `"True"`, loads the PaddleOCR model at application startup.
     * **Default Value:** `"False"`
 
-* **`SHOW_INFERENCE_SERVER_OPTIONS`**
+* **`SHOW_INFERENCE_SERVER_VLM_OPTIONS`**
     * **Description:** If set to `"True"`, allows the user to select inference-server-related options from the UI.
     * **Default Value:** `"False"`
 
