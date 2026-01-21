@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
+from gradio import Progress
 
 from tools.config import (
     CHOSEN_LLM_PII_INFERENCE_METHOD,
@@ -28,10 +29,13 @@ from tools.llm_entity_detection_prompts import (
 
 # Import LLM functions from local tools.llm_funcs
 try:
+    # Use send_request from llm_funcs.py which handles all model sources, retries, and response parsing
+
     from tools.llm_funcs import (
         ResponseObject,
         call_aws_bedrock,
         construct_azure_client,
+        send_request,
     )
 except ImportError as e:
     print(f"Warning: Could not import LLM functions: {e}")
@@ -441,13 +445,6 @@ def call_llm_for_entity_detection(
         text, entities_to_detect, language, custom_instructions
     )
 
-    # Use send_request from llm_funcs.py which handles all model sources, retries, and response parsing
-    from gradio import Progress
-
-    import tools.llm_funcs as llm_funcs_module
-    from tools.llm_funcs import max_tokens as global_max_tokens
-    from tools.llm_funcs import send_request
-
     # Map inference_method to model_source format expected by send_request
     model_source_map = {
         "aws-bedrock": "AWS",
@@ -493,33 +490,33 @@ def call_llm_for_entity_detection(
             )
 
     # Prepare local model if needed
-    if inference_method == "local":
-        from tools.llm_funcs import USE_LLAMA_CPP
+    # if inference_method == "local":
+    # from tools.llm_funcs import USE_LLAMA_CPP
 
-        # Load model and tokenizer together to ensure they're from the same source
-        # This prevents mismatches that could occur if they're loaded separately
-        if local_model is None or (tokenizer is None and USE_LLAMA_CPP != "True"):
-            from tools.llm_funcs import get_model, get_model_and_tokenizer
+    # Load model and tokenizer together to ensure they're from the same source
+    # This prevents mismatches that could occur if they're loaded separately
+    # if local_model is None or (tokenizer is None and USE_LLAMA_CPP != "True"):
+    #     from tools.llm_funcs import get_model, get_model_and_tokenizer
 
-            try:
-                if (
-                    local_model is None
-                    and tokenizer is None
-                    and USE_LLAMA_CPP != "True"
-                ):
-                    # Both are needed - load them together atomically
-                    local_model, tokenizer = get_model_and_tokenizer()
-                elif local_model is None:
-                    # Only model is needed
-                    local_model = get_model()
-                elif tokenizer is None and USE_LLAMA_CPP != "True":
-                    # Only tokenizer is needed (but get_model_and_tokenizer ensures they match)
-                    _, tokenizer = get_model_and_tokenizer()
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to get local model/tokenizer: {e}. "
-                    f"Ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True or pass local_model/tokenizer."
-                )
+    #     try:
+    #         if (
+    #             local_model is None
+    #             and tokenizer is None
+    #             and USE_LLAMA_CPP != "True"
+    #         ):
+    #             # Both are needed - load them together atomically
+    #             local_model, tokenizer = get_model_and_tokenizer()
+    #         elif local_model is None:
+    #             # Only model is needed
+    #             local_model = get_model()
+    #         elif tokenizer is None and USE_LLAMA_CPP != "True":
+    #             # Only tokenizer is needed (but get_model_and_tokenizer ensures they match)
+    #             _, tokenizer = get_model_and_tokenizer()
+    #     except Exception as e:
+    #         raise ValueError(
+    #             f"Failed to get local model/tokenizer: {e}. "
+    #             f"Ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True or pass local_model/tokenizer."
+    #         )
 
     # Set up API URL for inference-server if needed
     if inference_method == "inference-server" and api_url is None:
@@ -529,13 +526,6 @@ def call_llm_for_entity_detection(
                 "api_url is required when using inference-server method. "
                 "Set INFERENCE_SERVER_API_URL in config or pass api_url parameter."
             )
-
-    # Temporarily override global max_tokens for send_request if it's different
-    # (send_request uses global max_tokens variable, not a parameter)
-    original_max_tokens = None
-    if max_tokens != global_max_tokens:
-        original_max_tokens = llm_funcs_module.max_tokens
-        llm_funcs_module.max_tokens = max_tokens
 
     try:
         # Call send_request which handles all routing, retries, and response parsing
@@ -556,11 +546,11 @@ def call_llm_for_entity_detection(
             temperature=temperature,
             bedrock_runtime=bedrock_runtime,
             model_source=model_source,
-            local_model=(
-                local_model if local_model else []
-            ),  # Pass model directly (signature shows list but uses as single object)
-            tokenizer=tokenizer,
-            assistant_model=assistant_model,
+            # local_model=(
+            #     local_model if local_model else []
+            # ),  # Pass model directly (signature shows list but uses as single object)
+            # tokenizer=tokenizer,
+            # assistant_model=assistant_model,
             progress=Progress(
                 track_tqdm=False
             ),  # Disable progress bar for entity detection
@@ -569,10 +559,6 @@ def call_llm_for_entity_detection(
     except Exception as e:
         print(f"LLM entity detection failed: {e}")
         raise
-    finally:
-        # Restore original max_tokens if we changed it
-        if original_max_tokens is not None:
-            llm_funcs_module.max_tokens = original_max_tokens
 
     # Save prompt and response if output_folder is provided
     if output_folder and response_text:

@@ -478,7 +478,7 @@ class ContrastSegmentedImageEnhancer(ImagePreprocessor):
         if abs(angle) < 0.1:
             return image_np
 
-        (h, w) = image_np.shape[:2]
+        h, w = image_np.shape[:2]
         center = (w // 2, h // 2)
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
 
@@ -2431,10 +2431,12 @@ def _vlm_page_ocr_predict(
         # Create prompt that requests structured JSON output with bounding boxes
         if detect_people_only:
             progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
             prompt = full_page_ocr_people_vlm_prompt
             task_type = "person"
         elif detect_signatures_only:
             progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
             task_type = "signature"
         else:
@@ -7498,11 +7500,11 @@ class CustomImageAnalyzerEngine:
                                 inference_method=text_analyzer_kwargs.get(
                                     "inference_method"
                                 ),
-                                local_model=text_analyzer_kwargs.get("local_model"),
-                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                                assistant_model=text_analyzer_kwargs.get(
-                                    "assistant_model"
-                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
                                 client=text_analyzer_kwargs.get("client"),
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
@@ -7599,11 +7601,11 @@ class CustomImageAnalyzerEngine:
                                 inference_method=text_analyzer_kwargs.get(
                                     "inference_method"
                                 ),
-                                local_model=text_analyzer_kwargs.get("local_model"),
-                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                                assistant_model=text_analyzer_kwargs.get(
-                                    "assistant_model"
-                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
                                 client=text_analyzer_kwargs.get("client"),
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
@@ -7671,9 +7673,9 @@ class CustomImageAnalyzerEngine:
                         file_name=file_name,
                         page_number=page_number,
                         inference_method=text_analyzer_kwargs.get("inference_method"),
-                        local_model=text_analyzer_kwargs.get("local_model"),
-                        tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                        assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                        # local_model=text_analyzer_kwargs.get("local_model"),
+                        # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                        # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                         client=text_analyzer_kwargs.get("client"),
                         client_config=text_analyzer_kwargs.get("client_config"),
                         api_url=text_analyzer_kwargs.get("api_url"),
@@ -7845,11 +7847,11 @@ class CustomImageAnalyzerEngine:
                                 inference_method=text_analyzer_kwargs.get(
                                     "inference_method"
                                 ),
-                                local_model=text_analyzer_kwargs.get("local_model"),
-                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                                assistant_model=text_analyzer_kwargs.get(
-                                    "assistant_model"
-                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
                                 client=text_analyzer_kwargs.get("client"),
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
@@ -7946,11 +7948,11 @@ class CustomImageAnalyzerEngine:
                                 inference_method=text_analyzer_kwargs.get(
                                     "inference_method"
                                 ),
-                                local_model=text_analyzer_kwargs.get("local_model"),
-                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                                assistant_model=text_analyzer_kwargs.get(
-                                    "assistant_model"
-                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
                                 client=text_analyzer_kwargs.get("client"),
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
@@ -8018,9 +8020,9 @@ class CustomImageAnalyzerEngine:
                         file_name=file_name,
                         page_number=page_number,
                         inference_method=text_analyzer_kwargs.get("inference_method"),
-                        local_model=text_analyzer_kwargs.get("local_model"),
-                        tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                        assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                        # local_model=text_analyzer_kwargs.get("local_model"),
+                        # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                        # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                         client=text_analyzer_kwargs.get("client"),
                         client_config=text_analyzer_kwargs.get("client_config"),
                         api_url=text_analyzer_kwargs.get("api_url"),
@@ -8056,34 +8058,34 @@ class CustomImageAnalyzerEngine:
                 "model_choice", LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             )
 
-            # Load PII-specific model and tokenizer if not already provided
-            if (
-                text_analyzer_kwargs.get("local_model") is None
-                and text_analyzer_kwargs.get("inference_method") == "local"
-            ):
-                from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
+            # # Load PII-specific model and tokenizer if not already provided
+            # if (
+            #     text_analyzer_kwargs.get("local_model") is None
+            #     and text_analyzer_kwargs.get("inference_method") == "local"
+            # ):
+            #     from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
 
-                try:
-                    text_analyzer_kwargs["local_model"] = get_pii_model()
-                except Exception as e:
-                    print(
-                        f"Warning: Failed to load PII model: {e}. "
-                        f"Will attempt to load model on-demand."
-                    )
-            if (
-                text_analyzer_kwargs.get("tokenizer") is None
-                and text_analyzer_kwargs.get("inference_method") == "local"
-                and USE_LLAMA_CPP != "True"
-            ):
-                from tools.llm_funcs import get_pii_tokenizer
+            #     try:
+            #         text_analyzer_kwargs["local_model"] = get_pii_model()
+            #     except Exception as e:
+            #         print(
+            #             f"Warning: Failed to load PII model: {e}. "
+            #             f"Will attempt to load model on-demand."
+            #         )
+            # if (
+            #     text_analyzer_kwargs.get("tokenizer") is None
+            #     and text_analyzer_kwargs.get("inference_method") == "local"
+            #     and USE_LLAMA_CPP != "True"
+            # ):
+            #     from tools.llm_funcs import get_pii_tokenizer
 
-                try:
-                    text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-                except Exception as e:
-                    print(
-                        f"Warning: Failed to load PII tokenizer: {e}. "
-                        f"Will attempt to load tokenizer on-demand."
-                    )
+            #     try:
+            #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+            #     except Exception as e:
+            #         print(
+            #             f"Warning: Failed to load PII tokenizer: {e}. "
+            #             f"Will attempt to load tokenizer on-demand."
+            #         )
 
             # Handle custom entities first (same as AWS Comprehend)
             if custom_entities:
@@ -8214,11 +8216,11 @@ class CustomImageAnalyzerEngine:
                                 inference_method=text_analyzer_kwargs.get(
                                     "inference_method"
                                 ),
-                                local_model=text_analyzer_kwargs.get("local_model"),
-                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                                assistant_model=text_analyzer_kwargs.get(
-                                    "assistant_model"
-                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
                                 client=text_analyzer_kwargs.get("client"),
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
@@ -8315,11 +8317,11 @@ class CustomImageAnalyzerEngine:
                                 inference_method=text_analyzer_kwargs.get(
                                     "inference_method"
                                 ),
-                                local_model=text_analyzer_kwargs.get("local_model"),
-                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                                assistant_model=text_analyzer_kwargs.get(
-                                    "assistant_model"
-                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
                                 client=text_analyzer_kwargs.get("client"),
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),
@@ -8387,9 +8389,9 @@ class CustomImageAnalyzerEngine:
                         file_name=file_name,
                         page_number=page_number,
                         inference_method=text_analyzer_kwargs.get("inference_method"),
-                        local_model=text_analyzer_kwargs.get("local_model"),
-                        tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                        assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                        # local_model=text_analyzer_kwargs.get("local_model"),
+                        # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                        # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                         client=text_analyzer_kwargs.get("client"),
                         client_config=text_analyzer_kwargs.get("client_config"),
                         api_url=text_analyzer_kwargs.get("api_url"),
@@ -9316,9 +9318,9 @@ def run_page_text_redaction(
                             inference_method=text_analyzer_kwargs.get(
                                 "inference_method"
                             ),
-                            local_model=text_analyzer_kwargs.get("local_model"),
-                            tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                            assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                             client=text_analyzer_kwargs.get("client"),
                             client_config=text_analyzer_kwargs.get("client_config"),
                             api_url=text_analyzer_kwargs.get("api_url"),
@@ -9411,9 +9413,9 @@ def run_page_text_redaction(
                             inference_method=text_analyzer_kwargs.get(
                                 "inference_method"
                             ),
-                            local_model=text_analyzer_kwargs.get("local_model"),
-                            tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                            assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                             client=text_analyzer_kwargs.get("client"),
                             client_config=text_analyzer_kwargs.get("client_config"),
                             api_url=text_analyzer_kwargs.get("api_url"),
@@ -9472,9 +9474,9 @@ def run_page_text_redaction(
                 file_name=file_name,
                 page_number=page_number,
                 inference_method=text_analyzer_kwargs.get("inference_method"),
-                local_model=text_analyzer_kwargs.get("local_model"),
-                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                # local_model=text_analyzer_kwargs.get("local_model"),
+                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                 client=text_analyzer_kwargs.get("client"),
                 client_config=text_analyzer_kwargs.get("client_config"),
                 api_url=text_analyzer_kwargs.get("api_url"),
@@ -9641,9 +9643,9 @@ def run_page_text_redaction(
                             inference_method=text_analyzer_kwargs.get(
                                 "inference_method"
                             ),
-                            local_model=text_analyzer_kwargs.get("local_model"),
-                            tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                            assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                             client=text_analyzer_kwargs.get("client"),
                             client_config=text_analyzer_kwargs.get("client_config"),
                             api_url=text_analyzer_kwargs.get("api_url"),
@@ -9736,9 +9738,9 @@ def run_page_text_redaction(
                             inference_method=text_analyzer_kwargs.get(
                                 "inference_method"
                             ),
-                            local_model=text_analyzer_kwargs.get("local_model"),
-                            tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                            assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                             client=text_analyzer_kwargs.get("client"),
                             client_config=text_analyzer_kwargs.get("client_config"),
                             api_url=text_analyzer_kwargs.get("api_url"),
@@ -9800,9 +9802,9 @@ def run_page_text_redaction(
                     file_name=file_name,
                     page_number=page_number,
                     inference_method=text_analyzer_kwargs.get("inference_method"),
-                    local_model=text_analyzer_kwargs.get("local_model"),
-                    tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                    assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    # local_model=text_analyzer_kwargs.get("local_model"),
+                    # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                     client=text_analyzer_kwargs.get("client"),
                     client_config=text_analyzer_kwargs.get("client_config"),
                     api_url=text_analyzer_kwargs.get("api_url"),
@@ -9839,33 +9841,33 @@ def run_page_text_redaction(
         )
 
         # Load PII-specific model and tokenizer if not already provided
-        if (
-            text_analyzer_kwargs.get("local_model") is None
-            and text_analyzer_kwargs.get("inference_method") == "local"
-        ):
-            from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
+        # if (
+        #     text_analyzer_kwargs.get("local_model") is None
+        #     and text_analyzer_kwargs.get("inference_method") == "local"
+        # ):
+        #     # from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
 
-            try:
-                text_analyzer_kwargs["local_model"] = get_pii_model()
-            except Exception as e:
-                print(
-                    f"Warning: Failed to load PII model: {e}. "
-                    f"Will attempt to load model on-demand."
-                )
-        if (
-            text_analyzer_kwargs.get("tokenizer") is None
-            and text_analyzer_kwargs.get("inference_method") == "local"
-            and USE_LLAMA_CPP != "True"
-        ):
-            from tools.llm_funcs import get_pii_tokenizer
+        #     try:
+        #         text_analyzer_kwargs["local_model"] = get_pii_model()
+        #     except Exception as e:
+        #         print(
+        #             f"Warning: Failed to load PII model: {e}. "
+        #             f"Will attempt to load model on-demand."
+        #         )
+        # if (
+        #     text_analyzer_kwargs.get("tokenizer") is None
+        #     and text_analyzer_kwargs.get("inference_method") == "local"
+        #     and USE_LLAMA_CPP != "True"
+        # ):
+        #     from tools.llm_funcs import get_pii_tokenizer
 
-            try:
-                text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-            except Exception as e:
-                print(
-                    f"Warning: Failed to load PII tokenizer: {e}. "
-                    f"Will attempt to load tokenizer on-demand."
-                )
+        #     try:
+        #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+        #     except Exception as e:
+        #         print(
+        #             f"Warning: Failed to load PII tokenizer: {e}. "
+        #             f"Will attempt to load tokenizer on-demand."
+        #         )
 
         # Handle custom entities first (same as AWS Comprehend)
         if custom_entities:
@@ -9998,9 +10000,9 @@ def run_page_text_redaction(
                             inference_method=text_analyzer_kwargs.get(
                                 "inference_method"
                             ),
-                            local_model=text_analyzer_kwargs.get("local_model"),
-                            tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                            assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                             client=text_analyzer_kwargs.get("client"),
                             client_config=text_analyzer_kwargs.get("client_config"),
                             api_url=text_analyzer_kwargs.get("api_url"),
@@ -10093,9 +10095,9 @@ def run_page_text_redaction(
                             inference_method=text_analyzer_kwargs.get(
                                 "inference_method"
                             ),
-                            local_model=text_analyzer_kwargs.get("local_model"),
-                            tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                            assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                             client=text_analyzer_kwargs.get("client"),
                             client_config=text_analyzer_kwargs.get("client_config"),
                             api_url=text_analyzer_kwargs.get("api_url"),
@@ -10157,9 +10159,9 @@ def run_page_text_redaction(
                     file_name=file_name,
                     page_number=page_number,
                     inference_method=text_analyzer_kwargs.get("inference_method"),
-                    local_model=text_analyzer_kwargs.get("local_model"),
-                    tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                    assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    # local_model=text_analyzer_kwargs.get("local_model"),
+                    # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    # assistant_model=text_analyzer_kwargs.get("assistant_model"),
                     client=text_analyzer_kwargs.get("client"),
                     client_config=text_analyzer_kwargs.get("client_config"),
                     api_url=text_analyzer_kwargs.get("api_url"),

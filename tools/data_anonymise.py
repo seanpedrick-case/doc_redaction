@@ -1352,33 +1352,33 @@ def anonymise_script(
             )
 
         # Load PII-specific model and tokenizer if not already provided
-        if (
-            text_analyzer_kwargs.get("local_model") is None
-            and text_analyzer_kwargs.get("inference_method") == "local"
-        ):
-            from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
+        # if (
+        #     text_analyzer_kwargs.get("local_model") is None
+        #     and text_analyzer_kwargs.get("inference_method") == "local"
+        # ):
+        #     from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
 
-            try:
-                text_analyzer_kwargs["local_model"] = get_pii_model()
-            except Exception as e:
-                print(
-                    f"Warning: Failed to load PII model: {e}. "
-                    f"Will attempt to load model on-demand."
-                )
-        if (
-            text_analyzer_kwargs.get("tokenizer") is None
-            and text_analyzer_kwargs.get("inference_method") == "local"
-            and USE_LLAMA_CPP != "True"
-        ):
-            from tools.llm_funcs import get_pii_tokenizer
+        #     try:
+        #         text_analyzer_kwargs["local_model"] = get_pii_model()
+        #     except Exception as e:
+        #         print(
+        #             f"Warning: Failed to load PII model: {e}. "
+        #             f"Will attempt to load model on-demand."
+        #         )
+        # if (
+        #     text_analyzer_kwargs.get("tokenizer") is None
+        #     and text_analyzer_kwargs.get("inference_method") == "local"
+        #     and USE_LLAMA_CPP != "True"
+        # ):
+        #     from tools.llm_funcs import get_pii_tokenizer
 
-            try:
-                text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-            except Exception as e:
-                print(
-                    f"Warning: Failed to load PII tokenizer: {e}. "
-                    f"Will attempt to load tokenizer on-demand."
-                )
+        #     try:
+        #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+        #     except Exception as e:
+        #         print(
+        #             f"Warning: Failed to load PII tokenizer: {e}. "
+        #             f"Will attempt to load tokenizer on-demand."
+        #         )
 
         # Use the same logic as AWS_LLM_PII_OPTION for the rest
         # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
@@ -1483,11 +1483,11 @@ def anonymise_script(
                                 inference_method=text_analyzer_kwargs.get(
                                     "inference_method"
                                 ),
-                                local_model=text_analyzer_kwargs.get("local_model"),
-                                tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                                assistant_model=text_analyzer_kwargs.get(
-                                    "assistant_model"
-                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
                                 client=text_analyzer_kwargs.get("client"),
                                 client_config=text_analyzer_kwargs.get("client_config"),
                                 api_url=text_analyzer_kwargs.get("api_url"),

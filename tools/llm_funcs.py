@@ -20,13 +20,13 @@ if os.environ.get("USE_MOCK_LLM") == "1" or os.environ.get("TEST_MODE") == "1":
         project_root = os.path.dirname(os.path.dirname(__file__))
         if project_root not in sys.path:
             sys.path.insert(0, project_root)
-        try:
-            from test.mock_llm_calls import apply_mock_patches
+        # try:
+        #     from test.mock_llm_calls import apply_mock_patches
 
-            apply_mock_patches()
-        except ImportError:
-            # If mock module not found, continue without mocking
-            pass
+        #     apply_mock_patches()
+        # except ImportError:
+        #     # If mock module not found, continue without mocking
+        #     pass
     except Exception:
         # If anything fails, continue without mocking
         pass
@@ -57,9 +57,9 @@ full_text = (
 # Note: These are kept for backward compatibility but are no longer used.
 # All model loading now uses the PII globals (_pii_model, _pii_tokenizer, _pii_assistant_model)
 # via get_pii_model(), get_pii_tokenizer(), etc.
-_model = None
-_tokenizer = None
-_assistant_model = None
+# _model = None
+# _tokenizer = None
+# _assistant_model = None
 
 # Global variables for PII detection model and tokenizer
 # These are now used for all LLM model loading (both general and PII-specific)
@@ -382,43 +382,6 @@ def load_model(
         gpu_config.update_gpu(gpu_layers)
         gpu_config.update_context(max_context_length)
 
-        # Llama.cpp python support not currently implemented
-        # if USE_LLAMA_CPP == "True":
-        #     from llama_cpp import Llama
-        #     from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
-
-        #     model_path = get_model_path(
-        #         repo_id=repo_id, model_filename=model_filename, model_dir=model_dir
-        #     )
-
-        #     try:
-        #         print("GPU load variables:", vars(gpu_config))
-        #         if speculative_decoding:
-        #             model = Llama(
-        #                 model_path=model_path,
-        #                 type_k=K_QUANT_LEVEL,
-        #                 type_v=V_QUANT_LEVEL,
-        #                 flash_attn=True,
-        #                 draft_model=LlamaPromptLookupDecoding(
-        #                     num_pred_tokens=NUM_PRED_TOKENS
-        #                 ),
-        #                 **vars(gpu_config),
-        #             )
-        #         else:
-        #             model = Llama(
-        #                 model_path=model_path,
-        #                 type_k=K_QUANT_LEVEL,
-        #                 type_v=V_QUANT_LEVEL,
-        #                 flash_attn=True,
-        #                 **vars(gpu_config),
-        #             )
-
-        #     except Exception as e:
-        #         print("GPU load failed due to:", e, "Loading model in CPU mode")
-        #         # If fails, go to CPU mode
-        #         model = Llama(model_path=model_path, **vars(cpu_config))
-
-        # else:
         from transformers import (
             AutoModelForCausalLM,
             AutoTokenizer,
@@ -437,7 +400,7 @@ def load_model(
         elif dtype_str == "float16":
             torch_dtype = torch.float16
         elif dtype_str == "auto":
-            torch_dtype = None
+            torch_dtype = "auto"
         else:
             torch_dtype = torch.float32  # A safe fallback
 
@@ -566,38 +529,6 @@ def load_model(
 
     # CPU mode
     else:
-        if USE_LLAMA_CPP == "False":
-            raise Warning(
-                "Using transformers model in CPU mode is not supported. Please change your config variable USE_LLAMA_CPP to True if you want to do CPU inference."
-            )
-
-        # from llama_cpp import Llama
-        # from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
-
-        # model_path = get_model_path(
-        #     repo_id=repo_id, model_filename=model_filename, model_dir=model_dir
-        # )
-
-        # # gpu_config.update_gpu(gpu_layers)
-        # cpu_config.update_gpu(gpu_layers)
-
-        # # Update context length according to slider
-        # # gpu_config.update_context(max_context_length)
-        # cpu_config.update_context(max_context_length)
-
-        # # Load model
-        # if speculative_decoding:
-        #     model = Llama(
-        #         model_path=model_path,
-        #         draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS),
-        #         **vars(cpu_config),
-        #     )
-        # else:
-        #     model = Llama(model_path=model_path, **vars(cpu_config))
-
-        # For llama-cpp models, tokenizer is not used directly (model handles tokenization internally)
-        # However, we still load it for compatibility with code that expects a tokenizer
-        # Load tokenizer from the same repo_id to ensure compatibility if needed
         try:
             from transformers import AutoTokenizer
 
@@ -635,7 +566,7 @@ def load_model(
     # Load assistant model for speculative decoding if enabled
     # Note: Assistant model typically shares the same tokenizer as the main model
     # for speculative decoding, so we don't load a separate tokenizer for it
-    if speculative_decoding and USE_LLAMA_CPP == "False" and torch_device == "cuda":
+    if speculative_decoding and torch_device == "cuda":
         print("Loading assistant model for speculative decoding:", ASSISTANT_MODEL)
         try:
             from transformers import (
@@ -728,145 +659,126 @@ def load_model(
     return model, tokenizer, assistant_model
 
 
-def get_model():
-    """Get the globally loaded model. Load it if not already loaded.
-
-    Note: This function is an alias for get_pii_model() to maintain backward compatibility.
-    Both functions use the same underlying implementation and config variables.
-    """
-    return get_pii_model()
-
-
-def get_tokenizer():
-    """Get the globally loaded tokenizer. Load it if not already loaded.
-
-    Note: This function is an alias for get_pii_tokenizer() to maintain backward compatibility.
-    Both functions use the same underlying implementation and config variables.
-    """
-    return get_pii_tokenizer()
+# def get_assistant_model():
+#     """Get the globally loaded assistant model. Load it if not already loaded."""
+#     global _pii_model, _pii_tokenizer, _pii_assistant_model
+#     # Use PII globals to match get_pii_model() behavior
+#     if _pii_assistant_model is None:
+#         # Ensure model and tokenizer are loaded first
+#         get_pii_model()
+#         get_pii_tokenizer()
+#     return _pii_assistant_model
 
 
-def get_model_and_tokenizer():
-    """Get both the globally loaded model and tokenizer together.
+# def set_model(model, tokenizer, assistant_model=None):
+#     """Set the global model, tokenizer, and assistant model.
 
-    This is the recommended way to get both when you need them, as it ensures
-    they're loaded atomically from the same source and prevents mismatches.
-
-    Returns:
-        tuple: (model, tokenizer) - Both loaded and guaranteed to be from the same source
-    """
-    # Use PII versions which have better error handling
-    model = get_pii_model()
-    tokenizer = get_pii_tokenizer()
-    return model, tokenizer
+#     Note: This function now sets the PII globals to maintain consistency.
+#     """
+#     global _pii_model, _pii_tokenizer, _pii_assistant_model
+#     _pii_model = model
+#     _pii_tokenizer = tokenizer
+#     _pii_assistant_model = assistant_model
 
 
-def get_assistant_model():
-    """Get the globally loaded assistant model. Load it if not already loaded."""
-    global _pii_model, _pii_tokenizer, _pii_assistant_model
-    # Use PII globals to match get_pii_model() behavior
-    if _pii_assistant_model is None:
-        # Ensure model and tokenizer are loaded first
-        get_pii_model()
-        get_pii_tokenizer()
-    return _pii_assistant_model
+# def get_pii_model():
+#     """Get the globally loaded PII detection model. Load it if not already loaded."""
+#     global _pii_model, _pii_tokenizer, _pii_assistant_model
+
+#     # Check if model is already loaded
+#     if _pii_model is not None:
+#         print("PII model already loaded, reusing existing model instance.")
+#         return _pii_model
+
+#     # Determine which repo_id, model_file, and model_folder to use
+#     # If PII-specific config is set, use it; otherwise fall back to general local model config
+#     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
+#         pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
+#         pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+#         pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
+#     else:
+#         raise ValueError(
+#             "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
+#             "Please configure the PII model repository ID."
+#         )
+
+#     print("Loading PII model for the first time...")
+#     _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
+#         local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
+#         gpu_layers=gpu_layers,
+#         max_context_length=context_length,
+#         gpu_config=gpu_config,
+#         cpu_config=cpu_config,
+#         torch_device=torch_device,
+#         repo_id=pii_repo_id,
+#         model_filename=pii_model_file,
+#         model_dir=pii_model_folder,
+#         compile_mode=COMPILE_MODE,
+#         model_dtype=MODEL_DTYPE,
+#         hf_token=HF_TOKEN,
+#         model=_pii_model,
+#         tokenizer=_pii_tokenizer,
+#         assistant_model=_pii_assistant_model,
+#     )
+#     print("PII model loaded successfully.")
+#     return _pii_model
 
 
-def set_model(model, tokenizer, assistant_model=None):
-    """Set the global model, tokenizer, and assistant model.
+# def get_pii_tokenizer():
+#     """Get the globally loaded PII detection tokenizer. Load it if not already loaded."""
+#     global _pii_model, _pii_tokenizer, _pii_assistant_model
 
-    Note: This function now sets the PII globals to maintain consistency.
-    """
-    global _pii_model, _pii_tokenizer, _pii_assistant_model
-    _pii_model = model
-    _pii_tokenizer = tokenizer
-    _pii_assistant_model = assistant_model
+#     # Check if tokenizer is already loaded
+#     if _pii_tokenizer is not None:
+#         print("PII tokenizer already loaded, reusing existing tokenizer instance.")
+#         return _pii_tokenizer
 
+#     # Determine which repo_id, model_file, and model_folder to use
+#     # If PII-specific config is set, use it; otherwise fall back to general local model config
+#     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
+#         pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
+#         pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
+#         pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
+#     else:
+#         raise ValueError(
+#             "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
+#             "Please configure the PII model repository ID."
+#         )
 
-def get_pii_model():
-    """Get the globally loaded PII detection model. Load it if not already loaded."""
-    global _pii_model, _pii_tokenizer, _pii_assistant_model
+#     print("Loading PII tokenizer for the first time...")
+#     _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
+#         local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
+#         gpu_layers=gpu_layers,
+#         max_context_length=context_length,
+#         gpu_config=gpu_config,
+#         cpu_config=cpu_config,
+#         torch_device=torch_device,
+#         repo_id=pii_repo_id,
+#         model_filename=pii_model_file,
+#         model_dir=pii_model_folder,
+#         compile_mode=COMPILE_MODE,
+#         model_dtype=MODEL_DTYPE,
+#         hf_token=HF_TOKEN,
+#         model=_pii_model,
+#         tokenizer=_pii_tokenizer,
+#         assistant_model=_pii_assistant_model,
+#     )
+#     print("PII tokenizer loaded successfully.")
+#     return _pii_tokenizer, _pii_tokenizer, _pii_assistant_model
 
-    # Check if model is already loaded
-    if _pii_model is not None:
-        print("PII model already loaded, reusing existing model instance.")
-        return _pii_model
+# def get_model_and_tokenizer():
+#     """Get both the globally loaded model and tokenizer together.
 
-    # Determine which repo_id, model_file, and model_folder to use
-    # If PII-specific config is set, use it; otherwise fall back to general local model config
-    if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
-        pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-        pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-        pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-    else:
-        raise ValueError(
-            "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
-            "Please configure the PII model repository ID."
-        )
+#     This is the recommended way to get both when you need them, as it ensures
+#     they're loaded atomically from the same source and prevents mismatches.
 
-    print("Loading PII model for the first time...")
-    _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-        local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-        gpu_layers=gpu_layers,
-        max_context_length=context_length,
-        gpu_config=gpu_config,
-        cpu_config=cpu_config,
-        torch_device=torch_device,
-        repo_id=pii_repo_id,
-        model_filename=pii_model_file,
-        model_dir=pii_model_folder,
-        compile_mode=COMPILE_MODE,
-        model_dtype=MODEL_DTYPE,
-        hf_token=HF_TOKEN,
-        model=_pii_model,
-        tokenizer=_pii_tokenizer,
-        assistant_model=_pii_assistant_model,
-    )
-    print("PII model loaded successfully.")
-    return _pii_model
-
-
-def get_pii_tokenizer():
-    """Get the globally loaded PII detection tokenizer. Load it if not already loaded."""
-    global _pii_model, _pii_tokenizer, _pii_assistant_model
-
-    # Check if tokenizer is already loaded
-    if _pii_tokenizer is not None:
-        print("PII tokenizer already loaded, reusing existing tokenizer instance.")
-        return _pii_tokenizer
-
-    # Determine which repo_id, model_file, and model_folder to use
-    # If PII-specific config is set, use it; otherwise fall back to general local model config
-    if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
-        pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-        pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-        pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-    else:
-        raise ValueError(
-            "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
-            "Please configure the PII model repository ID."
-        )
-
-    print("Loading PII tokenizer for the first time...")
-    _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-        local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-        gpu_layers=gpu_layers,
-        max_context_length=context_length,
-        gpu_config=gpu_config,
-        cpu_config=cpu_config,
-        torch_device=torch_device,
-        repo_id=pii_repo_id,
-        model_filename=pii_model_file,
-        model_dir=pii_model_folder,
-        compile_mode=COMPILE_MODE,
-        model_dtype=MODEL_DTYPE,
-        hf_token=HF_TOKEN,
-        model=_pii_model,
-        tokenizer=_pii_tokenizer,
-        assistant_model=_pii_assistant_model,
-    )
-    print("PII tokenizer loaded successfully.")
-    return _pii_tokenizer
+#     Returns:
+#         tuple: (model, tokenizer) - Both loaded and guaranteed to be from the same source
+#     """
+#     # Use PII versions which have better error handling
+#     model = get_pii_model()
+#     tokenizer = get_pii_tokenizer()
+#     return model, tokenizer
 
 
 # Initialize PII model at startup if configured (even if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS is False)
@@ -877,160 +789,874 @@ if (
 ):
     try:
         print("Loading local PII model:", LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE)
-        get_pii_model()  # This will trigger loading the PII model
+        _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
+            local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
+            gpu_layers=gpu_layers,
+            max_context_length=context_length,
+            gpu_config=gpu_config,
+            cpu_config=cpu_config,
+            torch_device=torch_device,
+            repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
+            model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
+            model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
+            compile_mode=COMPILE_MODE,
+            model_dtype=MODEL_DTYPE,
+            hf_token=HF_TOKEN,
+            model=_pii_model,
+            tokenizer=_pii_tokenizer,
+            assistant_model=_pii_assistant_model,
+        )
     except Exception as e:
         print(f"Warning: Could not load PII model at startup: {e}")
         print("PII model will be loaded on-demand when needed.")
 
 
-def call_llama_cpp_model(formatted_string: str, gen_config: str, model=None):
-    """
-    Calls your generation model with parameters from the LlamaCPPGenerationConfig object.
-
-    Args:
-        formatted_string (str): The formatted input text for the model.
-        gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
-        model: Optional model instance. If None, will use the globally loaded model.
-    """
-    if model is None:
-        model = get_model()
-
-    if model is None:
-        raise ValueError(
-            "No model available. Either pass a model parameter or ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True."
-        )
-
-    # Extracting parameters from the gen_config object
-    temperature = gen_config.temperature
-    top_k = gen_config.top_k
-    top_p = gen_config.top_p
-    repeat_penalty = gen_config.repeat_penalty
-    seed = gen_config.seed
-    max_tokens = gen_config.max_tokens
-    stream = gen_config.stream
-
-    # Now you can call your model directly, passing the parameters:
-    output = model(
-        formatted_string,
-        temperature=temperature,
-        top_k=top_k,
-        top_p=top_p,
-        repeat_penalty=repeat_penalty,
-        seed=seed,
-        max_tokens=max_tokens,
-        stream=stream,  # ,
-        # stop=["<|eot_id|>", "\n\n"]
-    )
-
-    return output
-
-
-def call_llama_cpp_chatmodel(
-    formatted_string: str,
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
+def call_transformers_model(
+    prompt: str,
     system_prompt: str,
     gen_config: LlamaCPPGenerationConfig,
-    model=None,
+    model=_pii_model,
+    tokenizer=_pii_tokenizer,
+    assistant_model=_pii_assistant_model,
+    speculative_decoding=speculative_decoding,
 ):
     """
-    Calls your Llama.cpp chat model with a formatted user message and system prompt,
-    using generation parameters from the LlamaCPPGenerationConfig object.
+    This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
+    """
+    import torch
+    from transformers import TextStreamer
+
+    # Load model and tokenizer together to ensure they're from the same source
+    # This prevents mismatches that could occur if they're loaded separately
+    if model is None or tokenizer is None:
+        # Use get_model_and_tokenizer() to ensure both are loaded atomically
+        # This is safer than calling get_model() and get_tokenizer() separately
+        loaded_model, loaded_tokenizer, assistant_model = load_model()
+        if model is None:
+            model = loaded_model
+        if tokenizer is None:
+            tokenizer = loaded_tokenizer
+    # if assistant_model is None and speculative_decoding:
+    #     assistant_model = get_assistant_model()
+
+    if model is None or tokenizer is None:
+        raise ValueError(
+            "No model or tokenizer available. Either pass them as parameters or ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True."
+        )
+
+    # Apply reasoning suffix to prompt if configured
+    if REASONING_SUFFIX and REASONING_SUFFIX.strip():
+        prompt = f"{prompt} {REASONING_SUFFIX}".strip()
+
+    # 1. Define the conversation as a list of dictionaries
+    # Note: The multimodal format [{"type": "text", "text": text}] is only needed for actual multimodal models
+    # with images/videos. For text-only content, even multimodal models expect plain strings.
+
+    # Check if system_prompt is meaningful (not empty/None)
+    has_system_prompt = system_prompt and str(system_prompt).strip()
+
+    # Always use string format for text-only content, regardless of MULTIMODAL_PROMPT_FORMAT setting
+    # MULTIMODAL_PROMPT_FORMAT should only be used when you actually have multimodal inputs (images, etc.)
+    if MULTIMODAL_PROMPT_FORMAT:
+        conversation = []
+        if has_system_prompt:
+            conversation.append(
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": str(system_prompt)}],
+                }
+            )
+        conversation.append(
+            {"role": "user", "content": [{"type": "text", "text": str(prompt)}]}
+        )
+    else:
+        conversation = []
+        if has_system_prompt:
+            conversation.append({"role": "system", "content": str(system_prompt)})
+        conversation.append({"role": "user", "content": str(prompt)})
+
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print("System prompt:", system_prompt)
+        print("User prompt:", prompt)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+
+    if assistant_model is not None:
+        assistant_model = assistant_model.to(device)
+
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print("Model device:", device)
+        print("Model device type:", type(device))
+
+    try:
+        # Try applying chat template with system prompt (if present)
+        # Create inputs dict like VLM does - this allows model to handle device placement automatically
+        input_ids = tokenizer.apply_chat_template(
+            conversation,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_tensors="pt",
+        ).to(
+            device
+        )  # Ensure inputs match model device
+
+        if PRINT_TRANSFORMERS_USER_PROMPT:
+            print("Input IDs:", input_ids)
+            print("Rendered prompt:")
+            rendered = tokenizer.apply_chat_template(
+                conversation,
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+            print(rendered)
+            print("-" * 50)
+
+    except (TypeError, KeyError, IndexError, ValueError) as e:
+        # If chat template fails, try without system prompt (some models don't support it)
+        if has_system_prompt:
+            print(
+                f"Chat template failed with system prompt ({e}), trying without system prompt..."
+            )
+            # Try again with only user prompt
+            user_only_conversation = [{"role": "user", "content": str(prompt)}]
+            try:
+                input_ids = tokenizer.apply_chat_template(
+                    user_only_conversation,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_tensors="pt",
+                ).to(device)
+
+                if PRINT_TRANSFORMERS_USER_PROMPT:
+                    print("Input IDs:", input_ids)
+                    print("Rendered prompt (without system):")
+                    rendered = tokenizer.apply_chat_template(
+                        user_only_conversation,
+                        add_generation_prompt=True,
+                        tokenize=False,
+                    )
+                    print(rendered)
+                    print("-" * 50)
+            except Exception as e2:
+                print(
+                    f"Chat template failed without system prompt ({e2}), using manual tokenization"
+                )
+                # Combine system and user prompts manually as fallback
+                full_prompt = (
+                    f"{system_prompt}\n\n{prompt}" if has_system_prompt else prompt
+                )
+                # Tokenize manually with special tokens
+                input_ids = tokenizer(
+                    full_prompt, return_tensors="pt", add_special_tokens=True
+                ).to(device)
+
+        else:
+            # No system prompt, but chat template still failed - use manual tokenization
+            print(f"Chat template failed ({e}), using manual tokenization")
+            full_prompt = str(prompt)
+            input_ids = tokenizer(
+                full_prompt, return_tensors="pt", add_special_tokens=True
+            ).to(device)
+
+    except Exception as e:
+        print("Error applying chat template:", e)
+        import traceback
+
+        traceback.print_exc()
+        raise
+
+    attention_mask = torch.ones_like(input_ids).to(device)
+
+    # Map LlamaCPP parameters to transformers parameters
+    generation_kwargs = {
+        "max_new_tokens": gen_config.max_tokens,
+        "temperature": gen_config.temperature,
+        "top_p": gen_config.top_p,
+        "top_k": gen_config.top_k,
+        "do_sample": True,
+        "attention_mask": attention_mask,
+        #'pad_token_id': tokenizer.eos_token_id
+    }
+
+    if gen_config.stream:
+        streamer = TextStreamer(tokenizer, skip_prompt=True)
+    else:
+        streamer = None
+
+    # Remove parameters that don't exist in transformers
+    if hasattr(gen_config, "repeat_penalty"):
+        generation_kwargs["repetition_penalty"] = gen_config.repeat_penalty
+
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print("Generation kwargs:", generation_kwargs)
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model.config.pad_token_id = tokenizer.pad_token_id
+
+    # --- Timed Inference Test ---
+    print("\nStarting model inference...")
+    start_time = time.time()
+
+    # Use speculative decoding if assistant model is available
+    try:
+        if speculative_decoding and assistant_model is not None:
+            if PRINT_TRANSFORMERS_USER_PROMPT:
+                print("Using speculative decoding with assistant model")
+            outputs = model.generate(
+                input_ids,
+                assistant_model=assistant_model,
+                **generation_kwargs,
+                streamer=streamer,
+            )
+        else:
+            if PRINT_TRANSFORMERS_USER_PROMPT:
+                print("Generating without speculative decoding")
+            outputs = model.generate(input_ids, **generation_kwargs, streamer=streamer)
+    except Exception as e:
+        error_msg = str(e)
+        # Check if this is a CUDA compilation error
+        if (
+            "sm_120" in error_msg
+            or "LLVM ERROR" in error_msg
+            or "Cannot select" in error_msg
+        ):
+            print("\n" + "=" * 80)
+            print("CUDA COMPILATION ERROR DETECTED")
+            print("=" * 80)
+            print(
+                "\nThe error is caused by torch.compile() trying to compile CUDA kernels"
+            )
+            print(
+                "with incompatible settings. This is a known issue with certain CUDA/PyTorch"
+            )
+            print("combinations.\n")
+            print(
+                "SOLUTION: Disable model compilation by setting COMPILE_TRANSFORMERS=False"
+            )
+            print("in your config file (config/app_config.env).")
+            print(
+                "\nThe model will still work without compilation, just slightly slower."
+            )
+            print("=" * 80 + "\n")
+            raise RuntimeError(
+                "CUDA compilation error detected. Please set COMPILE_TRANSFORMERS=False "
+                "in your config file to disable model compilation and avoid this error."
+            ) from e
+        else:
+            # Re-raise other errors as-is
+            raise
+
+    end_time = time.time()
+
+    # --- Decode and Display Results ---
+    # Extract only the newly generated tokens (exclude input tokens)
+    input_length = input_ids.shape[-1]
+
+    # Handle different output formats from model.generate()
+    # model.generate() returns a tensor with shape [batch_size, sequence_length]
+    # that includes both input and generated tokens
+    if isinstance(outputs, torch.Tensor):
+        # If outputs is a tensor, extract the new tokens
+        if outputs.dim() == 2:
+            # Shape: [batch_size, sequence_length]
+            new_tokens = outputs[0, input_length:].clone()
+        elif outputs.dim() == 1:
+            # Shape: [sequence_length] (single sequence)
+            new_tokens = outputs[input_length:].clone()
+        else:
+            raise ValueError(f"Unexpected output tensor shape: {outputs.shape}")
+    else:
+        # If outputs is a sequence or other format
+        if hasattr(outputs, "__getitem__"):
+            new_tokens = (
+                outputs[0][input_length:]
+                if len(outputs) > 0
+                else outputs[input_length:]
+            )
+        else:
+            raise ValueError(f"Unexpected output type: {type(outputs)}")
+
+    # Ensure new_tokens is a tensor and on CPU for decoding
+    if isinstance(new_tokens, torch.Tensor):
+        new_tokens = new_tokens.cpu().clone()
+        # Convert to list for decoding (some tokenizers prefer lists)
+        new_tokens_list = new_tokens.tolist()
+    else:
+        new_tokens_list = (
+            list(new_tokens) if hasattr(new_tokens, "__iter__") else [new_tokens]
+        )
+
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print(f"Input length: {input_length}")
+        print(f"Output shape: {outputs.shape if hasattr(outputs, 'shape') else 'N/A'}")
+        print(f"New tokens count: {len(new_tokens_list)}")
+        print(f"First 20 new token IDs: {new_tokens_list[:20]}")
+
+    # Decode the tokens
+    # Use the token list for decoding (more reliable than tensor)
+    try:
+        assistant_reply = tokenizer.decode(
+            new_tokens_list, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        )
+    except Exception as e:
+        print(f"Warning: Error decoding tokens: {e}")
+        print(f"New tokens count: {len(new_tokens_list)}")
+        print(f"New tokens (first 20): {new_tokens_list[:20]}")
+        # Try alternative decoding methods
+        try:
+            # Try with tensor directly
+            if isinstance(new_tokens, torch.Tensor):
+                assistant_reply = tokenizer.decode(
+                    new_tokens,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=True,
+                )
+            else:
+                raise e
+        except Exception as e2:
+            print(f"Error with tensor decoding: {e2}")
+            # Last resort: try to decode each token individually to see which ones fail
+            try:
+                decoded_parts = []
+                failed_tokens = []
+                for i, token_id in enumerate(
+                    new_tokens_list[:200]
+                ):  # Limit to first 200 to avoid issues
+                    try:
+                        decoded = tokenizer.decode([token_id], skip_special_tokens=True)
+                        decoded_parts.append(decoded)
+                    except Exception as token_error:
+                        failed_tokens.append((i, token_id, str(token_error)))
+                        decoded_parts.append(f"<TOKEN_ERROR_{token_id}>")
+                if failed_tokens:
+                    print(
+                        f"Warning: {len(failed_tokens)} tokens failed to decode individually"
+                    )
+                    print(f"First few failed tokens: {failed_tokens[:5]}")
+                assistant_reply = "".join(decoded_parts)
+            except Exception as e3:
+                print(f"Error with individual token decoding: {e3}")
+                assistant_reply = f"<DECODING_ERROR: {str(e3)}>"
+
+    num_input_tokens = input_length
+    num_generated_tokens = (
+        len(new_tokens_list) if hasattr(new_tokens_list, "__len__") else 0
+    )
+    duration = end_time - start_time
+    tokens_per_second = num_generated_tokens / duration if duration > 0 else 0
+
+    if PRINT_TRANSFORMERS_USER_PROMPT:
+        print(f"\nDecoded output length: {len(assistant_reply)} characters")
+        print(f"First 200 chars of output: {assistant_reply[:200]}")
+
+    print("\n--- Performance ---")
+    print(f"Time taken: {duration:.2f} seconds")
+    print(f"Generated tokens: {num_generated_tokens}")
+    print(f"Tokens per second: {tokens_per_second:.2f}")
+
+    return assistant_reply, num_input_tokens, num_generated_tokens
+
+
+# Function to send a request and update history
+def send_request(
+    prompt: str,
+    conversation_history: List[dict],
+    client: ai.Client | OpenAI,
+    config: types.GenerateContentConfig,
+    model_choice: str,
+    system_prompt: str,
+    temperature: float,
+    bedrock_runtime: boto3.Session.client,
+    model_source: str,
+    local_model=_pii_model,
+    tokenizer=_pii_tokenizer,
+    assistant_model=_pii_assistant_model,
+    assistant_prefill="",
+    progress=Progress(track_tqdm=True),
+    api_url: str = None,
+) -> Tuple[str, List[dict]]:
+    """Sends a request to a language model and manages the conversation history.
+
+    This function constructs the full prompt by appending the new user prompt to the conversation history,
+    generates a response from the model, and updates the conversation history with the new prompt and response.
+    It handles different model sources (Gemini, AWS, Local, inference-server) and includes retry logic for API calls.
 
     Args:
-        formatted_string (str): The formatted input text for the user's message.
-        system_prompt (str): The system-level instructions for the model.
-        gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
-        model: Optional model instance. If None, will use the globally loaded model.
+        prompt (str): The user's input prompt to be sent to the model.
+        conversation_history (List[dict]): A list of dictionaries representing the ongoing conversation.
+                                           Each dictionary should have 'role' and 'parts' keys.
+        client (ai.Client): The API client object for the chosen model (e.g., Gemini `ai.Client`, or Azure/OpenAI `OpenAI`).
+        config (types.GenerateContentConfig): Configuration settings for content generation (e.g., Gemini `types.GenerateContentConfig`).
+        model_choice (str): The specific model identifier to use (e.g., "gemini-pro", "claude-v2").
+        system_prompt (str): An optional system-level instruction or context for the model.
+        temperature (float): Controls the randomness of the model's output, with higher values leading to more diverse responses.
+        bedrock_runtime (boto3.Session.client): The boto3 Bedrock runtime client object for AWS models.
+        model_source (str): Indicates the source/provider of the model (e.g., "Gemini", "AWS", "Local", "inference-server").
+        local_model (list, optional): A list containing the local model and its tokenizer (if `model_source` is "Local"). Defaults to [].
+        tokenizer (object, optional): The tokenizer object for local models. Defaults to None.
+        assistant_model (object, optional): An optional assistant model used for speculative decoding with local models. Defaults to None.
+        assistant_prefill (str, optional): A string to pre-fill the assistant's response, useful for certain models like Claude. Defaults to "".
+        progress (Progress, optional): A progress object for tracking the operation, typically from `tqdm`. Defaults to Progress(track_tqdm=True).
+        api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
+
+    Returns:
+        Tuple[str, List[dict]]: A tuple containing the model's response text and the updated conversation history.
     """
-    if model is None:
-        model = get_model()
+    # Constructing the full prompt from the conversation history
+    full_prompt = "Conversation history:\n"
+    num_transformer_input_tokens = 0
+    num_transformer_generated_tokens = 0
+    response_text = ""
 
-    if model is None:
-        raise ValueError(
-            "No model available. Either pass a model parameter or ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True."
+    for entry in conversation_history:
+        role = entry[
+            "role"
+        ].capitalize()  # Assuming the history is stored with 'role' and 'parts'
+        message = " ".join(entry["parts"])  # Combining all parts of the message
+        full_prompt += f"{role}: {message}\n"
+
+    # Adding the new user prompt
+    full_prompt += f"\nUser: {prompt}"
+
+    # Clear any existing progress bars
+    tqdm._instances.clear()
+
+    progress_bar = range(0, number_of_api_retry_attempts)
+
+    # Generate the model's response
+    if "Gemini" in model_source:
+
+        for i in progress_bar:
+            try:
+                print("Calling Gemini model, attempt", i + 1)
+
+                response = client.models.generate_content(
+                    model=model_choice, contents=full_prompt, config=config
+                )
+
+                # print("Successful call to Gemini model.")
+                break
+            except Exception as e:
+                # If fails, try again after X seconds in case there is a throttle limit
+                print(
+                    "Call to Gemini model failed:",
+                    e,
+                    " Waiting for ",
+                    str(timeout_wait),
+                    "seconds and trying again.",
+                )
+
+                time.sleep(timeout_wait)
+
+            if i == number_of_api_retry_attempts:
+                return (
+                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
+                    conversation_history,
+                    response_text,
+                    num_transformer_input_tokens,
+                    num_transformer_generated_tokens,
+                )
+
+    elif "AWS" in model_source:
+        for i in progress_bar:
+            try:
+                print("Calling AWS Bedrock model, attempt", i + 1)
+                response = call_aws_bedrock(
+                    prompt,
+                    system_prompt,
+                    temperature,
+                    max_tokens,
+                    model_choice,
+                    bedrock_runtime=bedrock_runtime,
+                    assistant_prefill=assistant_prefill,
+                )
+
+                # print("Successful call to Claude model.")
+                break
+            except Exception as e:
+                # If fails, try again after X seconds in case there is a throttle limit
+                print(
+                    "Call to Bedrock model failed:",
+                    e,
+                    " Waiting for ",
+                    str(timeout_wait),
+                    "seconds and trying again.",
+                )
+                time.sleep(timeout_wait)
+
+            if i == number_of_api_retry_attempts:
+                return (
+                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
+                    conversation_history,
+                    response_text,
+                    num_transformer_input_tokens,
+                    num_transformer_generated_tokens,
+                )
+    elif "Azure/OpenAI" in model_source:
+        for i in progress_bar:
+            try:
+                print("Calling Azure/OpenAI inference model, attempt", i + 1)
+
+                messages = [
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ]
+
+                response_raw = client.chat.completions.create(
+                    messages=messages,
+                    model=model_choice,
+                    temperature=temperature,
+                    max_completion_tokens=max_tokens,
+                )
+
+                response_text = response_raw.choices[0].message.content
+                usage = getattr(response_raw, "usage", None)
+                input_tokens = 0
+                output_tokens = 0
+                if usage is not None:
+                    input_tokens = getattr(
+                        usage, "input_tokens", getattr(usage, "prompt_tokens", 0)
+                    )
+                    output_tokens = getattr(
+                        usage, "output_tokens", getattr(usage, "completion_tokens", 0)
+                    )
+                response = ResponseObject(
+                    text=response_text,
+                    usage_metadata={
+                        "inputTokens": input_tokens,
+                        "outputTokens": output_tokens,
+                    },
+                )
+                break
+            except Exception as e:
+                print(
+                    "Call to Azure/OpenAI model failed:",
+                    e,
+                    " Waiting for ",
+                    str(timeout_wait),
+                    "seconds and trying again.",
+                )
+                time.sleep(timeout_wait)
+            if i == number_of_api_retry_attempts:
+                return (
+                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
+                    conversation_history,
+                    response_text,
+                    num_transformer_input_tokens,
+                    num_transformer_generated_tokens,
+                )
+    elif "Local" in model_source:
+        # This is the local model
+        for i in progress_bar:
+            try:
+                print("Calling local model, attempt", i + 1)
+
+                gen_config = LlamaCPPGenerationConfig()
+                gen_config.update_temp(temperature)
+
+                # if USE_LLAMA_CPP == "True":
+                #     response = call_llama_cpp_chatmodel(
+                #         prompt, system_prompt, gen_config, model=local_model
+                #     )
+
+                # else:
+                # Call transformers model using global model and tokeniser objects
+                (
+                    response,
+                    num_transformer_input_tokens,
+                    num_transformer_generated_tokens,
+                ) = call_transformers_model(
+                    prompt,
+                    system_prompt,
+                    gen_config,
+                    # model=local_model,
+                    # tokenizer=tokenizer,
+                    # assistant_model=assistant_model,
+                )
+                response_text = response
+
+                break
+            except Exception as e:
+                # If fails, try again after X seconds in case there is a throttle limit
+                print(
+                    "Call to local model failed:",
+                    e,
+                    " Waiting for ",
+                    str(timeout_wait),
+                    "seconds and trying again.",
+                )
+
+                time.sleep(timeout_wait)
+
+            if i == number_of_api_retry_attempts:
+                return (
+                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
+                    conversation_history,
+                    response_text,
+                    num_transformer_input_tokens,
+                    num_transformer_generated_tokens,
+                )
+    elif "inference-server" in model_source:
+        # This is the inference-server API
+        for i in progress_bar:
+            try:
+                print("Calling inference-server API, attempt", i + 1)
+
+                if api_url is None:
+                    raise ValueError(
+                        "api_url is required when model_source is 'inference-server'"
+                    )
+
+                gen_config = LlamaCPPGenerationConfig()
+                gen_config.update_temp(temperature)
+
+                response = call_inference_server_api(
+                    prompt,
+                    system_prompt,
+                    gen_config,
+                    api_url=api_url,
+                    model_name=model_choice,
+                    use_llama_swap=USE_LLAMA_SWAP,
+                )
+
+                break
+            except Exception as e:
+                # If fails, try again after X seconds in case there is a throttle limit
+                print(
+                    "Call to inference-server API failed:",
+                    e,
+                    " Waiting for ",
+                    str(timeout_wait),
+                    "seconds and trying again.",
+                )
+
+                time.sleep(timeout_wait)
+
+            if i == number_of_api_retry_attempts:
+                return (
+                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
+                    conversation_history,
+                    response_text,
+                    num_transformer_input_tokens,
+                    num_transformer_generated_tokens,
+                )
+    else:
+        print("Model source not recognised")
+        return (
+            ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
+            conversation_history,
+            response_text,
+            num_transformer_input_tokens,
+            num_transformer_generated_tokens,
         )
 
-    # Extracting parameters from the gen_config object
-    temperature = gen_config.temperature
-    top_k = gen_config.top_k
-    top_p = gen_config.top_p
-    repeat_penalty = gen_config.repeat_penalty
-    seed = gen_config.seed
-    max_tokens = gen_config.max_tokens
-    stream = gen_config.stream
-    reset = gen_config.reset
+    # Update the conversation history with the new prompt and response
+    conversation_history.append({"role": "user", "parts": [prompt]})
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": formatted_string},
-    ]
+    # Check if is a LLama.cpp model response or inference-server response
+    if isinstance(response, ResponseObject):
+        response_text = response.text
+    elif "choices" in response:  # LLama.cpp model response or inference-server response
+        # Check for GPT-OSS thinking models (case-insensitive, handle both hyphen and underscore)
+        if "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower():
+            content = response["choices"][0]["message"]["content"]
+            # Split on the final channel marker to extract only the final output (not thinking tokens)
+            parts = content.split("<|start|>assistant<|channel|>final<|message|>")
+            if len(parts) > 1:
+                response_text = parts[1]
+            # Following format may be from llama.cpp inference-server response
+            elif len(parts) == 1:
+                parts = content.split("<|end|>")
+                if len(parts) > 1:
+                    response_text = parts[1]
+                else:
+                    print(
+                        "Warning: Could not find final channel marker in GPT-OSS response. Using full content."
+                    )
+                    response_text = content
+            else:
+                # Fallback: if marker not found, use the full content (may include thinking tokens)
+                print(
+                    "Warning: Could not find final channel marker in GPT-OSS response. Using full content."
+                )
+                response_text = content
+        else:
+            response_text = response["choices"][0]["message"]["content"]
+    elif model_source == "Gemini":
+        response_text = response.text
+    else:  # Assume transformers model response
+        # Check for GPT-OSS thinking models (case-insensitive, handle both hyphen and underscore)
+        if "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower():
+            # Split on the final channel marker to extract only the final output (not thinking tokens)
+            parts = response.split("<|start|>assistant<|channel|>final<|message|>")
+            if len(parts) > 1:
+                response_text = parts[1]
+            else:
+                # Fallback: if marker not found, use the full content (may include thinking tokens)
+                print(
+                    "Warning: Could not find final channel marker in GPT-OSS response. Using full content."
+                )
+                response_text = response
+        else:
+            response_text = response
 
-    input_tokens = len(
-        model.tokenize(
-            (system_prompt + "\n" + formatted_string).encode("utf-8"), special=True
-        )
+    # Strip <|end|> tags (used by GPT-OSS thinking models to mark end of thinking)
+    response_text = re.sub(r"<\|end\|>", "", response_text)
+
+    # Replace multiple spaces with single space
+    response_text = re.sub(r" {2,}", " ", response_text)
+    response_text = response_text.strip()
+
+    conversation_history.append({"role": "assistant", "parts": [response_text]})
+
+    return (
+        response,
+        conversation_history,
+        response_text,
+        num_transformer_input_tokens,
+        num_transformer_generated_tokens,
     )
 
-    if stream:
-        final_tokens = list()
-        output_tokens = 0
-        for chunk in model.create_chat_completion(
-            messages=messages,
+
+def process_requests(
+    prompts: List[str],
+    system_prompt: str,
+    conversation_history: List[dict],
+    whole_conversation: List[str],
+    whole_conversation_metadata: List[str],
+    client: ai.Client | OpenAI,
+    config: types.GenerateContentConfig,
+    model_choice: str,
+    temperature: float,
+    bedrock_runtime: boto3.Session.client,
+    model_source: str,
+    batch_no: int = 1,
+    local_model=_pii_model,
+    tokenizer=_pii_tokenizer,
+    assistant_model=_pii_assistant_model,
+    master: bool = False,
+    assistant_prefill="",
+    api_url: str = None,
+) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+    """
+    Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
+
+    Args:
+        prompts (List[str]): A list of prompts to be processed.
+        system_prompt (str): The system prompt.
+        conversation_history (List[dict]): The history of the conversation.
+        whole_conversation (List[str]): The complete conversation including prompts and responses.
+        whole_conversation_metadata (List[str]): Metadata about the whole conversation.
+        client (object): The client to use for processing the prompts, from either Gemini or OpenAI client.
+        config (dict): Configuration for the model.
+        model_choice (str): The choice of model to use.
+        temperature (float): The temperature parameter for the model.
+        model_source (str): Source of the model, whether local, AWS, Gemini, or inference-server
+        batch_no (int): Batch number of the large language model request.
+        local_model: Local gguf model (if loaded)
+        master (bool): Is this request for the master table.
+        assistant_prefill (str, optional): Is there a prefill for the assistant response. Currently only working for AWS model calls
+        bedrock_runtime: The client object for boto3 Bedrock runtime
+        api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
+
+    Returns:
+        Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
+    """
+    responses = list()
+
+    # Clear any existing progress bars
+    tqdm._instances.clear()
+
+    for prompt in prompts:
+
+        (
+            response,
+            conversation_history,
+            response_text,
+            num_transformer_input_tokens,
+            num_transformer_generated_tokens,
+        ) = send_request(
+            prompt,
+            conversation_history,
+            client=client,
+            config=config,
+            model_choice=model_choice,
+            system_prompt=system_prompt,
             temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            repeat_penalty=repeat_penalty,
-            seed=seed,
-            max_tokens=max_tokens,
-            stream=True,
-            stop=stop_strings,
-        ):
-            delta = chunk["choices"][0].get("delta", {})
-            token = delta.get("content") or chunk["choices"][0].get("text") or ""
-            if token:
-                print(token, end="", flush=True)
-                final_tokens.append(token)
-                output_tokens += 1
-        print()  # newline after stream finishes
-
-        text = "".join(final_tokens)
-
-        if reset:
-            model.reset()
-
-        return {
-            "choices": [
-                {
-                    "index": 0,
-                    "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": text},
-                }
-            ],
-            # Provide a usage object so downstream code can read it
-            "usage": {
-                "prompt_tokens": input_tokens,  # unknown during streaming
-                "completion_tokens": output_tokens,  # unknown during streaming
-                "total_tokens": input_tokens
-                + output_tokens,  # unknown during streaming
-            },
-        }
-
-    else:
-        response = model.create_chat_completion(
-            messages=messages,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            repeat_penalty=repeat_penalty,
-            seed=seed,
-            max_tokens=max_tokens,
-            stream=False,
-            stop=stop_strings,
+            local_model=local_model,
+            tokenizer=tokenizer,
+            assistant_model=assistant_model,
+            assistant_prefill=assistant_prefill,
+            bedrock_runtime=bedrock_runtime,
+            model_source=model_source,
+            api_url=api_url,
         )
 
-        if reset:
-            model.reset()
+        responses.append(response)
+        whole_conversation.append(system_prompt)
+        whole_conversation.append(prompt)
+        whole_conversation.append(response_text)
 
-        return response
+        whole_conversation_metadata.append(f"Batch {batch_no}:")
+
+        try:
+            if "AWS" in model_source:
+                output_tokens = response.usage_metadata.get("outputTokens", 0)
+                input_tokens = response.usage_metadata.get("inputTokens", 0)
+
+            elif "Gemini" in model_source:
+                output_tokens = response.usage_metadata.candidates_token_count
+                input_tokens = response.usage_metadata.prompt_token_count
+
+            elif "Azure/OpenAI" in model_source:
+                input_tokens = response.usage_metadata.get("inputTokens", 0)
+                output_tokens = response.usage_metadata.get("outputTokens", 0)
+
+            elif "Local" in model_source:
+                if USE_LLAMA_CPP == "True":
+                    output_tokens = response["usage"].get("completion_tokens", 0)
+                    input_tokens = response["usage"].get("prompt_tokens", 0)
+
+                if USE_LLAMA_CPP == "False":
+                    input_tokens = num_transformer_input_tokens
+                    output_tokens = num_transformer_generated_tokens
+
+            elif "inference-server" in model_source:
+                # inference-server returns the same format as llama-cpp
+                output_tokens = response["usage"].get("completion_tokens", 0)
+                input_tokens = response["usage"].get("prompt_tokens", 0)
+
+            else:
+                input_tokens = 0
+                output_tokens = 0
+
+            whole_conversation_metadata.append(
+                "input_tokens: "
+                + str(input_tokens)
+                + " output_tokens: "
+                + str(output_tokens)
+            )
+
+        except KeyError as e:
+            print(f"Key error: {e} - Check the structure of response.usage_metadata")
+
+    return (
+        responses,
+        conversation_history,
+        whole_conversation,
+        whole_conversation_metadata,
+        response_text,
+    )
 
 
 def call_inference_server_api(
@@ -1383,850 +2009,3 @@ def call_aws_bedrock(
     response = ResponseObject(text=text, usage_metadata=usage)
 
     return response
-
-
-@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
-def call_transformers_model(
-    prompt: str,
-    system_prompt: str,
-    gen_config: LlamaCPPGenerationConfig,
-    model=None,
-    tokenizer=None,
-    assistant_model=None,
-    speculative_decoding=speculative_decoding,
-):
-    """
-    This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
-    """
-    import torch
-    from transformers import TextStreamer
-
-    # Load model and tokenizer together to ensure they're from the same source
-    # This prevents mismatches that could occur if they're loaded separately
-    if model is None or tokenizer is None:
-        # Use get_model_and_tokenizer() to ensure both are loaded atomically
-        # This is safer than calling get_model() and get_tokenizer() separately
-        loaded_model, loaded_tokenizer = get_model_and_tokenizer()
-        if model is None:
-            model = loaded_model
-        if tokenizer is None:
-            tokenizer = loaded_tokenizer
-    if assistant_model is None and speculative_decoding:
-        assistant_model = get_assistant_model()
-
-    if model is None or tokenizer is None:
-        raise ValueError(
-            "No model or tokenizer available. Either pass them as parameters or ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True."
-        )
-
-    # Apply reasoning suffix to prompt if configured
-    if REASONING_SUFFIX and REASONING_SUFFIX.strip():
-        prompt = f"{prompt} {REASONING_SUFFIX}".strip()
-
-    # 1. Define the conversation as a list of dictionaries
-    # Note: The multimodal format [{"type": "text", "text": text}] is only needed for actual multimodal models
-    # with images/videos. For text-only content, even multimodal models expect plain strings.
-
-    # Check if system_prompt is meaningful (not empty/None)
-    has_system_prompt = system_prompt and str(system_prompt).strip()
-
-    # Always use string format for text-only content, regardless of MULTIMODAL_PROMPT_FORMAT setting
-    # MULTIMODAL_PROMPT_FORMAT should only be used when you actually have multimodal inputs (images, etc.)
-    if MULTIMODAL_PROMPT_FORMAT:
-        conversation = []
-        if has_system_prompt:
-            conversation.append(
-                {
-                    "role": "system",
-                    "content": [{"type": "text", "text": str(system_prompt)}],
-                }
-            )
-        conversation.append(
-            {"role": "user", "content": [{"type": "text", "text": str(prompt)}]}
-        )
-    else:
-        conversation = []
-        if has_system_prompt:
-            conversation.append({"role": "system", "content": str(system_prompt)})
-        conversation.append({"role": "user", "content": str(prompt)})
-
-    if PRINT_TRANSFORMERS_USER_PROMPT:
-        print("System prompt:", system_prompt)
-        print("User prompt:", prompt)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.to(device)
-
-    if assistant_model is not None:
-        assistant_model = assistant_model.to(device)
-
-    if PRINT_TRANSFORMERS_USER_PROMPT:
-        print("Model device:", device)
-        print("Model device type:", type(device))
-
-    try:
-        # Try applying chat template with system prompt (if present)
-        # Create inputs dict like VLM does - this allows model to handle device placement automatically
-        input_ids = tokenizer.apply_chat_template(
-            conversation,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_tensors="pt",
-        ).to(
-            device
-        )  # Ensure inputs match model device
-
-        if PRINT_TRANSFORMERS_USER_PROMPT:
-            print("Input IDs:", input_ids)
-            print("Rendered prompt:")
-            rendered = tokenizer.apply_chat_template(
-                conversation,
-                add_generation_prompt=True,
-                tokenize=False,
-            )
-            print(rendered)
-            print("-" * 50)
-
-    except (TypeError, KeyError, IndexError, ValueError) as e:
-        # If chat template fails, try without system prompt (some models don't support it)
-        if has_system_prompt:
-            print(
-                f"Chat template failed with system prompt ({e}), trying without system prompt..."
-            )
-            # Try again with only user prompt
-            user_only_conversation = [{"role": "user", "content": str(prompt)}]
-            try:
-                input_ids = tokenizer.apply_chat_template(
-                    user_only_conversation,
-                    add_generation_prompt=True,
-                    tokenize=True,
-                    return_tensors="pt",
-                ).to(device)
-
-                if PRINT_TRANSFORMERS_USER_PROMPT:
-                    print("Input IDs:", input_ids)
-                    print("Rendered prompt (without system):")
-                    rendered = tokenizer.apply_chat_template(
-                        user_only_conversation,
-                        add_generation_prompt=True,
-                        tokenize=False,
-                    )
-                    print(rendered)
-                    print("-" * 50)
-            except Exception as e2:
-                print(
-                    f"Chat template failed without system prompt ({e2}), using manual tokenization"
-                )
-                # Combine system and user prompts manually as fallback
-                full_prompt = (
-                    f"{system_prompt}\n\n{prompt}" if has_system_prompt else prompt
-                )
-                # Tokenize manually with special tokens
-                input_ids = tokenizer(
-                    full_prompt, return_tensors="pt", add_special_tokens=True
-                ).to(device)
-
-        else:
-            # No system prompt, but chat template still failed - use manual tokenization
-            print(f"Chat template failed ({e}), using manual tokenization")
-            full_prompt = str(prompt)
-            input_ids = tokenizer(
-                full_prompt, return_tensors="pt", add_special_tokens=True
-            ).to(device)
-
-    except Exception as e:
-        print("Error applying chat template:", e)
-        import traceback
-
-        traceback.print_exc()
-        raise
-
-    attention_mask = torch.ones_like(input_ids).to(device)
-
-    # Map LlamaCPP parameters to transformers parameters
-    generation_kwargs = {
-        "max_new_tokens": gen_config.max_tokens,
-        "temperature": gen_config.temperature,
-        "top_p": gen_config.top_p,
-        "top_k": gen_config.top_k,
-        "do_sample": True,
-        "attention_mask": attention_mask,
-        #'pad_token_id': tokenizer.eos_token_id
-    }
-
-    if gen_config.stream:
-        streamer = TextStreamer(tokenizer, skip_prompt=True)
-    else:
-        streamer = None
-
-    # Remove parameters that don't exist in transformers
-    if hasattr(gen_config, "repeat_penalty"):
-        generation_kwargs["repetition_penalty"] = gen_config.repeat_penalty
-
-    if PRINT_TRANSFORMERS_USER_PROMPT:
-        print("Generation kwargs:", generation_kwargs)
-
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    model.config.pad_token_id = tokenizer.pad_token_id
-
-    # --- Timed Inference Test ---
-    print("\nStarting model inference...")
-    start_time = time.time()
-
-    # Use speculative decoding if assistant model is available
-    try:
-        if speculative_decoding and assistant_model is not None:
-            if PRINT_TRANSFORMERS_USER_PROMPT:
-                print("Using speculative decoding with assistant model")
-            outputs = model.generate(
-                input_ids,
-                assistant_model=assistant_model,
-                **generation_kwargs,
-                streamer=streamer,
-            )
-        else:
-            if PRINT_TRANSFORMERS_USER_PROMPT:
-                print("Generating without speculative decoding")
-            outputs = model.generate(input_ids, **generation_kwargs, streamer=streamer)
-    except Exception as e:
-        error_msg = str(e)
-        # Check if this is a CUDA compilation error
-        if (
-            "sm_120" in error_msg
-            or "LLVM ERROR" in error_msg
-            or "Cannot select" in error_msg
-        ):
-            print("\n" + "=" * 80)
-            print("CUDA COMPILATION ERROR DETECTED")
-            print("=" * 80)
-            print(
-                "\nThe error is caused by torch.compile() trying to compile CUDA kernels"
-            )
-            print(
-                "with incompatible settings. This is a known issue with certain CUDA/PyTorch"
-            )
-            print("combinations.\n")
-            print(
-                "SOLUTION: Disable model compilation by setting COMPILE_TRANSFORMERS=False"
-            )
-            print("in your config file (config/app_config.env).")
-            print(
-                "\nThe model will still work without compilation, just slightly slower."
-            )
-            print("=" * 80 + "\n")
-            raise RuntimeError(
-                "CUDA compilation error detected. Please set COMPILE_TRANSFORMERS=False "
-                "in your config file to disable model compilation and avoid this error."
-            ) from e
-        else:
-            # Re-raise other errors as-is
-            raise
-
-    end_time = time.time()
-
-    # --- Decode and Display Results ---
-    # Extract only the newly generated tokens (exclude input tokens)
-    input_length = input_ids.shape[-1]
-
-    # Handle different output formats from model.generate()
-    # model.generate() returns a tensor with shape [batch_size, sequence_length]
-    # that includes both input and generated tokens
-    if isinstance(outputs, torch.Tensor):
-        # If outputs is a tensor, extract the new tokens
-        if outputs.dim() == 2:
-            # Shape: [batch_size, sequence_length]
-            new_tokens = outputs[0, input_length:].clone()
-        elif outputs.dim() == 1:
-            # Shape: [sequence_length] (single sequence)
-            new_tokens = outputs[input_length:].clone()
-        else:
-            raise ValueError(f"Unexpected output tensor shape: {outputs.shape}")
-    else:
-        # If outputs is a sequence or other format
-        if hasattr(outputs, "__getitem__"):
-            new_tokens = (
-                outputs[0][input_length:]
-                if len(outputs) > 0
-                else outputs[input_length:]
-            )
-        else:
-            raise ValueError(f"Unexpected output type: {type(outputs)}")
-
-    # Ensure new_tokens is a tensor and on CPU for decoding
-    if isinstance(new_tokens, torch.Tensor):
-        new_tokens = new_tokens.cpu().clone()
-        # Convert to list for decoding (some tokenizers prefer lists)
-        new_tokens_list = new_tokens.tolist()
-    else:
-        new_tokens_list = (
-            list(new_tokens) if hasattr(new_tokens, "__iter__") else [new_tokens]
-        )
-
-    if PRINT_TRANSFORMERS_USER_PROMPT:
-        print(f"Input length: {input_length}")
-        print(f"Output shape: {outputs.shape if hasattr(outputs, 'shape') else 'N/A'}")
-        print(f"New tokens count: {len(new_tokens_list)}")
-        print(f"First 20 new token IDs: {new_tokens_list[:20]}")
-
-    # Decode the tokens
-    # Use the token list for decoding (more reliable than tensor)
-    try:
-        assistant_reply = tokenizer.decode(
-            new_tokens_list, skip_special_tokens=True, clean_up_tokenization_spaces=True
-        )
-    except Exception as e:
-        print(f"Warning: Error decoding tokens: {e}")
-        print(f"New tokens count: {len(new_tokens_list)}")
-        print(f"New tokens (first 20): {new_tokens_list[:20]}")
-        # Try alternative decoding methods
-        try:
-            # Try with tensor directly
-            if isinstance(new_tokens, torch.Tensor):
-                assistant_reply = tokenizer.decode(
-                    new_tokens,
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=True,
-                )
-            else:
-                raise e
-        except Exception as e2:
-            print(f"Error with tensor decoding: {e2}")
-            # Last resort: try to decode each token individually to see which ones fail
-            try:
-                decoded_parts = []
-                failed_tokens = []
-                for i, token_id in enumerate(
-                    new_tokens_list[:200]
-                ):  # Limit to first 200 to avoid issues
-                    try:
-                        decoded = tokenizer.decode([token_id], skip_special_tokens=True)
-                        decoded_parts.append(decoded)
-                    except Exception as token_error:
-                        failed_tokens.append((i, token_id, str(token_error)))
-                        decoded_parts.append(f"<TOKEN_ERROR_{token_id}>")
-                if failed_tokens:
-                    print(
-                        f"Warning: {len(failed_tokens)} tokens failed to decode individually"
-                    )
-                    print(f"First few failed tokens: {failed_tokens[:5]}")
-                assistant_reply = "".join(decoded_parts)
-            except Exception as e3:
-                print(f"Error with individual token decoding: {e3}")
-                assistant_reply = f"<DECODING_ERROR: {str(e3)}>"
-
-    num_input_tokens = input_length
-    num_generated_tokens = (
-        len(new_tokens_list) if hasattr(new_tokens_list, "__len__") else 0
-    )
-    duration = end_time - start_time
-    tokens_per_second = num_generated_tokens / duration if duration > 0 else 0
-
-    if PRINT_TRANSFORMERS_USER_PROMPT:
-        print(f"\nDecoded output length: {len(assistant_reply)} characters")
-        print(f"First 200 chars of output: {assistant_reply[:200]}")
-
-    print("\n--- Performance ---")
-    print(f"Time taken: {duration:.2f} seconds")
-    print(f"Generated tokens: {num_generated_tokens}")
-    print(f"Tokens per second: {tokens_per_second:.2f}")
-
-    return assistant_reply, num_input_tokens, num_generated_tokens
-
-
-# Function to send a request and update history
-def send_request(
-    prompt: str,
-    conversation_history: List[dict],
-    client: ai.Client | OpenAI,
-    config: types.GenerateContentConfig,
-    model_choice: str,
-    system_prompt: str,
-    temperature: float,
-    bedrock_runtime: boto3.Session.client,
-    model_source: str,
-    local_model=list(),
-    tokenizer=None,
-    assistant_model=None,
-    assistant_prefill="",
-    progress=Progress(track_tqdm=True),
-    api_url: str = None,
-) -> Tuple[str, List[dict]]:
-    """Sends a request to a language model and manages the conversation history.
-
-    This function constructs the full prompt by appending the new user prompt to the conversation history,
-    generates a response from the model, and updates the conversation history with the new prompt and response.
-    It handles different model sources (Gemini, AWS, Local, inference-server) and includes retry logic for API calls.
-
-    Args:
-        prompt (str): The user's input prompt to be sent to the model.
-        conversation_history (List[dict]): A list of dictionaries representing the ongoing conversation.
-                                           Each dictionary should have 'role' and 'parts' keys.
-        client (ai.Client): The API client object for the chosen model (e.g., Gemini `ai.Client`, or Azure/OpenAI `OpenAI`).
-        config (types.GenerateContentConfig): Configuration settings for content generation (e.g., Gemini `types.GenerateContentConfig`).
-        model_choice (str): The specific model identifier to use (e.g., "gemini-pro", "claude-v2").
-        system_prompt (str): An optional system-level instruction or context for the model.
-        temperature (float): Controls the randomness of the model's output, with higher values leading to more diverse responses.
-        bedrock_runtime (boto3.Session.client): The boto3 Bedrock runtime client object for AWS models.
-        model_source (str): Indicates the source/provider of the model (e.g., "Gemini", "AWS", "Local", "inference-server").
-        local_model (list, optional): A list containing the local model and its tokenizer (if `model_source` is "Local"). Defaults to [].
-        tokenizer (object, optional): The tokenizer object for local models. Defaults to None.
-        assistant_model (object, optional): An optional assistant model used for speculative decoding with local models. Defaults to None.
-        assistant_prefill (str, optional): A string to pre-fill the assistant's response, useful for certain models like Claude. Defaults to "".
-        progress (Progress, optional): A progress object for tracking the operation, typically from `tqdm`. Defaults to Progress(track_tqdm=True).
-        api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
-
-    Returns:
-        Tuple[str, List[dict]]: A tuple containing the model's response text and the updated conversation history.
-    """
-    # Constructing the full prompt from the conversation history
-    full_prompt = "Conversation history:\n"
-    num_transformer_input_tokens = 0
-    num_transformer_generated_tokens = 0
-    response_text = ""
-
-    for entry in conversation_history:
-        role = entry[
-            "role"
-        ].capitalize()  # Assuming the history is stored with 'role' and 'parts'
-        message = " ".join(entry["parts"])  # Combining all parts of the message
-        full_prompt += f"{role}: {message}\n"
-
-    # Adding the new user prompt
-    full_prompt += f"\nUser: {prompt}"
-
-    # Clear any existing progress bars
-    tqdm._instances.clear()
-
-    progress_bar = range(0, number_of_api_retry_attempts)
-
-    # Generate the model's response
-    if "Gemini" in model_source:
-
-        for i in progress_bar:
-            try:
-                print("Calling Gemini model, attempt", i + 1)
-
-                response = client.models.generate_content(
-                    model=model_choice, contents=full_prompt, config=config
-                )
-
-                # print("Successful call to Gemini model.")
-                break
-            except Exception as e:
-                # If fails, try again after X seconds in case there is a throttle limit
-                print(
-                    "Call to Gemini model failed:",
-                    e,
-                    " Waiting for ",
-                    str(timeout_wait),
-                    "seconds and trying again.",
-                )
-
-                time.sleep(timeout_wait)
-
-            if i == number_of_api_retry_attempts:
-                return (
-                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
-                    conversation_history,
-                    response_text,
-                    num_transformer_input_tokens,
-                    num_transformer_generated_tokens,
-                )
-
-    elif "AWS" in model_source:
-        for i in progress_bar:
-            try:
-                print("Calling AWS Bedrock model, attempt", i + 1)
-                response = call_aws_bedrock(
-                    prompt,
-                    system_prompt,
-                    temperature,
-                    max_tokens,
-                    model_choice,
-                    bedrock_runtime=bedrock_runtime,
-                    assistant_prefill=assistant_prefill,
-                )
-
-                # print("Successful call to Claude model.")
-                break
-            except Exception as e:
-                # If fails, try again after X seconds in case there is a throttle limit
-                print(
-                    "Call to Bedrock model failed:",
-                    e,
-                    " Waiting for ",
-                    str(timeout_wait),
-                    "seconds and trying again.",
-                )
-                time.sleep(timeout_wait)
-
-            if i == number_of_api_retry_attempts:
-                return (
-                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
-                    conversation_history,
-                    response_text,
-                    num_transformer_input_tokens,
-                    num_transformer_generated_tokens,
-                )
-    elif "Azure/OpenAI" in model_source:
-        for i in progress_bar:
-            try:
-                print("Calling Azure/OpenAI inference model, attempt", i + 1)
-
-                messages = [
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ]
-
-                response_raw = client.chat.completions.create(
-                    messages=messages,
-                    model=model_choice,
-                    temperature=temperature,
-                    max_completion_tokens=max_tokens,
-                )
-
-                response_text = response_raw.choices[0].message.content
-                usage = getattr(response_raw, "usage", None)
-                input_tokens = 0
-                output_tokens = 0
-                if usage is not None:
-                    input_tokens = getattr(
-                        usage, "input_tokens", getattr(usage, "prompt_tokens", 0)
-                    )
-                    output_tokens = getattr(
-                        usage, "output_tokens", getattr(usage, "completion_tokens", 0)
-                    )
-                response = ResponseObject(
-                    text=response_text,
-                    usage_metadata={
-                        "inputTokens": input_tokens,
-                        "outputTokens": output_tokens,
-                    },
-                )
-                break
-            except Exception as e:
-                print(
-                    "Call to Azure/OpenAI model failed:",
-                    e,
-                    " Waiting for ",
-                    str(timeout_wait),
-                    "seconds and trying again.",
-                )
-                time.sleep(timeout_wait)
-            if i == number_of_api_retry_attempts:
-                return (
-                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
-                    conversation_history,
-                    response_text,
-                    num_transformer_input_tokens,
-                    num_transformer_generated_tokens,
-                )
-    elif "Local" in model_source:
-        # This is the local model
-        for i in progress_bar:
-            try:
-                print("Calling local model, attempt", i + 1)
-
-                gen_config = LlamaCPPGenerationConfig()
-                gen_config.update_temp(temperature)
-
-                if USE_LLAMA_CPP == "True":
-                    response = call_llama_cpp_chatmodel(
-                        prompt, system_prompt, gen_config, model=local_model
-                    )
-
-                else:
-                    (
-                        response,
-                        num_transformer_input_tokens,
-                        num_transformer_generated_tokens,
-                    ) = call_transformers_model(
-                        prompt,
-                        system_prompt,
-                        gen_config,
-                        model=local_model,
-                        tokenizer=tokenizer,
-                        assistant_model=assistant_model,
-                    )
-                    response_text = response
-
-                break
-            except Exception as e:
-                # If fails, try again after X seconds in case there is a throttle limit
-                print(
-                    "Call to local model failed:",
-                    e,
-                    " Waiting for ",
-                    str(timeout_wait),
-                    "seconds and trying again.",
-                )
-
-                time.sleep(timeout_wait)
-
-            if i == number_of_api_retry_attempts:
-                return (
-                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
-                    conversation_history,
-                    response_text,
-                    num_transformer_input_tokens,
-                    num_transformer_generated_tokens,
-                )
-    elif "inference-server" in model_source:
-        # This is the inference-server API
-        for i in progress_bar:
-            try:
-                print("Calling inference-server API, attempt", i + 1)
-
-                if api_url is None:
-                    raise ValueError(
-                        "api_url is required when model_source is 'inference-server'"
-                    )
-
-                gen_config = LlamaCPPGenerationConfig()
-                gen_config.update_temp(temperature)
-
-                response = call_inference_server_api(
-                    prompt,
-                    system_prompt,
-                    gen_config,
-                    api_url=api_url,
-                    model_name=model_choice,
-                    use_llama_swap=USE_LLAMA_SWAP,
-                )
-
-                break
-            except Exception as e:
-                # If fails, try again after X seconds in case there is a throttle limit
-                print(
-                    "Call to inference-server API failed:",
-                    e,
-                    " Waiting for ",
-                    str(timeout_wait),
-                    "seconds and trying again.",
-                )
-
-                time.sleep(timeout_wait)
-
-            if i == number_of_api_retry_attempts:
-                return (
-                    ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
-                    conversation_history,
-                    response_text,
-                    num_transformer_input_tokens,
-                    num_transformer_generated_tokens,
-                )
-    else:
-        print("Model source not recognised")
-        return (
-            ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
-            conversation_history,
-            response_text,
-            num_transformer_input_tokens,
-            num_transformer_generated_tokens,
-        )
-
-    # Update the conversation history with the new prompt and response
-    conversation_history.append({"role": "user", "parts": [prompt]})
-
-    # Check if is a LLama.cpp model response or inference-server response
-    if isinstance(response, ResponseObject):
-        response_text = response.text
-    elif "choices" in response:  # LLama.cpp model response or inference-server response
-        # Check for GPT-OSS thinking models (case-insensitive, handle both hyphen and underscore)
-        if "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower():
-            content = response["choices"][0]["message"]["content"]
-            # Split on the final channel marker to extract only the final output (not thinking tokens)
-            parts = content.split("<|start|>assistant<|channel|>final<|message|>")
-            if len(parts) > 1:
-                response_text = parts[1]
-            # Following format may be from llama.cpp inference-server response
-            elif len(parts) == 1:
-                parts = content.split("<|end|>")
-                if len(parts) > 1:
-                    response_text = parts[1]
-                else:
-                    print(
-                        "Warning: Could not find final channel marker in GPT-OSS response. Using full content."
-                    )
-                    response_text = content
-            else:
-                # Fallback: if marker not found, use the full content (may include thinking tokens)
-                print(
-                    "Warning: Could not find final channel marker in GPT-OSS response. Using full content."
-                )
-                response_text = content
-        else:
-            response_text = response["choices"][0]["message"]["content"]
-    elif model_source == "Gemini":
-        response_text = response.text
-    else:  # Assume transformers model response
-        # Check for GPT-OSS thinking models (case-insensitive, handle both hyphen and underscore)
-        if "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower():
-            # Split on the final channel marker to extract only the final output (not thinking tokens)
-            parts = response.split("<|start|>assistant<|channel|>final<|message|>")
-            if len(parts) > 1:
-                response_text = parts[1]
-            else:
-                # Fallback: if marker not found, use the full content (may include thinking tokens)
-                print(
-                    "Warning: Could not find final channel marker in GPT-OSS response. Using full content."
-                )
-                response_text = response
-        else:
-            response_text = response
-
-    # Strip <|end|> tags (used by GPT-OSS thinking models to mark end of thinking)
-    response_text = re.sub(r"<\|end\|>", "", response_text)
-
-    # Replace multiple spaces with single space
-    response_text = re.sub(r" {2,}", " ", response_text)
-    response_text = response_text.strip()
-
-    conversation_history.append({"role": "assistant", "parts": [response_text]})
-
-    return (
-        response,
-        conversation_history,
-        response_text,
-        num_transformer_input_tokens,
-        num_transformer_generated_tokens,
-    )
-
-
-def process_requests(
-    prompts: List[str],
-    system_prompt: str,
-    conversation_history: List[dict],
-    whole_conversation: List[str],
-    whole_conversation_metadata: List[str],
-    client: ai.Client | OpenAI,
-    config: types.GenerateContentConfig,
-    model_choice: str,
-    temperature: float,
-    bedrock_runtime: boto3.Session.client,
-    model_source: str,
-    batch_no: int = 1,
-    local_model=list(),
-    tokenizer=None,
-    assistant_model=None,
-    master: bool = False,
-    assistant_prefill="",
-    api_url: str = None,
-) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
-    """
-    Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
-
-    Args:
-        prompts (List[str]): A list of prompts to be processed.
-        system_prompt (str): The system prompt.
-        conversation_history (List[dict]): The history of the conversation.
-        whole_conversation (List[str]): The complete conversation including prompts and responses.
-        whole_conversation_metadata (List[str]): Metadata about the whole conversation.
-        client (object): The client to use for processing the prompts, from either Gemini or OpenAI client.
-        config (dict): Configuration for the model.
-        model_choice (str): The choice of model to use.
-        temperature (float): The temperature parameter for the model.
-        model_source (str): Source of the model, whether local, AWS, Gemini, or inference-server
-        batch_no (int): Batch number of the large language model request.
-        local_model: Local gguf model (if loaded)
-        master (bool): Is this request for the master table.
-        assistant_prefill (str, optional): Is there a prefill for the assistant response. Currently only working for AWS model calls
-        bedrock_runtime: The client object for boto3 Bedrock runtime
-        api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
-
-    Returns:
-        Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
-    """
-    responses = list()
-
-    # Clear any existing progress bars
-    tqdm._instances.clear()
-
-    for prompt in prompts:
-
-        (
-            response,
-            conversation_history,
-            response_text,
-            num_transformer_input_tokens,
-            num_transformer_generated_tokens,
-        ) = send_request(
-            prompt,
-            conversation_history,
-            client=client,
-            config=config,
-            model_choice=model_choice,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            local_model=local_model,
-            tokenizer=tokenizer,
-            assistant_model=assistant_model,
-            assistant_prefill=assistant_prefill,
-            bedrock_runtime=bedrock_runtime,
-            model_source=model_source,
-            api_url=api_url,
-        )
-
-        responses.append(response)
-        whole_conversation.append(system_prompt)
-        whole_conversation.append(prompt)
-        whole_conversation.append(response_text)
-
-        whole_conversation_metadata.append(f"Batch {batch_no}:")
-
-        try:
-            if "AWS" in model_source:
-                output_tokens = response.usage_metadata.get("outputTokens", 0)
-                input_tokens = response.usage_metadata.get("inputTokens", 0)
-
-            elif "Gemini" in model_source:
-                output_tokens = response.usage_metadata.candidates_token_count
-                input_tokens = response.usage_metadata.prompt_token_count
-
-            elif "Azure/OpenAI" in model_source:
-                input_tokens = response.usage_metadata.get("inputTokens", 0)
-                output_tokens = response.usage_metadata.get("outputTokens", 0)
-
-            elif "Local" in model_source:
-                if USE_LLAMA_CPP == "True":
-                    output_tokens = response["usage"].get("completion_tokens", 0)
-                    input_tokens = response["usage"].get("prompt_tokens", 0)
-
-                if USE_LLAMA_CPP == "False":
-                    input_tokens = num_transformer_input_tokens
-                    output_tokens = num_transformer_generated_tokens
-
-            elif "inference-server" in model_source:
-                # inference-server returns the same format as llama-cpp
-                output_tokens = response["usage"].get("completion_tokens", 0)
-                input_tokens = response["usage"].get("prompt_tokens", 0)
-
-            else:
-                input_tokens = 0
-                output_tokens = 0
-
-            whole_conversation_metadata.append(
-                "input_tokens: "
-                + str(input_tokens)
-                + " output_tokens: "
-                + str(output_tokens)
-            )
-
-        except KeyError as e:
-            print(f"Key error: {e} - Check the structure of response.usage_metadata")
-
-    return (
-        responses,
-        conversation_history,
-        whole_conversation,
-        whole_conversation_metadata,
-        response_text,
-    )

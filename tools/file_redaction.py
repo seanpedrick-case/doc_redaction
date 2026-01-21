@@ -205,9 +205,10 @@ def add_page_range_suffix_to_file_path(
 
     Args:
         file_path: The original file path
-        page_min: The minimum page number to start redaction from
-        current_loop_page: The current page being processed
-        number_of_pages: Total number of pages in the document
+        page_min: The minimum page number to start redaction from (0-indexed, after conversion in redact_image_pdf/redact_text_pdf)
+        current_loop_page: The number of pages processed (0-indexed count)
+        number_of_pages: Total number of pages in the document (1-indexed)
+        page_max: The maximum page number to end redaction at (1-indexed)
 
     Returns:
         File path with page range suffix if partial processing, otherwise original path
@@ -221,12 +222,15 @@ def add_page_range_suffix_to_file_path(
         return file_path
 
     # Calculate the page range that was actually processed
-    start_page = page_min + 1 if page_min == 0 else page_min
+    # page_min is 0-indexed (converted in redact_image_pdf/redact_text_pdf), convert to 1-indexed
+    start_page = page_min
 
-    if current_loop_page > page_max:
-        end_page = page_max
-    else:
-        end_page = (start_page + current_loop_page) - 1
+    # Calculate end_page: page_min is 0-indexed, current_loop_page is number of pages processed
+    # Last page processed (0-indexed) = page_min + current_loop_page - 1
+    # Convert to 1-indexed: page_min + current_loop_page
+    # But don't exceed page_max (which is 1-indexed)
+    last_page_processed_1_indexed = page_min + current_loop_page
+    end_page = min(page_max, last_page_processed_1_indexed)
 
     if end_page < start_page:
         end_page = start_page
@@ -739,7 +743,7 @@ def choose_and_run_redactor(
 
     # If we have reached the last page, return message and outputs
     if current_loop_page >= number_of_pages_to_process:
-        print("Reached last page of document:", current_loop_page)
+        print("Reached last page of document to process")
 
         if total_textract_query_number > number_of_pages:
             total_textract_query_number = number_of_pages
@@ -4507,7 +4511,7 @@ def redact_image_pdf(
                 annotations_all_pages[existing_index] = page_image_annotations
             else:
                 annotations_all_pages.append(page_image_annotations)
-            current_loop_page = page_no + 1
+            current_loop_page += 1
             continue
 
         if (
@@ -4540,23 +4544,23 @@ def redact_image_pdf(
                             LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                         )
                         # Load PII-specific model and tokenizer if not already loaded
-                        from tools.llm_funcs import (
-                            USE_LLAMA_CPP,
-                            get_pii_model,
-                            get_pii_tokenizer,
-                        )
+                        # from tools.llm_funcs import (
+                        #     USE_LLAMA_CPP,
+                        #     get_pii_model,
+                        #     get_pii_tokenizer,
+                        # )
 
-                        if (
-                            "local_model" not in text_analyzer_kwargs
-                            or text_analyzer_kwargs["local_model"] is None
-                        ):
-                            text_analyzer_kwargs["local_model"] = get_pii_model()
-                        if (
-                            "tokenizer" not in text_analyzer_kwargs
-                            or text_analyzer_kwargs["tokenizer"] is None
-                        ) and USE_LLAMA_CPP != "True":
-                            text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-                        print("Using local transformers PII model for entity detection")
+                        # if (
+                        #     "local_model" not in text_analyzer_kwargs
+                        #     or text_analyzer_kwargs["local_model"] is None
+                        # ):
+                        #     text_analyzer_kwargs["local_model"] = get_pii_model()
+                        # if (
+                        #     "tokenizer" not in text_analyzer_kwargs
+                        #     or text_analyzer_kwargs["tokenizer"] is None
+                        # ) and USE_LLAMA_CPP != "True":
+                        #     text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+                        # print("Using local transformers PII model for entity detection")
 
                     # Call analyze_text for all PII detection methods (Local, AWS Comprehend, LLM, Inference Server)
                     (
@@ -4862,7 +4866,7 @@ def redact_image_pdf(
             # Append new annotation if it doesn't exist
             annotations_all_pages.append(page_image_annotations)
 
-        current_loop_page = page_no + 1
+        current_loop_page += 1
 
         # Break if new page is a multiple of chosen page_break_val
         if current_loop_page % page_break_val == 0:
