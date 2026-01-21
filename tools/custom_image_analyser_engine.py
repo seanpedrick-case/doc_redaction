@@ -1475,6 +1475,390 @@ def _vlm_ocr_predict(
         return {"rec_texts": [], "rec_scores": []}
 
 
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
+def _process_page_result_with_hybrid_vlm_ocr(
+    page_results: list,
+    image: Image.Image,
+    img_width: int,
+    img_height: int,
+    input_image_width: int,
+    input_image_height: int,
+    confidence_threshold: float,
+    image_name: str,
+    output_folder: str,
+    padding: int = 0,
+):
+    """
+    Processes OCR page results using a hybrid system that combines PaddleOCR for initial recognition
+    and VLM for low-confidence lines. When PaddleOCR's recognition confidence for a detected line is
+    below the specified threshold, the line is re-processed using a higher-quality (but slower) VLM
+    model and the result is used to replace the low-confidence recognition. Results are kept in
+    PaddleOCR's standard output format for downstream compatibility.
+
+    Args:
+        page_results (list): The list of page result dicts from PaddleOCR to process. Each dict should
+            contain keys like 'rec_texts', 'rec_scores', 'rec_polys', and optionally 'image_width',
+            'image_height', and 'rec_models'.
+        image (PIL.Image.Image): The PIL Image object of the full page to allow line cropping.
+        img_width (int): The width of the (possibly preprocessed) image in pixels.
+        img_height (int): The height of the (possibly preprocessed) image in pixels.
+        input_image_width (int): The original image width (before any resizing/preprocessing).
+        input_image_height (int): The original image height (before any resizing/preprocessing).
+        confidence_threshold (float): Lines recognized by PaddleOCR with confidence lower than this
+            threshold will be replaced using the VLM.
+        image_name (str): The name of the source image, used for logging/debugging.
+        output_folder (str): The output folder path for saving example images.
+        padding (int): Padding to add around line crops.
+
+    Returns:
+        Modified page_results with VLM replacements for low-confidence lines.
+    """
+
+    def _normalize_paddle_result_lists(rec_texts, rec_scores, rec_polys):
+        """
+        Normalizes PaddleOCR result lists to ensure they all have the same length.
+        Pads missing entries with appropriate defaults:
+        - rec_texts: empty string ""
+        - rec_scores: 0.0 (low confidence)
+        - rec_polys: empty list []
+
+        Args:
+            rec_texts: List of recognized text strings
+            rec_scores: List of confidence scores
+            rec_polys: List of bounding box polygons
+
+        Returns:
+            Tuple of (normalized_rec_texts, normalized_rec_scores, normalized_rec_polys, max_length)
+        """
+        len_texts = len(rec_texts)
+        len_scores = len(rec_scores)
+        len_polys = len(rec_polys)
+        max_length = max(len_texts, len_scores, len_polys)
+
+        # Only normalize if there's a mismatch
+        if max_length > 0 and (
+            len_texts != max_length
+            or len_scores != max_length
+            or len_polys != max_length
+        ):
+            print(
+                f"Warning: List length mismatch detected - rec_texts: {len_texts}, "
+                f"rec_scores: {len_scores}, rec_polys: {len_polys}. "
+                f"Padding to length {max_length}."
+            )
+
+            # Pad rec_texts
+            if len_texts < max_length:
+                rec_texts = list(rec_texts) + [""] * (max_length - len_texts)
+
+            # Pad rec_scores
+            if len_scores < max_length:
+                rec_scores = list(rec_scores) + [0.0] * (max_length - len_scores)
+
+            # Pad rec_polys
+            if len_polys < max_length:
+                rec_polys = list(rec_polys) + [[]] * (max_length - len_polys)
+
+        return rec_texts, rec_scores, rec_polys, max_length
+
+    # Helper function to create safe filename (inlined to avoid needing instance_self)
+    def _create_safe_filename_with_confidence(
+        original_text: str,
+        new_text: str,
+        conf: int,
+        new_conf: int,
+        ocr_type: str = "OCR",
+    ) -> str:
+        """Creates a safe filename using confidence values when text sanitization fails."""
+
+        # Helper to sanitize text similar to _sanitize_filename
+        def _sanitize_text_for_filename(
+            text: str,
+            max_length: int = 20,
+            fallback_prefix: str = "unknown_text",
+        ) -> str:
+            """Sanitizes text for use in filenames."""
+            sanitized = safe_sanitize_text(text)
+            # Remove leading/trailing underscores and spaces
+            sanitized = sanitized.strip("_ ")
+            # If empty after sanitization, use a default value
+            if not sanitized:
+                sanitized = fallback_prefix
+            # Limit to max_length characters
+            if len(sanitized) > max_length:
+                sanitized = sanitized[:max_length]
+                sanitized = sanitized.rstrip("_")
+            # Final check: if still empty or too short, use fallback
+            if not sanitized or len(sanitized) < 3:
+                sanitized = fallback_prefix
+            return sanitized
+
+        # Try to sanitize both texts
+        safe_original = _sanitize_text_for_filename(
+            original_text, max_length=15, fallback_prefix=f"orig_conf_{conf}"
+        )
+        safe_new = _sanitize_text_for_filename(
+            new_text, max_length=15, fallback_prefix=f"new_conf_{new_conf}"
+        )
+
+        # If both sanitizations resulted in fallback names, create a confidence-based name
+        if safe_original.startswith("orig_conf") and safe_new.startswith("new_conf"):
+            return f"{ocr_type}_conf_{conf}_to_conf_{new_conf}"
+
+        return f"{safe_original}_conf_{conf}_to_{safe_new}_conf_{new_conf}"
+
+    # Process each page result in paddle_results
+    for page_result in page_results:
+        # Extract text recognition results from the paddle format
+        rec_texts = page_result.get("rec_texts", list())
+        rec_scores = page_result.get("rec_scores", list())
+        rec_polys = page_result.get("rec_polys", list())
+
+        # Normalize lists to ensure they all have the same length
+        rec_texts, rec_scores, rec_polys, num_lines = _normalize_paddle_result_lists(
+            rec_texts, rec_scores, rec_polys
+        )
+
+        # Update page_result with normalized lists
+        page_result["rec_texts"] = rec_texts
+        page_result["rec_scores"] = rec_scores
+        page_result["rec_polys"] = rec_polys
+
+        # Initialize rec_models list with "Paddle" as default for all lines
+        if (
+            "rec_models" not in page_result
+            or len(page_result.get("rec_models", [])) != num_lines
+        ):
+            rec_models = ["Paddle"] * num_lines
+            page_result["rec_models"] = rec_models
+        else:
+            rec_models = page_result["rec_models"]
+
+        # Since we're using the exact image PaddleOCR processed, coordinates are directly in image space
+        # No coordinate conversion needed - coordinates match the image dimensions exactly
+
+        # Process each line
+        # print(f"Processing {num_lines} lines from PaddleOCR results...")
+
+        for i in range(num_lines):
+            line_text = rec_texts[i]
+            line_conf = float(rec_scores[i]) * 100  # Convert to percentage
+            bounding_box = rec_polys[i]
+
+            # Skip if bounding box is empty (from padding)
+            # Handle numpy arrays, lists, and None values safely
+            if bounding_box is None:
+                continue
+
+            # Convert to list first to handle numpy arrays safely
+            if hasattr(bounding_box, "tolist"):
+                box = bounding_box.tolist()
+            else:
+                box = bounding_box
+
+            # Check if box is empty (handles both list and numpy array cases)
+            if not box or (isinstance(box, list) and len(box) == 0):
+                continue
+
+            # Skip empty lines
+            if not line_text.strip():
+                continue
+
+            # Convert polygon to bounding box
+            x_coords = [p[0] for p in box]
+            y_coords = [p[1] for p in box]
+            line_left_paddle = float(min(x_coords))
+            line_top_paddle = float(min(y_coords))
+            line_right_paddle = float(max(x_coords))
+            line_bottom_paddle = float(max(y_coords))
+            line_width_paddle = line_right_paddle - line_left_paddle
+            line_height_paddle = line_bottom_paddle - line_top_paddle
+
+            # Since we're using the exact image PaddleOCR processed, coordinates are already in image space
+            # No conversion needed - use coordinates directly
+            line_left = line_left_paddle
+            line_top = line_top_paddle
+            line_width = line_width_paddle
+            line_height = line_height_paddle
+
+            # Initialize model as PaddleOCR (default)
+
+            # Count words in PaddleOCR output
+            paddle_words = line_text.split()
+            paddle_word_count = len(paddle_words)
+
+            # If confidence is low, use VLM for a second opinion
+            if line_conf <= confidence_threshold:
+
+                # Ensure minimum line height for VLM processing
+                # If line_height is too small, use a minimum height based on typical text line height
+                min_line_height = max(
+                    line_height, 20
+                )  # Minimum 20 pixels for text line
+
+                # Calculate crop coordinates with padding
+                # Convert floats to integers and apply padding, clamping to image bounds
+                crop_left = max(0, int(round(line_left - padding)))
+                crop_top = max(0, int(round(line_top - padding)))
+                crop_right = min(
+                    img_width, int(round(line_left + line_width + padding))
+                )
+                crop_bottom = min(
+                    img_height, int(round(line_top + min_line_height + padding))
+                )
+
+                # Ensure crop dimensions are valid
+                if crop_right <= crop_left or crop_bottom <= crop_top:
+                    # Invalid crop, keep original PaddleOCR result
+                    continue
+
+                # Crop the line image
+                cropped_image = image.crop(
+                    (crop_left, crop_top, crop_right, crop_bottom)
+                )
+
+                # Check if cropped image is too small for VLM processing
+                crop_width = crop_right - crop_left
+                crop_height = crop_bottom - crop_top
+                if crop_width < 10 or crop_height < 10:
+                    continue
+
+                # Ensure cropped image is in RGB mode before passing to VLM
+                if cropped_image.mode != "RGB":
+                    cropped_image = cropped_image.convert("RGB")
+
+                # Save input image for debugging if environment variable is set
+                if SAVE_VLM_INPUT_IMAGES:
+                    try:
+                        vlm_debug_dir = os.path.join(
+                            output_folder,
+                            "hybrid_paddle_vlm_visualisations/hybrid_analysis_input_images",
+                        )
+                        os.makedirs(vlm_debug_dir, exist_ok=True)
+                        line_text_safe = safe_sanitize_text(line_text)
+                        line_text_shortened = line_text_safe[:20]
+                        image_name_safe = safe_sanitize_text(image_name)
+                        image_name_shortened = image_name_safe[:20]
+                        filename = f"{image_name_shortened}_{line_text_shortened}_hybrid_analysis_input_image.png"
+                        filepath = os.path.join(vlm_debug_dir, filename)
+                        cropped_image.save(filepath)
+                        # print(f"Saved VLM input image to: {filepath}")
+                    except Exception as save_error:
+                        print(f"Warning: Could not save VLM input image: {save_error}")
+
+                # Use VLM for OCR on this line with error handling
+                vlm_result = None
+                vlm_rec_texts = []
+                vlm_rec_scores = []
+
+                try:
+                    vlm_result = _vlm_ocr_predict(cropped_image)
+                    vlm_rec_texts = (
+                        vlm_result.get("rec_texts", []) if vlm_result else []
+                    )
+                    vlm_rec_scores = (
+                        vlm_result.get("rec_scores", []) if vlm_result else []
+                    )
+                except Exception:
+                    # Ensure we keep original PaddleOCR result on error
+                    vlm_rec_texts = []
+                    vlm_rec_scores = []
+
+                if vlm_rec_texts and vlm_rec_scores:
+                    # Combine VLM words into a single text string
+                    vlm_text = " ".join(vlm_rec_texts)
+                    vlm_word_count = len(vlm_rec_texts)
+                    vlm_conf = float(
+                        np.median(vlm_rec_scores)
+                    )  # Keep as 0-1 range for paddle format
+
+                    # Only replace if word counts match
+                    word_count_allowed_difference = 4
+                    if (
+                        vlm_word_count - paddle_word_count
+                        <= word_count_allowed_difference
+                        and vlm_word_count - paddle_word_count
+                        >= -word_count_allowed_difference
+                    ):
+                        text_output = f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
+                        text_output += f"-> '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) [VLM]"
+                        print(text_output)
+
+                        if REPORT_VLM_OUTPUTS_TO_GUI:
+                            try:
+                                gr.Info(text_output, duration=2)
+                            except Exception:
+                                # gr.Info may not be available in worker process, ignore
+                                pass
+
+                        # For exporting example image comparisons
+                        safe_filename = _create_safe_filename_with_confidence(
+                            line_text,
+                            vlm_text,
+                            int(line_conf),
+                            int(vlm_conf * 100),
+                            "VLM",
+                        )
+
+                        if SAVE_EXAMPLE_HYBRID_IMAGES:
+                            # Normalize and validate image_name to prevent path traversal attacks
+                            normalized_image_name = os.path.normpath(
+                                image_name + "_hybrid_paddle_vlm"
+                            )
+                            if (
+                                ".." in normalized_image_name
+                                or "/" in normalized_image_name
+                                or "\\" in normalized_image_name
+                            ):
+                                normalized_image_name = "safe_image"
+
+                            hybrid_ocr_examples_folder = (
+                                output_folder
+                                + f"/hybrid_ocr_examples/{normalized_image_name}"
+                            )
+                            # Validate the constructed path is safe
+                            if not validate_folder_containment(
+                                hybrid_ocr_examples_folder, OUTPUT_FOLDER
+                            ):
+                                raise ValueError(
+                                    f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
+                                )
+
+                            if not os.path.exists(hybrid_ocr_examples_folder):
+                                os.makedirs(hybrid_ocr_examples_folder)
+                            output_image_path = (
+                                hybrid_ocr_examples_folder + f"/{safe_filename}.png"
+                            )
+                            # print(f"Saving example image to {output_image_path}")
+                            cropped_image.save(output_image_path)
+
+                        # Replace with VLM result in paddle_results format
+                        # Update rec_texts, rec_scores, and rec_models for this line
+                        rec_texts[i] = vlm_text
+                        rec_scores[i] = vlm_conf
+                        rec_models[i] = "VLM"
+                        # Ensure page_result is updated with the modified rec_models list
+                        page_result["rec_models"] = rec_models
+                    else:
+                        print(
+                            f"  Line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) -> "
+                            f"VLM result '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) "
+                            f"word count mismatch. Keeping PaddleOCR result."
+                        )
+                else:
+                    # VLM returned empty or no results - keep original PaddleOCR result
+                    if line_conf <= confidence_threshold:
+                        pass
+
+    # Debug: Print summary of model labels before returning
+    for page_idx, page_result in enumerate(page_results):
+        rec_models = page_result.get("rec_models", [])
+        sum(1 for m in rec_models if m == "VLM")
+        sum(1 for m in rec_models if m == "Paddle")
+
+    return page_results
+
+
 def _inference_server_ocr_predict(
     image: Image.Image,
     prompt: str = model_default_prompt,
@@ -5543,392 +5927,6 @@ class CustomImageAnalyzerEngine:
 
         # Create a deep copy of paddle_results to modify
         copied_paddle_results = copy.deepcopy(paddle_results)
-
-        @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
-        def _process_page_result_with_hybrid_vlm_ocr(
-            page_results: list,
-            image: Image.Image,
-            img_width: int,
-            img_height: int,
-            input_image_width: int,
-            input_image_height: int,
-            confidence_threshold: float,
-            image_name: str,
-            output_folder: str,
-            padding: int = 0,
-        ):
-            """
-            Processes OCR page results using a hybrid system that combines PaddleOCR for initial recognition
-            and VLM for low-confidence lines. When PaddleOCR's recognition confidence for a detected line is
-            below the specified threshold, the line is re-processed using a higher-quality (but slower) VLM
-            model and the result is used to replace the low-confidence recognition. Results are kept in
-            PaddleOCR's standard output format for downstream compatibility.
-
-            Args:
-                page_results (list): The list of page result dicts from PaddleOCR to process. Each dict should
-                    contain keys like 'rec_texts', 'rec_scores', 'rec_polys', and optionally 'image_width',
-                    'image_height', and 'rec_models'.
-                image (PIL.Image.Image): The PIL Image object of the full page to allow line cropping.
-                img_width (int): The width of the (possibly preprocessed) image in pixels.
-                img_height (int): The height of the (possibly preprocessed) image in pixels.
-                input_image_width (int): The original image width (before any resizing/preprocessing).
-                input_image_height (int): The original image height (before any resizing/preprocessing).
-                confidence_threshold (float): Lines recognized by PaddleOCR with confidence lower than this
-                    threshold will be replaced using the VLM.
-                image_name (str): The name of the source image, used for logging/debugging.
-                output_folder (str): The output folder path for saving example images.
-                padding (int): Padding to add around line crops.
-
-            Returns:
-                Modified page_results with VLM replacements for low-confidence lines.
-            """
-
-            def _normalize_paddle_result_lists(rec_texts, rec_scores, rec_polys):
-                """
-                Normalizes PaddleOCR result lists to ensure they all have the same length.
-                Pads missing entries with appropriate defaults:
-                - rec_texts: empty string ""
-                - rec_scores: 0.0 (low confidence)
-                - rec_polys: empty list []
-
-                Args:
-                    rec_texts: List of recognized text strings
-                    rec_scores: List of confidence scores
-                    rec_polys: List of bounding box polygons
-
-                Returns:
-                    Tuple of (normalized_rec_texts, normalized_rec_scores, normalized_rec_polys, max_length)
-                """
-                len_texts = len(rec_texts)
-                len_scores = len(rec_scores)
-                len_polys = len(rec_polys)
-                max_length = max(len_texts, len_scores, len_polys)
-
-                # Only normalize if there's a mismatch
-                if max_length > 0 and (
-                    len_texts != max_length
-                    or len_scores != max_length
-                    or len_polys != max_length
-                ):
-                    print(
-                        f"Warning: List length mismatch detected - rec_texts: {len_texts}, "
-                        f"rec_scores: {len_scores}, rec_polys: {len_polys}. "
-                        f"Padding to length {max_length}."
-                    )
-
-                    # Pad rec_texts
-                    if len_texts < max_length:
-                        rec_texts = list(rec_texts) + [""] * (max_length - len_texts)
-
-                    # Pad rec_scores
-                    if len_scores < max_length:
-                        rec_scores = list(rec_scores) + [0.0] * (
-                            max_length - len_scores
-                        )
-
-                    # Pad rec_polys
-                    if len_polys < max_length:
-                        rec_polys = list(rec_polys) + [[]] * (max_length - len_polys)
-
-                return rec_texts, rec_scores, rec_polys, max_length
-
-            # Helper function to create safe filename (inlined to avoid needing instance_self)
-            def _create_safe_filename_with_confidence(
-                original_text: str,
-                new_text: str,
-                conf: int,
-                new_conf: int,
-                ocr_type: str = "OCR",
-            ) -> str:
-                """Creates a safe filename using confidence values when text sanitization fails."""
-
-                # Helper to sanitize text similar to _sanitize_filename
-                def _sanitize_text_for_filename(
-                    text: str,
-                    max_length: int = 20,
-                    fallback_prefix: str = "unknown_text",
-                ) -> str:
-                    """Sanitizes text for use in filenames."""
-                    sanitized = safe_sanitize_text(text)
-                    # Remove leading/trailing underscores and spaces
-                    sanitized = sanitized.strip("_ ")
-                    # If empty after sanitization, use a default value
-                    if not sanitized:
-                        sanitized = fallback_prefix
-                    # Limit to max_length characters
-                    if len(sanitized) > max_length:
-                        sanitized = sanitized[:max_length]
-                        sanitized = sanitized.rstrip("_")
-                    # Final check: if still empty or too short, use fallback
-                    if not sanitized or len(sanitized) < 3:
-                        sanitized = fallback_prefix
-                    return sanitized
-
-                # Try to sanitize both texts
-                safe_original = _sanitize_text_for_filename(
-                    original_text, max_length=15, fallback_prefix=f"orig_conf_{conf}"
-                )
-                safe_new = _sanitize_text_for_filename(
-                    new_text, max_length=15, fallback_prefix=f"new_conf_{new_conf}"
-                )
-
-                # If both sanitizations resulted in fallback names, create a confidence-based name
-                if safe_original.startswith("orig_conf") and safe_new.startswith(
-                    "new_conf"
-                ):
-                    return f"{ocr_type}_conf_{conf}_to_conf_{new_conf}"
-
-                return f"{safe_original}_conf_{conf}_to_{safe_new}_conf_{new_conf}"
-
-            # Process each page result in paddle_results
-            for page_result in page_results:
-                # Extract text recognition results from the paddle format
-                rec_texts = page_result.get("rec_texts", list())
-                rec_scores = page_result.get("rec_scores", list())
-                rec_polys = page_result.get("rec_polys", list())
-
-                # Normalize lists to ensure they all have the same length
-                rec_texts, rec_scores, rec_polys, num_lines = (
-                    _normalize_paddle_result_lists(rec_texts, rec_scores, rec_polys)
-                )
-
-                # Update page_result with normalized lists
-                page_result["rec_texts"] = rec_texts
-                page_result["rec_scores"] = rec_scores
-                page_result["rec_polys"] = rec_polys
-
-                # Initialize rec_models list with "Paddle" as default for all lines
-                if (
-                    "rec_models" not in page_result
-                    or len(page_result.get("rec_models", [])) != num_lines
-                ):
-                    rec_models = ["Paddle"] * num_lines
-                    page_result["rec_models"] = rec_models
-                else:
-                    rec_models = page_result["rec_models"]
-
-                # Since we're using the exact image PaddleOCR processed, coordinates are directly in image space
-                # No coordinate conversion needed - coordinates match the image dimensions exactly
-
-                # Process each line
-                # print(f"Processing {num_lines} lines from PaddleOCR results...")
-
-                for i in range(num_lines):
-                    line_text = rec_texts[i]
-                    line_conf = float(rec_scores[i]) * 100  # Convert to percentage
-                    bounding_box = rec_polys[i]
-
-                    # Skip if bounding box is empty (from padding)
-                    # Handle numpy arrays, lists, and None values safely
-                    if bounding_box is None:
-                        continue
-
-                    # Convert to list first to handle numpy arrays safely
-                    if hasattr(bounding_box, "tolist"):
-                        box = bounding_box.tolist()
-                    else:
-                        box = bounding_box
-
-                    # Check if box is empty (handles both list and numpy array cases)
-                    if not box or (isinstance(box, list) and len(box) == 0):
-                        continue
-
-                    # Skip empty lines
-                    if not line_text.strip():
-                        continue
-
-                    # Convert polygon to bounding box
-                    x_coords = [p[0] for p in box]
-                    y_coords = [p[1] for p in box]
-                    line_left_paddle = float(min(x_coords))
-                    line_top_paddle = float(min(y_coords))
-                    line_right_paddle = float(max(x_coords))
-                    line_bottom_paddle = float(max(y_coords))
-                    line_width_paddle = line_right_paddle - line_left_paddle
-                    line_height_paddle = line_bottom_paddle - line_top_paddle
-
-                    # Since we're using the exact image PaddleOCR processed, coordinates are already in image space
-                    # No conversion needed - use coordinates directly
-                    line_left = line_left_paddle
-                    line_top = line_top_paddle
-                    line_width = line_width_paddle
-                    line_height = line_height_paddle
-
-                    # Initialize model as PaddleOCR (default)
-
-                    # Count words in PaddleOCR output
-                    paddle_words = line_text.split()
-                    paddle_word_count = len(paddle_words)
-
-                    # If confidence is low, use VLM for a second opinion
-                    if line_conf <= confidence_threshold:
-
-                        # Ensure minimum line height for VLM processing
-                        # If line_height is too small, use a minimum height based on typical text line height
-                        min_line_height = max(
-                            line_height, 20
-                        )  # Minimum 20 pixels for text line
-
-                        # Calculate crop coordinates with padding
-                        # Convert floats to integers and apply padding, clamping to image bounds
-                        crop_left = max(0, int(round(line_left - padding)))
-                        crop_top = max(0, int(round(line_top - padding)))
-                        crop_right = min(
-                            img_width, int(round(line_left + line_width + padding))
-                        )
-                        crop_bottom = min(
-                            img_height, int(round(line_top + min_line_height + padding))
-                        )
-
-                        # Ensure crop dimensions are valid
-                        if crop_right <= crop_left or crop_bottom <= crop_top:
-                            # Invalid crop, keep original PaddleOCR result
-                            continue
-
-                        # Crop the line image
-                        cropped_image = image.crop(
-                            (crop_left, crop_top, crop_right, crop_bottom)
-                        )
-
-                        # Check if cropped image is too small for VLM processing
-                        crop_width = crop_right - crop_left
-                        crop_height = crop_bottom - crop_top
-                        if crop_width < 10 or crop_height < 10:
-                            continue
-
-                        # Ensure cropped image is in RGB mode before passing to VLM
-                        if cropped_image.mode != "RGB":
-                            cropped_image = cropped_image.convert("RGB")
-
-                        # Save input image for debugging if environment variable is set
-                        if SAVE_VLM_INPUT_IMAGES:
-                            try:
-                                vlm_debug_dir = os.path.join(
-                                    output_folder,
-                                    "hybrid_paddle_vlm_visualisations/hybrid_analysis_input_images",
-                                )
-                                os.makedirs(vlm_debug_dir, exist_ok=True)
-                                line_text_safe = safe_sanitize_text(line_text)
-                                line_text_shortened = line_text_safe[:20]
-                                image_name_safe = safe_sanitize_text(image_name)
-                                image_name_shortened = image_name_safe[:20]
-                                filename = f"{image_name_shortened}_{line_text_shortened}_hybrid_analysis_input_image.png"
-                                filepath = os.path.join(vlm_debug_dir, filename)
-                                cropped_image.save(filepath)
-                                # print(f"Saved VLM input image to: {filepath}")
-                            except Exception as save_error:
-                                print(
-                                    f"Warning: Could not save VLM input image: {save_error}"
-                                )
-
-                        # Use VLM for OCR on this line with error handling
-                        vlm_result = None
-                        vlm_rec_texts = []
-                        vlm_rec_scores = []
-
-                        try:
-                            vlm_result = _vlm_ocr_predict(cropped_image)
-                            vlm_rec_texts = (
-                                vlm_result.get("rec_texts", []) if vlm_result else []
-                            )
-                            vlm_rec_scores = (
-                                vlm_result.get("rec_scores", []) if vlm_result else []
-                            )
-                        except Exception:
-                            # Ensure we keep original PaddleOCR result on error
-                            vlm_rec_texts = []
-                            vlm_rec_scores = []
-
-                        if vlm_rec_texts and vlm_rec_scores:
-                            # Combine VLM words into a single text string
-                            vlm_text = " ".join(vlm_rec_texts)
-                            vlm_word_count = len(vlm_rec_texts)
-                            vlm_conf = float(
-                                np.median(vlm_rec_scores)
-                            )  # Keep as 0-1 range for paddle format
-
-                            # Only replace if word counts match
-                            word_count_allowed_difference = 4
-                            if (
-                                vlm_word_count - paddle_word_count
-                                <= word_count_allowed_difference
-                                and vlm_word_count - paddle_word_count
-                                >= -word_count_allowed_difference
-                            ):
-                                text_output = f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
-                                text_output += f"-> '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) [VLM]"
-                                print(text_output)
-
-                                if REPORT_VLM_OUTPUTS_TO_GUI:
-                                    gr.Info(text_output, duration=2)
-
-                                # For exporting example image comparisons
-                                safe_filename = _create_safe_filename_with_confidence(
-                                    line_text,
-                                    vlm_text,
-                                    int(line_conf),
-                                    int(vlm_conf * 100),
-                                    "VLM",
-                                )
-
-                                if SAVE_EXAMPLE_HYBRID_IMAGES:
-                                    # Normalize and validate image_name to prevent path traversal attacks
-                                    normalized_image_name = os.path.normpath(
-                                        image_name + "_hybrid_paddle_vlm"
-                                    )
-                                    if (
-                                        ".." in normalized_image_name
-                                        or "/" in normalized_image_name
-                                        or "\\" in normalized_image_name
-                                    ):
-                                        normalized_image_name = "safe_image"
-
-                                    hybrid_ocr_examples_folder = (
-                                        output_folder
-                                        + f"/hybrid_ocr_examples/{normalized_image_name}"
-                                    )
-                                    # Validate the constructed path is safe
-                                    if not validate_folder_containment(
-                                        hybrid_ocr_examples_folder, OUTPUT_FOLDER
-                                    ):
-                                        raise ValueError(
-                                            f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
-                                        )
-
-                                    if not os.path.exists(hybrid_ocr_examples_folder):
-                                        os.makedirs(hybrid_ocr_examples_folder)
-                                    output_image_path = (
-                                        hybrid_ocr_examples_folder
-                                        + f"/{safe_filename}.png"
-                                    )
-                                    # print(f"Saving example image to {output_image_path}")
-                                    cropped_image.save(output_image_path)
-
-                                # Replace with VLM result in paddle_results format
-                                # Update rec_texts, rec_scores, and rec_models for this line
-                                rec_texts[i] = vlm_text
-                                rec_scores[i] = vlm_conf
-                                rec_models[i] = "VLM"
-                                # Ensure page_result is updated with the modified rec_models list
-                                page_result["rec_models"] = rec_models
-                            else:
-                                print(
-                                    f"  Line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) -> "
-                                    f"VLM result '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) "
-                                    f"word count mismatch. Keeping PaddleOCR result."
-                                )
-                        else:
-                            # VLM returned empty or no results - keep original PaddleOCR result
-                            if line_conf <= confidence_threshold:
-                                pass
-
-            # Debug: Print summary of model labels before returning
-            for page_idx, page_result in enumerate(page_results):
-                rec_models = page_result.get("rec_models", [])
-                sum(1 for m in rec_models if m == "VLM")
-                sum(1 for m in rec_models if m == "Paddle")
-
-            return page_results
 
         modified_paddle_results = _process_page_result_with_hybrid_vlm_ocr(
             copied_paddle_results,
