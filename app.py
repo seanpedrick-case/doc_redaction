@@ -232,7 +232,6 @@ from tools.helper_functions import (
     reset_state_vars,
     reveal_feedback_buttons,
     update_cost_code_dataframe_from_dropdown_select,
-    update_dataframe,
     update_language_dropdown,
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
@@ -338,17 +337,13 @@ async def lifespan(app: FastAPI):
 
 
 def change_tab_to_tabular_or_document_redactions(is_data_file):
-    print("is_data_file: ", is_data_file)
     if is_data_file:
-        print("switching to tabular redactions tab")
         return gr.Tabs(selected=3)
     else:
-        print("switching to document redactions tab")
         return gr.Tabs(selected=1)
 
 
 def change_tab_to_review_redactions():
-    print("switching to review redactions tab")
     return gr.Tabs(selected=2)
 
 
@@ -366,6 +361,124 @@ spaces.annotations
 ###
 
 # Load some components outside of blocks context that are used for examples
+
+# Components for "Redact all PII" option (conditionally visible)
+# Set initial visibility based on default redaction method ("Redact all PII")
+initial_show_pii_method = SHOW_PII_IDENTIFICATION_OPTIONS  # Default is "Redact all PII"
+default_pii_method = DEFAULT_PII_DETECTION_MODEL
+initial_show_local_entities = initial_show_pii_method and (
+    default_pii_method == LOCAL_PII_OPTION
+)
+initial_show_comprehend_entities = initial_show_pii_method and (
+    default_pii_method == AWS_PII_OPTION
+)
+initial_is_llm_method = initial_show_pii_method and (
+    default_pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+    or default_pii_method == INFERENCE_SERVER_PII_OPTION
+    or default_pii_method == AWS_LLM_PII_OPTION
+)
+
+## Walkthrough / quickstart components
+walkthrough_file_input = gr.File(
+    label="Choose a PDF document, image file (PDF, JPG, PNG), tabular data file (Excel, CSV, Parquet), or Word document (DOCX)",
+    file_count="multiple",
+    file_types=[
+        ".pdf",
+        ".jpg",
+        ".png",
+        ".json",
+        ".zip",
+        ".xlsx",
+        ".xls",
+        ".csv",
+        ".parquet",
+        ".docx",
+    ],
+    height=FILE_INPUT_HEIGHT,
+)
+
+walkthrough_in_redact_entities = gr.Dropdown(
+    value=CHOSEN_REDACT_ENTITIES,
+    choices=FULL_ENTITY_LIST,
+    multiselect=True,
+    label="Local PII identification model (click empty space in box for full list)",
+    visible=initial_show_local_entities,
+)
+
+walkthrough_in_redact_comprehend_entities = gr.Dropdown(
+    value=CHOSEN_COMPREHEND_ENTITIES,
+    choices=FULL_COMPREHEND_ENTITY_LIST,
+    multiselect=True,
+    label="AWS Comprehend PII identification model (click empty space in box for full list)",
+    visible=initial_show_comprehend_entities,
+)
+
+# Set initial visibility for local OCR and AWS Textract based on default text extraction method
+initial_local_ocr_visible = (
+    DEFAULT_TEXT_EXTRACTION_MODEL == TESSERACT_TEXT_EXTRACT_OPTION
+)
+initial_aws_textract_visible = (
+    DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION
+)
+
+walkthrough_text_extract_method_radio = gr.Radio(
+    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
+    value=DEFAULT_TEXT_EXTRACTION_MODEL,
+    choices=TEXT_EXTRACTION_MODELS,
+    visible=True,
+)
+
+walkthrough_local_ocr_method_radio = gr.Radio(
+    label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
+    value=CHOSEN_LOCAL_OCR_MODEL,
+    choices=LOCAL_OCR_MODEL_OPTIONS,
+    interactive=True,
+    visible=initial_local_ocr_visible,
+)
+
+walkthrough_handwrite_signature_checkbox = gr.CheckboxGroup(
+    label="AWS Textract extraction settings",
+    choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
+    value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+    visible=initial_aws_textract_visible,
+)
+
+walkthrough_pii_identification_method_drop = gr.Radio(
+    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+    value=DEFAULT_PII_DETECTION_MODEL,
+    choices=PII_DETECTION_MODELS,
+    visible=initial_show_pii_method,
+)
+
+walkthrough_deny_list_state = gr.Dropdown(
+    allow_custom_value=True,
+    label="Deny list (always redact these words)",
+    interactive=True,
+    multiselect=True,
+)
+
+walkthrough_allow_list_state = gr.Dropdown(
+    allow_custom_value=True,
+    label="Allow list (always exclude these words from redaction)",
+    interactive=True,
+    multiselect=True,
+)
+
+walkthrough_fully_redacted_list_state = gr.Dropdown(
+    allow_custom_value=True,
+    label="Fully redacted pages (fully redact these page numbers)",
+    interactive=True,
+    multiselect=True,
+)
+
+# Column container for the accordion (conditionally visible based on redaction method)
+# Initially hidden since default is "Redact all PII"
+initial_show_selected_terms_lists = False
+walkthrough_selected_terms_accordion_container = gr.Column(
+    visible=initial_show_selected_terms_lists,
+)
+
+
 ## Redaction examples
 in_doc_files = gr.File(
     label="Choose a PDF document or image file (PDF, JPG, PNG)",
@@ -437,14 +550,14 @@ in_redact_entities = gr.Dropdown(
     choices=FULL_ENTITY_LIST,
     multiselect=True,
     label="Local PII identification model (click empty space in box for full list)",
-    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+    visible=initial_show_local_entities,
 )
 in_redact_comprehend_entities = gr.Dropdown(
     value=CHOSEN_COMPREHEND_ENTITIES,
     choices=FULL_COMPREHEND_ENTITY_LIST,
     multiselect=True,
     label="AWS Comprehend PII identification model (click empty space in box for full list)",
-    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+    visible=initial_show_comprehend_entities,
 )
 
 in_redact_llm_entities = gr.Dropdown(
@@ -452,7 +565,7 @@ in_redact_llm_entities = gr.Dropdown(
     choices=FULL_LLM_ENTITY_LIST,
     multiselect=True,
     label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
-    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+    visible=initial_is_llm_method,
 )
 
 custom_llm_instructions_textbox = gr.Textbox(
@@ -460,22 +573,10 @@ custom_llm_instructions_textbox = gr.Textbox(
     placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'redact all company names with the label COMPANY_NAME'",
     value="",
     lines=3,
-    visible=SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
+    visible=initial_is_llm_method,
 )
 
 # Allow / deny / fully redacted lists
-
-# in_deny_list_state = gr.Dataframe(
-#     value=pd.DataFrame(),
-#     headers=["Always redact these words"],
-#     col_count=(1, "fixed"),
-#     row_count=(0, "dynamic"),
-#     label="Deny list (always redact these words)",
-#     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
-#     type="pandas",
-#     interactive=True,
-#     wrap=True,
-# )
 
 in_deny_list_state = gr.Dropdown(
     allow_custom_value=True,
@@ -485,18 +586,6 @@ in_deny_list_state = gr.Dropdown(
     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
 )
 
-# in_allow_list_state = gr.Dataframe(
-#     value=pd.DataFrame(),
-#     headers=["Never redact these words"],
-#     col_count=(1, "fixed"),
-#     row_count=(0, "dynamic"),
-#     label="Allow list (always exclude these words from redaction)",
-#     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
-#     type="pandas",
-#     interactive=True,
-#     wrap=True,
-# )
-
 in_allow_list_state = gr.Dropdown(
     allow_custom_value=True,
     label="Allow list (always exclude these words from redaction)",
@@ -504,18 +593,6 @@ in_allow_list_state = gr.Dropdown(
     multiselect=True,
     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
 )
-
-# in_fully_redacted_list_state = gr.Dataframe(
-#     value=pd.DataFrame(),
-#     headers=["Fully redacted pages list"],
-#     col_count=(1, "fixed"),
-#     row_count=(0, "dynamic"),
-#     label="Fully redacted pages (fully redact these page numbers)",
-#     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
-#     type="pandas",
-#     interactive=True,
-#     wrap=True,
-# )
 
 in_fully_redacted_list_state = gr.Dropdown(
     allow_custom_value=True,
@@ -1369,6 +1446,431 @@ with blocks:
 
     gr.Markdown(INTRO_TEXT)
 
+    # Examples for PDF/image redaction
+    if SHOW_EXAMPLES:
+        gr.Markdown(
+            "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
+        )
+
+        # Check which example files exist and create examples only for available files
+        example_files = [
+            "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
+            "example_data/example_complaint_letter.jpg",
+            "example_data/graduate-job-example-cover-letter.pdf",
+            "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+            "example_data/partnership_toolkit_redact_custom_deny_list.csv",
+            "example_data/partnership_toolkit_redact_some_pages.csv",
+        ]
+
+        available_examples = list()
+        example_labels = list()
+
+        # Check each example file and add to examples if it exists
+        if os.path.exists(example_files[0]):
+            available_examples.append(
+                [
+                    [example_files[0]],
+                    "Local model - selectable text",
+                    "Local",
+                    [],
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[0]],
+                    example_files[0],
+                    [],
+                    [],
+                    [],
+                    [],
+                    2,
+                ]
+            )
+            example_labels.append("PDF with selectable text redaction")
+
+        if os.path.exists(example_files[1]):
+            available_examples.append(
+                [
+                    [example_files[1]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    [],
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[1]],
+                    example_files[1],
+                    [],
+                    [],
+                    [],
+                    [],
+                    1,
+                ]
+            )
+            example_labels.append("Image redaction with local OCR")
+
+        if os.path.exists(example_files[2]):
+            available_examples.append(
+                [
+                    [example_files[2]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    [],
+                    ["TITLES", "PERSON", "DATE_TIME"],
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[2]],
+                    example_files[2],
+                    [],
+                    [],
+                    [],
+                    [],
+                    1,
+                ]
+            )
+            example_labels.append(
+                "PDF redaction with custom entities (Titles, Person, Dates)"
+            )
+
+        if os.path.exists(example_files[3]):
+            if SHOW_AWS_EXAMPLES:
+                available_examples.append(
+                    [
+                        [example_files[3]],
+                        "AWS Textract service - all PDF types",
+                        "AWS Comprehend",
+                        ["Extract handwriting", "Extract signatures"],
+                        CHOSEN_REDACT_ENTITIES,
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        [example_files[3]],
+                        example_files[3],
+                        [],
+                        [],
+                        [],
+                        [],
+                        7,
+                    ]
+                )
+                example_labels.append(
+                    "PDF redaction with AWS services and signature detection"
+                )
+
+        # Add new example for custom deny list and whole page redaction
+        if (
+            os.path.exists(example_files[3])
+            and os.path.exists(example_files[4])
+            and os.path.exists(example_files[5])
+        ):
+            available_examples.append(
+                [
+                    [example_files[3]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    [],
+                    ["CUSTOM"],  # Use CUSTOM entity to enable deny list functionality
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[3]],
+                    example_files[3],
+                    [example_files[4]],
+                    [
+                        "Sister",
+                        "Sister City",
+                        "Sister Cities",
+                        "Friendship City",
+                    ],
+                    [example_files[5]],
+                    [
+                        2,
+                        5,
+                    ],  # pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
+                    7,
+                ],
+            )
+            example_labels.append(
+                "PDF redaction with custom deny list and whole page redaction"
+            )
+
+        # Only create examples if we have available files
+        if available_examples:
+
+            def show_info_box_on_click(
+                in_doc_files,
+                text_extract_method_radio,
+                pii_identification_method_drop,
+                handwrite_signature_checkbox,
+                in_redact_entities,
+                in_redact_comprehend_entities,
+                prepared_pdf_state,
+                doc_full_file_name_textbox,
+                in_deny_list,
+                in_deny_list_state,
+                in_fully_redacted_list,
+                in_fully_redacted_list_state,
+                total_pdf_page_count,
+            ):
+                gr.Info(
+                    "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
+                )
+
+                # Convert deny_list_state, allow_list_state, and fully_redacted_list_state to lists if they are DataFrames
+                # Handle deny_list_state
+                deny_list_walkthrough = []
+                if isinstance(in_deny_list_state, pd.DataFrame):
+                    # Explicitly convert empty DataFrame to empty list
+                    if in_deny_list_state.empty:
+                        deny_list_walkthrough = []
+                    else:
+                        deny_list_walkthrough = (
+                            in_deny_list_state.iloc[:, 0].dropna().astype(str).tolist()
+                        )
+                elif isinstance(in_deny_list_state, list):
+                    deny_list_walkthrough = (
+                        [str(item) for item in in_deny_list_state if item]
+                        if in_deny_list_state
+                        else []
+                    )
+                else:
+                    # Default to empty list for any other type
+                    deny_list_walkthrough = []
+
+                # Handle fully_redacted_list_state
+                fully_redacted_list_walkthrough = []
+                if isinstance(in_fully_redacted_list_state, pd.DataFrame):
+                    # Explicitly convert empty DataFrame to empty list
+                    if in_fully_redacted_list_state.empty:
+                        fully_redacted_list_walkthrough = []
+                    else:
+                        fully_redacted_list_walkthrough = (
+                            in_fully_redacted_list_state.iloc[:, 0]
+                            .dropna()
+                            .astype(str)
+                            .tolist()
+                        )
+                elif isinstance(in_fully_redacted_list_state, list):
+                    fully_redacted_list_walkthrough = (
+                        [str(item) for item in in_fully_redacted_list_state if item]
+                        if in_fully_redacted_list_state
+                        else []
+                    )
+                else:
+                    # Default to empty list for any other type
+                    fully_redacted_list_walkthrough = []
+
+                # Allow list is not in examples, so always set to empty list
+                allow_list_walkthrough = []
+
+                # Use default local OCR method - examples don't set this directly
+                local_ocr_method = CHOSEN_LOCAL_OCR_MODEL
+
+                return (
+                    gr.File(value=in_doc_files),  # walkthrough_file_input
+                    gr.Dropdown(
+                        value=in_redact_entities
+                    ),  # walkthrough_in_redact_entities
+                    gr.Dropdown(
+                        value=in_redact_comprehend_entities
+                    ),  # walkthrough_in_redact_comprehend_entities
+                    gr.Radio(
+                        value=text_extract_method_radio
+                    ),  # walkthrough_text_extract_method_radio
+                    gr.Radio(
+                        value=local_ocr_method
+                    ),  # walkthrough_local_ocr_method_radio
+                    gr.CheckboxGroup(
+                        value=handwrite_signature_checkbox
+                    ),  # walkthrough_handwrite_signature_checkbox
+                    gr.Radio(
+                        value=pii_identification_method_drop
+                    ),  # walkthrough_pii_identification_method_drop
+                    gr.Dropdown(
+                        value=allow_list_walkthrough
+                    ),  # walkthrough_allow_list_state
+                    gr.Dropdown(
+                        value=deny_list_walkthrough
+                    ),  # walkthrough_deny_list_state
+                    gr.Dropdown(
+                        value=fully_redacted_list_walkthrough
+                    ),  # walkthrough_fully_redacted_list_state
+                )
+
+            redaction_examples = gr.Examples(
+                examples=available_examples,
+                inputs=[
+                    in_doc_files,
+                    text_extract_method_radio,
+                    pii_identification_method_drop,
+                    handwrite_signature_checkbox,
+                    in_redact_entities,
+                    in_redact_comprehend_entities,
+                    prepared_pdf_state,
+                    doc_full_file_name_textbox,
+                    in_deny_list,
+                    in_deny_list_state,
+                    in_fully_redacted_list,
+                    in_fully_redacted_list_state,
+                    total_pdf_page_count,
+                ],
+                outputs=[
+                    walkthrough_file_input,
+                    walkthrough_in_redact_entities,
+                    walkthrough_in_redact_comprehend_entities,
+                    walkthrough_text_extract_method_radio,
+                    walkthrough_local_ocr_method_radio,
+                    walkthrough_handwrite_signature_checkbox,
+                    walkthrough_pii_identification_method_drop,
+                    walkthrough_allow_list_state,
+                    walkthrough_deny_list_state,
+                    walkthrough_fully_redacted_list_state,
+                ],
+                example_labels=example_labels,
+                fn=show_info_box_on_click,
+                run_on_click=True,
+            )
+    if SHOW_DIFFICULT_OCR_EXAMPLES:
+        gr.Markdown(
+            "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
+        )
+        ocr_example_files = [
+            "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+            "example_data/Difficult handwritten note.jpg",
+            "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
+        ]
+        available_ocr_examples = list()
+        ocr_example_labels = list()
+        if os.path.exists(ocr_example_files[0]):
+            available_ocr_examples.append(
+                [
+                    [ocr_example_files[0]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Only extract text (no redaction)",
+                    ["Extract handwriting", "Extract signatures"],
+                    [ocr_example_files[0]],
+                    ocr_example_files[0],
+                    7,
+                    1,
+                    1,
+                    "paddle",
+                    CHOSEN_REDACT_ENTITIES,
+                ],
+            )
+            ocr_example_labels.append("Baseline 'easy' document page")
+
+            available_ocr_examples.append(
+                [
+                    [ocr_example_files[0]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    ["Extract handwriting", "Extract signatures"],
+                    [ocr_example_files[0]],
+                    ocr_example_files[0],
+                    7,
+                    6,
+                    6,
+                    "hybrid-paddle-vlm",
+                    CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
+                ],
+            )
+            ocr_example_labels.append("Scanned document page with signatures")
+
+        if os.path.exists(ocr_example_files[1]):
+            available_ocr_examples.append(
+                [
+                    [ocr_example_files[1]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Only extract text (no redaction)",
+                    ["Extract handwriting", "Extract signatures"],
+                    [ocr_example_files[1]],
+                    ocr_example_files[1],
+                    1,
+                    0,
+                    0,
+                    "vlm",
+                    CHOSEN_REDACT_ENTITIES,
+                ],
+            )
+            ocr_example_labels.append("Unclear text on handwritten note")
+
+        if os.path.exists(ocr_example_files[2]):
+            available_ocr_examples.append(
+                [
+                    [ocr_example_files[2]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    ["Extract handwriting", "Extract signatures"],
+                    [ocr_example_files[2]],
+                    ocr_example_files[2],
+                    1,
+                    0,
+                    0,
+                    "hybrid-paddle-vlm",
+                    CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
+                ],
+            )
+            ocr_example_labels.append("CV with photo")
+
+        # Only create examples if we have available files
+        if available_ocr_examples:
+
+            def show_info_box_on_click(
+                in_doc_files,
+                text_extract_method_radio,
+                pii_identification_method_drop,
+                handwrite_signature_checkbox,
+                prepared_pdf_state,
+                doc_full_file_name_textbox,
+                total_pdf_page_count,
+                page_min,
+                page_max,
+                local_ocr_method_radio,
+                in_redact_entities,
+            ):
+                gr.Info(
+                    "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
+                )
+
+                return (
+                    gr.File(value=in_doc_files),  # walkthrough_file_input
+                    gr.Dropdown(
+                        value=in_redact_entities
+                    ),  # walkthrough_in_redact_entities
+                    gr.Radio(
+                        value=text_extract_method_radio
+                    ),  # walkthrough_text_extract_method_radio
+                    gr.Radio(
+                        value=local_ocr_method_radio
+                    ),  # walkthrough_local_ocr_method_radio
+                    gr.CheckboxGroup(
+                        value=handwrite_signature_checkbox
+                    ),  # walkthrough_handwrite_signature_checkbox
+                    gr.Radio(
+                        value=pii_identification_method_drop
+                    ),  # walkthrough_pii_identification_method_drop
+                )
+
+            ocr_examples = gr.Examples(
+                examples=available_ocr_examples,
+                inputs=[
+                    in_doc_files,
+                    text_extract_method_radio,
+                    pii_identification_method_drop,
+                    handwrite_signature_checkbox,
+                    prepared_pdf_state,
+                    doc_full_file_name_textbox,
+                    total_pdf_page_count,
+                    page_min,
+                    page_max,
+                    local_ocr_method_radio,
+                    in_redact_entities,
+                ],
+                outputs=[
+                    walkthrough_file_input,
+                    walkthrough_in_redact_entities,
+                    walkthrough_text_extract_method_radio,
+                    walkthrough_local_ocr_method_radio,
+                    walkthrough_handwrite_signature_checkbox,
+                    walkthrough_pii_identification_method_drop,
+                ],
+                example_labels=ocr_example_labels,
+                fn=show_info_box_on_click,
+                run_on_click=True,
+            )
+
     with gr.Tabs() as tabs:
         ###
         # QUICKSTART TAB
@@ -1380,23 +1882,8 @@ with blocks:
 
                 with gr.Walkthrough(selected=1) as walkthrough:
                     with gr.Step("Load document/data", id=1):
-                        walkthrough_file_input = gr.File(
-                            label="Choose a PDF document, image file (PDF, JPG, PNG), tabular data file (Excel, CSV, Parquet), or Word document (DOCX)",
-                            file_count="multiple",
-                            file_types=[
-                                ".pdf",
-                                ".jpg",
-                                ".png",
-                                ".json",
-                                ".zip",
-                                ".xlsx",
-                                ".xls",
-                                ".csv",
-                                ".parquet",
-                                ".docx",
-                            ],
-                            height=FILE_INPUT_HEIGHT,
-                        )
+
+                        walkthrough_file_input.render()
                         with gr.Row():
                             step_1_back_btn = gr.Button("Back", variant="secondary")
                             step_1_back_btn.click(
@@ -1420,37 +1907,11 @@ with blocks:
                             visible=False,
                         )
                         # Text extraction method radio (conditionally visible)
-                        walkthrough_text_extract_method_radio = gr.Radio(
-                            label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
-                            value=DEFAULT_TEXT_EXTRACTION_MODEL,
-                            choices=TEXT_EXTRACTION_MODELS,
-                            visible=True,
-                        )
+                        walkthrough_text_extract_method_radio.render()
                         # Local OCR method radio (shown only if Local OCR model is selected)
-                        # Set initial visibility based on default text extraction method
-                        initial_local_ocr_visible = (
-                            DEFAULT_TEXT_EXTRACTION_MODEL
-                            == TESSERACT_TEXT_EXTRACT_OPTION
-                        )
-                        walkthrough_local_ocr_method_radio = gr.Radio(
-                            label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
-                            value=CHOSEN_LOCAL_OCR_MODEL,
-                            choices=LOCAL_OCR_MODEL_OPTIONS,
-                            interactive=True,
-                            visible=initial_local_ocr_visible,
-                        )
+                        walkthrough_local_ocr_method_radio.render()
                         # AWS Textract extraction settings (shown only if AWS Textract is selected)
-                        # Set initial visibility based on default text extraction method
-                        initial_aws_textract_visible = (
-                            DEFAULT_TEXT_EXTRACTION_MODEL
-                            == TEXTRACT_TEXT_EXTRACT_OPTION
-                        )
-                        walkthrough_handwrite_signature_checkbox = gr.CheckboxGroup(
-                            label="AWS Textract extraction settings",
-                            choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
-                            value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
-                            visible=initial_aws_textract_visible,
-                        )
+                        walkthrough_handwrite_signature_checkbox.render()
                         with gr.Row():
                             step_2_back_btn = gr.Button("Back", variant="secondary")
                             step_2_back_btn.click(
@@ -1469,41 +1930,12 @@ with blocks:
                             value="Redact all PII",
                             interactive=True,
                         )
-                        # Components for "Redact all PII" option (conditionally visible)
-                        # Set initial visibility based on default redaction method ("Redact all PII")
-                        initial_show_pii_method = SHOW_PII_IDENTIFICATION_OPTIONS  # Default is "Redact all PII"
-                        default_pii_method = DEFAULT_PII_DETECTION_MODEL
-                        initial_show_local_entities = initial_show_pii_method and (
-                            default_pii_method == LOCAL_PII_OPTION
-                        )
-                        initial_show_comprehend_entities = initial_show_pii_method and (
-                            default_pii_method == AWS_PII_OPTION
-                        )
-                        initial_is_llm_method = initial_show_pii_method and (
-                            default_pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
-                            or default_pii_method == INFERENCE_SERVER_PII_OPTION
-                            or default_pii_method == AWS_LLM_PII_OPTION
-                        )
-                        walkthrough_pii_identification_method_drop = gr.Radio(
-                            label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
-                            value=DEFAULT_PII_DETECTION_MODEL,
-                            choices=PII_DETECTION_MODELS,
-                            visible=initial_show_pii_method,
-                        )
-                        walkthrough_in_redact_entities = gr.Dropdown(
-                            value=CHOSEN_REDACT_ENTITIES,
-                            choices=FULL_ENTITY_LIST,
-                            multiselect=True,
-                            label="Local PII identification model (click empty space in box for full list)",
-                            visible=initial_show_local_entities,
-                        )
-                        walkthrough_in_redact_comprehend_entities = gr.Dropdown(
-                            value=CHOSEN_COMPREHEND_ENTITIES,
-                            choices=FULL_COMPREHEND_ENTITY_LIST,
-                            multiselect=True,
-                            label="AWS Comprehend PII identification model (click empty space in box for full list)",
-                            visible=initial_show_comprehend_entities,
-                        )
+
+                        walkthrough_pii_identification_method_drop.render()
+
+                        walkthrough_in_redact_entities.render()
+
+                        walkthrough_in_redact_comprehend_entities.render()
                         walkthrough_in_redact_llm_entities = gr.Dropdown(
                             value=CHOSEN_LLM_ENTITIES,
                             choices=FULL_LLM_ENTITY_LIST,
@@ -1519,59 +1951,16 @@ with blocks:
                             visible=initial_is_llm_method,
                         )
 
-                        with gr.Row():
-                            # Components for "Redact selected terms" option (conditionally visible)
-                            # walkthrough_deny_list_state = gr.Dataframe(
-                            #     value=pd.DataFrame(),
-                            #     headers=["Always redact these words"],
-                            #     col_count=(1, "fixed"),
-                            #     row_count=(0, "dynamic"),
-                            #     label="Deny list (always redact these words)",
-                            #     visible=False,
-                            #     type="pandas",
-                            #     interactive=True,
-                            #     wrap=True,
-                            # )
-                            walkthrough_deny_list_state = gr.Dropdown(
-                                allow_custom_value=True,
-                                label="Deny list (always redact these words)",
-                                interactive=True,
-                                multiselect=True,
-                            )
-                            # walkthrough_allow_list_state = gr.Dataframe(
-                            #     value=pd.DataFrame(),
-                            #     headers=["Never redact these words"],
-                            #     col_count=(1, "fixed"),
-                            #     row_count=(0, "dynamic"),
-                            #     label="Allow list (always exclude these words from redaction)",
-                            #     visible=False,
-                            #     type="pandas",
-                            #     interactive=True,
-                            #     wrap=True,
-                            # )
-                            walkthrough_allow_list_state = gr.Dropdown(
-                                allow_custom_value=True,
-                                label="Allow list (always exclude these words from redaction)",
-                                interactive=True,
-                                multiselect=True,
-                            )
-                            # walkthrough_fully_redacted_list_state = gr.Dataframe(
-                            #     value=pd.DataFrame(),
-                            #     headers=["Fully redacted pages list"],
-                            #     col_count=(1, "fixed"),
-                            #     row_count=(0, "dynamic"),
-                            #     label="Fully redacted pages (fully redact these page numbers)",
-                            #     visible=False,
-                            #     type="pandas",
-                            #     interactive=True,
-                            #     wrap=True,
-                            # )
-                            walkthrough_fully_redacted_list_state = gr.Dropdown(
-                                allow_custom_value=True,
-                                label="Fully redacted pages (fully redact these page numbers)",
-                                interactive=True,
-                                multiselect=True,
-                            )
+                        with walkthrough_selected_terms_accordion_container:
+                            with gr.Accordion(
+                                "Terms to always include or exclude in redactions, and whole page redaction. To add many terms at once, you can load in a file on the Redaction Settings tab.",
+                                open=True,
+                            ):
+                                # Components for "Redact selected terms" option (conditionally visible)
+                                with gr.Row():
+                                    walkthrough_deny_list_state.render()
+                                    walkthrough_allow_list_state.render()
+                                    walkthrough_fully_redacted_list_state.render()
 
                         # Tabular data redaction options (conditionally visible for data files)
                         walkthrough_pii_identification_method_drop_tabular = gr.Radio(
@@ -1794,7 +2183,7 @@ with blocks:
             )
 
             # Update local OCR method radio and AWS Textract settings visibility when text extraction method is selected
-            walkthrough_text_extract_method_radio.input(
+            walkthrough_text_extract_method_radio.change(
                 fn=handle_text_extract_method_selection,
                 inputs=[walkthrough_text_extract_method_radio],
                 outputs=[
@@ -1813,7 +2202,7 @@ with blocks:
             )
 
             # Update Step 3 components visibility when redaction method is selected
-            walkthrough_redaction_method_dropdown.input(
+            walkthrough_redaction_method_dropdown.change(
                 fn=handle_redaction_method_selection,
                 inputs=[walkthrough_redaction_method_dropdown],
                 outputs=[
@@ -1825,11 +2214,12 @@ with blocks:
                     walkthrough_deny_list_state,
                     walkthrough_allow_list_state,
                     walkthrough_fully_redacted_list_state,
+                    walkthrough_selected_terms_accordion_container,
                 ],
             )
 
             # Update entity dropdowns when PII method is selected
-            walkthrough_pii_identification_method_drop.input(
+            walkthrough_pii_identification_method_drop.change(
                 fn=handle_pii_method_selection,
                 inputs=[walkthrough_pii_identification_method_drop],
                 outputs=[
@@ -1979,440 +2369,6 @@ with blocks:
         # REDACTION PDF/IMAGES TABLE
         ###
         with gr.Tab("Redact PDFs/images", id=1):
-
-            # Examples for PDF/image redaction
-            if SHOW_EXAMPLES:
-                gr.Markdown(
-                    "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
-                )
-
-                # Check which example files exist and create examples only for available files
-                example_files = [
-                    "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
-                    "example_data/example_complaint_letter.jpg",
-                    "example_data/graduate-job-example-cover-letter.pdf",
-                    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-                    "example_data/partnership_toolkit_redact_custom_deny_list.csv",
-                    "example_data/partnership_toolkit_redact_some_pages.csv",
-                ]
-
-                available_examples = list()
-                example_labels = list()
-
-                # Check each example file and add to examples if it exists
-                if os.path.exists(example_files[0]):
-                    available_examples.append(
-                        [
-                            [example_files[0]],
-                            "Local model - selectable text",
-                            "Local",
-                            [],
-                            CHOSEN_REDACT_ENTITIES,
-                            CHOSEN_COMPREHEND_ENTITIES,
-                            [example_files[0]],
-                            example_files[0],
-                            [],
-                            [],
-                            [],
-                            [],
-                            2,
-                        ]
-                    )
-                    example_labels.append("PDF with selectable text redaction")
-
-                if os.path.exists(example_files[1]):
-                    available_examples.append(
-                        [
-                            [example_files[1]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            [],
-                            CHOSEN_REDACT_ENTITIES,
-                            CHOSEN_COMPREHEND_ENTITIES,
-                            [example_files[1]],
-                            example_files[1],
-                            [],
-                            [],
-                            [],
-                            [],
-                            1,
-                        ]
-                    )
-                    example_labels.append("Image redaction with local OCR")
-
-                if os.path.exists(example_files[2]):
-                    available_examples.append(
-                        [
-                            [example_files[2]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            [],
-                            ["TITLES", "PERSON", "DATE_TIME"],
-                            CHOSEN_COMPREHEND_ENTITIES,
-                            [example_files[2]],
-                            example_files[2],
-                            [],
-                            [],
-                            [],
-                            [],
-                            1,
-                        ]
-                    )
-                    example_labels.append(
-                        "PDF redaction with custom entities (Titles, Person, Dates)"
-                    )
-
-                if os.path.exists(example_files[3]):
-                    if SHOW_AWS_EXAMPLES:
-                        available_examples.append(
-                            [
-                                [example_files[3]],
-                                "AWS Textract service - all PDF types",
-                                "AWS Comprehend",
-                                ["Extract handwriting", "Extract signatures"],
-                                CHOSEN_REDACT_ENTITIES,
-                                CHOSEN_COMPREHEND_ENTITIES,
-                                [example_files[3]],
-                                example_files[3],
-                                [],
-                                [],
-                                [],
-                                [],
-                                7,
-                            ]
-                        )
-                        example_labels.append(
-                            "PDF redaction with AWS services and signature detection"
-                        )
-
-                # Add new example for custom deny list and whole page redaction
-                if (
-                    os.path.exists(example_files[3])
-                    and os.path.exists(example_files[4])
-                    and os.path.exists(example_files[5])
-                ):
-                    available_examples.append(
-                        [
-                            [example_files[3]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            [],
-                            [
-                                "CUSTOM"
-                            ],  # Use CUSTOM entity to enable deny list functionality
-                            CHOSEN_COMPREHEND_ENTITIES,
-                            [example_files[3]],
-                            example_files[3],
-                            [example_files[4]],
-                            [
-                                "Sister",
-                                "Sister City",
-                                "Sister Cities",
-                                "Friendship City",
-                            ],
-                            [example_files[5]],
-                            [
-                                2,
-                                5,
-                            ],  # pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
-                            7,
-                        ],
-                    )
-                    example_labels.append(
-                        "PDF redaction with custom deny list and whole page redaction"
-                    )
-
-                # Only create examples if we have available files
-                if available_examples:
-
-                    def show_info_box_on_click(
-                        in_doc_files,
-                        text_extract_method_radio,
-                        pii_identification_method_drop,
-                        handwrite_signature_checkbox,
-                        in_redact_entities,
-                        in_redact_comprehend_entities,
-                        prepared_pdf_state,
-                        doc_full_file_name_textbox,
-                        in_deny_list,
-                        in_deny_list_state,
-                        in_fully_redacted_list,
-                        in_fully_redacted_list_state,
-                        total_pdf_page_count,
-                    ):
-                        gr.Info(
-                            "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
-                        )
-
-                        # Convert deny_list_state, allow_list_state, and fully_redacted_list_state to lists if they are DataFrames
-                        # Handle deny_list_state
-                        deny_list_walkthrough = []
-                        if isinstance(in_deny_list_state, pd.DataFrame):
-                            # Explicitly convert empty DataFrame to empty list
-                            if in_deny_list_state.empty:
-                                deny_list_walkthrough = []
-                            else:
-                                deny_list_walkthrough = (
-                                    in_deny_list_state.iloc[:, 0]
-                                    .dropna()
-                                    .astype(str)
-                                    .tolist()
-                                )
-                        elif isinstance(in_deny_list_state, list):
-                            deny_list_walkthrough = (
-                                [str(item) for item in in_deny_list_state if item]
-                                if in_deny_list_state
-                                else []
-                            )
-                        else:
-                            # Default to empty list for any other type
-                            deny_list_walkthrough = []
-
-                        # Handle fully_redacted_list_state
-                        fully_redacted_list_walkthrough = []
-                        if isinstance(in_fully_redacted_list_state, pd.DataFrame):
-                            # Explicitly convert empty DataFrame to empty list
-                            if in_fully_redacted_list_state.empty:
-                                fully_redacted_list_walkthrough = []
-                            else:
-                                fully_redacted_list_walkthrough = (
-                                    in_fully_redacted_list_state.iloc[:, 0]
-                                    .dropna()
-                                    .astype(str)
-                                    .tolist()
-                                )
-                        elif isinstance(in_fully_redacted_list_state, list):
-                            fully_redacted_list_walkthrough = (
-                                [
-                                    str(item)
-                                    for item in in_fully_redacted_list_state
-                                    if item
-                                ]
-                                if in_fully_redacted_list_state
-                                else []
-                            )
-                        else:
-                            # Default to empty list for any other type
-                            fully_redacted_list_walkthrough = []
-
-                        # Allow list is not in examples, so always set to empty list
-                        allow_list_walkthrough = []
-
-                        # Use default local OCR method - examples don't set this directly
-                        local_ocr_method = CHOSEN_LOCAL_OCR_MODEL
-
-                        return (
-                            gr.File(value=in_doc_files),  # walkthrough_file_input
-                            gr.Dropdown(
-                                value=in_redact_entities
-                            ),  # walkthrough_in_redact_entities
-                            gr.Dropdown(
-                                value=in_redact_comprehend_entities
-                            ),  # walkthrough_in_redact_comprehend_entities
-                            gr.Radio(
-                                value=text_extract_method_radio
-                            ),  # walkthrough_text_extract_method_radio
-                            gr.Radio(
-                                value=local_ocr_method
-                            ),  # walkthrough_local_ocr_method_radio
-                            gr.CheckboxGroup(
-                                value=handwrite_signature_checkbox
-                            ),  # walkthrough_handwrite_signature_checkbox
-                            gr.Radio(
-                                value=pii_identification_method_drop
-                            ),  # walkthrough_pii_identification_method_drop
-                            gr.Dropdown(
-                                value=allow_list_walkthrough
-                            ),  # walkthrough_allow_list_state
-                            gr.Dropdown(
-                                value=deny_list_walkthrough
-                            ),  # walkthrough_deny_list_state
-                            gr.Dropdown(
-                                value=fully_redacted_list_walkthrough
-                            ),  # walkthrough_fully_redacted_list_state
-                        )
-
-                    redaction_examples = gr.Examples(
-                        examples=available_examples,
-                        inputs=[
-                            in_doc_files,
-                            text_extract_method_radio,
-                            pii_identification_method_drop,
-                            handwrite_signature_checkbox,
-                            in_redact_entities,
-                            in_redact_comprehend_entities,
-                            prepared_pdf_state,
-                            doc_full_file_name_textbox,
-                            in_deny_list,
-                            in_deny_list_state,
-                            in_fully_redacted_list,
-                            in_fully_redacted_list_state,
-                            total_pdf_page_count,
-                        ],
-                        outputs=[
-                            walkthrough_file_input,
-                            walkthrough_in_redact_entities,
-                            walkthrough_in_redact_comprehend_entities,
-                            walkthrough_text_extract_method_radio,
-                            walkthrough_local_ocr_method_radio,
-                            walkthrough_handwrite_signature_checkbox,
-                            walkthrough_pii_identification_method_drop,
-                            walkthrough_allow_list_state,
-                            walkthrough_deny_list_state,
-                            walkthrough_fully_redacted_list_state,
-                        ],
-                        example_labels=example_labels,
-                        fn=show_info_box_on_click,
-                        run_on_click=True,
-                    )
-            if SHOW_DIFFICULT_OCR_EXAMPLES:
-                gr.Markdown(
-                    "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
-                )
-                ocr_example_files = [
-                    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-                    "example_data/Difficult handwritten note.jpg",
-                    "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
-                ]
-                available_ocr_examples = list()
-                ocr_example_labels = list()
-                if os.path.exists(ocr_example_files[0]):
-                    available_ocr_examples.append(
-                        [
-                            [ocr_example_files[0]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Only extract text (no redaction)",
-                            ["Extract handwriting", "Extract signatures"],
-                            [ocr_example_files[0]],
-                            ocr_example_files[0],
-                            7,
-                            1,
-                            1,
-                            "paddle",
-                            CHOSEN_REDACT_ENTITIES,
-                        ],
-                    )
-                    ocr_example_labels.append("Baseline 'easy' document page")
-
-                    available_ocr_examples.append(
-                        [
-                            [ocr_example_files[0]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            ["Extract handwriting", "Extract signatures"],
-                            [ocr_example_files[0]],
-                            ocr_example_files[0],
-                            7,
-                            6,
-                            6,
-                            "hybrid-paddle-vlm",
-                            CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
-                        ],
-                    )
-                    ocr_example_labels.append("Scanned document page with signatures")
-
-                if os.path.exists(ocr_example_files[1]):
-                    available_ocr_examples.append(
-                        [
-                            [ocr_example_files[1]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Only extract text (no redaction)",
-                            ["Extract handwriting", "Extract signatures"],
-                            [ocr_example_files[1]],
-                            ocr_example_files[1],
-                            1,
-                            0,
-                            0,
-                            "vlm",
-                            CHOSEN_REDACT_ENTITIES,
-                        ],
-                    )
-                    ocr_example_labels.append("Unclear text on handwritten note")
-
-                if os.path.exists(ocr_example_files[2]):
-                    available_ocr_examples.append(
-                        [
-                            [ocr_example_files[2]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            ["Extract handwriting", "Extract signatures"],
-                            [ocr_example_files[2]],
-                            ocr_example_files[2],
-                            1,
-                            0,
-                            0,
-                            "hybrid-paddle-vlm",
-                            CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
-                        ],
-                    )
-                    ocr_example_labels.append("CV with photo")
-
-                # Only create examples if we have available files
-                if available_ocr_examples:
-
-                    def show_info_box_on_click(
-                        in_doc_files,
-                        text_extract_method_radio,
-                        pii_identification_method_drop,
-                        handwrite_signature_checkbox,
-                        prepared_pdf_state,
-                        doc_full_file_name_textbox,
-                        total_pdf_page_count,
-                        page_min,
-                        page_max,
-                        local_ocr_method_radio,
-                        in_redact_entities,
-                    ):
-                        gr.Info(
-                            "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
-                        )
-
-                        return (
-                            gr.File(value=in_doc_files),  # walkthrough_file_input
-                            gr.Dropdown(
-                                value=in_redact_entities
-                            ),  # walkthrough_in_redact_entities
-                            gr.Radio(
-                                value=text_extract_method_radio
-                            ),  # walkthrough_text_extract_method_radio
-                            gr.Radio(
-                                value=local_ocr_method_radio
-                            ),  # walkthrough_local_ocr_method_radio
-                            gr.CheckboxGroup(
-                                value=handwrite_signature_checkbox
-                            ),  # walkthrough_handwrite_signature_checkbox
-                            gr.Radio(
-                                value=pii_identification_method_drop
-                            ),  # walkthrough_pii_identification_method_drop
-                        )
-
-                    ocr_examples = gr.Examples(
-                        examples=available_ocr_examples,
-                        inputs=[
-                            in_doc_files,
-                            text_extract_method_radio,
-                            pii_identification_method_drop,
-                            handwrite_signature_checkbox,
-                            prepared_pdf_state,
-                            doc_full_file_name_textbox,
-                            total_pdf_page_count,
-                            page_min,
-                            page_max,
-                            local_ocr_method_radio,
-                            in_redact_entities,
-                        ],
-                        outputs=[
-                            walkthrough_file_input,
-                            walkthrough_in_redact_entities,
-                            walkthrough_text_extract_method_radio,
-                            walkthrough_local_ocr_method_radio,
-                            walkthrough_handwrite_signature_checkbox,
-                            walkthrough_pii_identification_method_drop,
-                        ],
-                        example_labels=ocr_example_labels,
-                        fn=show_info_box_on_click,
-                        run_on_click=True,
-                    )
 
             if SHOW_QUICKSTART:
                 show_main_redaction_accordion = False
@@ -2567,7 +2523,7 @@ with blocks:
                                 custom_llm_instructions_textbox.render()
                             with gr.Row(equal_height=True):
                                 with gr.Accordion(
-                                    "Terms to always include, exclude, and whole page redaction",
+                                    "Terms to always include or exclude in redactions, and whole page redaction. To add many terms at once, you can load in a file on the Redaction Settings tab.",
                                     open=True,
                                 ):
                                     with gr.Row():
@@ -3762,7 +3718,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        text_extract_method_radio.input(
+        text_extract_method_radio.change(
             fn=check_for_relevant_ocr_output_with_words,
             inputs=[
                 doc_file_name_no_extension_textbox,
@@ -3782,7 +3738,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        pii_identification_method_drop.input(
+        pii_identification_method_drop.change(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -3794,7 +3750,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        handwrite_signature_checkbox.input(
+        handwrite_signature_checkbox.change(
             fn=check_for_existing_textract_file,
             inputs=[
                 doc_file_name_no_extension_textbox,
@@ -3814,7 +3770,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        textract_output_found_checkbox.input(
+        textract_output_found_checkbox.change(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -3826,7 +3782,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        only_extract_text_radio.input(
+        only_extract_text_radio.change(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -3864,7 +3820,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        text_extract_method_radio.input(
+        text_extract_method_radio.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -3876,7 +3832,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        pii_identification_method_drop.input(
+        pii_identification_method_drop.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -3888,7 +3844,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        handwrite_signature_checkbox.input(
+        handwrite_signature_checkbox.change(
             fn=check_for_existing_textract_file,
             inputs=[
                 doc_file_name_no_extension_textbox,
@@ -3921,7 +3877,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        only_extract_text_radio.input(
+        only_extract_text_radio.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -7193,21 +7149,6 @@ with blocks:
         fn=custom_regex_load,
         inputs=[in_fully_redacted_list, in_fully_redacted_text_in],
         outputs=[in_fully_redacted_list_text, in_fully_redacted_list_state],
-    )
-
-    # The following allows for more reliable updates of the data in the custom list dataframes
-    in_allow_list_state.input(
-        update_dataframe,
-        inputs=[in_allow_list_state],
-        outputs=[in_allow_list_state],
-    )
-    in_deny_list_state.input(
-        update_dataframe, inputs=[in_deny_list_state], outputs=[in_deny_list_state]
-    )
-    in_fully_redacted_list_state.input(
-        update_dataframe,
-        inputs=[in_fully_redacted_list_state],
-        outputs=[in_fully_redacted_list_state],
     )
 
     # Apply whole page redactions from the provided whole page redaction csv file upload/list of specific page numbers given by user

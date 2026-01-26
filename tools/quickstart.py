@@ -203,6 +203,9 @@ def handle_redaction_method_selection(redaction_method):
         gr.Dropdown(
             visible=show_selected_terms_lists
         ),  # walkthrough_fully_redacted_list_state
+        gr.Column(
+            visible=show_selected_terms_lists
+        ),  # walkthrough_selected_terms_accordion_container
     )
 
 

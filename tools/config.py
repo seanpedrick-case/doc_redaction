@@ -537,7 +537,7 @@ RUN_MCP_SERVER = convert_string_to_boolean(
     get_or_create_env_var("RUN_MCP_SERVER", "False")
 )
 
-MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "10"))
+MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "15"))
 
 MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb").lower()
 

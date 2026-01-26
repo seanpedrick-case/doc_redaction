@@ -289,7 +289,10 @@ def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
                     custom_regex_df.iloc[:, 0].dropna().astype(str).tolist()
                 )
 
-            output_text = file_type + " file loaded."
+            # substitute underscores in file type
+            file_type_output = file_type.replace("_", " ")
+
+            output_text = file_type_output + " file loaded."
             print(output_text)
     else:
         output_text = "No file provided."
