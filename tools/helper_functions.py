@@ -175,9 +175,18 @@ def ensure_folder_exists(output_folder: str):
         print(f"The {output_folder} folder already exists.")
 
 
-def update_dataframe(df: pd.DataFrame):
-    df_copy = df.copy()
-    return df_copy
+def update_dataframe(df_or_list):
+    """
+    Update function for both DataFrame and list inputs.
+    For Dropdown components (list), return the list as-is.
+    For DataFrame components, return a copy.
+    """
+    if isinstance(df_or_list, list):
+        return df_or_list
+    elif isinstance(df_or_list, pd.DataFrame):
+        return df_or_list.copy()
+    else:
+        return df_or_list
 
 
 def get_file_name_without_type(file_path):
@@ -260,8 +269,9 @@ def ensure_output_folder_exists(output_folder: str):
 def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
     """
     When file is loaded, update the column dropdown choices and write to relevant data states.
+    Returns a list for Dropdown components (instead of DataFrame).
     """
-    custom_regex_df = pd.DataFrame()
+    custom_regex_list = list()
 
     if in_file:
         file_list = [string.name for string in in_file]
@@ -273,20 +283,20 @@ def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
                 regex_file_name, low_memory=False, header=None
             )
 
-            # Select just first columns
-            custom_regex_df = pd.DataFrame(custom_regex_df.iloc[:, [0]])
-            custom_regex_df.rename(columns={0: file_type}, inplace=True)
-
-            custom_regex_df.columns = custom_regex_df.columns.astype(str)
+            # Select just first column and convert to list for Dropdown component
+            if not custom_regex_df.empty:
+                custom_regex_list = (
+                    custom_regex_df.iloc[:, 0].dropna().astype(str).tolist()
+                )
 
             output_text = file_type + " file loaded."
             print(output_text)
     else:
         output_text = "No file provided."
         # print(output_text)
-        return output_text, custom_regex_df
+        return output_text, custom_regex_list
 
-    return output_text, custom_regex_df
+    return output_text, custom_regex_list
 
 
 def put_columns_in_df(in_file: List[str]):

@@ -237,15 +237,14 @@ from tools.helper_functions import (
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.quickstart import (
+    handle_main_pii_method_selection,
+    handle_main_text_extract_method_selection,
     handle_pii_method_selection,
     handle_redaction_method_selection,
     handle_step_2_next,
     handle_step_3_next,
-    handle_step_4_next,
     handle_text_extract_method_selection,
     route_walkthrough_files,
-    sync_walkthrough_outputs_to_original,
-    sync_walkthrough_tabular_outputs_to_original,
     update_step_2_on_data_file_upload,
     update_step_3_tabular_visibility,
     update_step_4_visibility,
@@ -337,6 +336,7 @@ async def lifespan(app: FastAPI):
     # (Any cleanup code would go here, e.g., closing DB connections)
     pass
 
+
 def change_tab_to_tabular_or_document_redactions(is_data_file):
     print("is_data_file: ", is_data_file)
     if is_data_file:
@@ -345,6 +345,7 @@ def change_tab_to_tabular_or_document_redactions(is_data_file):
     else:
         print("switching to document redactions tab")
         return gr.Tabs(selected=1)
+
 
 def change_tab_to_review_redactions():
     print("switching to review redactions tab")
@@ -464,40 +465,64 @@ custom_llm_instructions_textbox = gr.Textbox(
 
 # Allow / deny / fully redacted lists
 
-in_deny_list_state = gr.Dataframe(
-    value=pd.DataFrame(),
-    headers=["Always redact these words"],
-    col_count=(1, "fixed"),
-    row_count=(0, "dynamic"),
+# in_deny_list_state = gr.Dataframe(
+#     value=pd.DataFrame(),
+#     headers=["Always redact these words"],
+#     col_count=(1, "fixed"),
+#     row_count=(0, "dynamic"),
+#     label="Deny list (always redact these words)",
+#     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+#     type="pandas",
+#     interactive=True,
+#     wrap=True,
+# )
+
+in_deny_list_state = gr.Dropdown(
+    allow_custom_value=True,
     label="Deny list (always redact these words)",
-    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
-    type="pandas",
     interactive=True,
-    wrap=True,
+    multiselect=True,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
 )
 
-in_allow_list_state = gr.Dataframe(
-    value=pd.DataFrame(),
-    headers=["Never redact these words"],
-    col_count=(1, "fixed"),
-    row_count=(0, "dynamic"),
+# in_allow_list_state = gr.Dataframe(
+#     value=pd.DataFrame(),
+#     headers=["Never redact these words"],
+#     col_count=(1, "fixed"),
+#     row_count=(0, "dynamic"),
+#     label="Allow list (always exclude these words from redaction)",
+#     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+#     type="pandas",
+#     interactive=True,
+#     wrap=True,
+# )
+
+in_allow_list_state = gr.Dropdown(
+    allow_custom_value=True,
     label="Allow list (always exclude these words from redaction)",
-    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
-    type="pandas",
     interactive=True,
-    wrap=True,
+    multiselect=True,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
 )
 
-in_fully_redacted_list_state = gr.Dataframe(
-    value=pd.DataFrame(),
-    headers=["Fully redacted pages list"],
-    col_count=(1, "fixed"),
-    row_count=(0, "dynamic"),
+# in_fully_redacted_list_state = gr.Dataframe(
+#     value=pd.DataFrame(),
+#     headers=["Fully redacted pages list"],
+#     col_count=(1, "fixed"),
+#     row_count=(0, "dynamic"),
+#     label="Fully redacted pages (fully redact these page numbers)",
+#     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+#     type="pandas",
+#     interactive=True,
+#     wrap=True,
+# )
+
+in_fully_redacted_list_state = gr.Dropdown(
+    allow_custom_value=True,
     label="Fully redacted pages (fully redact these page numbers)",
-    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
-    type="pandas",
     interactive=True,
-    wrap=True,
+    multiselect=True,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
 )
 
 in_deny_list = gr.File(
@@ -1179,6 +1204,13 @@ with blocks:
         value=False, label="Page break reached", visible=False
     )
 
+    latest_file_completed_num = gr.Number(
+        value=0,
+        label="Number of documents redacted",
+        interactive=False,
+        visible=False,
+    )
+
     # Placeholders for elements that may be made visible later below depending on environment variables
     cost_code_dataframe_base = gr.Dataframe(
         value=pd.DataFrame(),
@@ -1347,7 +1379,7 @@ with blocks:
                 walkthrough_is_data_file = gr.State(value=False)
 
                 with gr.Walkthrough(selected=1) as walkthrough:
-                    with gr.Step("Step 1 - Load file", id=1):
+                    with gr.Step("Load document/data", id=1):
                         walkthrough_file_input = gr.File(
                             label="Choose a PDF document, image file (PDF, JPG, PNG), tabular data file (Excel, CSV, Parquet), or Word document (DOCX)",
                             file_count="multiple",
@@ -1371,7 +1403,7 @@ with blocks:
                                 lambda: gr.Walkthrough(selected=0), outputs=walkthrough
                             )
                             step_1_next_btn = gr.Button("Next", variant="primary")
-                    with gr.Step("Step 2 - Text extraction (OCR) method", id=2):
+                    with gr.Step("Choose text extraction (OCR) method", id=2):
                         # Components for data files (conditionally visible)
                         walkthrough_excel_sheets = gr.Dropdown(
                             choices=["Choose Excel sheets to anonymise"],
@@ -1425,7 +1457,7 @@ with blocks:
                                 lambda: gr.Walkthrough(selected=1), outputs=walkthrough
                             )
                             step_2_next_btn = gr.Button("Next", variant="primary")
-                    with gr.Step("Step 3 - PII detection method", id=3):
+                    with gr.Step("Choose PII detection method", id=3):
                         # Redaction method selection (at the top of Step 3)
                         walkthrough_redaction_method_dropdown = gr.Radio(
                             label="Choose redaction method",
@@ -1489,38 +1521,56 @@ with blocks:
 
                         with gr.Row():
                             # Components for "Redact selected terms" option (conditionally visible)
-                            walkthrough_deny_list_state = gr.Dataframe(
-                                value=pd.DataFrame(),
-                                headers=["Always redact these words"],
-                                col_count=(1, "fixed"),
-                                row_count=(0, "dynamic"),
+                            # walkthrough_deny_list_state = gr.Dataframe(
+                            #     value=pd.DataFrame(),
+                            #     headers=["Always redact these words"],
+                            #     col_count=(1, "fixed"),
+                            #     row_count=(0, "dynamic"),
+                            #     label="Deny list (always redact these words)",
+                            #     visible=False,
+                            #     type="pandas",
+                            #     interactive=True,
+                            #     wrap=True,
+                            # )
+                            walkthrough_deny_list_state = gr.Dropdown(
+                                allow_custom_value=True,
                                 label="Deny list (always redact these words)",
-                                visible=False,
-                                type="pandas",
                                 interactive=True,
-                                wrap=True,
+                                multiselect=True,
                             )
-                            walkthrough_allow_list_state = gr.Dataframe(
-                                value=pd.DataFrame(),
-                                headers=["Never redact these words"],
-                                col_count=(1, "fixed"),
-                                row_count=(0, "dynamic"),
+                            # walkthrough_allow_list_state = gr.Dataframe(
+                            #     value=pd.DataFrame(),
+                            #     headers=["Never redact these words"],
+                            #     col_count=(1, "fixed"),
+                            #     row_count=(0, "dynamic"),
+                            #     label="Allow list (always exclude these words from redaction)",
+                            #     visible=False,
+                            #     type="pandas",
+                            #     interactive=True,
+                            #     wrap=True,
+                            # )
+                            walkthrough_allow_list_state = gr.Dropdown(
+                                allow_custom_value=True,
                                 label="Allow list (always exclude these words from redaction)",
-                                visible=False,
-                                type="pandas",
                                 interactive=True,
-                                wrap=True,
+                                multiselect=True,
                             )
-                            walkthrough_fully_redacted_list_state = gr.Dataframe(
-                                value=pd.DataFrame(),
-                                headers=["Fully redacted pages list"],
-                                col_count=(1, "fixed"),
-                                row_count=(0, "dynamic"),
+                            # walkthrough_fully_redacted_list_state = gr.Dataframe(
+                            #     value=pd.DataFrame(),
+                            #     headers=["Fully redacted pages list"],
+                            #     col_count=(1, "fixed"),
+                            #     row_count=(0, "dynamic"),
+                            #     label="Fully redacted pages (fully redact these page numbers)",
+                            #     visible=False,
+                            #     type="pandas",
+                            #     interactive=True,
+                            #     wrap=True,
+                            # )
+                            walkthrough_fully_redacted_list_state = gr.Dropdown(
+                                allow_custom_value=True,
                                 label="Fully redacted pages (fully redact these page numbers)",
-                                visible=False,
-                                type="pandas",
                                 interactive=True,
-                                wrap=True,
+                                multiselect=True,
                             )
 
                         # Tabular data redaction options (conditionally visible for data files)
@@ -1554,9 +1604,12 @@ with blocks:
                                 lambda: gr.Walkthrough(selected=2), outputs=walkthrough
                             )
                             step_3_next_btn = gr.Button("Next", variant="primary")
-                    with gr.Step("Step 4 - select pages and costs", id=4):
+                    with gr.Step("Redact", id=4):
                         # Page selection (always visible)
-                        with gr.Accordion("Page selection", open=True):
+                        with gr.Accordion(
+                            "Redact only selected pages (default is all pages)",
+                            open=False,
+                        ):
                             with gr.Row():
                                 walkthrough_page_min = gr.Number(
                                     value=DEFAULT_PAGE_MIN,
@@ -1573,14 +1626,18 @@ with blocks:
                                     label="Highest page to redact (set to 0 to redact to the last page)",
                                 )
                         # Currently not visible as not updating correctly
-                        with gr.Accordion("Costs and time taken estimates", open=True, visible=False):
+                        with gr.Accordion(
+                            "Costs and time taken estimates", open=True, visible=False
+                        ):
                             with gr.Row():
                                 # Cost-related components (conditionally visible)
-                                walkthrough_textract_output_found_checkbox = gr.Checkbox(
-                                    value=False,
-                                    label="Existing Textract output file found",
-                                    interactive=False,
-                                    visible=SHOW_COSTS,
+                                walkthrough_textract_output_found_checkbox = (
+                                    gr.Checkbox(
+                                        value=False,
+                                        label="Existing Textract output file found",
+                                        interactive=False,
+                                        visible=SHOW_COSTS,
+                                    )
                                 )
                                 walkthrough_relevant_ocr_output_with_words_found_checkbox = gr.Checkbox(
                                     value=False,
@@ -1609,10 +1666,12 @@ with blocks:
                                     interactive=False,
                                 )
                         show_cost_codes = GET_COST_CODES or ENFORCE_COST_CODES
-                        with gr.Accordion("Cost code selection", open=True, visible=show_cost_codes):
+                        with gr.Accordion(
+                            "Cost code selection", open=True, visible=show_cost_codes
+                        ):
                             with gr.Row():
                                 # Cost code components (conditionally visible)
-                                
+
                                 with gr.Column():
                                     walkthrough_cost_code_dataframe = gr.Dataframe(
                                         value=pd.DataFrame(
@@ -1627,9 +1686,11 @@ with blocks:
                                         wrap=True,
                                         max_height=200,
                                     )
-                                    walkthrough_reset_cost_code_dataframe_button = gr.Button(
-                                        value="Reset code code table filter",
-                                        visible=show_cost_codes,
+                                    walkthrough_reset_cost_code_dataframe_button = (
+                                        gr.Button(
+                                            value="Reset code code table filter",
+                                            visible=show_cost_codes,
+                                        )
                                     )
                                 with gr.Column():
                                     walkthrough_cost_code_choice_drop = gr.Dropdown(
@@ -1681,10 +1742,18 @@ with blocks:
                             )
                             step_4_next_document_redact_btn.click(
                                 fn=lambda: None, js=TRIGGER_DOCUMENT_REDACT_BUTTON
-                            ).then(change_tab_to_tabular_or_document_redactions, inputs=walkthrough_is_data_file, outputs=tabs)
+                            ).then(
+                                change_tab_to_tabular_or_document_redactions,
+                                inputs=walkthrough_is_data_file,
+                                outputs=tabs,
+                            )
                             step_4_next_tabular_redact_btn.click(
                                 fn=lambda: None, js=TRIGGER_TABULAR_REDACT_BUTTON
-                            ).then(change_tab_to_tabular_or_document_redactions, inputs=walkthrough_is_data_file, outputs=tabs)
+                            ).then(
+                                change_tab_to_tabular_or_document_redactions,
+                                inputs=walkthrough_is_data_file,
+                                outputs=tabs,
+                            )
 
             ###
             # QUICKSTART WALKTHROUGH EVENT HANDLERS
@@ -1848,14 +1917,12 @@ with blocks:
             #     ],
             # )
 
-
             # if walkthrough_is_data_file.value:
             # step_4_next_btn.click(
             #     fn=change_tab_to_tabular_or_document_redactions,
             #     inputs=walkthrough_is_data_file,
             #     outputs=tabs,
             # )
-
 
             # Reset cost code dataframe filter in walkthrough
             if GET_COST_CODES or ENFORCE_COST_CODES:
@@ -1945,9 +2012,9 @@ with blocks:
                             [example_files[0]],
                             example_files[0],
                             [],
-                            pd.DataFrame(),
                             [],
-                            pd.DataFrame(),
+                            [],
+                            [],
                             2,
                         ]
                     )
@@ -1965,9 +2032,9 @@ with blocks:
                             [example_files[1]],
                             example_files[1],
                             [],
-                            pd.DataFrame(),
                             [],
-                            pd.DataFrame(),
+                            [],
+                            [],
                             1,
                         ]
                     )
@@ -1985,9 +2052,9 @@ with blocks:
                             [example_files[2]],
                             example_files[2],
                             [],
-                            pd.DataFrame(),
                             [],
-                            pd.DataFrame(),
+                            [],
+                            [],
                             1,
                         ]
                     )
@@ -2008,9 +2075,9 @@ with blocks:
                                 [example_files[3]],
                                 example_files[3],
                                 [],
-                                pd.DataFrame(),
                                 [],
-                                pd.DataFrame(),
+                                [],
+                                [],
                                 7,
                             ]
                         )
@@ -2037,18 +2104,17 @@ with blocks:
                             [example_files[3]],
                             example_files[3],
                             [example_files[4]],
-                            pd.DataFrame(
-                                data={
-                                    "deny_list": [
-                                        "Sister",
-                                        "Sister City",
-                                        "Sister Cities",
-                                        "Friendship City",
-                                    ]
-                                }
-                            ),
+                            [
+                                "Sister",
+                                "Sister City",
+                                "Sister Cities",
+                                "Friendship City",
+                            ],
                             [example_files[5]],
-                            pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
+                            [
+                                2,
+                                5,
+                            ],  # pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
                             7,
                         ],
                     )
@@ -2078,6 +2144,94 @@ with blocks:
                             "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
                         )
 
+                        # Convert deny_list_state, allow_list_state, and fully_redacted_list_state to lists if they are DataFrames
+                        # Handle deny_list_state
+                        deny_list_walkthrough = []
+                        if isinstance(in_deny_list_state, pd.DataFrame):
+                            # Explicitly convert empty DataFrame to empty list
+                            if in_deny_list_state.empty:
+                                deny_list_walkthrough = []
+                            else:
+                                deny_list_walkthrough = (
+                                    in_deny_list_state.iloc[:, 0]
+                                    .dropna()
+                                    .astype(str)
+                                    .tolist()
+                                )
+                        elif isinstance(in_deny_list_state, list):
+                            deny_list_walkthrough = (
+                                [str(item) for item in in_deny_list_state if item]
+                                if in_deny_list_state
+                                else []
+                            )
+                        else:
+                            # Default to empty list for any other type
+                            deny_list_walkthrough = []
+
+                        # Handle fully_redacted_list_state
+                        fully_redacted_list_walkthrough = []
+                        if isinstance(in_fully_redacted_list_state, pd.DataFrame):
+                            # Explicitly convert empty DataFrame to empty list
+                            if in_fully_redacted_list_state.empty:
+                                fully_redacted_list_walkthrough = []
+                            else:
+                                fully_redacted_list_walkthrough = (
+                                    in_fully_redacted_list_state.iloc[:, 0]
+                                    .dropna()
+                                    .astype(str)
+                                    .tolist()
+                                )
+                        elif isinstance(in_fully_redacted_list_state, list):
+                            fully_redacted_list_walkthrough = (
+                                [
+                                    str(item)
+                                    for item in in_fully_redacted_list_state
+                                    if item
+                                ]
+                                if in_fully_redacted_list_state
+                                else []
+                            )
+                        else:
+                            # Default to empty list for any other type
+                            fully_redacted_list_walkthrough = []
+
+                        # Allow list is not in examples, so always set to empty list
+                        allow_list_walkthrough = []
+
+                        # Use default local OCR method - examples don't set this directly
+                        local_ocr_method = CHOSEN_LOCAL_OCR_MODEL
+
+                        return (
+                            gr.File(value=in_doc_files),  # walkthrough_file_input
+                            gr.Dropdown(
+                                value=in_redact_entities
+                            ),  # walkthrough_in_redact_entities
+                            gr.Dropdown(
+                                value=in_redact_comprehend_entities
+                            ),  # walkthrough_in_redact_comprehend_entities
+                            gr.Radio(
+                                value=text_extract_method_radio
+                            ),  # walkthrough_text_extract_method_radio
+                            gr.Radio(
+                                value=local_ocr_method
+                            ),  # walkthrough_local_ocr_method_radio
+                            gr.CheckboxGroup(
+                                value=handwrite_signature_checkbox
+                            ),  # walkthrough_handwrite_signature_checkbox
+                            gr.Radio(
+                                value=pii_identification_method_drop
+                            ),  # walkthrough_pii_identification_method_drop
+                            gr.Dropdown(
+                                value=allow_list_walkthrough
+                            ),  # walkthrough_allow_list_state
+                            gr.Dropdown(
+                                value=deny_list_walkthrough
+                            ),  # walkthrough_deny_list_state
+                            gr.Dropdown(
+                                value=fully_redacted_list_walkthrough
+                            ),  # walkthrough_fully_redacted_list_state
+                        )
+
                     redaction_examples = gr.Examples(
                         examples=available_examples,
                         inputs=[
@@ -2094,6 +2248,18 @@ with blocks:
                             in_fully_redacted_list,
                             in_fully_redacted_list_state,
                             total_pdf_page_count,
+                        ],
+                        outputs=[
+                            walkthrough_file_input,
+                            walkthrough_in_redact_entities,
+                            walkthrough_in_redact_comprehend_entities,
+                            walkthrough_text_extract_method_radio,
+                            walkthrough_local_ocr_method_radio,
+                            walkthrough_handwrite_signature_checkbox,
+                            walkthrough_pii_identification_method_drop,
+                            walkthrough_allow_list_state,
+                            walkthrough_deny_list_state,
+                            walkthrough_fully_redacted_list_state,
                         ],
                         example_labels=example_labels,
                         fn=show_info_box_on_click,
@@ -2201,6 +2367,25 @@ with blocks:
                             "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
                         )
 
+                        return (
+                            gr.File(value=in_doc_files),  # walkthrough_file_input
+                            gr.Dropdown(
+                                value=in_redact_entities
+                            ),  # walkthrough_in_redact_entities
+                            gr.Radio(
+                                value=text_extract_method_radio
+                            ),  # walkthrough_text_extract_method_radio
+                            gr.Radio(
+                                value=local_ocr_method_radio
+                            ),  # walkthrough_local_ocr_method_radio
+                            gr.CheckboxGroup(
+                                value=handwrite_signature_checkbox
+                            ),  # walkthrough_handwrite_signature_checkbox
+                            gr.Radio(
+                                value=pii_identification_method_drop
+                            ),  # walkthrough_pii_identification_method_drop
+                        )
+
                     ocr_examples = gr.Examples(
                         examples=available_ocr_examples,
                         inputs=[
@@ -2216,6 +2401,14 @@ with blocks:
                             local_ocr_method_radio,
                             in_redact_entities,
                         ],
+                        outputs=[
+                            walkthrough_file_input,
+                            walkthrough_in_redact_entities,
+                            walkthrough_text_extract_method_radio,
+                            walkthrough_local_ocr_method_radio,
+                            walkthrough_handwrite_signature_checkbox,
+                            walkthrough_pii_identification_method_drop,
+                        ],
                         example_labels=ocr_example_labels,
                         fn=show_info_box_on_click,
                         run_on_click=True,
@@ -2225,7 +2418,7 @@ with blocks:
                 show_main_redaction_accordion = False
             else:
                 show_main_redaction_accordion = True
-            
+
             with gr.Accordion("Redaction settings", open=show_main_redaction_accordion):
                 in_doc_files.render()
                 open_tab_text = ""
@@ -2255,37 +2448,57 @@ with blocks:
                 ):
 
                     if SHOW_OCR_GUI_OPTIONS:
-
                         with gr.Accordion(
                             "Change default text extraction OCR method",
                             open=True,
                             visible=SHOW_OCR_GUI_OPTIONS,
                         ):
                             text_extract_method_radio.render()
-                            with gr.Accordion(
+                            # Store accordion references for dynamic visibility control
+                            # Initialize visibility based on default text extraction method
+                            local_ocr_accordion = gr.Accordion(
                                 label="Change default local OCR model",
                                 open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
-                            ):
+                                visible=(
+                                    DEFAULT_TEXT_EXTRACTION_MODEL
+                                    == TESSERACT_TEXT_EXTRACT_OPTION
+                                ),
+                            )
+                            with local_ocr_accordion:
                                 local_ocr_method_radio.render()
 
-                            with gr.Accordion(
+                            inference_server_vlm_accordion = gr.Accordion(
                                 "Inference Server VLM Model (for inference-server OCR only)",
                                 open=False,
-                                visible=SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
-                            ):
+                                visible=(
+                                    SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS
+                                    and DEFAULT_TEXT_EXTRACTION_MODEL
+                                    == TESSERACT_TEXT_EXTRACT_OPTION
+                                ),
+                            )
+                            with inference_server_vlm_accordion:
                                 inference_server_vlm_model_textbox.render()
 
-                            with gr.Accordion(
+                            aws_textract_signature_accordion = gr.Accordion(
                                 "Enable AWS Textract signature detection (default is off)",
                                 open=False,
-                                visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
-                            ):
+                                visible=(
+                                    SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+                                    and DEFAULT_TEXT_EXTRACTION_MODEL
+                                    == TEXTRACT_TEXT_EXTRACT_OPTION
+                                ),
+                            )
+                            with aws_textract_signature_accordion:
                                 handwrite_signature_checkbox.render()
                     else:
                         text_extract_method_radio.render()
                         local_ocr_method_radio.render()
                         inference_server_vlm_model_textbox.render()
                         handwrite_signature_checkbox.render()
+                        # Create hidden accordions for consistency (so event handlers can reference them)
+                        local_ocr_accordion = gr.Accordion(visible=False)
+                        inference_server_vlm_accordion = gr.Accordion(visible=False)
+                        aws_textract_signature_accordion = gr.Accordion(visible=False)
 
                     if SHOW_PII_IDENTIFICATION_OPTIONS:
                         with gr.Accordion(
@@ -2299,29 +2512,62 @@ with blocks:
                                 with gr.Accordion(
                                     "Select entity types to redact", open=True
                                 ):
-                                    with gr.Accordion(
-                                        "Local model PII identification model entities",
-                                        open=False,
-                                    ):
-                                        in_redact_entities.render()
-                                    with gr.Accordion(
-                                        "AWS Comprehend PII identification model entities",
-                                        open=False,
-                                    ):
-                                        in_redact_comprehend_entities.render()
-                                    with gr.Accordion(
-                                        "LLM PII identification model entities",
-                                        open=False,
-                                    ):
-                                        in_redact_llm_entities.render()
-                                with gr.Accordion(
-                                    "LLM Custom Instructions (for LLM-based PII detection only)",
-                                    open=True,
-                                ):
-                                    custom_llm_instructions_textbox.render()
+                                    # Store accordion references for dynamic visibility control
+                                    # Determine initial visibility based on default PII method
+                                    default_pii_method = DEFAULT_PII_DETECTION_MODEL
+                                    is_no_redaction_init = (
+                                        default_pii_method == NO_REDACTION_PII_OPTION
+                                    )
+                                    show_local_entities_init = (
+                                        not is_no_redaction_init
+                                        and (default_pii_method == LOCAL_PII_OPTION)
+                                    )
+                                    show_comprehend_entities_init = (
+                                        not is_no_redaction_init
+                                        and (default_pii_method == AWS_PII_OPTION)
+                                    )
+                                    is_llm_method_init = not is_no_redaction_init and (
+                                        default_pii_method
+                                        == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+                                        or default_pii_method
+                                        == INFERENCE_SERVER_PII_OPTION
+                                        or default_pii_method == AWS_LLM_PII_OPTION
+                                    )
+
+                                    # local_entities_accordion = gr.Accordion(
+                                    #     "Local model PII identification model entities",
+                                    #     open=False,
+                                    #     visible=show_local_entities_init,
+                                    # )
+                                    # with local_entities_accordion:
+                                    in_redact_entities.render()
+
+                                    # comprehend_entities_accordion = gr.Accordion(
+                                    #     "AWS Comprehend PII identification model entities",
+                                    #     open=False,
+                                    #     visible=show_comprehend_entities_init,
+                                    # )
+                                    # with comprehend_entities_accordion:
+                                    in_redact_comprehend_entities.render()
+
+                                    # llm_entities_accordion = gr.Accordion(
+                                    #     "LLM PII identification model entities",
+                                    #     open=False,
+                                    #     visible=is_llm_method_init,
+                                    # )
+                                    # with llm_entities_accordion:
+                                    in_redact_llm_entities.render()
+
+                                # llm_custom_instructions_accordion = gr.Accordion(
+                                #     "LLM Custom Instructions (for LLM-based PII detection only)",
+                                #     open=True,
+                                #     visible=is_llm_method_init,
+                                # )
+                                # with llm_custom_instructions_accordion:
+                                custom_llm_instructions_textbox.render()
                             with gr.Row(equal_height=True):
                                 with gr.Accordion(
-                                    "Manually modify terms to always exclude from redaction (allow list), always redact (deny list), or whole page numbers to fully redact (fully redacted pages list). Click the plus button to add the first row, thereafter click the three dots to the right of the row - add row below - to add more. (NOTE: you need to press Enter after modifying/adding an entry to the lists to apply them)",
+                                    "Terms to always include, exclude, and whole page redaction",
                                     open=True,
                                 ):
                                     with gr.Row():
@@ -2338,6 +2584,11 @@ with blocks:
                         in_allow_list_state.render()
                         in_deny_list_state.render()
                         in_fully_redacted_list_state.render()
+                        # Create hidden accordions for consistency (so event handlers can reference them)
+                        # local_entities_accordion = gr.Accordion(visible=False)
+                        # comprehend_entities_accordion = gr.Accordion(visible=False)
+                        # llm_entities_accordion = gr.Accordion(visible=False)
+                        # llm_custom_instructions_accordion = gr.Accordion(visible=False)
 
                 if SHOW_COSTS:
                     with gr.Accordion(
@@ -2485,32 +2736,29 @@ with blocks:
                                 )
 
             with gr.Accordion(label="Extract text and redact document", open=True):
-                gr.Markdown(
-                    """If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the Redaction Settings tab."""
-                )
+                # gr.Markdown(
+                #     """If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the Redaction Settings tab."""
+                # )
                 document_redact_btn = gr.Button(
-                    "Extract text and redact document", variant="primary", scale=4, elem_id="document-redact-btn"
+                    "Extract text and redact document",
+                    variant="secondary",
+                    scale=4,
+                    elem_id="document-redact-btn",
                 )
 
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     with gr.Column(scale=1):
                         redaction_output_summary_textbox = gr.Textbox(
                             label="Output summary", scale=1, lines=4
-                        )
-                        go_to_review_redactions_tab_btn = gr.Button(
-                            "Review and modify redactions", variant="secondary", scale=1
                         )
                     with gr.Column(scale=2):
                         output_file = gr.File(
                             label="Output files", scale=2
                         )  # , height=FILE_INPUT_HEIGHT)
 
-                    latest_file_completed_num = gr.Number(
-                        value=0,
-                        label="Number of documents redacted",
-                        interactive=False,
-                        visible=False,
-                    )
+                go_to_review_redactions_tab_btn = gr.Button(
+                    "Review and modify redactions", variant="primary", scale=1
+                )
 
             # Feedback elements are invisible until revealed by redaction action
             pdf_feedback_title = gr.Markdown(
@@ -2550,7 +2798,9 @@ with blocks:
                 visible=False,
             )
 
-            with gr.Accordion(label="Upload PDFs/images and OCR results for review", open=False):
+            with gr.Accordion(
+                label="Upload PDFs/images and OCR results for review", open=False
+            ):
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=2):
                         input_pdf_for_review = gr.File(
@@ -3152,6 +3402,14 @@ with blocks:
                             "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' below to run the example."
                         )
 
+                        return (
+                            gr.File(value=in_data_files),  # walkthrough_file_input
+                            gr.Radio(
+                                value=pii_identification_method_drop_tabular
+                            ),  # walkthrough_pii_identification_method_drop_tabular
+                            gr.Radio(value=anon_strategy),  # walkthrough_anon_strategy
+                        )
+
                     tabular_examples = gr.Examples(
                         examples=available_tabular_examples,
                         inputs=[
@@ -3163,12 +3421,20 @@ with blocks:
                             tabular_text_columns,
                             tabular_min_word_count,
                         ],
+                        outputs=[
+                            walkthrough_file_input,
+                            walkthrough_pii_identification_method_drop_tabular,
+                            walkthrough_anon_strategy,
+                        ],
                         example_labels=tabular_example_labels,
                         fn=show_tabular_info_box_on_click,
                         run_on_click=True,
                     )
 
-            with gr.Accordion("Redact Word or Excel/csv files options", open=show_main_redaction_accordion):
+            with gr.Accordion(
+                "Redact Word or Excel/csv files options",
+                open=show_main_redaction_accordion,
+            ):
                 with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
                     in_data_files.render()
                 with gr.Accordion("Redact open text", open=False):
@@ -3190,11 +3456,13 @@ with blocks:
                 ):
                     with gr.Row():
                         anon_strategy.render()
-                        
+
                         do_initial_clean.render()
 
                 tabular_data_redact_btn = gr.Button(
-                    "Redact text/data files", variant="primary", elem_id="tabular-redact-btn"
+                    "Redact text/data files",
+                    variant="primary",
+                    elem_id="tabular-redact-btn",
                 )
 
             with gr.Accordion(label="Redact Word/data files", open=True):
@@ -3703,6 +3971,31 @@ with blocks:
             fn=auto_set_local_ocr_for_bedrock_vlm,
             inputs=[text_extract_method_radio],
             outputs=[local_ocr_method_radio],
+        )
+
+        # Dynamic visibility handlers for main redaction tab
+        # Update visibility of OCR-related accordions based on text extraction method selection
+        text_extract_method_radio.change(
+            fn=handle_main_text_extract_method_selection,
+            inputs=[text_extract_method_radio],
+            outputs=[
+                local_ocr_accordion,
+                inference_server_vlm_accordion,
+                aws_textract_signature_accordion,
+            ],
+        )
+
+        # Update visibility of PII-related accordions based on PII method selection
+        pii_identification_method_drop.change(
+            fn=handle_main_pii_method_selection,
+            inputs=[pii_identification_method_drop],
+            outputs=[
+                pii_identification_method_drop,  # Keep visible so user can change
+                in_redact_entities,
+                in_redact_comprehend_entities,
+                in_redact_llm_entities,
+                custom_llm_instructions_textbox,
+            ],
         )
 
     # Allow user to select items from cost code dataframe for cost code
@@ -4469,8 +4762,6 @@ with blocks:
         ],
         show_progress_on=[annotator],
     )
-
-    
 
     go_to_review_redactions_tab_btn.click(
         fn=change_tab_to_review_redactions,

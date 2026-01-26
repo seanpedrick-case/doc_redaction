@@ -535,11 +535,12 @@ def anonymise_files_with_open_text(
     if not out_file_paths:
         out_file_paths = list()
 
+    # Handle both list (new Dropdown format) and DataFrame (legacy)
     if isinstance(in_allow_list, list):
-        if in_allow_list:
-            in_allow_list_flat = in_allow_list
-        else:
-            in_allow_list_flat = list()
+        # Dropdown component returns a list directly
+        in_allow_list_flat = (
+            [str(item) for item in in_allow_list if item] if in_allow_list else list()
+        )
     elif isinstance(in_allow_list, pd.DataFrame):
         if not in_allow_list.empty:
             in_allow_list_flat = list(in_allow_list.iloc[:, 0].unique())
@@ -1111,11 +1112,12 @@ def anonymise_script(
     results_by_column = dict()
     key_string = ""
 
+    # Handle both list (new Dropdown format) and DataFrame (legacy)
     if isinstance(in_allow_list, list):
-        if in_allow_list:
-            in_allow_list_flat = in_allow_list
-        else:
-            in_allow_list_flat = list()
+        # Dropdown component returns a list directly
+        in_allow_list_flat = (
+            [str(item) for item in in_allow_list if item] if in_allow_list else list()
+        )
     elif isinstance(in_allow_list, pd.DataFrame):
         if not in_allow_list.empty:
             in_allow_list_flat = list(in_allow_list.iloc[:, 0].unique())
@@ -1150,7 +1152,15 @@ def anonymise_script(
         print(out_message)
         raise Exception(out_message)
 
-    if isinstance(in_deny_list, pd.DataFrame):
+    # Handle both list (new Dropdown format) and DataFrame (legacy)
+    if isinstance(in_deny_list, list):
+        # Dropdown component returns a list directly
+        in_deny_list = (
+            [str(item) for item in in_deny_list if item] if in_deny_list else list()
+        )
+        # Sort the strings in order from the longest string to the shortest
+        in_deny_list = sorted(in_deny_list, key=len, reverse=True)
+    elif isinstance(in_deny_list, pd.DataFrame):
         if not in_deny_list.empty:
             in_deny_list = in_deny_list.iloc[:, 0].tolist()
         else:

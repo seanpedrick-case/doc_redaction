@@ -812,12 +812,17 @@ def choose_and_run_redactor(
     if isinstance(in_allow_list, str):
         if in_allow_list:
             in_allow_list = pd.read_csv(in_allow_list, header=None)
-    # Now, should be a pandas dataframe format
+    # Handle both DataFrame (legacy) and list (new Dropdown format)
     if isinstance(in_allow_list, pd.DataFrame):
         if not in_allow_list.empty:
             in_allow_list_flat = in_allow_list.iloc[:, 0].tolist()
         else:
             in_allow_list_flat = list()
+    elif isinstance(in_allow_list, list):
+        # Dropdown component returns a list directly
+        in_allow_list_flat = (
+            [str(item) for item in in_allow_list if item] if in_allow_list else list()
+        )
     else:
         in_allow_list_flat = list()
 
@@ -827,11 +832,21 @@ def choose_and_run_redactor(
         if in_deny_list:
             in_deny_list = pd.read_csv(in_deny_list, header=None)
 
+    # Handle both DataFrame (legacy) and list (new Dropdown format)
     if isinstance(in_deny_list, pd.DataFrame):
         if not in_deny_list.empty:
             custom_recogniser_word_list_flat = in_deny_list.iloc[:, 0].tolist()
         else:
             custom_recogniser_word_list_flat = list()
+        # Sort the strings in order from the longest string to the shortest
+        custom_recogniser_word_list_flat = sorted(
+            custom_recogniser_word_list_flat, key=len, reverse=True
+        )
+    elif isinstance(in_deny_list, list):
+        # Dropdown component returns a list directly
+        custom_recogniser_word_list_flat = (
+            [str(item) for item in in_deny_list if item] if in_deny_list else list()
+        )
         # Sort the strings in order from the longest string to the shortest
         custom_recogniser_word_list_flat = sorted(
             custom_recogniser_word_list_flat, key=len, reverse=True
@@ -844,6 +859,7 @@ def choose_and_run_redactor(
     if isinstance(redact_whole_page_list, str):
         if redact_whole_page_list:
             redact_whole_page_list = pd.read_csv(redact_whole_page_list, header=None)
+    # Handle both DataFrame (legacy) and list (new Dropdown format)
     if isinstance(redact_whole_page_list, pd.DataFrame):
         if not redact_whole_page_list.empty:
             try:
@@ -856,6 +872,25 @@ def choose_and_run_redactor(
                     e,
                 )
                 redact_whole_page_list_flat = redact_whole_page_list.iloc[:, 0].tolist()
+        else:
+            redact_whole_page_list_flat = list()
+    elif isinstance(redact_whole_page_list, list):
+        # Dropdown component returns a list directly
+        if redact_whole_page_list:
+            try:
+                # Try to convert to integers for page numbers
+                redact_whole_page_list_flat = [
+                    int(item) for item in redact_whole_page_list if item
+                ]
+            except (ValueError, TypeError) as e:
+                print(
+                    "Could not convert whole page redaction data to number list due to:",
+                    e,
+                )
+                # Fall back to string list if conversion fails
+                redact_whole_page_list_flat = [
+                    str(item) for item in redact_whole_page_list if item
+                ]
         else:
             redact_whole_page_list_flat = list()
     else:
@@ -4461,7 +4496,8 @@ def redact_image_pdf(
         desc="PII detection pass",
     )
 
-    redacted_image = image.copy()
+    # Initialize redacted_image - will be updated inside loop for image files
+    redacted_image = None
 
     for page_no in pii_progress_bar:
 
@@ -4494,6 +4530,30 @@ def redact_image_pdf(
         page_height = page_data["page_height"]
         image = page_data["image"]
         reported_page_number = page_data["reported_page_number"]
+
+        # Initialize redacted_image for image files as fallback (will be updated if redactions are applied)
+        if is_pdf(file_path) is False and redacted_image is None:
+            # Try to get image from image_path or use the image from page_data
+            if isinstance(image_path, str):
+                try:
+                    normalized_path = os.path.normpath(os.path.abspath(image_path))
+                    is_gradio_temp = (
+                        "gradio" in normalized_path.lower()
+                        and "temp" in normalized_path.lower()
+                    )
+                    if is_gradio_temp or validate_path_containment(
+                        normalized_path, input_folder
+                    ):
+                        redacted_image = Image.open(normalized_path)
+                    else:
+                        redacted_image = image if image is not None else None
+                except Exception as e:
+                    print(f"Error loading image for redacted_image fallback: {e}")
+                    redacted_image = image if image is not None else None
+            elif isinstance(image_path, Image.Image):
+                redacted_image = image_path
+            else:
+                redacted_image = image if image is not None else None
 
         page_image_annotations = {"image": image_path, "boxes": []}
         page_break_return = False
@@ -4744,6 +4804,9 @@ def redact_image_pdf(
                         except Exception as e:
                             print(f"Error drawing rectangle: {e}")
 
+                    # Update redacted_image with the redacted version for image files
+                    redacted_image = image
+
                     page_image_annotations = {
                         "image": file_path,
                         "boxes": all_image_annotations_boxes,
@@ -4789,8 +4852,47 @@ def redact_image_pdf(
                 tqdm._instances.clear()
 
                 if is_pdf(file_path) is False:
-                    pdf_image_file_paths.append(redacted_image)  # .append(image_path)
-                    pymupdf_doc = pdf_image_file_paths
+                    # Ensure redacted_image is set before appending (timeout case)
+                    if redacted_image is None:
+                        # Fallback: try to use image_path or image from page_data
+                        if isinstance(image_path, str):
+                            try:
+                                normalized_path = os.path.normpath(
+                                    os.path.abspath(image_path)
+                                )
+                                is_gradio_temp = (
+                                    "gradio" in normalized_path.lower()
+                                    and "temp" in normalized_path.lower()
+                                )
+                                if is_gradio_temp or validate_path_containment(
+                                    normalized_path, input_folder
+                                ):
+                                    redacted_image = Image.open(normalized_path)
+                                else:
+                                    redacted_image = (
+                                        image if image is not None else image_path
+                                    )
+                            except Exception as e:
+                                print(
+                                    f"Error loading image for redacted_image timeout fallback: {e}"
+                                )
+                                redacted_image = (
+                                    image if image is not None else image_path
+                                )
+                        elif isinstance(image_path, Image.Image):
+                            redacted_image = image_path
+                        else:
+                            redacted_image = image if image is not None else image_path
+
+                    if redacted_image is not None:
+                        pdf_image_file_paths.append(
+                            redacted_image
+                        )  # .append(image_path)
+                        pymupdf_doc = pdf_image_file_paths
+                    else:
+                        print(
+                            f"Warning: redacted_image is None for image file {file_path} in timeout case, skipping append"
+                        )
 
                 # Check if the image_path already exists in annotations_all_pages
                 existing_index = next(
@@ -4861,8 +4963,39 @@ def redact_image_pdf(
 
         # If it's an image file
         if is_pdf(file_path) is False:
-            pdf_image_file_paths.append(redacted_image)  # .append(image_path)
-            pymupdf_doc = pdf_image_file_paths
+            # Ensure redacted_image is set before appending
+            if redacted_image is None:
+                # Fallback: try to use image_path or image from page_data
+                if isinstance(image_path, str):
+                    try:
+                        normalized_path = os.path.normpath(os.path.abspath(image_path))
+                        is_gradio_temp = (
+                            "gradio" in normalized_path.lower()
+                            and "temp" in normalized_path.lower()
+                        )
+                        if is_gradio_temp or validate_path_containment(
+                            normalized_path, input_folder
+                        ):
+                            redacted_image = Image.open(normalized_path)
+                        else:
+                            redacted_image = image if image is not None else image_path
+                    except Exception as e:
+                        print(
+                            f"Error loading image for redacted_image final fallback: {e}"
+                        )
+                        redacted_image = image if image is not None else image_path
+                elif isinstance(image_path, Image.Image):
+                    redacted_image = image_path
+                else:
+                    redacted_image = image if image is not None else image_path
+
+            if redacted_image is not None:
+                pdf_image_file_paths.append(redacted_image)  # .append(image_path)
+                pymupdf_doc = pdf_image_file_paths
+            else:
+                print(
+                    f"Warning: redacted_image is None for image file {file_path}, skipping append"
+                )
 
         # Check if the image_path already exists in annotations_all_pages
         existing_index = next(

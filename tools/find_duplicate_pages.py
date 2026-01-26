@@ -1433,7 +1433,7 @@ def add_new_annotations_to_existing_page_annotations(
 
 
 def apply_whole_page_redactions_from_list(
-    duplicate_page_numbers_df: pd.DataFrame,
+    duplicate_page_numbers_df_or_list,
     doc_file_name_with_extension_textbox: str,
     review_file_state: pd.DataFrame,
     duplicate_output_paths: list[str],
@@ -1447,7 +1447,7 @@ def apply_whole_page_redactions_from_list(
     This function applies redactions to whole pages based on a provided list of duplicate page numbers. It supports two modes of operation: combining pages and not combining pages. When combining pages is enabled, it attempts to identify duplicate pages across different files and applies redactions accordingly. If combining pages is disabled, it relies on new annotations with bounding boxes to determine which pages to redact. The function utilises a PyMuPDF document object to manipulate the PDF file, and it also considers the sizes of pages to ensure accurate redaction application.
 
     Args:
-        duplicate_page_numbers_df (pd.DataFrame): A DataFrame containing page numbers identified as duplicates.
+        duplicate_page_numbers_df_or_list: A DataFrame or list containing page numbers identified as duplicates (supports both legacy DataFrame and new Dropdown list format).
         doc_file_name_with_extension_textbox (str): The name of the document file with its extension.
         review_file_state (pd.DataFrame): The current state of the review file.
         duplicate_output_paths (list[str]): A list of paths to files containing duplicate page information.
@@ -1473,9 +1473,26 @@ def apply_whole_page_redactions_from_list(
     list_whole_pages_to_redact = list()
 
     if combine_pages is True:
-        # Get list of pages to redact from either dataframe or file
-        if not duplicate_page_numbers_df.empty:
-            list_whole_pages_to_redact = duplicate_page_numbers_df.iloc[:, 0].tolist()
+        # Get list of pages to redact from either dataframe, list, or file
+        # Handle both DataFrame (legacy) and list (new Dropdown format)
+        if isinstance(duplicate_page_numbers_df_or_list, list):
+            # Dropdown component returns a list directly
+            if duplicate_page_numbers_df_or_list:
+                try:
+                    # Try to convert to integers for page numbers
+                    list_whole_pages_to_redact = [
+                        int(item) for item in duplicate_page_numbers_df_or_list if item
+                    ]
+                except (ValueError, TypeError):
+                    # Fall back to string list if conversion fails
+                    list_whole_pages_to_redact = [
+                        str(item) for item in duplicate_page_numbers_df_or_list if item
+                    ]
+        elif isinstance(duplicate_page_numbers_df_or_list, pd.DataFrame):
+            if not duplicate_page_numbers_df_or_list.empty:
+                list_whole_pages_to_redact = duplicate_page_numbers_df_or_list.iloc[
+                    :, 0
+                ].tolist()
         elif duplicate_output_paths:
             expected_duplicate_pages_to_redact_name = (
                 f"{doc_file_name_with_extension_textbox}"

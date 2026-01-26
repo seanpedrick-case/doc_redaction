@@ -3,6 +3,7 @@
 import os
 
 import gradio as gr
+import pandas as pd
 
 from tools.config import (
     AWS_LLM_PII_OPTION,
@@ -11,6 +12,9 @@ from tools.config import (
     INFERENCE_SERVER_PII_OPTION,
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+    NO_REDACTION_PII_OPTION,
+    SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
+    SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
     SHOW_OCR_GUI_OPTIONS,
     SHOW_PII_IDENTIFICATION_OPTIONS,
     TESSERACT_TEXT_EXTRACT_OPTION,
@@ -194,9 +198,9 @@ def handle_redaction_method_selection(redaction_method):
         gr.Textbox(
             visible=is_llm_method_init
         ),  # walkthrough_custom_llm_instructions_textbox
-        gr.Dataframe(visible=show_selected_terms_lists),  # walkthrough_deny_list_state
-        gr.Dataframe(visible=show_selected_terms_lists),  # walkthrough_allow_list_state
-        gr.Dataframe(
+        gr.Dropdown(visible=show_selected_terms_lists),  # walkthrough_deny_list_state
+        gr.Dropdown(visible=show_selected_terms_lists),  # walkthrough_allow_list_state
+        gr.Dropdown(
             visible=show_selected_terms_lists
         ),  # walkthrough_fully_redacted_list_state
     )
@@ -283,21 +287,61 @@ def handle_step_3_next(
     )
 
     # Update deny/allow/fully redacted list components with walkthrough values
-    deny_list_update = (
-        gr.Dataframe(value=deny_list_val)
-        if deny_list_val is not None
-        else gr.Dataframe()
-    )
-    allow_list_update = (
-        gr.Dataframe(value=allow_list_val)
-        if allow_list_val is not None
-        else gr.Dataframe()
-    )
-    fully_redacted_list_update = (
-        gr.Dataframe(value=fully_redacted_list_val)
-        if fully_redacted_list_val is not None
-        else gr.Dataframe()
-    )
+    # Convert DataFrame to list if needed (for backward compatibility)
+    # Ensure all items are strings for Dropdown components
+    if deny_list_val is not None:
+        if isinstance(deny_list_val, pd.DataFrame):
+            deny_list_val = (
+                deny_list_val.iloc[:, 0].tolist() if not deny_list_val.empty else []
+            )
+        # Ensure all items are strings
+        if isinstance(deny_list_val, list):
+            deny_list_val = (
+                [str(item) for item in deny_list_val if item] if deny_list_val else []
+            )
+        deny_list_update = (
+            gr.Dropdown(value=deny_list_val) if deny_list_val else gr.Dropdown()
+        )
+    else:
+        deny_list_update = gr.Dropdown()
+
+    if allow_list_val is not None:
+        if isinstance(allow_list_val, pd.DataFrame):
+            allow_list_val = (
+                allow_list_val.iloc[:, 0].tolist() if not allow_list_val.empty else []
+            )
+        # Ensure all items are strings
+        if isinstance(allow_list_val, list):
+            allow_list_val = (
+                [str(item) for item in allow_list_val if item] if allow_list_val else []
+            )
+        allow_list_update = (
+            gr.Dropdown(value=allow_list_val) if allow_list_val else gr.Dropdown()
+        )
+    else:
+        allow_list_update = gr.Dropdown()
+
+    if fully_redacted_list_val is not None:
+        if isinstance(fully_redacted_list_val, pd.DataFrame):
+            fully_redacted_list_val = (
+                fully_redacted_list_val.iloc[:, 0].tolist()
+                if not fully_redacted_list_val.empty
+                else []
+            )
+        # Ensure all items are strings
+        if isinstance(fully_redacted_list_val, list):
+            fully_redacted_list_val = (
+                [str(item) for item in fully_redacted_list_val if item]
+                if fully_redacted_list_val
+                else []
+            )
+        fully_redacted_list_update = (
+            gr.Dropdown(value=fully_redacted_list_val)
+            if fully_redacted_list_val
+            else gr.Dropdown()
+        )
+    else:
+        fully_redacted_list_update = gr.Dropdown()
 
     # Update tabular data components with walkthrough values
     pii_method_tabular_update = (
@@ -482,4 +526,78 @@ def update_step_4_visibility(is_data_file):
     return (
         gr.update(visible=not is_data_file),  # step_4_next_document_redact_btn
         gr.update(visible=is_data_file),  # step_4_next_tabular_redact_btn
+    )
+
+
+def handle_main_text_extract_method_selection(text_extract_method):
+    """Handle text extraction method selection for main components - show local OCR options only if Local OCR model is selected,
+    and show AWS Textract settings only if AWS Textract is selected.
+
+    Args:
+        text_extract_method: Selected text extraction method
+
+    Returns:
+        Tuple of visibility updates for local OCR accordion, inference server accordion, and AWS Textract accordion
+    """
+    # Show local OCR method accordion only if "Local OCR model - PDFs without selectable text" is selected
+    show_local_ocr = text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION
+    # Show AWS Textract settings accordion only if "AWS Textract service - all PDF types" is selected
+    show_aws_textract = (
+        text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION
+        and SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+    )
+    # Show inference server VLM model accordion only if local OCR is selected and the option is enabled
+    show_inference_server = show_local_ocr and SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS
+
+    return (
+        gr.update(visible=show_local_ocr),  # local_ocr_method_accordion
+        gr.update(
+            visible=show_inference_server
+        ),  # inference_server_vlm_model_accordion
+        gr.update(visible=show_aws_textract),  # aws_textract_signature_accordion
+    )
+
+
+def handle_main_pii_method_selection(pii_method):
+    """Handle PII method selection for main components - show appropriate entity dropdowns and hide all if No PII redaction is selected.
+
+    Args:
+        pii_method: Selected PII detection method
+
+    Returns:
+        Tuple of visibility updates for PII method dropdown, local entities accordion, comprehend entities accordion,
+        LLM entities accordion, and LLM custom instructions accordion
+    """
+    # Check if "No PII redaction" is selected
+    is_no_redaction = pii_method == NO_REDACTION_PII_OPTION
+
+    # If no redaction, hide all PII-related components
+    if is_no_redaction:
+        return (
+            gr.update(
+                visible=True
+            ),  # pii_identification_method_drop (keep visible so user can change selection)
+            gr.update(visible=False),  # local_entities
+            gr.update(visible=False),  # comprehend_entities
+            gr.update(visible=False),  # llm_entities
+            gr.update(visible=False),  # llm_custom_instructions
+        )
+
+    # Check if method is Local
+    show_local_entities = pii_method == LOCAL_PII_OPTION
+    # Check if method is AWS Comprehend
+    show_comprehend_entities = pii_method == AWS_PII_OPTION
+    # Check if method is an LLM option
+    is_llm_method = (
+        pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+        or pii_method == INFERENCE_SERVER_PII_OPTION
+        or pii_method == AWS_LLM_PII_OPTION
+    )
+
+    return (
+        gr.update(visible=True),  # pii_identification_method_drop
+        gr.update(visible=show_local_entities),  # local_entities_accordion
+        gr.update(visible=show_comprehend_entities),  # comprehend_entities_accordion
+        gr.update(visible=is_llm_method),  # llm_entities_accordion
+        gr.update(visible=is_llm_method),  # llm_custom_instructions_accordion
     )
