@@ -947,9 +947,9 @@ def tabular_anonymise_wrapper_func(
         print(out_message)
         raise Exception(out_message)
 
-    col_count = anon_df_part.shape[1]
+    column_count = anon_df_part.shape[1]
 
-    if col_count > MAX_TABLE_COLUMNS:
+    if column_count > MAX_TABLE_COLUMNS:
         out_message = f"Number of columns in dataframe is greater than {MAX_TABLE_COLUMNS}. Please submit a smaller dataframe."
         print(out_message)
         raise Exception(out_message)

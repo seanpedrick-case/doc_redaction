@@ -1,6 +1,6 @@
 # --- PaddleOCR (CPU, for torch compatibility) ---
 #--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
 #paddlepaddle-gpu>=3.0.0,<=3.2.1
-paddlepaddle>=3.0.0,<=3.2.1
+paddlepaddle>=3.0.0,<=3.3.0
 paddleocr<=3.3.0
 pycocotools==2.0.10

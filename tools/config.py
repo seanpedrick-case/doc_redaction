@@ -598,6 +598,10 @@ if POPPLER_FOLDER:
     POPPLER_FOLDER = ensure_folder_within_app_directory(POPPLER_FOLDER)
     add_folder_to_path(POPPLER_FOLDER)
 
+SHOW_QUICKSTART = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_QUICKSTART", "False")
+)
+
 # Extraction and PII options open by default:
 EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = convert_string_to_boolean(
     get_or_create_env_var("EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT", "True")
@@ -1674,7 +1678,7 @@ elif LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "Qwen 3 4B":
     print("Using REASONING_SUFFIX: /nothink")
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "/nothink")
 else:
-    print("No reasoning suffix applied")
+    # print("No reasoning suffix applied")
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "")
 
 

@@ -24,6 +24,7 @@ from tools.config import (
     ALLOWED_HOSTS,
     ALLOWED_ORIGINS,
     AWS_ACCESS_KEY,
+    AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
@@ -122,6 +123,7 @@ from tools.config import (
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
     HOST_NAME,
     INFERENCE_SERVER_API_URL,
+    INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     INTRO_TEXT,
     LANGUAGE_CHOICES,
@@ -129,6 +131,8 @@ from tools.config import (
     LLM_PII_TEMPERATURE,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     LOG_FILE_NAME,
     MAPPED_LANGUAGE_CHOICES,
     MAX_FILE_SIZE,
@@ -167,10 +171,12 @@ from tools.config import (
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
     SHOW_OCR_GUI_OPTIONS,
     SHOW_PII_IDENTIFICATION_OPTIONS,
+    SHOW_QUICKSTART,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     SPACY_MODEL_PATH,
     TABULAR_PII_DETECTION_MODELS,
+    TESSERACT_TEXT_EXTRACT_OPTION,
     TEXT_EXTRACTION_MODELS,
     TEXTRACT_JOBS_LOCAL_LOC,
     TEXTRACT_JOBS_S3_INPUT_LOC,
@@ -230,6 +236,20 @@ from tools.helper_functions import (
     update_language_dropdown,
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
+from tools.quickstart import (
+    handle_pii_method_selection,
+    handle_redaction_method_selection,
+    handle_step_2_next,
+    handle_step_3_next,
+    handle_step_4_next,
+    handle_text_extract_method_selection,
+    route_walkthrough_files,
+    sync_walkthrough_outputs_to_original,
+    sync_walkthrough_tabular_outputs_to_original,
+    update_step_2_on_data_file_upload,
+    update_step_3_tabular_visibility,
+    update_step_4_visibility,
+)
 from tools.redaction_review import (
     apply_redactions_to_review_df_and_files,
     convert_df_to_xfdf,
@@ -316,6 +336,19 @@ async def lifespan(app: FastAPI):
     # --- SHUTDOWN LOGIC ---
     # (Any cleanup code would go here, e.g., closing DB connections)
     pass
+
+def change_tab_to_tabular_or_document_redactions(is_data_file):
+    print("is_data_file: ", is_data_file)
+    if is_data_file:
+        print("switching to tabular redactions tab")
+        return gr.Tabs(selected=3)
+    else:
+        print("switching to document redactions tab")
+        return gr.Tabs(selected=1)
+
+def change_tab_to_review_redactions():
+    print("switching to review redactions tab")
+    return gr.Tabs(selected=2)
 
 
 # 3. Initialize the App with the lifespan parameter
@@ -537,6 +570,14 @@ in_colnames = gr.Dropdown(
     label="Select columns that you want to anonymise (showing columns present across all files).",
 )
 
+in_excel_sheets = gr.Dropdown(
+    choices=["Choose Excel sheets to anonymise"],
+    multiselect=True,
+    label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).",
+    visible=False,
+    allow_custom_value=True,
+)
+
 pii_identification_method_drop_tabular = gr.Radio(
     label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
     value=DEFAULT_PII_DETECTION_MODEL,
@@ -555,6 +596,11 @@ anon_strategy = gr.Radio(
     value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
 )  # , "encrypt", "fake_first_name" are also available, but are not currently included as not that useful in current form
 
+do_initial_clean = gr.Checkbox(
+    label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
+    value=DO_INITIAL_TABULAR_DATA_CLEAN,
+)
+
 in_tabular_duplicate_files = gr.File(
     label="Upload CSV, Excel, or Parquet files to find duplicate cells/rows. Note that the app will remove duplicates from later cells/files that are found in earlier cells/files and not vice versa.",
     file_count="multiple",
@@ -572,6 +618,38 @@ tabular_min_word_count = gr.Number(
     value=DEFAULT_MIN_WORD_COUNT,
     label="Minimum word count",
     info="Cells with fewer words than this are ignored.",
+)
+
+### All output file components
+all_output_files_btn = gr.Button("Refresh files in output folder", variant="secondary")
+all_output_files = gr.FileExplorer(
+    root_dir=OUTPUT_FOLDER,
+    label="Choose output files for download",
+    file_count="multiple",
+    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+    interactive=True,
+    max_height=400,
+)
+
+all_outputs_file_download = gr.File(
+    label="Download output files",
+    file_count="multiple",
+    file_types=[
+        ".pdf",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".csv",
+        ".xlsx",
+        ".xls",
+        ".txt",
+        ".doc",
+        ".docx",
+        ".json",
+    ],
+    interactive=False,
+    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+    height=200,
 )
 
 clean_path = f"/{ROOT_PATH.strip('/')}"
@@ -1261,6 +1339,576 @@ with blocks:
 
     with gr.Tabs() as tabs:
         ###
+        # QUICKSTART TAB
+        ###
+        if SHOW_QUICKSTART:
+            with gr.Tab("Quickstart", id=0):
+                # State to track if we're dealing with data files
+                walkthrough_is_data_file = gr.State(value=False)
+
+                with gr.Walkthrough(selected=1) as walkthrough:
+                    with gr.Step("Step 1 - Load file", id=1):
+                        walkthrough_file_input = gr.File(
+                            label="Choose a PDF document, image file (PDF, JPG, PNG), tabular data file (Excel, CSV, Parquet), or Word document (DOCX)",
+                            file_count="multiple",
+                            file_types=[
+                                ".pdf",
+                                ".jpg",
+                                ".png",
+                                ".json",
+                                ".zip",
+                                ".xlsx",
+                                ".xls",
+                                ".csv",
+                                ".parquet",
+                                ".docx",
+                            ],
+                            height=FILE_INPUT_HEIGHT,
+                        )
+                        with gr.Row():
+                            step_1_back_btn = gr.Button("Back", variant="secondary")
+                            step_1_back_btn.click(
+                                lambda: gr.Walkthrough(selected=0), outputs=walkthrough
+                            )
+                            step_1_next_btn = gr.Button("Next", variant="primary")
+                    with gr.Step("Step 2 - Text extraction (OCR) method", id=2):
+                        # Components for data files (conditionally visible)
+                        walkthrough_excel_sheets = gr.Dropdown(
+                            choices=["Choose Excel sheets to anonymise"],
+                            multiselect=True,
+                            label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).",
+                            visible=False,
+                            allow_custom_value=True,
+                        )
+                        walkthrough_colnames = gr.Dropdown(
+                            choices=["Choose columns to anonymise"],
+                            multiselect=True,
+                            allow_custom_value=True,
+                            label="Select columns that you want to anonymise (showing columns present across all files).",
+                            visible=False,
+                        )
+                        # Text extraction method radio (conditionally visible)
+                        walkthrough_text_extract_method_radio = gr.Radio(
+                            label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
+                            value=DEFAULT_TEXT_EXTRACTION_MODEL,
+                            choices=TEXT_EXTRACTION_MODELS,
+                            visible=True,
+                        )
+                        # Local OCR method radio (shown only if Local OCR model is selected)
+                        # Set initial visibility based on default text extraction method
+                        initial_local_ocr_visible = (
+                            DEFAULT_TEXT_EXTRACTION_MODEL
+                            == TESSERACT_TEXT_EXTRACT_OPTION
+                        )
+                        walkthrough_local_ocr_method_radio = gr.Radio(
+                            label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
+                            value=CHOSEN_LOCAL_OCR_MODEL,
+                            choices=LOCAL_OCR_MODEL_OPTIONS,
+                            interactive=True,
+                            visible=initial_local_ocr_visible,
+                        )
+                        # AWS Textract extraction settings (shown only if AWS Textract is selected)
+                        # Set initial visibility based on default text extraction method
+                        initial_aws_textract_visible = (
+                            DEFAULT_TEXT_EXTRACTION_MODEL
+                            == TEXTRACT_TEXT_EXTRACT_OPTION
+                        )
+                        walkthrough_handwrite_signature_checkbox = gr.CheckboxGroup(
+                            label="AWS Textract extraction settings",
+                            choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
+                            value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+                            visible=initial_aws_textract_visible,
+                        )
+                        with gr.Row():
+                            step_2_back_btn = gr.Button("Back", variant="secondary")
+                            step_2_back_btn.click(
+                                lambda: gr.Walkthrough(selected=1), outputs=walkthrough
+                            )
+                            step_2_next_btn = gr.Button("Next", variant="primary")
+                    with gr.Step("Step 3 - PII detection method", id=3):
+                        # Redaction method selection (at the top of Step 3)
+                        walkthrough_redaction_method_dropdown = gr.Radio(
+                            label="Choose redaction method",
+                            choices=[
+                                "Extract text only",
+                                "Redact all PII",
+                                "Redact selected terms",
+                            ],
+                            value="Redact all PII",
+                            interactive=True,
+                        )
+                        # Components for "Redact all PII" option (conditionally visible)
+                        # Set initial visibility based on default redaction method ("Redact all PII")
+                        initial_show_pii_method = SHOW_PII_IDENTIFICATION_OPTIONS  # Default is "Redact all PII"
+                        default_pii_method = DEFAULT_PII_DETECTION_MODEL
+                        initial_show_local_entities = initial_show_pii_method and (
+                            default_pii_method == LOCAL_PII_OPTION
+                        )
+                        initial_show_comprehend_entities = initial_show_pii_method and (
+                            default_pii_method == AWS_PII_OPTION
+                        )
+                        initial_is_llm_method = initial_show_pii_method and (
+                            default_pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+                            or default_pii_method == INFERENCE_SERVER_PII_OPTION
+                            or default_pii_method == AWS_LLM_PII_OPTION
+                        )
+                        walkthrough_pii_identification_method_drop = gr.Radio(
+                            label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+                            value=DEFAULT_PII_DETECTION_MODEL,
+                            choices=PII_DETECTION_MODELS,
+                            visible=initial_show_pii_method,
+                        )
+                        walkthrough_in_redact_entities = gr.Dropdown(
+                            value=CHOSEN_REDACT_ENTITIES,
+                            choices=FULL_ENTITY_LIST,
+                            multiselect=True,
+                            label="Local PII identification model (click empty space in box for full list)",
+                            visible=initial_show_local_entities,
+                        )
+                        walkthrough_in_redact_comprehend_entities = gr.Dropdown(
+                            value=CHOSEN_COMPREHEND_ENTITIES,
+                            choices=FULL_COMPREHEND_ENTITY_LIST,
+                            multiselect=True,
+                            label="AWS Comprehend PII identification model (click empty space in box for full list)",
+                            visible=initial_show_comprehend_entities,
+                        )
+                        walkthrough_in_redact_llm_entities = gr.Dropdown(
+                            value=CHOSEN_LLM_ENTITIES,
+                            choices=FULL_LLM_ENTITY_LIST,
+                            multiselect=True,
+                            label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
+                            visible=initial_is_llm_method,
+                        )
+                        walkthrough_custom_llm_instructions_textbox = gr.Textbox(
+                            label="Custom instructions for LLM-based entity detection",
+                            placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'redact all company names with the label COMPANY_NAME'",
+                            value="",
+                            lines=3,
+                            visible=initial_is_llm_method,
+                        )
+
+                        with gr.Row():
+                            # Components for "Redact selected terms" option (conditionally visible)
+                            walkthrough_deny_list_state = gr.Dataframe(
+                                value=pd.DataFrame(),
+                                headers=["Always redact these words"],
+                                col_count=(1, "fixed"),
+                                row_count=(0, "dynamic"),
+                                label="Deny list (always redact these words)",
+                                visible=False,
+                                type="pandas",
+                                interactive=True,
+                                wrap=True,
+                            )
+                            walkthrough_allow_list_state = gr.Dataframe(
+                                value=pd.DataFrame(),
+                                headers=["Never redact these words"],
+                                col_count=(1, "fixed"),
+                                row_count=(0, "dynamic"),
+                                label="Allow list (always exclude these words from redaction)",
+                                visible=False,
+                                type="pandas",
+                                interactive=True,
+                                wrap=True,
+                            )
+                            walkthrough_fully_redacted_list_state = gr.Dataframe(
+                                value=pd.DataFrame(),
+                                headers=["Fully redacted pages list"],
+                                col_count=(1, "fixed"),
+                                row_count=(0, "dynamic"),
+                                label="Fully redacted pages (fully redact these page numbers)",
+                                visible=False,
+                                type="pandas",
+                                interactive=True,
+                                wrap=True,
+                            )
+
+                        # Tabular data redaction options (conditionally visible for data files)
+                        walkthrough_pii_identification_method_drop_tabular = gr.Radio(
+                            label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
+                            value=DEFAULT_PII_DETECTION_MODEL,
+                            choices=TABULAR_PII_DETECTION_MODELS,
+                            visible=False,
+                        )
+                        walkthrough_anon_strategy = gr.Radio(
+                            choices=[
+                                "replace with 'REDACTED'",
+                                "replace with <ENTITY_NAME>",
+                                "redact completely",
+                                "hash",
+                                "mask",
+                            ],
+                            label="Select an anonymisation method.",
+                            value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
+                            visible=False,
+                        )
+                        walkthrough_do_initial_clean = gr.Checkbox(
+                            label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
+                            value=DO_INITIAL_TABULAR_DATA_CLEAN,
+                            visible=False,
+                        )
+
+                        with gr.Row():
+                            step_3_back_btn = gr.Button("Back", variant="secondary")
+                            step_3_back_btn.click(
+                                lambda: gr.Walkthrough(selected=2), outputs=walkthrough
+                            )
+                            step_3_next_btn = gr.Button("Next", variant="primary")
+                    with gr.Step("Step 4 - select pages and costs", id=4):
+                        # Page selection (always visible)
+                        with gr.Accordion("Page selection", open=True):
+                            with gr.Row():
+                                walkthrough_page_min = gr.Number(
+                                    value=DEFAULT_PAGE_MIN,
+                                    precision=0,
+                                    minimum=0,
+                                    maximum=9999,
+                                    label="Lowest page to redact (set to 0 to redact from the first page)",
+                                )
+                                walkthrough_page_max = gr.Number(
+                                    value=DEFAULT_PAGE_MAX,
+                                    precision=0,
+                                    minimum=0,
+                                    maximum=9999,
+                                    label="Highest page to redact (set to 0 to redact to the last page)",
+                                )
+                        # Currently not visible as not updating correctly
+                        with gr.Accordion("Costs and time taken estimates", open=True, visible=False):
+                            with gr.Row():
+                                # Cost-related components (conditionally visible)
+                                walkthrough_textract_output_found_checkbox = gr.Checkbox(
+                                    value=False,
+                                    label="Existing Textract output file found",
+                                    interactive=False,
+                                    visible=SHOW_COSTS,
+                                )
+                                walkthrough_relevant_ocr_output_with_words_found_checkbox = gr.Checkbox(
+                                    value=False,
+                                    label="Existing local OCR output file found",
+                                    interactive=False,
+                                    visible=SHOW_COSTS,
+                                )
+                                walkthrough_total_pdf_page_count = gr.Number(
+                                    label="Total page count",
+                                    value=0,
+                                    visible=SHOW_COSTS,
+                                    interactive=False,
+                                )
+                                walkthrough_estimated_aws_costs_number = gr.Number(
+                                    label="Approximate AWS Textract and/or Comprehend cost (£)",
+                                    value=0.00,
+                                    precision=2,
+                                    visible=SHOW_COSTS,
+                                    interactive=False,
+                                )
+                                walkthrough_estimated_time_taken_number = gr.Number(
+                                    label="Approximate time taken to extract text/redact (minutes)",
+                                    value=0,
+                                    visible=SHOW_COSTS,
+                                    precision=2,
+                                    interactive=False,
+                                )
+                        show_cost_codes = GET_COST_CODES or ENFORCE_COST_CODES
+                        with gr.Accordion("Cost code selection", open=True, visible=show_cost_codes):
+                            with gr.Row():
+                                # Cost code components (conditionally visible)
+                                
+                                with gr.Column():
+                                    walkthrough_cost_code_dataframe = gr.Dataframe(
+                                        value=pd.DataFrame(
+                                            columns=["Cost code", "Description"]
+                                        ),
+                                        row_count=(0, "dynamic"),
+                                        label="Existing cost codes",
+                                        type="pandas",
+                                        interactive=True,
+                                        show_search="filter",
+                                        visible=show_cost_codes,
+                                        wrap=True,
+                                        max_height=200,
+                                    )
+                                    walkthrough_reset_cost_code_dataframe_button = gr.Button(
+                                        value="Reset code code table filter",
+                                        visible=show_cost_codes,
+                                    )
+                                with gr.Column():
+                                    walkthrough_cost_code_choice_drop = gr.Dropdown(
+                                        value=DEFAULT_COST_CODE,
+                                        label="Choose cost code for analysis",
+                                        choices=[DEFAULT_COST_CODE],
+                                        allow_custom_value=False,
+                                        visible=show_cost_codes,
+                                    )
+
+                        TRIGGER_DOCUMENT_REDACT_BUTTON = """
+                        function triggerChatButtonClick() {
+
+                        // Find the div with id "document-redact-btn"
+                        const documentRedactButton = document.getElementById("document-redact-btn");
+
+                        if (!documentRedactButton) {
+                            console.error("Error: Could not find element with id 'document-redact-btn'");
+                            return;
+                        }
+
+                        // Trigger the click event
+                        documentRedactButton.click();
+
+                        }"""
+
+                        TRIGGER_TABULAR_REDACT_BUTTON = """
+                        function triggerTabularRedactButtonClick() {
+                            // Find the div with id "tabular-redact-btn"
+                            const tabularRedactButton = document.getElementById("tabular-redact-btn");
+                            if (!tabularRedactButton) {
+                                console.error("Error: Could not find element with id 'tabular-redact-btn'");
+                                return;
+                            }
+                            // Trigger the click event
+                            tabularRedactButton.click();
+                        }"""
+
+                        with gr.Row():
+                            step_4_back_btn = gr.Button("Back", variant="secondary")
+                            step_4_back_btn.click(
+                                lambda: gr.Walkthrough(selected=3), outputs=walkthrough
+                            )
+                            step_4_next_document_redact_btn = gr.Button(
+                                "Redact document", variant="primary", visible=True
+                            )
+                            step_4_next_tabular_redact_btn = gr.Button(
+                                "Redact data files", variant="primary", visible=False
+                            )
+                            step_4_next_document_redact_btn.click(
+                                fn=lambda: None, js=TRIGGER_DOCUMENT_REDACT_BUTTON
+                            ).then(change_tab_to_tabular_or_document_redactions, inputs=walkthrough_is_data_file, outputs=tabs)
+                            step_4_next_tabular_redact_btn.click(
+                                fn=lambda: None, js=TRIGGER_TABULAR_REDACT_BUTTON
+                            ).then(change_tab_to_tabular_or_document_redactions, inputs=walkthrough_is_data_file, outputs=tabs)
+
+            ###
+            # QUICKSTART WALKTHROUGH EVENT HANDLERS
+            ###
+            # Step 1: Route files to appropriate component when Next is clicked
+            step_1_next_btn.click(
+                fn=route_walkthrough_files,
+                inputs=[walkthrough_file_input],
+                outputs=[
+                    in_doc_files,
+                    in_data_files,
+                    walkthrough_is_data_file,
+                    walkthrough,
+                ],
+            )
+
+            # Step 2: For data files, populate dropdowns when Next is clicked
+
+            # Note: in_excel_sheets is defined in the "Word or Excel/csv files" tab (id=5)
+            # Both tabs are in the same gr.Tabs() context, so components are accessible at runtime
+            step_2_next_btn.click(
+                fn=handle_step_2_next,
+                inputs=[
+                    in_data_files,
+                    walkthrough_is_data_file,
+                    walkthrough_colnames,
+                    walkthrough_excel_sheets,
+                    walkthrough_text_extract_method_radio,
+                ],
+                outputs=[
+                    walkthrough_colnames,
+                    walkthrough_excel_sheets,
+                    in_colnames,
+                    in_excel_sheets,
+                    walkthrough_text_extract_method_radio,
+                    walkthrough,
+                ],  # type: ignore
+            )
+
+            # Update local OCR method radio and AWS Textract settings visibility when text extraction method is selected
+            walkthrough_text_extract_method_radio.input(
+                fn=handle_text_extract_method_selection,
+                inputs=[walkthrough_text_extract_method_radio],
+                outputs=[
+                    walkthrough_local_ocr_method_radio,
+                    walkthrough_handwrite_signature_checkbox,
+                ],
+            )
+
+            # When data files are uploaded in walkthrough, automatically populate dropdowns
+
+            # Update dropdowns when files are routed to in_data_files
+            in_data_files.change(
+                fn=update_step_2_on_data_file_upload,
+                inputs=[in_data_files, walkthrough_is_data_file],
+                outputs=[walkthrough_colnames, walkthrough_excel_sheets],
+            )
+
+            # Update Step 3 components visibility when redaction method is selected
+            walkthrough_redaction_method_dropdown.input(
+                fn=handle_redaction_method_selection,
+                inputs=[walkthrough_redaction_method_dropdown],
+                outputs=[
+                    walkthrough_pii_identification_method_drop,
+                    walkthrough_in_redact_entities,
+                    walkthrough_in_redact_comprehend_entities,
+                    walkthrough_in_redact_llm_entities,
+                    walkthrough_custom_llm_instructions_textbox,
+                    walkthrough_deny_list_state,
+                    walkthrough_allow_list_state,
+                    walkthrough_fully_redacted_list_state,
+                ],
+            )
+
+            # Update entity dropdowns when PII method is selected
+            walkthrough_pii_identification_method_drop.input(
+                fn=handle_pii_method_selection,
+                inputs=[walkthrough_pii_identification_method_drop],
+                outputs=[
+                    walkthrough_in_redact_entities,
+                    walkthrough_in_redact_comprehend_entities,
+                    walkthrough_in_redact_llm_entities,
+                    walkthrough_custom_llm_instructions_textbox,
+                ],
+            )
+
+            # Update Step 3 tabular component visibility based on file type
+            walkthrough_is_data_file.change(
+                fn=update_step_3_tabular_visibility,
+                inputs=[walkthrough_is_data_file],
+                outputs=[
+                    walkthrough_pii_identification_method_drop_tabular,
+                    walkthrough_anon_strategy,
+                    walkthrough_do_initial_clean,
+                ],
+            )
+
+            # Step 3: Write values to main components when Next is clicked
+            step_3_next_btn.click(
+                fn=handle_step_3_next,
+                inputs=[
+                    walkthrough_text_extract_method_radio,
+                    walkthrough_local_ocr_method_radio,
+                    walkthrough_handwrite_signature_checkbox,
+                    walkthrough_pii_identification_method_drop,
+                    walkthrough_in_redact_entities,
+                    walkthrough_in_redact_comprehend_entities,
+                    walkthrough_in_redact_llm_entities,
+                    walkthrough_custom_llm_instructions_textbox,
+                    walkthrough_deny_list_state,
+                    walkthrough_allow_list_state,
+                    walkthrough_fully_redacted_list_state,
+                    walkthrough_pii_identification_method_drop_tabular,
+                    walkthrough_anon_strategy,
+                    walkthrough_do_initial_clean,
+                ],
+                outputs=[
+                    text_extract_method_radio,
+                    local_ocr_method_radio,
+                    handwrite_signature_checkbox,
+                    pii_identification_method_drop,
+                    in_redact_entities,
+                    in_redact_comprehend_entities,
+                    in_redact_llm_entities,
+                    custom_llm_instructions_textbox,
+                    in_deny_list_state,
+                    in_allow_list_state,
+                    in_fully_redacted_list_state,
+                    pii_identification_method_drop_tabular,
+                    anon_strategy,
+                    do_initial_clean,
+                    walkthrough,
+                ],
+            )
+
+            # Step 4: Write values to main components when Next is clicked
+            # step_4_next_btn.click(
+            #     fn=handle_step_4_next,
+            #     inputs=[
+            #         walkthrough_page_min,
+            #         walkthrough_page_max,
+            #         walkthrough_textract_output_found_checkbox,
+            #         walkthrough_relevant_ocr_output_with_words_found_checkbox,
+            #         walkthrough_total_pdf_page_count,
+            #         walkthrough_estimated_aws_costs_number,
+            #         walkthrough_estimated_time_taken_number,
+            #         walkthrough_cost_code_dataframe,
+            #         walkthrough_cost_code_choice_drop,
+            #     ],
+            #     outputs=[
+            #         page_min,
+            #         page_max,
+            #         textract_output_found_checkbox,
+            #         relevant_ocr_output_with_words_found_checkbox,
+            #         total_pdf_page_count,
+            #         estimated_aws_costs_number,
+            #         estimated_time_taken_number,
+            #         cost_code_dataframe,
+            #         cost_code_choice_drop,
+            #         walkthrough,
+            #     ],
+            # )
+
+
+            # if walkthrough_is_data_file.value:
+            # step_4_next_btn.click(
+            #     fn=change_tab_to_tabular_or_document_redactions,
+            #     inputs=walkthrough_is_data_file,
+            #     outputs=tabs,
+            # )
+
+
+            # Reset cost code dataframe filter in walkthrough
+            if GET_COST_CODES or ENFORCE_COST_CODES:
+                from tools.helper_functions import reset_base_dataframe
+
+                walkthrough_reset_cost_code_dataframe_button.click(
+                    reset_base_dataframe,
+                    inputs=[cost_code_dataframe_base],
+                    outputs=[walkthrough_cost_code_dataframe],
+                )
+
+            # Update Step 4 component visibility based on file type
+            walkthrough_is_data_file.change(
+                fn=update_step_4_visibility,
+                inputs=[walkthrough_is_data_file],
+                outputs=[
+                    step_4_next_document_redact_btn,
+                    step_4_next_tabular_redact_btn,
+                ],
+            )
+
+            # Walkthrough extract/redact button - uses same handlers as document_redact_btn
+            # but also updates walkthrough output components and syncs to original components
+            # walkthrough_document_redact_btn.click().success(
+            #     fn=sync_walkthrough_outputs_to_original,
+            #     inputs=[
+            #         redaction_output_summary_textbox,
+            #         output_file,
+            #     ],
+            #     outputs=[
+            #         walkthrough_redaction_output_summary_textbox,
+            #         walkthrough_output_file,
+            #         redaction_output_summary_textbox,
+            #         output_file,
+            #     ],
+            # )
+
+            # Walkthrough tabular data redact button - uses same handlers as tabular_data_redact_btn
+            # but also updates walkthrough output components and syncs to original components
+            # walkthrough_tabular_data_redact_btn.click().success(
+            #     fn=sync_walkthrough_tabular_outputs_to_original,
+            #     inputs=[
+            #         text_output_summary,
+            #         text_output_file,
+            #     ],
+            #     outputs=[
+            #         walkthrough_text_output_summary,
+            #         walkthrough_text_output_file,
+            #         text_output_summary,
+            #         text_output_file,
+            #     ],
+            # )
+        ###
         # REDACTION PDF/IMAGES TABLE
         ###
         with gr.Tab("Redact PDFs/images", id=1):
@@ -1573,7 +2221,12 @@ with blocks:
                         run_on_click=True,
                     )
 
-            with gr.Accordion("Extract text and redact document", open=True):
+            if SHOW_QUICKSTART:
+                show_main_redaction_accordion = False
+            else:
+                show_main_redaction_accordion = True
+            
+            with gr.Accordion("Redaction settings", open=show_main_redaction_accordion):
                 in_doc_files.render()
                 open_tab_text = ""
                 default_text = ""
@@ -1600,14 +2253,15 @@ with blocks:
                     label=f"Change default redaction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
                     open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                 ):
-                    text_extract_method_radio.render()
 
                     if SHOW_OCR_GUI_OPTIONS:
+
                         with gr.Accordion(
                             "Change default text extraction OCR method",
                             open=True,
                             visible=SHOW_OCR_GUI_OPTIONS,
                         ):
+                            text_extract_method_radio.render()
                             with gr.Accordion(
                                 label="Change default local OCR model",
                                 open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
@@ -1628,6 +2282,7 @@ with blocks:
                             ):
                                 handwrite_signature_checkbox.render()
                     else:
+                        text_extract_method_radio.render()
                         local_ocr_method_radio.render()
                         inference_server_vlm_model_textbox.render()
                         handwrite_signature_checkbox.render()
@@ -1829,32 +2484,33 @@ with blocks:
                                     visible=True,
                                 )
 
+            with gr.Accordion(label="Extract text and redact document", open=True):
                 gr.Markdown(
                     """If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the Redaction Settings tab."""
                 )
                 document_redact_btn = gr.Button(
-                    "Extract text and redact document", variant="primary", scale=4
+                    "Extract text and redact document", variant="primary", scale=4, elem_id="document-redact-btn"
                 )
 
-            with gr.Row():
-                with gr.Column(scale=1):
-                    redaction_output_summary_textbox = gr.Textbox(
-                        label="Output summary", scale=1, lines=4
-                    )
-                    go_to_review_redactions_tab_btn = gr.Button(
-                        "Go to review redactions tab", variant="secondary", scale=1
-                    )
-                with gr.Column(scale=2):
-                    output_file = gr.File(
-                        label="Output files", scale=2
-                    )  # , height=FILE_INPUT_HEIGHT)
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        redaction_output_summary_textbox = gr.Textbox(
+                            label="Output summary", scale=1, lines=4
+                        )
+                        go_to_review_redactions_tab_btn = gr.Button(
+                            "Review and modify redactions", variant="secondary", scale=1
+                        )
+                    with gr.Column(scale=2):
+                        output_file = gr.File(
+                            label="Output files", scale=2
+                        )  # , height=FILE_INPUT_HEIGHT)
 
-                latest_file_completed_num = gr.Number(
-                    value=0,
-                    label="Number of documents redacted",
-                    interactive=False,
-                    visible=False,
-                )
+                    latest_file_completed_num = gr.Number(
+                        value=0,
+                        label="Number of documents redacted",
+                        interactive=False,
+                        visible=False,
+                    )
 
             # Feedback elements are invisible until revealed by redaction action
             pdf_feedback_title = gr.Markdown(
@@ -1881,80 +2537,6 @@ with blocks:
             #     interactive=True,
             # )
 
-            if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
-                with gr.Accordion(
-                    "View all and download all output files from this session",
-                    open=False,
-                ):
-                    all_output_files_btn = gr.Button(
-                        "Refresh files in output folder", variant="secondary"
-                    )
-                    all_output_files = gr.FileExplorer(
-                        root_dir=OUTPUT_FOLDER,
-                        label="Choose output files for download",
-                        file_count="multiple",
-                        visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                        interactive=True,
-                        max_height=400,
-                    )
-
-                    all_outputs_file_download = gr.File(
-                        label="Download output files",
-                        file_count="multiple",
-                        file_types=[
-                            ".pdf",
-                            ".jpg",
-                            ".jpeg",
-                            ".png",
-                            ".csv",
-                            ".xlsx",
-                            ".xls",
-                            ".txt",
-                            ".doc",
-                            ".docx",
-                            ".json",
-                        ],
-                        interactive=False,
-                        visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                        height=200,
-                    )
-            else:
-                all_output_files_btn = gr.Button(
-                    "Update files in output folder",
-                    variant="secondary",
-                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                )
-
-                all_output_files = gr.FileExplorer(
-                    root_dir=OUTPUT_FOLDER,
-                    label="Choose output files for download",
-                    file_count="multiple",
-                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                    interactive=True,
-                    max_height=400,
-                )
-
-                all_outputs_file_download = gr.File(
-                    label="Download output files",
-                    file_count="multiple",
-                    file_types=[
-                        ".pdf",
-                        ".jpg",
-                        ".jpeg",
-                        ".png",
-                        ".csv",
-                        ".xlsx",
-                        ".xls",
-                        ".txt",
-                        ".doc",
-                        ".docx",
-                        ".json",
-                    ],
-                    interactive=False,
-                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                    height=200,
-                )
-
         ###
         # REVIEW REDACTIONS TAB
         ###
@@ -1968,7 +2550,7 @@ with blocks:
                 visible=False,
             )
 
-            with gr.Accordion(label="Review PDF redactions", open=True):
+            with gr.Accordion(label="Upload PDFs/images and OCR results for review", open=False):
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=2):
                         input_pdf_for_review = gr.File(
@@ -2484,6 +3066,7 @@ with blocks:
         # WORD / TABULAR DATA TAB
         ###
         with gr.Tab(label="Word or Excel/csv files", id=5):
+
             gr.Markdown(
                 """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
             )
@@ -2585,7 +3168,7 @@ with blocks:
                         run_on_click=True,
                     )
 
-            with gr.Accordion("Redact Word or Excel/csv files", open=True):
+            with gr.Accordion("Redact Word or Excel/csv files options", open=show_main_redaction_accordion):
                 with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
                     in_data_files.render()
                 with gr.Accordion("Redact open text", open=False):
@@ -2595,13 +3178,7 @@ with blocks:
                         max_length=MAX_OPEN_TEXT_CHARACTERS,
                     )
 
-                in_excel_sheets = gr.Dropdown(
-                    choices=["Choose Excel sheets to anonymise"],
-                    multiselect=True,
-                    label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).",
-                    visible=False,
-                    allow_custom_value=True,
-                )
+                in_excel_sheets.render()
 
                 in_colnames.render()
 
@@ -2613,25 +3190,23 @@ with blocks:
                 ):
                     with gr.Row():
                         anon_strategy.render()
-
-                        do_initial_clean = gr.Checkbox(
-                            label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
-                            value=DO_INITIAL_TABULAR_DATA_CLEAN,
-                        )
+                        
+                        do_initial_clean.render()
 
                 tabular_data_redact_btn = gr.Button(
-                    "Redact text/data files", variant="primary"
+                    "Redact text/data files", variant="primary", elem_id="tabular-redact-btn"
                 )
 
-            with gr.Row():
-                text_output_summary = gr.Textbox(label="Output result", lines=4)
-                text_output_file = gr.File(label="Output files")
-                text_tabular_files_done = gr.Number(
-                    value=0,
-                    label="Number of tabular files redacted",
-                    interactive=False,
-                    visible=False,
-                )
+            with gr.Accordion(label="Redact Word/data files", open=True):
+                with gr.Row():
+                    text_output_summary = gr.Textbox(label="Output result", lines=4)
+                    text_output_file = gr.File(label="Output files")
+                    text_tabular_files_done = gr.Number(
+                        value=0,
+                        label="Number of tabular files redacted",
+                        interactive=False,
+                        visible=False,
+                    )
 
             ###
             # TABULAR DUPLICATE DETECTION
@@ -2883,6 +3458,19 @@ with blocks:
                 merge_multiple_review_files_btn = gr.Button(
                     "Merge multiple review files into one", variant="primary"
                 )
+
+        if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
+            with gr.Accordion(
+                "View all and download all output files from this session",
+                open=False,
+            ):
+                all_output_files_btn.render()
+                all_output_files.render()
+                all_outputs_file_download.render()
+        else:
+            all_output_files_btn.render()
+            all_output_files.render()
+            all_outputs_file_download.render()
 
     ###
     # UI INTERACTION
@@ -3882,11 +4470,10 @@ with blocks:
         show_progress_on=[annotator],
     )
 
-    def change_tab():
-        return gr.Tabs(selected=2)
+    
 
     go_to_review_redactions_tab_btn.click(
-        fn=change_tab,
+        fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
     )
@@ -7222,6 +7809,9 @@ with blocks:
             app = gr.mount_gradio_app(
                 app,
                 blocks,
+                # theme=gr.themes.Default(primary_hue="blue"),
+                # head=head_html,
+                # css=css,
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
@@ -7237,6 +7827,9 @@ with blocks:
             if __name__ == "__main__":
                 if COGNITO_AUTH:
                     blocks.launch(
+                        # theme=gr.themes.Default(primary_hue="blue"),
+                        # head=head_html,
+                        # css=css,
                         show_error=True,
                         inbrowser=True,
                         auth=authenticate_user,
@@ -7249,6 +7842,9 @@ with blocks:
                     )
                 else:
                     blocks.launch(
+                        # theme=gr.themes.Default(primary_hue="blue"),
+                        # head=head_html,
+                        # css=css,
                         show_error=True,
                         inbrowser=True,
                         max_file_size=MAX_FILE_SIZE,

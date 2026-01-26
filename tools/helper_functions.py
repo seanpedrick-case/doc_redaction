@@ -329,13 +329,13 @@ def put_columns_in_df(in_file: List[str]):
     concat_choices = list(set(concat_choices))
 
     if number_of_excel_files > 0:
-        return gr.Dropdown(choices=concat_choices, value=concat_choices), gr.Dropdown(
-            choices=all_sheet_names, value=all_sheet_names, visible=True
-        )
+        return gr.Dropdown(
+            choices=concat_choices, value=concat_choices, visible=True
+        ), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names, visible=True)
     else:
-        return gr.Dropdown(choices=concat_choices, value=concat_choices), gr.Dropdown(
-            visible=False
-        )
+        return gr.Dropdown(
+            choices=concat_choices, value=concat_choices, visible=True
+        ), gr.Dropdown(visible=False)
 
 
 def get_textract_file_suffix(handwrite_signature_checkbox: List[str] = list()) -> str:
