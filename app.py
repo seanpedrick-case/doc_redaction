@@ -354,7 +354,7 @@ CLEAN_ROOT = f"/{FASTAPI_ROOT_PATH.strip('/')}" if FASTAPI_ROOT_PATH.strip("/") 
 app = FastAPI(lifespan=lifespan, root_path=CLEAN_ROOT)
 
 # Added to pass lint check, no effect
-spaces.annotations
+#spaces.annotations
 
 ###
 # Load in Gradio app components
