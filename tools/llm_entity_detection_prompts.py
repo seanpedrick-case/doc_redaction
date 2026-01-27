@@ -22,7 +22,10 @@ def create_entity_detection_prompt(
     Returns:
         Formatted prompt string
     """
-    entities_list = ", ".join(entities_to_detect)
+    # Filter out CUSTOM_VLM_* entities (these are handled separately via VLM)
+    filtered_entities = [
+        entity for entity in entities_to_detect if not entity.startswith("CUSTOM_VLM_")
+    ]
 
     custom_instructions_section = ""
     if custom_instructions and custom_instructions.strip():
@@ -30,7 +33,22 @@ def create_entity_detection_prompt(
             f"\n\nIMPORTANT CUSTOM INSTRUCTIONS:\n{custom_instructions.strip()}\n"
         )
 
-    prompt = f"""You are an expert at identifying Personally Identifiable Information (PII) in text. Your task is to analyse the provided text and identify all instances of the following entity types/labels: {entities_list}.{custom_instructions_section}
+    # Handle case where no standard entities are selected
+    if filtered_entities:
+        entities_list = ", ".join(filtered_entities)
+        entity_section = f"Your task is to analyse the provided text and identify all instances of the following entity types/labels: {entities_list}."
+        entity_rule = f"Only return entities/labels that match the requested types/labels: {entities_list}"
+    else:
+        # No standard entities selected - only use custom instructions
+        entity_section = "Your task is to analyse the provided text and identify PII entities based on the custom instructions provided below."
+        entity_rule = "Return entities based on the custom instructions provided."
+        if not custom_instructions or not custom_instructions.strip():
+            raise ValueError(
+                "No standard entities selected and no custom instructions provided. "
+                "Please select at least one entity type or provide custom instructions for LLM-based PII detection."
+            )
+
+    prompt = f"""You are an expert at identifying Personally Identifiable Information (PII) in text. {entity_section}{custom_instructions_section}
 
 IMPORTANT: You must return your response as a valid JSON object with the following structure:
 {{
@@ -51,7 +69,7 @@ Rules:
 3. EndOffset is the position AFTER the last character of the entity/label (exclusive, like Python string slicing)
 4. Score should be a decimal between 0.0 and 1.0 representing your confidence
 5. Text should be the exact substring from the original text
-6. Only return entities/labels that match the requested types/labels: {entities_list}
+6. {entity_rule}
 7. If no entities/labels are found, return: {{"entities": []}}
 8. The JSON must be valid and parseable - do not include any explanatory text outside the JSON
 9. If IMPORTANT CUSTOM INSTRUCTIONS are provided, follow them carefully. They override all other instructions.
@@ -80,7 +98,10 @@ def create_entity_detection_system_prompt(
     Returns:
         System prompt string
     """
-    ", ".join(entities_to_detect)
+    # Filter out CUSTOM_VLM_* entities (these are handled separately via VLM)
+    filtered_entities = [
+        entity for entity in entities_to_detect if not entity.startswith("CUSTOM_VLM_")
+    ]
 
     custom_instructions_section = ""
     if custom_instructions and custom_instructions.strip():
@@ -88,9 +109,20 @@ def create_entity_detection_system_prompt(
             f"\n\nADDITIONAL INSTRUCTIONS:\n{custom_instructions.strip()}\n"
         )
 
+    # Handle case where no standard entities are selected
+    if filtered_entities:
+        entity_types_section = f"Entity types to detect: {filtered_entities}"
+    else:
+        entity_types_section = "Entity types to detect: Based on custom instructions provided (no standard entity types selected)."
+        if not custom_instructions or not custom_instructions.strip():
+            raise ValueError(
+                "No standard entities selected and no custom instructions provided. "
+                "Please select at least one entity type or provide custom instructions for LLM-based PII detection."
+            )
+
     system_prompt = f"""You are a precise PII (Personally Identifiable Information) detection system. Your role is to identify specific entity types in text and return them in a structured JSON format with exact character positions.{custom_instructions_section}
 
-Entity types to detect: {entities_to_detect}
+{entity_types_section}
 
 For each entity found, you must provide:
 - Type: The entity type (must match one of the requested types)

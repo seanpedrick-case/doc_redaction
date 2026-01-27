@@ -1456,133 +1456,145 @@ def anonymise_script(
                     for result in custom_results:
                         results_by_column[result.key] = result
 
-        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+        # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+        # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
         llm_chosen_redact_entities = [
-            entity for entity in chosen_llm_entities if entity != "CUSTOM"
+            entity
+            for entity in chosen_llm_entities
+            if entity != "CUSTOM" and not entity.startswith("CUSTOM_VLM_")
         ]
 
-        if not llm_chosen_redact_entities:
-            # If no LLM entities to detect, just use custom results
-            analyzer_results = list(results_by_column.values())
-        else:
-            max_retries = 3
-            retry_delay = 3
+        # Validate: if no standard entities and no custom instructions, raise error
+        if not llm_chosen_redact_entities and (
+            not custom_llm_instructions or not custom_llm_instructions.strip()
+        ):
+            raise ValueError(
+                "No standard entities selected for LLM PII detection and no custom instructions provided. "
+                "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions."
+            )
 
-            # Process each text column in the dictionary
-            for column_name, texts in progress.tqdm(
-                df_dict.items(), desc="Querying LLM service.", unit="Columns"
+        # If no LLM entities to detect but custom instructions exist, still call LLM with custom instructions only
+        # If no entities and no custom instructions, the validation above will have raised an error
+        # So at this point, we either have entities OR custom instructions (or both)
+        max_retries = 3
+        retry_delay = 3
+
+        # Process each text column in the dictionary
+        for column_name, texts in progress.tqdm(
+            df_dict.items(), desc="Querying LLM service.", unit="Columns"
+        ):
+            # Get or create DictAnalyzerResult for this column
+            if column_name in results_by_column:
+                column_results = results_by_column[column_name]
+            else:
+                column_results = DictAnalyzerResult(
+                    recognizer_results=[[] for _ in texts],
+                    key=column_name,
+                    value=texts,
+                )
+
+            # Process each text in the column
+            for text_idx, text in progress.tqdm(
+                enumerate(texts), desc="Querying LLM service.", unit="Row"
             ):
-                # Get or create DictAnalyzerResult for this column
-                if column_name in results_by_column:
-                    column_results = results_by_column[column_name]
-                else:
-                    column_results = DictAnalyzerResult(
-                        recognizer_results=[[] for _ in texts],
-                        key=column_name,
-                        value=texts,
-                    )
+                text_str = str(text) if text else ""
 
-                # Process each text in the column
-                for text_idx, text in progress.tqdm(
-                    enumerate(texts), desc="Querying LLM service.", unit="Row"
-                ):
-                    text_str = str(text) if text else ""
+                if not text_str.strip():
+                    continue
 
-                    if not text_str.strip():
-                        continue
+                for attempt in range(max_retries):
+                    try:
+                        # Call LLM for entity detection
+                        entities = call_llm_for_entity_detection(
+                            text=text_str,
+                            entities_to_detect=llm_chosen_redact_entities,
+                            language=language,
+                            bedrock_runtime=bedrock_runtime,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=OUTPUT_FOLDER,
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=None,  # Not applicable for tabular data
+                            inference_method=text_analyzer_kwargs.get(
+                                "inference_method"
+                            ),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get(
+                            #     "assistant_model"
+                            # ),
+                            client=text_analyzer_kwargs.get("client"),
+                            client_config=text_analyzer_kwargs.get("client_config"),
+                            api_url=text_analyzer_kwargs.get("api_url"),
+                        )
 
-                    for attempt in range(max_retries):
-                        try:
-                            # Call LLM for entity detection
-                            entities = call_llm_for_entity_detection(
-                                text=text_str,
-                                entities_to_detect=llm_chosen_redact_entities,
-                                language=language,
-                                bedrock_runtime=bedrock_runtime,
-                                model_choice=model_choice,
-                                temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
-                                ),
-                                max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
-                                ),
-                                output_folder=OUTPUT_FOLDER,
-                                batch_number=comprehend_query_number + 1,
-                                custom_instructions=custom_llm_instructions,
-                                file_name=file_name,
-                                page_number=None,  # Not applicable for tabular data
-                                inference_method=text_analyzer_kwargs.get(
-                                    "inference_method"
-                                ),
-                                # local_model=text_analyzer_kwargs.get("local_model"),
-                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                                # assistant_model=text_analyzer_kwargs.get(
-                                #     "assistant_model"
-                                # ),
-                                client=text_analyzer_kwargs.get("client"),
-                                client_config=text_analyzer_kwargs.get("client_config"),
-                                api_url=text_analyzer_kwargs.get("api_url"),
+                        comprehend_query_number += 1
+
+                        # Convert LLM entity results to RecognizerResult format
+                        for entity in entities:
+                            # Extract entity information (format: Type, BeginOffset, EndOffset, Score, Text)
+                            entity_type = entity.get("Type", "")
+                            begin_offset = entity.get("BeginOffset", 0)
+                            end_offset = entity.get("EndOffset", 0)
+                            entity_text = entity.get(
+                                "Text", text_str[begin_offset:end_offset]
                             )
 
-                            comprehend_query_number += 1
-
-                            # Convert LLM entity results to RecognizerResult format
-                            for entity in entities:
-                                # Extract entity information (format: Type, BeginOffset, EndOffset, Score, Text)
-                                entity_type = entity.get("Type", "")
-                                begin_offset = entity.get("BeginOffset", 0)
-                                end_offset = entity.get("EndOffset", 0)
-                                entity_text = entity.get(
-                                    "Text", text_str[begin_offset:end_offset]
-                                )
-
-                                # Filter by allow_list (case-insensitive)
-                                # If allow_list contains this text, skip adding it as a PII entity
-                                # This allows allow_list terms to "overrule" LLM PII detection
-                                if in_allow_list_flat:
-                                    # Normalize for case-insensitive matching
-                                    allow_list_normalized = [
-                                        item.strip().lower()
-                                        for item in in_allow_list_flat
-                                        if item
-                                    ]
-                                    entity_text_normalized = entity_text.strip().lower()
-                                    if entity_text_normalized in allow_list_normalized:
-                                        continue
-
-                                # Only add entities that are in the chosen list
-                                if entity_type not in llm_chosen_redact_entities:
+                            # Filter by allow_list (case-insensitive)
+                            # If allow_list contains this text, skip adding it as a PII entity
+                            # This allows allow_list terms to "overrule" LLM PII detection
+                            if in_allow_list_flat:
+                                # Normalize for case-insensitive matching
+                                allow_list_normalized = [
+                                    item.strip().lower()
+                                    for item in in_allow_list_flat
+                                    if item
+                                ]
+                                entity_text_normalized = entity_text.strip().lower()
+                                if entity_text_normalized in allow_list_normalized:
                                     continue
 
-                                recognizer_result = RecognizerResult(
-                                    entity_type=entity_type,
-                                    start=begin_offset,
-                                    end=end_offset,
-                                    score=entity.get("Score", 0.0),
-                                )
-                                column_results.recognizer_results[text_idx].append(
-                                    recognizer_result
-                                )
+                            # Only add entities that are in the chosen list (if we have entities)
+                            # If no entities but custom instructions, accept all returned entities
+                            if (
+                                llm_chosen_redact_entities
+                                and entity_type not in llm_chosen_redact_entities
+                            ):
+                                continue
 
-                            break  # Success, exit retry loop
+                            recognizer_result = RecognizerResult(
+                                entity_type=entity_type,
+                                start=begin_offset,
+                                end=end_offset,
+                                score=entity.get("Score", 0.0),
+                            )
+                            column_results.recognizer_results[text_idx].append(
+                                recognizer_result
+                            )
 
-                        except Exception as e:
-                            if attempt == max_retries - 1:
-                                print(
-                                    f"LLM entity detection failed for text: {text_str[:100]}... due to",
-                                    e,
-                                )
-                                raise
-                            time.sleep(retry_delay)
+                        break  # Success, exit retry loop
 
-                # Store or update the column results
-                results_by_column[column_name] = column_results
+                    except Exception as e:
+                        if attempt == max_retries - 1:
+                            print(
+                                f"LLM entity detection failed for text: {text_str[:100]}... due to",
+                                e,
+                            )
+                            raise
+                        time.sleep(retry_delay)
 
-            # Convert the dictionary of results back to a list
-            analyzer_results = list(results_by_column.values())
+            # Store or update the column results
+            results_by_column[column_name] = column_results
 
-    else:
-        print("Unable to redact.")
+        # Convert the dictionary of results back to a list
+        analyzer_results = list(results_by_column.values())
 
     # Usage in the main function:
     decision_process_output_str, decision_process_output_df = generate_log(

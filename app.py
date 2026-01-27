@@ -428,9 +428,18 @@ walkthrough_text_extract_method_radio = gr.Radio(
     visible=True,
 )
 
+# Set initial value for walkthrough local OCR method based on default text extraction method
+# If Bedrock VLM is the default, set to "bedrock-vlm", otherwise use CHOSEN_LOCAL_OCR_MODEL
+initial_walkthrough_local_ocr_value = CHOSEN_LOCAL_OCR_MODEL
+if (
+    DEFAULT_TEXT_EXTRACTION_MODEL == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+    and "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS
+):
+    initial_walkthrough_local_ocr_value = "bedrock-vlm"
+
 walkthrough_local_ocr_method_radio = gr.Radio(
     label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
-    value=CHOSEN_LOCAL_OCR_MODEL,
+    value=initial_walkthrough_local_ocr_value,
     choices=LOCAL_OCR_MODEL_OPTIONS,
     interactive=True,
     visible=initial_local_ocr_visible,
@@ -471,12 +480,15 @@ walkthrough_fully_redacted_list_state = gr.Dropdown(
     multiselect=True,
 )
 
-# Column container for the accordion (conditionally visible based on redaction method)
-# Initially hidden since default is "Redact all PII"
-initial_show_selected_terms_lists = False
-walkthrough_selected_terms_accordion_container = gr.Column(
-    visible=initial_show_selected_terms_lists,
+walkthrough_pii_identification_method_drop_tabular = gr.Radio(
+    label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
+    value=DEFAULT_PII_DETECTION_MODEL,
+    choices=TABULAR_PII_DETECTION_MODELS,
+    visible=False,
 )
+
+# Note: Accordion container removed to avoid block ID mismatches
+# Components are now rendered directly in the walkthrough
 
 
 ## Redaction examples
@@ -507,9 +519,18 @@ text_extract_method_radio = gr.Radio(
     visible=SHOW_OCR_GUI_OPTIONS,
 )
 
+# Set initial value for local OCR method based on default text extraction method
+# If Bedrock VLM is the default, set to "bedrock-vlm", otherwise use CHOSEN_LOCAL_OCR_MODEL
+initial_local_ocr_value = CHOSEN_LOCAL_OCR_MODEL
+if (
+    DEFAULT_TEXT_EXTRACTION_MODEL == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+    and "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS
+):
+    initial_local_ocr_value = "bedrock-vlm"
+
 local_ocr_method_radio = gr.Radio(
     label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
-    value=CHOSEN_LOCAL_OCR_MODEL,
+    value=initial_local_ocr_value,
     choices=LOCAL_OCR_MODEL_OPTIONS,
     interactive=True,
     visible=SHOW_LOCAL_OCR_MODEL_OPTIONS,
@@ -1951,24 +1972,16 @@ with blocks:
                             visible=initial_is_llm_method,
                         )
 
-                        with walkthrough_selected_terms_accordion_container:
-                            with gr.Accordion(
-                                "Terms to always include or exclude in redactions, and whole page redaction. To add many terms at once, you can load in a file on the Redaction Settings tab.",
-                                open=True,
-                            ):
-                                # Components for "Redact selected terms" option (conditionally visible)
-                                with gr.Row():
-                                    walkthrough_deny_list_state.render()
-                                    walkthrough_allow_list_state.render()
-                                    walkthrough_fully_redacted_list_state.render()
+                        # Components for "Redact selected terms" option (conditionally visible)
+                        # Note: Accordion removed to avoid block ID mismatches
+                        with gr.Row():
+                            walkthrough_deny_list_state.render()
+                            walkthrough_allow_list_state.render()
+                            walkthrough_fully_redacted_list_state.render()
 
                         # Tabular data redaction options (conditionally visible for data files)
-                        walkthrough_pii_identification_method_drop_tabular = gr.Radio(
-                            label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
-                            value=DEFAULT_PII_DETECTION_MODEL,
-                            choices=TABULAR_PII_DETECTION_MODELS,
-                            visible=False,
-                        )
+
+                        walkthrough_pii_identification_method_drop_tabular.render()
                         walkthrough_anon_strategy = gr.Radio(
                             choices=[
                                 "replace with 'REDACTED'",
@@ -2062,19 +2075,24 @@ with blocks:
                                 # Cost code components (conditionally visible)
 
                                 with gr.Column():
-                                    walkthrough_cost_code_dataframe = gr.Dataframe(
-                                        value=pd.DataFrame(
-                                            columns=["Cost code", "Description"]
-                                        ),
-                                        row_count=(0, "dynamic"),
-                                        label="Existing cost codes",
-                                        type="pandas",
-                                        interactive=True,
-                                        show_search="filter",
+                                    with gr.Accordion(
+                                        "Existing cost codes table",
+                                        open=False,
                                         visible=show_cost_codes,
-                                        wrap=True,
-                                        max_height=200,
-                                    )
+                                    ):
+                                        walkthrough_cost_code_dataframe = gr.Dataframe(
+                                            value=pd.DataFrame(
+                                                columns=["Cost code", "Description"]
+                                            ),
+                                            row_count=(0, "dynamic"),
+                                            label="Existing cost codes",
+                                            type="pandas",
+                                            interactive=True,
+                                            show_search="filter",
+                                            visible=show_cost_codes,
+                                            wrap=True,
+                                            max_height=200,
+                                        )
                                     walkthrough_reset_cost_code_dataframe_button = (
                                         gr.Button(
                                             value="Reset code code table filter",
@@ -2214,7 +2232,6 @@ with blocks:
                     walkthrough_deny_list_state,
                     walkthrough_allow_list_state,
                     walkthrough_fully_redacted_list_state,
-                    walkthrough_selected_terms_accordion_container,
                 ],
             )
 

@@ -502,6 +502,20 @@ def call_llm_for_entity_detection(
     if inference_method is None:
         inference_method = CHOSEN_LLM_PII_INFERENCE_METHOD
 
+    # Filter out CUSTOM_VLM_* entities (these are handled separately via VLM)
+    filtered_entities = [
+        entity for entity in entities_to_detect if not entity.startswith("CUSTOM_VLM_")
+    ]
+
+    # Validate that we have either entities or custom instructions
+    if not filtered_entities and (
+        not custom_instructions or not custom_instructions.strip()
+    ):
+        raise ValueError(
+            "No standard entities selected and no custom instructions provided. "
+            "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions for LLM-based PII detection."
+        )
+
     # Determine model source from model_choice if using model_name_map
     model_source = None
     if model_choice and model_name_map and model_choice in model_name_map:
@@ -519,10 +533,10 @@ def call_llm_for_entity_detection(
             inference_method = "aws-bedrock"
 
     system_prompt = create_entity_detection_system_prompt(
-        entities_to_detect, language, custom_instructions
+        filtered_entities, language, custom_instructions
     )
     user_prompt = create_entity_detection_prompt(
-        text, entities_to_detect, language, custom_instructions
+        text, filtered_entities, language, custom_instructions
     )
 
     # Map inference_method to model_source format expected by send_request
@@ -727,11 +741,11 @@ def map_back_llm_entity_results(
         entity_type = entity.get("Type")
         # Allow all entity types returned by LLM, including custom types from custom instructions
         # Log when a custom entity type (not in the original list) is found
-        if entity_type not in chosen_redact_comprehend_entities:
-            print(
-                f"Info: Found custom entity type '{entity_type}' (not in original detection list). "
-                f"Including it in results as it was returned by LLM."
-            )
+        # if entity_type not in chosen_redact_comprehend_entities:
+        #     print(
+        #         f"Info: Found custom entity type '{entity_type}' (not in original detection list). "
+        #         f"Including it in results as it was returned by LLM."
+        #     )
 
         entity_start = entity["BeginOffset"]
         entity_end = entity["EndOffset"]
@@ -874,7 +888,7 @@ def do_llm_entity_detection_call(
         Tuple of (updated all_text_line_results, input_tokens, output_tokens)
     """
     if not current_batch:
-        return all_text_line_results or []
+        return (all_text_line_results or [], 0, 0)
 
     if allow_list is None:
         allow_list = []

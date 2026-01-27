@@ -61,7 +61,6 @@ from tools.config import (
     TESSERACT_SEGMENTATION_LEVEL,
     TESSERACT_WORD_LEVEL_OCR,
     USE_LLAMA_SWAP,
-    VLM_MAX_DPI,
     VLM_MAX_IMAGE_SIZE,
 )
 from tools.helper_functions import clean_unicode_text, get_system_font_path
@@ -638,6 +637,7 @@ def save_vlm_prompt_response(
     max_new_tokens: Optional[int] = None,
     top_p: Optional[float] = None,
     model_type: str = "VLM",
+    task_suffix: Optional[str] = None,
 ) -> str:
     """
     Save VLM prompt and response to a text file for traceability.
@@ -653,6 +653,7 @@ def save_vlm_prompt_response(
         max_new_tokens: Max tokens used (if applicable)
         top_p: Top-p parameter used (if applicable)
         model_type: Type of model (e.g., "VLM", "Bedrock", "Inference Server", "Gemini", "Azure/OpenAI")
+        task_suffix: Optional suffix to add to filename (e.g., "_person", "_sig") to distinguish task types
 
     Returns:
         Path to the saved file
@@ -660,6 +661,9 @@ def save_vlm_prompt_response(
     # Create VLM logs subfolder
     vlm_logs_folder = os.path.join(output_folder, "vlm_prompts_responses")
     os.makedirs(vlm_logs_folder, exist_ok=True)
+
+    # Add task suffix to filename if provided
+    suffix_str = f"_{task_suffix}" if task_suffix else ""
 
     # Create filename with image name and page number if available, otherwise use timestamp
     if image_name and page_number is not None:
@@ -670,18 +674,20 @@ def save_vlm_prompt_response(
         safe_image_name = safe_image_name.replace(" ", "_")
         # Remove file extension if present
         safe_image_name = safe_image_name.rsplit(".", 1)[0]
-        filename = f"vlm_{safe_image_name}_page_{page_number:04d}_{model_type.lower().replace(' ', '_')}.txt"
+        filename = f"vlm_{safe_image_name}_page_{page_number:04d}{suffix_str}_{model_type.lower().replace(' ', '_')}.txt"
     elif image_name:
         safe_image_name = "".join(
             c for c in image_name if c.isalnum() or c in (" ", "-", "_", ".")
         ).strip()
         safe_image_name = safe_image_name.replace(" ", "_")
         safe_image_name = safe_image_name.rsplit(".", 1)[0]
-        filename = f"vlm_{safe_image_name}_{model_type.lower().replace(' ', '_')}.txt"
+        filename = f"vlm_{safe_image_name}{suffix_str}_{model_type.lower().replace(' ', '_')}.txt"
     else:
         # Fallback to timestamp if image info not available
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"vlm_{model_type.lower().replace(' ', '_')}_{timestamp}.txt"
+        filename = (
+            f"vlm_{model_type.lower().replace(' ', '_')}{suffix_str}_{timestamp}.txt"
+        )
     filepath = os.path.join(vlm_logs_folder, filename)
 
     # Write prompt and response to file
@@ -718,18 +724,40 @@ def save_vlm_prompt_response(
     return filepath
 
 
-def _prepare_image_for_vlm(image: Image.Image) -> Image.Image:
+def _prepare_image_for_vlm(
+    image: Image.Image,
+    ocr_method: Optional[str] = None,
+    max_image_size: Optional[int] = VLM_MAX_IMAGE_SIZE,
+) -> Image.Image:
     """
     Prepare image for VLM by ensuring it doesn't exceed maximum size and DPI limits.
 
     Args:
         image: PIL Image to prepare
-
+        ocr_method: Optional OCR method name. If "AWS Bedrock VLM OCR" or contains "Bedrock",
+                    the image will not be resized.
+        max_image_size: Optional maximum image size in pixels. If not provided, the default VLM_MAX_IMAGE_SIZE will be used.
     Returns:
         PIL Image that has been resized if necessary to meet size and DPI constraints
+        (unless OCR method is AWS Bedrock VLM OCR)
     """
     if image is None:
         return image
+
+    # Check if OCR method is AWS Bedrock VLM OCR - if so, skip resizing. NOTE: abandoned as images were exceeding bedrock limits
+    # from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
+    # if ocr_method and (
+    #     ocr_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+    #     or "Bedrock" in ocr_method
+    #     or ocr_method == "bedrock-vlm"
+    # ):
+    #     # Skip resizing for AWS Bedrock VLM OCR
+    #     return image
+
+    # Override VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR. This is a multiple of 32*32 for Qwen3-VL.
+    if "bedrock" in ocr_method.lower():
+        max_image_size = 33554432  # 32*32*32*1024 = 33554432
+        # print("Overriding VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR to 33554432")
 
     width, height = image.size
 
@@ -748,20 +776,22 @@ def _prepare_image_for_vlm(image: Image.Image) -> Image.Image:
 
     # Check if total pixels exceed maximum
     total_pixels = width * height
-    if total_pixels > VLM_MAX_IMAGE_SIZE:
+    if total_pixels > max_image_size:
         # Calculate scale factor to reduce total pixels to maximum
         # Since area scales with scale^2, we need sqrt of the ratio
-        size_scale = (VLM_MAX_IMAGE_SIZE / total_pixels) ** 0.5
+        size_scale = (max_image_size / total_pixels) ** 0.5
         print(
-            f"VLM image size check: Image has {total_pixels:,} pixels ({width}x{height}), exceeds maximum {VLM_MAX_IMAGE_SIZE:,} pixels. Will resize by factor {size_scale:.3f}"
+            f"VLM image size check: Image has {total_pixels:,} pixels ({width}x{height}), exceeds maximum {max_image_size:,} pixels. Will resize by factor {size_scale:.3f}"
         )
 
-    # Check if DPI exceeds maximum
-    if current_dpi > VLM_MAX_DPI:
-        dpi_scale = VLM_MAX_DPI / current_dpi
-        # print(
-        #     f"VLM DPI check: Image DPI {current_dpi:.1f} exceeds maximum {VLM_MAX_DPI:.1f} DPI. Will resize by factor {dpi_scale:.3f}"
-        # )
+    # Check if DPI exceeds maximum (Not currently utilised)
+    # if current_dpi > VLM_MAX_DPI:
+    #     dpi_scale = VLM_MAX_DPI / current_dpi
+    # print(
+    #     f"VLM DPI check: Image DPI {current_dpi:.1f} exceeds maximum {VLM_MAX_DPI:.1f} DPI. Will resize by factor {dpi_scale:.3f}"
+    # )
+
+    dpi_scale = 1.0
 
     # Use the smaller scale factor to ensure both constraints are met
     final_scale = min(size_scale, dpi_scale)
@@ -2066,8 +2096,13 @@ def _bedrock_vlm_ocr_predict(
             return {"rec_texts": [], "rec_scores": []}
 
         # Check and resize image if it exceeds maximum size or DPI limits
+        # Skip resizing for AWS Bedrock VLM OCR
         try:
-            image = _prepare_image_for_vlm(image)
+            from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
+
+            image = _prepare_image_for_vlm(
+                image, ocr_method=BEDROCK_VLM_TEXT_EXTRACT_OPTION
+            )
             width, height = image.size
         except Exception as prep_error:
             print(
@@ -3399,6 +3434,13 @@ def _inference_server_page_ocr_predict(
                             page_number = int(match.group(1))
                             break
 
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
                     response_text=extracted_text,
@@ -3410,6 +3452,7 @@ def _inference_server_page_ocr_predict(
                     max_new_tokens=model_default_max_new_tokens,
                     top_p=model_default_top_p,
                     model_type="Inference Server",
+                    task_suffix=task_suffix,
                 )
                 print(f"Saved inference-server VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -4025,7 +4068,12 @@ def _bedrock_page_ocr_predict(
         scale_y = 1.0
         try:
             original_width, original_height = image.size
-            processed_image = _prepare_image_for_vlm(image)
+            # Skip resizing for AWS Bedrock VLM OCR
+            from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
+
+            processed_image = _prepare_image_for_vlm(
+                image, ocr_method=BEDROCK_VLM_TEXT_EXTRACT_OPTION
+            )
             processed_width, processed_height = processed_image.size
 
             scale_x = (
@@ -4156,6 +4204,13 @@ def _bedrock_page_ocr_predict(
                             page_number = int(match.group(1))
                             break
 
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
                     response_text=extracted_text,
@@ -4167,6 +4222,7 @@ def _bedrock_page_ocr_predict(
                     max_new_tokens=model_default_max_new_tokens,
                     top_p=model_default_top_p,
                     model_type="Bedrock",
+                    task_suffix=task_suffix,
                 )
                 print(f"Saved Bedrock VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -4408,6 +4464,13 @@ def _gemini_page_ocr_predict(
                             page_number = int(match.group(1))
                             break
 
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
                     response_text=extracted_text,
@@ -4418,6 +4481,7 @@ def _gemini_page_ocr_predict(
                     temperature=model_default_temperature,
                     max_new_tokens=model_default_max_new_tokens,
                     model_type="Gemini",
+                    task_suffix=task_suffix,
                 )
                 print(f"Saved Gemini VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -4637,6 +4701,13 @@ def _azure_openai_page_ocr_predict(
                             page_number = int(match.group(1))
                             break
 
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
                     response_text=extracted_text,
@@ -4647,6 +4718,7 @@ def _azure_openai_page_ocr_predict(
                     temperature=model_default_temperature,
                     max_new_tokens=model_default_max_new_tokens,
                     model_type="Azure/OpenAI",
+                    task_suffix=task_suffix,
                 )
                 print(f"Saved Azure/OpenAI VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -7069,6 +7141,23 @@ class CustomImageAnalyzerEngine:
         if chosen_llm_entities is None:
             chosen_llm_entities = chosen_redact_comprehend_entities
 
+        # Filter out CUSTOM_VLM_* entities (these are handled separately via VLM, not LLM)
+        # and validate that we have either entities or custom instructions
+        filtered_llm_entities = [
+            entity
+            for entity in (chosen_llm_entities or [])
+            if not entity.startswith("CUSTOM_VLM_")
+        ]
+
+        # Validate: if no standard entities and no custom instructions, raise error
+        if not filtered_llm_entities and (
+            not custom_llm_instructions or not custom_llm_instructions.strip()
+        ):
+            raise ValueError(
+                "No standard entities selected for LLM PII detection and no custom instructions provided. "
+                "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions."
+            )
+
         if not nlp_analyser:
             nlp_analyser = self.analyzer_engine
 
@@ -7500,11 +7589,13 @@ class CustomImageAnalyzerEngine:
 
                         # Check if current word ends with phrase punctuation
                         if ends_with_phrase_punctuation(word):
-                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
                             llm_chosen_redact_comprehend_entities = [
                                 entity
                                 for entity in chosen_llm_entities
                                 if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
                             ]
                             # Process current batch
                             (
@@ -7601,11 +7692,13 @@ class CustomImageAnalyzerEngine:
                             batch_word_count = lookahead_word_count
                             current_batch_mapping = lookahead_mapping
 
-                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
                             llm_chosen_redact_comprehend_entities = [
                                 entity
                                 for entity in chosen_llm_entities
                                 if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
                             ]
                             # Process current batch
                             (
@@ -7681,9 +7774,12 @@ class CustomImageAnalyzerEngine:
 
             # Process final batch if any
             if current_batch:
-                # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
                 llm_chosen_redact_comprehend_entities = [
-                    entity for entity in chosen_llm_entities if entity != "CUSTOM"
+                    entity
+                    for entity in chosen_llm_entities
+                    if entity != "CUSTOM" and not entity.startswith("CUSTOM_VLM_")
                 ]
                 all_text_line_results, batch_input_tokens, batch_output_tokens = (
                     do_llm_entity_detection_call(
@@ -7854,11 +7950,13 @@ class CustomImageAnalyzerEngine:
 
                         # Check if current word ends with phrase punctuation
                         if ends_with_phrase_punctuation(word):
-                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
                             llm_chosen_redact_comprehend_entities = [
                                 entity
                                 for entity in chosen_llm_entities
                                 if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
                             ]
                             # Process current batch
                             (
@@ -7955,11 +8053,13 @@ class CustomImageAnalyzerEngine:
                             batch_word_count = lookahead_word_count
                             current_batch_mapping = lookahead_mapping
 
-                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
                             llm_chosen_redact_comprehend_entities = [
                                 entity
                                 for entity in chosen_llm_entities
                                 if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
                             ]
                             # Process current batch
                             (
@@ -8035,9 +8135,12 @@ class CustomImageAnalyzerEngine:
 
             # Process final batch if any
             if current_batch:
-                # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
                 llm_chosen_redact_comprehend_entities = [
-                    entity for entity in chosen_llm_entities if entity != "CUSTOM"
+                    entity
+                    for entity in chosen_llm_entities
+                    if entity != "CUSTOM" and not entity.startswith("CUSTOM_VLM_")
                 ]
                 all_text_line_results, batch_input_tokens, batch_output_tokens = (
                     do_llm_entity_detection_call(
@@ -8230,11 +8333,13 @@ class CustomImageAnalyzerEngine:
 
                         # Check if current word ends with phrase punctuation
                         if ends_with_phrase_punctuation(word):
-                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
                             llm_chosen_redact_comprehend_entities = [
                                 entity
                                 for entity in chosen_llm_entities
                                 if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
                             ]
                             # Process current batch
                             (
@@ -8331,11 +8436,13 @@ class CustomImageAnalyzerEngine:
                             batch_word_count = lookahead_word_count
                             current_batch_mapping = lookahead_mapping
 
-                            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
                             llm_chosen_redact_comprehend_entities = [
                                 entity
                                 for entity in chosen_llm_entities
                                 if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
                             ]
                             # Process current batch
                             (
@@ -8411,9 +8518,12 @@ class CustomImageAnalyzerEngine:
 
             # Process final batch if any
             if current_batch:
-                # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
                 llm_chosen_redact_comprehend_entities = [
-                    entity for entity in chosen_llm_entities if entity != "CUSTOM"
+                    entity
+                    for entity in chosen_llm_entities
+                    if entity != "CUSTOM" and not entity.startswith("CUSTOM_VLM_")
                 ]
                 all_text_line_results, batch_input_tokens, batch_output_tokens = (
                     do_llm_entity_detection_call(
@@ -9571,32 +9681,40 @@ def run_page_text_redaction(
             llm_chosen_redact_comprehend_entities = [
                 entity for entity in chosen_llm_entities if entity != "CUSTOM"
             ]
-            all_text_line_results = do_llm_entity_detection_call(
-                current_batch,
-                current_batch_mapping,
-                bedrock_runtime=bedrock_runtime,
-                language=aws_language,
-                allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
-                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
-                all_text_line_results=all_text_line_results,
-                model_choice=model_choice,
-                temperature=text_analyzer_kwargs.get(
-                    "temperature", LLM_PII_TEMPERATURE
-                ),
-                max_tokens=text_analyzer_kwargs.get("max_tokens", LLM_PII_MAX_TOKENS),
-                output_folder=output_folder,
-                batch_number=comprehend_query_number + 1,
-                custom_instructions=custom_llm_instructions,
-                file_name=file_name,
-                page_number=page_number,
-                inference_method=text_analyzer_kwargs.get("inference_method"),
-                # local_model=text_analyzer_kwargs.get("local_model"),
-                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                # assistant_model=text_analyzer_kwargs.get("assistant_model"),
-                client=text_analyzer_kwargs.get("client"),
-                client_config=text_analyzer_kwargs.get("client_config"),
-                api_url=text_analyzer_kwargs.get("api_url"),
+            all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                do_llm_entity_detection_call(
+                    current_batch,
+                    current_batch_mapping,
+                    bedrock_runtime=bedrock_runtime,
+                    language=aws_language,
+                    allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
+                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                    all_text_line_results=all_text_line_results,
+                    model_choice=model_choice,
+                    temperature=text_analyzer_kwargs.get(
+                        "temperature", LLM_PII_TEMPERATURE
+                    ),
+                    max_tokens=text_analyzer_kwargs.get(
+                        "max_tokens", LLM_PII_MAX_TOKENS
+                    ),
+                    output_folder=output_folder,
+                    batch_number=comprehend_query_number + 1,
+                    custom_instructions=custom_llm_instructions,
+                    file_name=file_name,
+                    page_number=page_number,
+                    inference_method=text_analyzer_kwargs.get("inference_method"),
+                    # local_model=text_analyzer_kwargs.get("local_model"),
+                    # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    client=text_analyzer_kwargs.get("client"),
+                    client_config=text_analyzer_kwargs.get("client_config"),
+                    api_url=text_analyzer_kwargs.get("api_url"),
+                )
             )
+            # Accumulate token usage
+            llm_total_input_tokens += batch_input_tokens
+            llm_total_output_tokens += batch_output_tokens
+            comprehend_query_number += 1
             comprehend_query_number += 1
     elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
         # LLM-based entity detection using inference server
