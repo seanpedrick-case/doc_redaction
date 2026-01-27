@@ -354,7 +354,8 @@ CLEAN_ROOT = f"/{FASTAPI_ROOT_PATH.strip('/')}" if FASTAPI_ROOT_PATH.strip("/") 
 app = FastAPI(lifespan=lifespan, root_path=CLEAN_ROOT)
 
 # Added to pass lint check, no effect
-#spaces.annotations
+if 0 == 1:
+    print(f"spaces.__name__: {spaces.__name__}")
 
 ###
 # Load in Gradio app components
@@ -484,6 +485,25 @@ walkthrough_pii_identification_method_drop_tabular = gr.Radio(
     label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
     value=DEFAULT_PII_DETECTION_MODEL,
     choices=TABULAR_PII_DETECTION_MODELS,
+    visible=False,
+)
+
+walkthrough_anon_strategy = gr.Radio(
+    choices=[
+        "replace with 'REDACTED'",
+        "replace with <ENTITY_NAME>",
+        "redact completely",
+        "hash",
+        "mask",
+    ],
+    label="Select an anonymisation method.",
+    value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
+    visible=False,
+)
+
+walkthrough_do_initial_clean = gr.Checkbox(
+    label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
+    value=DO_INITIAL_TABULAR_DATA_CLEAN,
     visible=False,
 )
 
@@ -1679,6 +1699,42 @@ with blocks:
                 # Use default local OCR method - examples don't set this directly
                 local_ocr_method = CHOSEN_LOCAL_OCR_MODEL
 
+                # Update visibility of main PII entity components based on selected PII method
+                # This ensures visibility is correct even when clicking examples with the same PII method
+                # Determine visibility based on PII method (same logic as handle_main_pii_method_selection)
+                is_no_redaction = (
+                    pii_identification_method_drop == NO_REDACTION_PII_OPTION
+                )
+                show_local_entities = (
+                    not is_no_redaction
+                    and pii_identification_method_drop == LOCAL_PII_OPTION
+                )
+                show_comprehend_entities = (
+                    not is_no_redaction
+                    and pii_identification_method_drop == AWS_PII_OPTION
+                )
+                is_llm_method = not is_no_redaction and (
+                    pii_identification_method_drop == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+                    or pii_identification_method_drop == INFERENCE_SERVER_PII_OPTION
+                    or pii_identification_method_drop == AWS_LLM_PII_OPTION
+                )
+
+                # Create updates with both value and visibility for main components
+                main_local_entities_update = gr.update(
+                    value=in_redact_entities,
+                    visible=show_local_entities,
+                )
+                main_comprehend_entities_update = gr.update(
+                    value=in_redact_comprehend_entities,
+                    visible=show_comprehend_entities,
+                )
+                main_llm_entities_update = gr.update(
+                    visible=is_llm_method,
+                )
+                main_llm_instructions_update = gr.update(
+                    visible=is_llm_method,
+                )
+
                 return (
                     gr.File(value=in_doc_files),  # walkthrough_file_input
                     gr.Dropdown(
@@ -1708,6 +1764,10 @@ with blocks:
                     gr.Dropdown(
                         value=fully_redacted_list_walkthrough
                     ),  # walkthrough_fully_redacted_list_state
+                    main_local_entities_update,  # in_redact_entities (main component)
+                    main_comprehend_entities_update,  # in_redact_comprehend_entities (main component)
+                    main_llm_entities_update,  # in_redact_llm_entities (main component)
+                    main_llm_instructions_update,  # custom_llm_instructions_textbox (main component)
                 )
 
             redaction_examples = gr.Examples(
@@ -1738,6 +1798,10 @@ with blocks:
                     walkthrough_allow_list_state,
                     walkthrough_deny_list_state,
                     walkthrough_fully_redacted_list_state,
+                    in_redact_entities,  # Main component - update visibility
+                    in_redact_comprehend_entities,  # Main component - update visibility
+                    in_redact_llm_entities,  # Main component - update visibility
+                    custom_llm_instructions_textbox,  # Main component - update visibility
                 ],
                 example_labels=example_labels,
                 fn=show_info_box_on_click,
@@ -1892,6 +1956,24 @@ with blocks:
                 run_on_click=True,
             )
 
+    # Render walkthrough components in a hidden container when SHOW_QUICKSTART is False
+    # This ensures they exist for examples and event handlers even when Quickstart tab is hidden
+    if not SHOW_QUICKSTART:
+        with gr.Column(visible=False):
+            walkthrough_file_input.render()
+            walkthrough_in_redact_entities.render()
+            walkthrough_in_redact_comprehend_entities.render()
+            walkthrough_text_extract_method_radio.render()
+            walkthrough_local_ocr_method_radio.render()
+            walkthrough_handwrite_signature_checkbox.render()
+            walkthrough_pii_identification_method_drop.render()
+            walkthrough_allow_list_state.render()
+            walkthrough_deny_list_state.render()
+            walkthrough_fully_redacted_list_state.render()
+            walkthrough_pii_identification_method_drop_tabular.render()
+            walkthrough_anon_strategy.render()
+            walkthrough_do_initial_clean.render()
+
     with gr.Tabs() as tabs:
         ###
         # QUICKSTART TAB
@@ -1982,23 +2064,10 @@ with blocks:
                         # Tabular data redaction options (conditionally visible for data files)
 
                         walkthrough_pii_identification_method_drop_tabular.render()
-                        walkthrough_anon_strategy = gr.Radio(
-                            choices=[
-                                "replace with 'REDACTED'",
-                                "replace with <ENTITY_NAME>",
-                                "redact completely",
-                                "hash",
-                                "mask",
-                            ],
-                            label="Select an anonymisation method.",
-                            value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
-                            visible=False,
-                        )
-                        walkthrough_do_initial_clean = gr.Checkbox(
-                            label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
-                            value=DO_INITIAL_TABULAR_DATA_CLEAN,
-                            visible=False,
-                        )
+
+                        walkthrough_anon_strategy.render()
+
+                        walkthrough_do_initial_clean.render()
 
                         with gr.Row():
                             step_3_back_btn = gr.Button("Back", variant="secondary")
@@ -2067,6 +2136,7 @@ with blocks:
                                     precision=2,
                                     interactive=False,
                                 )
+
                         show_cost_codes = GET_COST_CODES or ENFORCE_COST_CODES
                         with gr.Accordion(
                             "Cost code selection", open=True, visible=show_cost_codes
@@ -2161,7 +2231,6 @@ with blocks:
                                 inputs=walkthrough_is_data_file,
                                 outputs=tabs,
                             )
-
             ###
             # QUICKSTART WALKTHROUGH EVENT HANDLERS
             ###
@@ -2296,41 +2365,6 @@ with blocks:
                 ],
             )
 
-            # Step 4: Write values to main components when Next is clicked
-            # step_4_next_btn.click(
-            #     fn=handle_step_4_next,
-            #     inputs=[
-            #         walkthrough_page_min,
-            #         walkthrough_page_max,
-            #         walkthrough_textract_output_found_checkbox,
-            #         walkthrough_relevant_ocr_output_with_words_found_checkbox,
-            #         walkthrough_total_pdf_page_count,
-            #         walkthrough_estimated_aws_costs_number,
-            #         walkthrough_estimated_time_taken_number,
-            #         walkthrough_cost_code_dataframe,
-            #         walkthrough_cost_code_choice_drop,
-            #     ],
-            #     outputs=[
-            #         page_min,
-            #         page_max,
-            #         textract_output_found_checkbox,
-            #         relevant_ocr_output_with_words_found_checkbox,
-            #         total_pdf_page_count,
-            #         estimated_aws_costs_number,
-            #         estimated_time_taken_number,
-            #         cost_code_dataframe,
-            #         cost_code_choice_drop,
-            #         walkthrough,
-            #     ],
-            # )
-
-            # if walkthrough_is_data_file.value:
-            # step_4_next_btn.click(
-            #     fn=change_tab_to_tabular_or_document_redactions,
-            #     inputs=walkthrough_is_data_file,
-            #     outputs=tabs,
-            # )
-
             # Reset cost code dataframe filter in walkthrough
             if GET_COST_CODES or ENFORCE_COST_CODES:
                 from tools.helper_functions import reset_base_dataframe
@@ -2351,37 +2385,6 @@ with blocks:
                 ],
             )
 
-            # Walkthrough extract/redact button - uses same handlers as document_redact_btn
-            # but also updates walkthrough output components and syncs to original components
-            # walkthrough_document_redact_btn.click().success(
-            #     fn=sync_walkthrough_outputs_to_original,
-            #     inputs=[
-            #         redaction_output_summary_textbox,
-            #         output_file,
-            #     ],
-            #     outputs=[
-            #         walkthrough_redaction_output_summary_textbox,
-            #         walkthrough_output_file,
-            #         redaction_output_summary_textbox,
-            #         output_file,
-            #     ],
-            # )
-
-            # Walkthrough tabular data redact button - uses same handlers as tabular_data_redact_btn
-            # but also updates walkthrough output components and syncs to original components
-            # walkthrough_tabular_data_redact_btn.click().success(
-            #     fn=sync_walkthrough_tabular_outputs_to_original,
-            #     inputs=[
-            #         text_output_summary,
-            #         text_output_file,
-            #     ],
-            #     outputs=[
-            #         walkthrough_text_output_summary,
-            #         walkthrough_text_output_file,
-            #         text_output_summary,
-            #         text_output_file,
-            #     ],
-            # )
         ###
         # REDACTION PDF/IMAGES TABLE
         ###

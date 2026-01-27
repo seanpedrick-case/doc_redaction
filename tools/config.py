@@ -1702,9 +1702,9 @@ model_type_for_reasoning = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
 
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "gpt-oss-20b":
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "Reasoning: low")
-    print("Using REASONING_SUFFIX: Reasoning: low")
+    # print("Using REASONING_SUFFIX: Reasoning: low")
 elif LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "Qwen 3 4B":
-    print("Using REASONING_SUFFIX: /nothink")
+    # print("Using REASONING_SUFFIX: /nothink")
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "/nothink")
 else:
     # print("No reasoning suffix applied")

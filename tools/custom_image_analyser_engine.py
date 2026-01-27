@@ -755,7 +755,7 @@ def _prepare_image_for_vlm(
     #     return image
 
     # Override VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR. This is a multiple of 32*32 for Qwen3-VL.
-    if "bedrock" in ocr_method.lower():
+    if ocr_method and "bedrock" in ocr_method.lower():
         max_image_size = 33554432  # 32*32*32*1024 = 33554432
         # print("Overriding VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR to 33554432")
 
@@ -2879,6 +2879,54 @@ def _vlm_page_ocr_predict(
                 do_sample=model_default_do_sample,
             )
         )
+
+        # Save prompt and response to file
+        if extracted_text and isinstance(extracted_text, str) and output_folder:
+            try:
+                # Extract page number from image_name if present
+                page_number = None
+                if image_name:
+                    page_patterns = [
+                        r"_page_(\d+)\.png$",
+                        r"_(\d+)\.png$",
+                        r"page_(\d+)\.png$",
+                    ]
+                    for pattern in page_patterns:
+                        match = re.search(pattern, image_name, re.IGNORECASE)
+                        if match:
+                            page_number = int(match.group(1))
+                            break
+
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
+                # Get model name for logging
+                vlm_model_name = (
+                    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    else "VLM"
+                )
+
+                saved_file = save_vlm_prompt_response(
+                    prompt=prompt,
+                    response_text=extracted_text,
+                    output_folder=output_folder,
+                    model_choice=vlm_model_name,
+                    image_name=image_name,
+                    page_number=page_number,
+                    temperature=model_default_temperature,
+                    max_new_tokens=model_default_max_new_tokens,
+                    top_p=model_default_top_p,
+                    model_type="VLM",
+                    task_suffix=task_suffix,
+                )
+                print(f"Saved VLM prompt/response to: {saved_file}")
+            except Exception as save_error:
+                print(f"Warning: Could not save VLM prompt/response: {save_error}")
 
         # Check if extracted_text is None or empty
         if extracted_text is None or not isinstance(extracted_text, str):
