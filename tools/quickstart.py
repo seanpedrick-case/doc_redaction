@@ -293,6 +293,7 @@ def handle_step_3_next(
     pii_method_tabular_val,
     anon_strategy_val,
     do_initial_clean_val,
+    redact_duplicate_pages_val,
 ):
     """Handle step 3 next button - write values to main components."""
     # Update text extraction method with walkthrough value
@@ -411,6 +412,13 @@ def handle_step_3_next(
         else gr.Checkbox()
     )
 
+    # Update redact duplicate pages checkbox with walkthrough value
+    redact_duplicate_pages_update = (
+        gr.Checkbox(value=redact_duplicate_pages_val)
+        if redact_duplicate_pages_val is not None
+        else gr.Checkbox()
+    )
+
     return (
         text_extract_method_update,  # text_extract_method_radio
         local_ocr_update,  # local_ocr_method_radio
@@ -426,6 +434,7 @@ def handle_step_3_next(
         pii_method_tabular_update,  # pii_identification_method_drop_tabular
         anon_strategy_update,  # anon_strategy
         do_initial_clean_update,  # do_initial_clean
+        redact_duplicate_pages_update,  # redact_duplicate_pages_checkbox
         gr.Walkthrough(selected=4),  # walkthrough
     )
 

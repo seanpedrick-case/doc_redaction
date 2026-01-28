@@ -1512,13 +1512,12 @@ def apply_whole_page_redactions_from_list(
                         output_file, header=None
                     )  # Use output_file directly if it's a path
                     break
+            if not whole_pages_list.empty:
+                list_whole_pages_to_redact = whole_pages_list.iloc[:, 0].tolist()
         else:
             message = "No relevant list of whole pages to redact found."
             print(message)
             raise Warning(message)
-
-        if not whole_pages_list.empty:
-            list_whole_pages_to_redact = whole_pages_list.iloc[:, 0].tolist()
 
         list_whole_pages_to_redact = list(set(list_whole_pages_to_redact))
 
@@ -1699,7 +1698,8 @@ def create_annotation_objects_from_duplicates(
     final_output = list()
 
     if duplicates_df.empty:
-        raise Warning("No duplicates found")
+        gr.Info("No duplicates found")
+        return final_output
     if ocr_results_df.empty:
         raise Warning(
             "No OCR results found for file under review. Please upload relevant OCR_output file and original PDF document on the review tab."
@@ -1760,7 +1760,7 @@ def create_annotation_objects_from_duplicates(
                 annotations_by_page[page_number].append(box)
 
         # --- Format the final output list using the page-to-image map ---
-        final_output = list()
+
         # Sort by page number for a predictable order
         for page_num, boxes in sorted(annotations_by_page.items()):
             # Look up the image path using the page number

@@ -78,6 +78,7 @@ def reset_state_vars():
         0,
         [],
         [],
+        0,
     )
 
 

@@ -624,7 +624,7 @@ def choose_and_run_redactor(
             review_file_state,
             page_sizes,
             duplication_file_path_outputs,
-            duplication_file_path_outputs,
+            duplication_file_path_outputs,  # Write ocr_file_path to in_duplicate_pages
             review_file_path,
             total_textract_query_number,
             ocr_file_path,
@@ -1765,7 +1765,7 @@ def choose_and_run_redactor(
         if isinstance(ocr_file_path, str):
             out_file_paths.append(ocr_file_path)
         else:
-            duplication_file_path_outputs.append(ocr_file_path[0])
+            out_file_paths.append(ocr_file_path[0])
 
         if all_page_line_level_ocr_results_with_words:
             all_page_line_level_ocr_results_with_words = merge_page_results(
@@ -2114,8 +2114,10 @@ def choose_and_run_redactor(
     if ocr_file_path:
         if isinstance(ocr_file_path, str):
             ocr_review_files.append(ocr_file_path)
+            duplication_file_path_outputs.append(ocr_file_path)
         else:
             ocr_review_files.append(ocr_file_path[0])
+            duplication_file_path_outputs.append(ocr_file_path[0])
 
     if all_page_line_level_ocr_results_with_words_df_file_path:
         if isinstance(all_page_line_level_ocr_results_with_words_df_file_path, str):
@@ -2162,7 +2164,7 @@ def choose_and_run_redactor(
         review_file_state,
         page_sizes,
         duplication_file_path_outputs,
-        duplication_file_path_outputs,
+        duplication_file_path_outputs,  # Write ocr_file_path to in_duplicate_pages
         review_file_path,
         total_textract_query_number,
         ocr_file_path,

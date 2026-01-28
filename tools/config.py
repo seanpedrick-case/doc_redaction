@@ -1977,6 +1977,9 @@ SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER = convert_string_to_boolean(
     get_or_create_env_var("SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER", "False")
 )
 
+APPLY_DUPLICATES_TO_FILE_AUTOMATICALLY = convert_string_to_boolean(
+    get_or_create_env_var("APPLY_DUPLICATES_TO_FILE_AUTOMATICALLY", "False")
+)
 
 SHOW_EXAMPLES = convert_string_to_boolean(
     get_or_create_env_var("SHOW_EXAMPLES", "True")

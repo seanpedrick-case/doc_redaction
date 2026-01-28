@@ -305,6 +305,24 @@ CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 # CHOSEN_LLM_ENTITIES.extend(custom_entities)
 
+import sys
+
+
+# 1. Create a custom error class
+class ProcessStop(Exception):
+    pass
+
+
+# 2. Tell Python how to display it (Short and sweet)
+def silent_exception_handler(etype, value, tb):
+    print(f"etype: {etype}, value: {value}, tb: {tb}")
+    if issubclass(etype, ProcessStop):
+        print(f"INFO: {value}")  # Only print the message, no traceback
+    else:
+        sys.__excepthook__(etype, value, tb)  # Use default for real bugs
+
+
+sys.excepthook = silent_exception_handler
 ###
 # Load in FastAPI app
 ###
@@ -479,6 +497,17 @@ walkthrough_fully_redacted_list_state = gr.Dropdown(
     label="Fully redacted pages (fully redact these page numbers)",
     interactive=True,
     multiselect=True,
+)
+
+# State variable to sync the checkbox value across both locations
+redact_duplicate_pages_state = gr.State(value=False)
+
+# Checkbox for automatically redacting duplicate pages
+redact_duplicate_pages_checkbox = gr.Checkbox(
+    label="Redact duplicate pages",
+    value=False,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+    elem_id="redact_duplicate_pages_checkbox",
 )
 
 walkthrough_pii_identification_method_drop_tabular = gr.Radio(
@@ -2056,10 +2085,18 @@ with blocks:
 
                         # Components for "Redact selected terms" option (conditionally visible)
                         # Note: Accordion removed to avoid block ID mismatches
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             walkthrough_deny_list_state.render()
                             walkthrough_allow_list_state.render()
                             walkthrough_fully_redacted_list_state.render()
+
+                            # Checkbox for automatically redacting duplicate pages
+                            walkthrough_redact_duplicate_pages_checkbox = gr.Checkbox(
+                                label="Redact duplicate pages",
+                                value=False,
+                                visible=True,
+                                elem_id="redact_duplicate_pages_checkbox_walkthrough",
+                            )
 
                         # Tabular data redaction options (conditionally visible for data files)
 
@@ -2345,6 +2382,7 @@ with blocks:
                     walkthrough_pii_identification_method_drop_tabular,
                     walkthrough_anon_strategy,
                     walkthrough_do_initial_clean,
+                    walkthrough_redact_duplicate_pages_checkbox,
                 ],
                 outputs=[
                     text_extract_method_radio,
@@ -2361,6 +2399,7 @@ with blocks:
                     pii_identification_method_drop_tabular,
                     anon_strategy,
                     do_initial_clean,
+                    redact_duplicate_pages_checkbox,
                     walkthrough,
                 ],
             )
@@ -2546,10 +2585,12 @@ with blocks:
                                     "Terms to always include or exclude in redactions, and whole page redaction. To add many terms at once, you can load in a file on the Redaction Settings tab.",
                                     open=True,
                                 ):
-                                    with gr.Row():
+                                    with gr.Row(equal_height=True):
                                         in_allow_list_state.render()
                                         in_deny_list_state.render()
                                         in_fully_redacted_list_state.render()
+                                        # Checkbox for automatically redacting duplicate pages
+                                        redact_duplicate_pages_checkbox.render()
 
                     else:
                         pii_identification_method_drop.render()
@@ -2560,6 +2601,8 @@ with blocks:
                         in_allow_list_state.render()
                         in_deny_list_state.render()
                         in_fully_redacted_list_state.render()
+                        # Checkbox for automatically redacting duplicate pages
+                        redact_duplicate_pages_checkbox.render()
                         # Create hidden accordions for consistency (so event handlers can reference them)
                         # local_entities_accordion = gr.Accordion(visible=False)
                         # comprehend_entities_accordion = gr.Accordion(visible=False)
@@ -3226,7 +3269,9 @@ with blocks:
                     )
 
                 find_duplicate_pages_btn = gr.Button(
-                    value="Identify duplicate pages/subdocuments", variant="primary"
+                    value="Identify duplicate pages/subdocuments",
+                    variant="primary",
+                    elem_id="duplicate-detection-btn",
                 )
 
             with gr.Accordion("Step 2: Review and refine results", open=True):
@@ -3286,6 +3331,7 @@ with blocks:
                     apply_match_btn = gr.Button(
                         value="Apply relevant duplicate page output to document currently under review",
                         variant="secondary",
+                        elem_id="apply-duplicate-pages-btn",
                     )
 
         ###
@@ -3993,6 +4039,45 @@ with blocks:
             outputs=[cost_code_dataframe],
         )
 
+    # Triggers to programmatically click the duplicate detection and apply duplicate pages buttons
+    TRIGGER_DUPLICATE_DETECTION_BUTTON = """
+    function triggerDuplicateDetectionButtonClick() {
+        // Find the checkbox for redacting duplicate pages by its ID
+        const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
+        // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
+        
+        // Only trigger if checkbox exists and is checked
+        if (redactDuplicatePagesCheckbox) {
+            // Find the div with id "duplicate-detection-btn"
+            const duplicateDetectionButton = document.getElementById("duplicate-detection-btn");
+            if (!duplicateDetectionButton) {
+                console.error("Error: Could not find element with id 'duplicate-detection-btn'");
+                return;
+            }
+            // Trigger the click event
+            duplicateDetectionButton.click();
+        }
+    }"""
+
+    TRIGGER_APPLY_DUPLICATE_PAGES_BUTTON = """
+    function triggerApplyDuplicatePagesButtonClick() {
+        // Find the checkbox for redacting duplicate pages by its ID
+        const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
+        // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
+        
+        // Only trigger if checkbox exists and is checked
+        if (redactDuplicatePagesCheckbox) {
+            // Find the div with id "apply-duplicate-pages-btn"
+            const applyDuplicatePagesButton = document.getElementById("apply-duplicate-pages-btn");
+            if (!applyDuplicatePagesButton) {
+                console.error("Error: Could not find element with id 'apply-duplicate-pages-btn'");
+                return;
+            }
+            // Trigger the click event
+            applyDuplicatePagesButton.click();
+        }
+    }"""
+
     in_doc_files.upload(
         fn=get_input_file_names,
         inputs=[in_doc_files],
@@ -4082,6 +4167,7 @@ with blocks:
             textract_query_number,
             all_page_line_level_ocr_results_with_words,
             input_review_files,
+            latest_file_completed_num,
         ],
     ).success(
         fn=enforce_cost_codes,
@@ -4230,6 +4316,21 @@ with blocks:
         ],
         show_progress_on=[annotator],
     )
+
+    def check_duplicate_pages_checkbox(redact_duplicate_pages_checkbox_value: bool):
+        if not redact_duplicate_pages_checkbox_value:
+            # Silently raise an error to avoid showing a popup
+            return
+        if redact_duplicate_pages_checkbox_value:
+            print("Redact duplicate pages checkbox is enabled, identifying duplicates")
+            sys.tracebacklimit = 0  # Suppress traceback
+            raise ProcessStop(
+                "Redact duplicate pages checkbox is enabled, identifying duplicates."
+            )
+
+    def restore_sys_tracebacklimit():
+        sys.tracebacklimit = 1000  # Restore traceback limit
+        return
 
     # If a file has been completed, the function will continue onto the next document
     latest_file_completed_num.change(
@@ -4395,6 +4496,15 @@ with blocks:
     ).success(
         fn=reset_aws_call_vars,
         outputs=[comprehend_query_number, textract_query_number],
+    ).success(
+        fn=check_duplicate_pages_checkbox,
+        inputs=[redact_duplicate_pages_checkbox],
+        outputs=None,
+    ).failure(
+        fn=lambda: None, js=TRIGGER_DUPLICATE_DETECTION_BUTTON
+    ).then(
+        fn=restore_sys_tracebacklimit,
+        outputs=None,
     )
 
     # If the line level ocr results are changed by load in by user or by a new redaction task, replace the ocr results displayed in the table
@@ -6983,7 +7093,7 @@ with blocks:
             actual_time_taken_number,
             task_textbox,
         ],
-        show_progress_on=[results_df_preview],
+        show_progress_on=[results_df_preview, redaction_output_summary_textbox],
     ).success(
         fn=export_outputs_to_s3,
         # duplicate_files_out returns a single file path; export helper will normalise it
@@ -6993,6 +7103,15 @@ with blocks:
             save_outputs_to_s3_checkbox,
             in_duplicate_pages,
         ],
+        outputs=None,
+    ).success(
+        fn=check_duplicate_pages_checkbox,
+        inputs=[redact_duplicate_pages_checkbox],
+        outputs=None,
+    ).failure(
+        fn=lambda: None, js=TRIGGER_APPLY_DUPLICATE_PAGES_BUTTON
+    ).then(
+        fn=restore_sys_tracebacklimit,
         outputs=None,
     )
 
@@ -7028,6 +7147,10 @@ with blocks:
             combine_page_text_for_duplicates_bool,
         ],
         outputs=[new_duplicate_search_annotation_object],
+        show_progress_on=[
+            new_duplicate_search_annotation_object,
+            redaction_output_summary_textbox,
+        ],
     ).success(
         fn=apply_whole_page_redactions_from_list,
         inputs=[
@@ -8064,7 +8187,7 @@ with blocks:
                 # theme=gr.themes.Default(primary_hue="blue"),
                 # head=head_html,
                 # css=css,
-                show_error=True,
+                show_error=False,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
                 path="",
@@ -8082,7 +8205,7 @@ with blocks:
                         # theme=gr.themes.Default(primary_hue="blue"),
                         # head=head_html,
                         # css=css,
-                        show_error=True,
+                        show_error=False,
                         inbrowser=True,
                         auth=authenticate_user,
                         max_file_size=MAX_FILE_SIZE,
@@ -8097,7 +8220,7 @@ with blocks:
                         # theme=gr.themes.Default(primary_hue="blue"),
                         # head=head_html,
                         # css=css,
-                        show_error=True,
+                        show_error=False,
                         inbrowser=True,
                         max_file_size=MAX_FILE_SIZE,
                         server_name=GRADIO_SERVER_NAME,
