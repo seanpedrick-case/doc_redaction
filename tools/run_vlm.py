@@ -477,7 +477,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     else:
         raise ValueError(
-            f"Invalid model selected: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, PaddleOCR-VL"
+            f"Invalid model selected: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, PaddleOCR-VL, or None"
         )
 
     # Override model defaults with user-provided config values if they are set

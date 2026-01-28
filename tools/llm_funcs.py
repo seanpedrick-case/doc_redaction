@@ -659,7 +659,7 @@ def load_model(
     return model, tokenizer, assistant_model
 
 
-# def get_assistant_model():
+# def # get_assistant_model():
 #     """Get the globally loaded assistant model. Load it if not already loaded."""
 #     global _pii_model, _pii_tokenizer, _pii_assistant_model
 #     # Use PII globals to match get_pii_model() behavior
@@ -831,14 +831,14 @@ def call_transformers_model(
     # This prevents mismatches that could occur if they're loaded separately
     if model is None or tokenizer is None:
         # Use get_model_and_tokenizer() to ensure both are loaded atomically
-        # This is safer than calling get_model() and get_tokenizer() separately
+        # This is safer than calling get_pii_model() and get_pii_tokenizer() separately
         loaded_model, loaded_tokenizer, assistant_model = load_model()
         if model is None:
             model = loaded_model
         if tokenizer is None:
             tokenizer = loaded_tokenizer
     # if assistant_model is None and speculative_decoding:
-    #     assistant_model = get_assistant_model()
+    #     assistant_model = # get_assistant_model()
 
     if model is None or tokenizer is None:
         raise ValueError(
@@ -2009,3 +2009,40 @@ def call_aws_bedrock(
     response = ResponseObject(text=text, usage_metadata=usage)
 
     return response
+
+
+def calculate_tokens_from_metadata(
+    metadata_string: str, model_choice: str, model_name_map: dict
+):
+    """
+    Calculate the number of input and output tokens for given queries based on metadata strings.
+
+    Args:
+        metadata_string (str): A string containing all relevant metadata from the string.
+        model_choice (str): A string describing the model name
+        model_name_map (dict): A dictionary mapping model name to source
+    """
+
+    model_name_map[model_choice]["source"]
+
+    # Regex to find the numbers following the keys in the "Query summary metadata" section
+    # This ensures we get the final, aggregated totals for the whole query.
+    input_regex = r"input_tokens: (\d+)"
+    output_regex = r"output_tokens: (\d+)"
+
+    # re.findall returns a list of all matching strings (the captured groups).
+    input_token_strings = re.findall(input_regex, metadata_string)
+    output_token_strings = re.findall(output_regex, metadata_string)
+
+    # Convert the lists of strings to lists of integers and sum them up
+    total_input_tokens = sum([int(token) for token in input_token_strings])
+    total_output_tokens = sum([int(token) for token in output_token_strings])
+
+    number_of_calls = len(input_token_strings)
+
+    print(f"Found {number_of_calls} LLM call entries in metadata.")
+    print("-" * 20)
+    print(f"Total Input Tokens: {total_input_tokens}")
+    print(f"Total Output Tokens: {total_output_tokens}")
+
+    return total_input_tokens, total_output_tokens, number_of_calls

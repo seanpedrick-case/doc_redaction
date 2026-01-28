@@ -1,6 +1,7 @@
 import os
 import platform
 import random
+import re
 import string
 import unicodedata
 from datetime import datetime
@@ -96,6 +97,107 @@ def reset_data_vars():
 
 def reset_aws_call_vars():
     return 0, 0
+
+
+### functions related to summarisation ###
+
+
+def clean_column_name(
+    column_name: str, max_length: int = 20, front_characters: bool = True
+):
+    # Convert to string
+    column_name = str(column_name)
+    # Replace non-alphanumeric characters (except underscores) with underscores
+    column_name = re.sub(r"\W+", "_", column_name)
+    # Remove leading/trailing underscores
+    column_name = column_name.strip("_")
+    # Ensure the result is not empty; fall back to "column" if necessary
+    column_name = column_name if column_name else "column"
+    # Truncate to max_length
+    if front_characters is True:
+        output_text = column_name[:max_length]
+    else:
+        output_text = column_name[-max_length:]
+    return output_text
+
+
+def create_batch_file_path_details(
+    reference_data_file_name: str,
+    latest_batch_completed: int = None,
+    batch_size_number: int = None,
+    in_column: str = None,
+) -> str:
+    """
+    Creates a standardised batch file path detail string from a reference data filename.
+
+    Args:
+        reference_data_file_name (str): Name of the reference data file
+        latest_batch_completed (int, optional): Latest batch completed. Defaults to None.
+        batch_size_number (int, optional): Batch size number. Defaults to None.
+        in_column (str, optional): In column. Defaults to None.
+    Returns:
+        str: Formatted batch file path detail string
+    """
+
+    # Extract components from filename using regex
+    file_name = (
+        re.search(
+            r"(.*?)(?:_all_|_final_|_batch_|_col_)", reference_data_file_name
+        ).group(1)
+        if re.search(r"(.*?)(?:_all_|_final_|_batch_|_col_)", reference_data_file_name)
+        else reference_data_file_name
+    )
+
+    # Clean the extracted names
+    file_name_cleaned = clean_column_name(file_name, max_length=20)
+
+    return f"{file_name_cleaned}_"
+
+
+def ensure_model_in_map(model_choice: str, model_name_map_dict: dict = None) -> dict:
+    """
+    Ensures that a model_choice is registered in model_name_map.
+    If the model_choice is not found, it assumes it's an inference-server model
+    and adds it to the map with source "inference-server".
+
+    Args:
+        model_choice (str): The model name to check/register
+        model_name_map_dict (dict, optional): The model_name_map dictionary to update.
+            If None, uses the global model_name_map from config.
+
+    Returns:
+        dict: The model_name_map dictionary (updated if needed)
+    """
+    # Use provided dict or global one
+    if model_name_map_dict is None:
+        from tools.config import model_name_map
+
+        model_name_map_dict = model_name_map
+
+    # If model_choice is not in the map, assume it's an inference-server model
+    if model_choice not in model_name_map_dict:
+        model_name_map_dict[model_choice] = {
+            "short_name": model_choice,
+            "source": "inference-server",
+        }
+        print(f"Registered custom model '{model_choice}' as inference-server model")
+
+    return model_name_map_dict
+
+
+def get_file_name_no_ext(file_path: str):
+    # First, get the basename of the file (e.g., "example.txt" from "/path/to/example.txt")
+    basename = os.path.basename(file_path)
+
+    # Then, split the basename and its extension and return only the basename without the extension
+    filename_without_extension, _ = os.path.splitext(basename)
+
+    # print(filename_without_extension)
+
+    return filename_without_extension
+
+
+###
 
 
 def load_in_default_allow_list(allow_list_file_path):

@@ -81,7 +81,6 @@ from tools.config import (
     DIRECT_MODE_IMAGES_DPI,
     DIRECT_MODE_INPUT_FILE,
     DIRECT_MODE_JOB_ID,
-    # Additional direct mode configuration options
     DIRECT_MODE_LANGUAGE,
     DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
     DIRECT_MODE_MIN_CONSECUTIVE_PAGES,
@@ -162,16 +161,19 @@ from tools.config import (
     SESSION_OUTPUT_FOLDER,
     SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
     SHOW_AWS_EXAMPLES,
+    SHOW_AWS_PII_DETECTION_OPTIONS,
     SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
     SHOW_COSTS,
     SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
+    SHOW_INFERENCE_SERVER_PII_OPTIONS,
     SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
     SHOW_LANGUAGE_SELECTION,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
     SHOW_OCR_GUI_OPTIONS,
     SHOW_PII_IDENTIFICATION_OPTIONS,
     SHOW_QUICKSTART,
+    SHOW_SUMMARISATION,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     SPACY_MODEL_PATH,
@@ -277,6 +279,11 @@ from tools.redaction_review import (
     update_other_annotator_number_from_current,
     update_redact_choice_df_from_page_dropdown,
     update_selected_review_df_row_colour,
+)
+from tools.summaries import (
+    concise_summary_format_prompt,
+    detailed_summary_format_prompt,
+    summarise_document_wrapper,
 )
 from tools.textract_batch_call import (
     analyse_document_with_textract_api,
@@ -2462,152 +2469,118 @@ with blocks:
                     open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                 ):
 
-                    if SHOW_OCR_GUI_OPTIONS:
-                        with gr.Accordion(
-                            "Change default text extraction OCR method",
-                            open=True,
-                            visible=SHOW_OCR_GUI_OPTIONS,
-                        ):
-                            text_extract_method_radio.render()
-                            # Store accordion references for dynamic visibility control
-                            # Initialize visibility based on default text extraction method
-                            local_ocr_accordion = gr.Accordion(
-                                label="Change default local OCR model",
-                                open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
-                                visible=(
-                                    DEFAULT_TEXT_EXTRACTION_MODEL
-                                    == TESSERACT_TEXT_EXTRACT_OPTION
-                                ),
-                            )
-                            with local_ocr_accordion:
-                                local_ocr_method_radio.render()
-
-                            inference_server_vlm_accordion = gr.Accordion(
-                                "Inference Server VLM Model (for inference-server OCR only)",
-                                open=False,
-                                visible=(
-                                    SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS
-                                    and DEFAULT_TEXT_EXTRACTION_MODEL
-                                    == TESSERACT_TEXT_EXTRACT_OPTION
-                                ),
-                            )
-                            with inference_server_vlm_accordion:
-                                inference_server_vlm_model_textbox.render()
-
-                            aws_textract_signature_accordion = gr.Accordion(
-                                "Enable AWS Textract signature detection (default is off)",
-                                open=False,
-                                visible=(
-                                    SHOW_AWS_TEXT_EXTRACTION_OPTIONS
-                                    and DEFAULT_TEXT_EXTRACTION_MODEL
-                                    == TEXTRACT_TEXT_EXTRACT_OPTION
-                                ),
-                            )
-                            with aws_textract_signature_accordion:
-                                handwrite_signature_checkbox.render()
-                    else:
+                    with gr.Accordion(
+                        "Change default text extraction OCR method",
+                        open=True,
+                        visible=SHOW_OCR_GUI_OPTIONS,
+                    ):
                         text_extract_method_radio.render()
-                        local_ocr_method_radio.render()
-                        inference_server_vlm_model_textbox.render()
-                        handwrite_signature_checkbox.render()
-                        # Create hidden accordions for consistency (so event handlers can reference them)
-                        local_ocr_accordion = gr.Accordion(visible=False)
-                        inference_server_vlm_accordion = gr.Accordion(visible=False)
-                        aws_textract_signature_accordion = gr.Accordion(visible=False)
+                        # Store accordion references for dynamic visibility control
+                        # Initialize visibility based on default text extraction method
+                        local_ocr_accordion = gr.Accordion(
+                            label="Change default local OCR model",
+                            open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                            visible=(
+                                DEFAULT_TEXT_EXTRACTION_MODEL
+                                == TESSERACT_TEXT_EXTRACT_OPTION
+                            ),
+                        )
+                        with local_ocr_accordion:
+                            local_ocr_method_radio.render()
 
-                    if SHOW_PII_IDENTIFICATION_OPTIONS:
+                        inference_server_vlm_accordion = gr.Accordion(
+                            "Inference Server VLM Model (for inference-server OCR only)",
+                            open=False,
+                            visible=(
+                                SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS
+                                and DEFAULT_TEXT_EXTRACTION_MODEL
+                                == TESSERACT_TEXT_EXTRACT_OPTION
+                            ),
+                        )
+                        with inference_server_vlm_accordion:
+                            inference_server_vlm_model_textbox.render()
+
+                    aws_textract_signature_accordion = gr.Accordion(
+                        "Enable AWS Textract signature detection (default is off)",
+                        open=False,
+                        visible=(
+                            SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+                            and DEFAULT_TEXT_EXTRACTION_MODEL
+                            == TEXTRACT_TEXT_EXTRACT_OPTION
+                        ),
+                    )
+                    with aws_textract_signature_accordion:
+                        handwrite_signature_checkbox.render()
+                    # else:
+                    #     text_extract_method_radio.render()
+                    #     local_ocr_method_radio.render()
+                    #     inference_server_vlm_model_textbox.render()
+                    #     handwrite_signature_checkbox.render()
+                    #     # Create hidden accordions for consistency (so event handlers can reference them)
+                    #     local_ocr_accordion = gr.Accordion(visible=False)
+                    #     inference_server_vlm_accordion = gr.Accordion(visible=False)
+                    #     aws_textract_signature_accordion = gr.Accordion(visible=False)
+
+                with gr.Accordion(
+                    "Change PII identification method",
+                    open=True,
+                    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+                ):
+                    with gr.Row(equal_height=True):
+                        pii_identification_method_drop.render()
+
+                        with gr.Accordion("Select entity types to redact", open=True):
+                            # Store accordion references for dynamic visibility control
+                            # Determine initial visibility based on default PII method
+                            default_pii_method = DEFAULT_PII_DETECTION_MODEL
+                            is_no_redaction_init = (
+                                default_pii_method == NO_REDACTION_PII_OPTION
+                            )
+                            show_local_entities_init = not is_no_redaction_init and (
+                                default_pii_method == LOCAL_PII_OPTION
+                            )
+                            show_comprehend_entities_init = (
+                                not is_no_redaction_init
+                                and (default_pii_method == AWS_PII_OPTION)
+                            )
+                            is_llm_method_init = not is_no_redaction_init and (
+                                default_pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+                                or default_pii_method == INFERENCE_SERVER_PII_OPTION
+                                or default_pii_method == AWS_LLM_PII_OPTION
+                            )
+
+                            in_redact_entities.render()
+                            in_redact_comprehend_entities.render()
+                            in_redact_llm_entities.render()
+
+                        custom_llm_instructions_textbox.render()
+                    with gr.Row(equal_height=True):
                         with gr.Accordion(
-                            "Change PII identification method",
+                            "Terms to always include or exclude in redactions, and whole page redaction. To add many terms at once, you can load in a file on the Redaction Settings tab.",
                             open=True,
-                            visible=SHOW_PII_IDENTIFICATION_OPTIONS,
                         ):
                             with gr.Row(equal_height=True):
-                                pii_identification_method_drop.render()
-
-                                with gr.Accordion(
-                                    "Select entity types to redact", open=True
-                                ):
-                                    # Store accordion references for dynamic visibility control
-                                    # Determine initial visibility based on default PII method
-                                    default_pii_method = DEFAULT_PII_DETECTION_MODEL
-                                    is_no_redaction_init = (
-                                        default_pii_method == NO_REDACTION_PII_OPTION
-                                    )
-                                    show_local_entities_init = (
-                                        not is_no_redaction_init
-                                        and (default_pii_method == LOCAL_PII_OPTION)
-                                    )
-                                    show_comprehend_entities_init = (
-                                        not is_no_redaction_init
-                                        and (default_pii_method == AWS_PII_OPTION)
-                                    )
-                                    is_llm_method_init = not is_no_redaction_init and (
-                                        default_pii_method
-                                        == LOCAL_TRANSFORMERS_LLM_PII_OPTION
-                                        or default_pii_method
-                                        == INFERENCE_SERVER_PII_OPTION
-                                        or default_pii_method == AWS_LLM_PII_OPTION
-                                    )
-
-                                    # local_entities_accordion = gr.Accordion(
-                                    #     "Local model PII identification model entities",
-                                    #     open=False,
-                                    #     visible=show_local_entities_init,
-                                    # )
-                                    # with local_entities_accordion:
-                                    in_redact_entities.render()
-
-                                    # comprehend_entities_accordion = gr.Accordion(
-                                    #     "AWS Comprehend PII identification model entities",
-                                    #     open=False,
-                                    #     visible=show_comprehend_entities_init,
-                                    # )
-                                    # with comprehend_entities_accordion:
-                                    in_redact_comprehend_entities.render()
-
-                                    # llm_entities_accordion = gr.Accordion(
-                                    #     "LLM PII identification model entities",
-                                    #     open=False,
-                                    #     visible=is_llm_method_init,
-                                    # )
-                                    # with llm_entities_accordion:
-                                    in_redact_llm_entities.render()
-
-                                # llm_custom_instructions_accordion = gr.Accordion(
-                                #     "LLM Custom Instructions (for LLM-based PII detection only)",
-                                #     open=True,
-                                #     visible=is_llm_method_init,
-                                # )
-                                # with llm_custom_instructions_accordion:
-                                custom_llm_instructions_textbox.render()
-                            with gr.Row(equal_height=True):
-                                with gr.Accordion(
-                                    "Terms to always include or exclude in redactions, and whole page redaction. To add many terms at once, you can load in a file on the Redaction Settings tab.",
-                                    open=True,
-                                ):
-                                    with gr.Row(equal_height=True):
-                                        in_allow_list_state.render()
-                                        in_deny_list_state.render()
-                                        in_fully_redacted_list_state.render()
-                                        # Checkbox for automatically redacting duplicate pages
-                                        redact_duplicate_pages_checkbox.render()
-
-                    else:
-                        pii_identification_method_drop.render()
-                        in_redact_entities.render()
-                        in_redact_comprehend_entities.render()
-                        in_redact_llm_entities.render()
-                        custom_llm_instructions_textbox.render()
-                        in_allow_list_state.render()
-                        in_deny_list_state.render()
-                        in_fully_redacted_list_state.render()
-                        # Checkbox for automatically redacting duplicate pages
-                        redact_duplicate_pages_checkbox.render()
-                        # Create hidden accordions for consistency (so event handlers can reference them)
-                        # local_entities_accordion = gr.Accordion(visible=False)
-                        # comprehend_entities_accordion = gr.Accordion(visible=False)
-                        # llm_entities_accordion = gr.Accordion(visible=False)
-                        # llm_custom_instructions_accordion = gr.Accordion(visible=False)
+                                in_allow_list_state.render()
+                                in_deny_list_state.render()
+                                in_fully_redacted_list_state.render()
+                                # Checkbox for automatically redacting duplicate pages
+                                redact_duplicate_pages_checkbox.render()
+                    # else:
+                    #     pii_identification_method_drop.render()
+                    #     in_redact_entities.render()
+                    #     in_redact_comprehend_entities.render()
+                    #     in_redact_llm_entities.render()
+                    #     custom_llm_instructions_textbox.render()
+                    #     in_allow_list_state.render()
+                    #     in_deny_list_state.render()
+                    #     in_fully_redacted_list_state.render()
+                    #     # Checkbox for automatically redacting duplicate pages
+                    #     redact_duplicate_pages_checkbox.render()
+                    #     # Create hidden accordions for consistency (so event handlers can reference them)
+                    #     # local_entities_accordion = gr.Accordion(visible=False)
+                    #     # comprehend_entities_accordion = gr.Accordion(visible=False)
+                    #     # llm_entities_accordion = gr.Accordion(visible=False)
+                    #     # llm_custom_instructions_accordion = gr.Accordion(visible=False)
 
                 if SHOW_COSTS:
                     with gr.Accordion(
@@ -3616,9 +3589,172 @@ with blocks:
             data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
         ###
+        # DOCUMENT SUMMARIsATION TAB
+        ###
+        # Build summarization inference method options based on the same flags used for PII detection
+        # Only show options that are available: AWS_LLM_PII_OPTION, LOCAL_TRANSFORMERS_LLM_PII_OPTION, INFERENCE_SERVER_PII_OPTION
+        summarisation_inference_method_options = []
+        if SHOW_AWS_PII_DETECTION_OPTIONS:
+            summarisation_inference_method_options.append(AWS_LLM_PII_OPTION)
+        if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS:
+            summarisation_inference_method_options.append(
+                LOCAL_TRANSFORMERS_LLM_PII_OPTION
+            )
+        if SHOW_INFERENCE_SERVER_PII_OPTIONS:
+            summarisation_inference_method_options.append(INFERENCE_SERVER_PII_OPTION)
+
+        # Determine default value
+        default_summarisation_inference_method = None
+        if summarisation_inference_method_options:
+            if SHOW_AWS_PII_DETECTION_OPTIONS:
+                default_summarisation_inference_method = AWS_LLM_PII_OPTION
+            elif SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS:
+                default_summarisation_inference_method = (
+                    LOCAL_TRANSFORMERS_LLM_PII_OPTION
+                )
+            elif SHOW_INFERENCE_SERVER_PII_OPTIONS:
+                default_summarisation_inference_method = INFERENCE_SERVER_PII_OPTION
+            else:
+                default_summarisation_inference_method = (
+                    summarisation_inference_method_options[0]
+                )
+
+        # Only show the tab if at least one inference method is available
+        visible_summarisation_tab = SHOW_SUMMARISATION and (
+            SHOW_AWS_PII_DETECTION_OPTIONS
+            or SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
+            or SHOW_INFERENCE_SERVER_PII_OPTIONS
+        )
+        with gr.Tab(
+            label="Document Summarisation", id=8, visible=visible_summarisation_tab
+        ):
+            gr.Markdown("""
+                # Document Summarisation
+                
+                This tab allows you to summarise documents using LLM-based summarisation. 
+                The summarisation process:
+                1. Groups pages into chunks that fit within the LLM context length
+                2. Summarises each page group
+                3. Recursively summarises if summaries exceed context length
+                4. Creates an overall summary of the entire document
+                
+                **Note:** You must first run text extraction (OCR) on your document in the "Redact PDFs/images" tab before using this feature.
+                """)
+
+            in_summarisation_ocr_files = gr.File(
+                label="Upload one or multiple 'ocr_output.csv' files to summarise",
+                file_count="multiple",
+                height=FILE_INPUT_HEIGHT,
+                file_types=[".csv"],
+            )
+
+            with gr.Accordion("Summarisation Settings", open=True):
+                with gr.Row():
+                    summarisation_inference_method = gr.Radio(
+                        label="Choose LLM inference method for summarisation",
+                        choices=summarisation_inference_method_options,
+                        value=default_summarisation_inference_method,
+                        interactive=True,
+                    )
+                    summarisation_temperature = gr.Slider(
+                        label="Temperature",
+                        minimum=0.0,
+                        maximum=2.0,
+                        value=0.6,
+                        step=0.1,
+                        interactive=True,
+                        visible=False,
+                    )
+                    summarisation_max_pages_per_group = gr.Number(
+                        label="Max pages per page-group summary",
+                        info="No single page group will exceed this many pages (in addition to context-length token limits).",
+                        value=30,
+                        minimum=1,
+                        maximum=9999,
+                        precision=0,
+                        interactive=True,
+                        visible=True,
+                    )
+
+            with gr.Row():
+                summarisation_api_key = gr.Textbox(
+                    label="API Key (if required)",
+                    type="password",
+                    visible=False,
+                )
+                summarisation_context = gr.Textbox(
+                    label="Additional context (optional)",
+                    placeholder="e.g., 'This is a consultation response document'",
+                    lines=2,
+                    visible=False,
+                )
+
+            with gr.Row():
+                summarisation_format = gr.Radio(
+                    label="Summary format",
+                    choices=[
+                        concise_summary_format_prompt,
+                        detailed_summary_format_prompt,
+                    ],
+                    value=detailed_summary_format_prompt,
+                    interactive=True,
+                )
+                summarisation_additional_instructions = gr.Textbox(
+                    label="Additional summary instructions (optional)",
+                    placeholder="e.g., 'Focus on key decisions and recommendations'",
+                    lines=2,
+                )
+
+            # Note: AWS credentials are shared with the main redaction settings
+            # Use existing components from Settings tab (aws_access_key_textbox, aws_secret_key_textbox)
+            # For other settings not exposed in Settings tab, create hidden components with config defaults
+            summarisation_aws_region_hidden = gr.Textbox(
+                value=AWS_REGION,
+                visible=False,
+            )
+            summarisation_hf_api_key_hidden = gr.Textbox(
+                value="",  # Not exposed in Settings tab, use empty string
+                visible=False,
+            )
+            summarisation_azure_endpoint_hidden = gr.Textbox(
+                value=AZURE_OPENAI_INFERENCE_ENDPOINT,
+                visible=False,
+            )
+            summarisation_api_url_hidden = gr.Textbox(
+                value=INFERENCE_SERVER_API_URL,
+                visible=False,
+            )
+
+            summarise_btn = gr.Button(
+                "Generate summary",
+                variant="primary",
+                elem_id="summarise-document-btn",
+            )
+
+            with gr.Row(equal_height=True):
+                summarisation_status = gr.Textbox(
+                    label="Status",
+                    lines=3,
+                    interactive=False,
+                )
+                summarisation_output_files = gr.File(
+                    label="Download Summary Files",
+                    file_count="multiple",
+                    interactive=False,
+                )
+
+            summarisation_display = gr.Markdown(
+                label="Summary",
+                value="",
+                line_breaks=True,
+                show_copy_button=True,
+                visible=True,
+            )
+
+        ###
         # SETTINGS TAB
         ###
-        with gr.Tab(label="Redaction settings", id=6):
+        with gr.Tab(label="Settings", id=9):
             with gr.Accordion(
                 "Custom allow, deny, and full page redaction lists", open=True
             ):
@@ -4257,6 +4393,7 @@ with blocks:
             page_sizes,
             duplication_file_path_outputs_list_state,
             in_duplicate_pages,
+            in_summarisation_ocr_files,
             latest_review_file_path,
             textract_query_number,
             latest_ocr_file_path,
@@ -4412,6 +4549,7 @@ with blocks:
             page_sizes,
             duplication_file_path_outputs_list_state,
             in_duplicate_pages,
+            in_summarisation_ocr_files,
             latest_review_file_path,
             textract_query_number,
             latest_ocr_file_path,
@@ -4790,6 +4928,7 @@ with blocks:
             page_sizes,
             duplication_file_path_outputs_list_state,
             in_duplicate_pages,
+            in_summarisation_ocr_files,
             latest_review_file_path,
             textract_query_number,
             latest_ocr_file_path,
@@ -7275,6 +7414,80 @@ with blocks:
     )
 
     ###
+    # SUMMARISATION TAB
+    ###
+
+    summarise_btn.click(
+        fn=summarise_document_wrapper,
+        inputs=[
+            all_page_line_level_ocr_results_df_base,
+            output_folder_textbox,
+            summarisation_inference_method,
+            summarisation_api_key,
+            summarisation_temperature,
+            doc_full_file_name_textbox,
+            summarisation_context,
+            aws_access_key_textbox,  # Use existing component from Settings tab
+            aws_secret_key_textbox,  # Use existing component from Settings tab
+            summarisation_aws_region_hidden,  # Use config default for region
+            summarisation_hf_api_key_hidden,  # Not exposed in Settings, use empty
+            summarisation_azure_endpoint_hidden,  # Use config default
+            summarisation_api_url_hidden,  # Use config default
+            summarisation_format,
+            summarisation_additional_instructions,
+            summarisation_max_pages_per_group,
+            in_summarisation_ocr_files,
+        ],
+        outputs=[
+            summarisation_output_files,
+            summarisation_status,
+            llm_model_name_textbox,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
+            summarisation_display,
+        ],
+        show_progress=True,
+        show_progress_on=[summarisation_status],
+    ).then(
+        fn=lambda: "summarisation",
+        outputs=[task_textbox],
+    ).success(
+        fn=lambda *args: usage_callback.flag(
+            list(args),
+            save_to_csv=SAVE_LOGS_TO_CSV,
+            save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+            dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+            dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+            replacement_headers=CSV_USAGE_LOG_HEADERS,
+        ),
+        inputs=[
+            session_hash_textbox,
+            doc_file_name_no_extension_textbox,
+            data_file_name_with_extension_textbox,
+            total_pdf_page_count,
+            actual_time_taken_number,
+            textract_query_number,
+            pii_identification_method_drop,
+            comprehend_query_number,
+            cost_code_choice_drop,
+            handwrite_signature_checkbox,
+            host_name_textbox,
+            text_extract_method_radio,
+            is_a_textract_api_call,
+            task_textbox,
+            vlm_model_name_textbox,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
+            llm_model_name_textbox,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
+        ],
+        outputs=[flag_value_placeholder],
+        preprocess=False,
+        api_name="usage_logs_summarisation",
+    )
+
+    ###
     # SETTINGS PAGE INPUT / OUTPUT
     ###
     # If a custom allow/deny/duplicate page list is uploaded
@@ -7867,6 +8080,7 @@ with blocks:
                 session_hash_textbox,
                 blank_doc_file_name_no_extension_textbox_for_logs,
                 blank_data_file_name_no_extension_textbox_for_logs,
+                total_pdf_page_count,
                 actual_time_taken_number,
                 textract_query_number,
                 pii_identification_method_drop_tabular,
@@ -8090,7 +8304,6 @@ with blocks:
                 blank_data_file_name_no_extension_textbox_for_logs,
                 total_pdf_page_count,
                 actual_time_taken_number,
-                total_pdf_page_count,
                 textract_query_number,
                 pii_identification_method_drop_tabular,
                 comprehend_query_number,

@@ -625,6 +625,7 @@ def choose_and_run_redactor(
             page_sizes,
             duplication_file_path_outputs,
             duplication_file_path_outputs,  # Write ocr_file_path to in_duplicate_pages
+            duplication_file_path_outputs,  # Write ocr_file_path to in_summarisation_ocr_files
             review_file_path,
             total_textract_query_number,
             ocr_file_path,
@@ -790,6 +791,7 @@ def choose_and_run_redactor(
             page_sizes,
             duplication_file_path_outputs,
             duplication_file_path_outputs,
+            duplication_file_path_outputs,  # Write ocr_file_path to in_summarisation_ocr_files
             review_file_path,
             total_textract_query_number,
             ocr_file_path,
@@ -2165,6 +2167,7 @@ def choose_and_run_redactor(
         page_sizes,
         duplication_file_path_outputs,
         duplication_file_path_outputs,  # Write ocr_file_path to in_duplicate_pages
+        duplication_file_path_outputs,  # Write ocr_file_path to in_summarisation_ocr_files
         review_file_path,
         total_textract_query_number,
         ocr_file_path,
@@ -5203,7 +5206,6 @@ def redact_image_pdf(
             or RETURN_PDF_FOR_REVIEW is True
         ):
             page_redaction_bounding_boxes = list()
-            comprehend_query_number = 0
             comprehend_query_number_new = 0
             redact_whole_page = False
 

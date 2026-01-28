@@ -30,6 +30,7 @@ from tools.config import (
     CONVERT_LINE_TO_WORD_LEVEL,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
+    FULL_COMPREHEND_ENTITY_LIST,
     HYBRID_OCR_CONFIDENCE_THRESHOLD,
     HYBRID_OCR_MAX_NEW_TOKENS,
     HYBRID_OCR_PADDING,
@@ -7281,56 +7282,64 @@ class CustomImageAnalyzerEngine:
 
         elif pii_identification_method == AWS_PII_OPTION:
 
-            # Handle custom entities first
-            if custom_entities:
-                custom_redact_entities = [
-                    entity
-                    for entity in chosen_redact_comprehend_entities
-                    if entity in custom_entities
-                ]
+            # Run local detection for any custom entities (including CUSTOM/CUSTOM_FUZZY)
+            local_custom_entities = [
+                entity
+                for entity in (chosen_redact_comprehend_entities or [])
+                if entity in (custom_entities or [])
+                or entity in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
 
-                if custom_redact_entities:
-                    # Filter entities to only include those supported by the language
-                    language_supported_entities = filter_entities_for_language(
-                        custom_redact_entities, valid_language_entities, language
-                    )
+            if local_custom_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    local_custom_entities, valid_language_entities, language
+                )
 
-                    if language_supported_entities:
-                        text_analyzer_kwargs["entities"] = language_supported_entities
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
 
-                    # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
-                    presidio_kwargs = {
-                        k: v
-                        for k, v in text_analyzer_kwargs.items()
-                        if k
-                        not in [
-                            "inference_method",
-                            "model_choice",
-                            "api_url",
-                            "local_model",
-                            "tokenizer",
-                            "assistant_model",
-                            "client",
-                            "client_config",
-                            "temperature",
-                            "max_tokens",
-                            "custom_instructions",
-                            "allow_list",
-                        ]
-                    }
+                # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                presidio_kwargs = {
+                    k: v
+                    for k, v in text_analyzer_kwargs.items()
+                    if k
+                    not in [
+                        "inference_method",
+                        "model_choice",
+                        "api_url",
+                        "local_model",
+                        "tokenizer",
+                        "assistant_model",
+                        "client",
+                        "client_config",
+                        "temperature",
+                        "max_tokens",
+                        "custom_instructions",
+                        "allow_list",
+                    ]
+                }
 
-                    page_analyser_result = nlp_analyser.analyze(
-                        text=page_text,
-                        language=language,
-                        allow_list=allow_list,
-                        **presidio_kwargs,
-                    )
-                    all_text_line_results = map_back_entity_results(
-                        page_analyser_result,
-                        page_text_mapping,
-                        all_text_line_results,
-                        allow_list=allow_list,
-                    )
+                page_analyser_result = nlp_analyser.analyze(
+                    text=page_text,
+                    language=language,
+                    allow_list=allow_list,
+                    **presidio_kwargs,
+                )
+                all_text_line_results = map_back_entity_results(
+                    page_analyser_result,
+                    page_text_mapping,
+                    all_text_line_results,
+                    allow_list=allow_list,
+                )
+
+            # Guard: only call AWS Comprehend when at least one non-custom Comprehend entity is selected.
+            aws_comprehend_entities = [
+                entity
+                for entity in (chosen_redact_comprehend_entities or [])
+                if entity in (FULL_COMPREHEND_ENTITY_LIST or [])
+                and entity not in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
 
             # Process text in batches for AWS Comprehend
             current_batch = ""
@@ -7392,7 +7401,7 @@ class CustomImageAnalyzerEngine:
                                 comprehend_client,
                                 aws_language,
                                 text_analyzer_kwargs.get("allow_list", []),
-                                chosen_redact_comprehend_entities,
+                                aws_comprehend_entities,
                                 all_text_line_results,
                             )
                             comprehend_query_number += 1
@@ -7457,7 +7466,7 @@ class CustomImageAnalyzerEngine:
                                 comprehend_client,
                                 aws_language,
                                 text_analyzer_kwargs.get("allow_list", []),
-                                chosen_redact_comprehend_entities,
+                                aws_comprehend_entities,
                                 all_text_line_results,
                             )
                             comprehend_query_number += 1
@@ -7500,7 +7509,7 @@ class CustomImageAnalyzerEngine:
                     comprehend_client,
                     aws_language,
                     text_analyzer_kwargs.get("allow_list", []),
-                    chosen_redact_comprehend_entities,
+                    aws_comprehend_entities,
                     all_text_line_results,
                 )
                 comprehend_query_number += 1
@@ -9046,6 +9055,10 @@ def do_aws_comprehend_call(
 ):
     if not current_batch:
         return all_text_line_results
+    # Guard: if no relevant AWS entity types are selected, skip AWS entirely.
+    # (CUSTOM/CUSTOM_FUZZY and other local-only entities are handled via Presidio.)
+    if not chosen_redact_comprehend_entities:
+        return all_text_line_results
 
     max_retries = 3
     retry_delay = 3
@@ -9215,57 +9228,67 @@ def run_page_text_redaction(
 
     elif pii_identification_method == AWS_PII_OPTION:
 
-        # Process custom entities if any
-        if custom_entities:
-            custom_redact_entities = [
-                entity
-                for entity in chosen_redact_comprehend_entities
-                if entity in custom_entities
-            ]
+        # Run local detection for any custom entities (including CUSTOM/CUSTOM_FUZZY)
+        local_custom_entities = [
+            entity
+            for entity in (chosen_redact_comprehend_entities or [])
+            if entity in (custom_entities or []) or entity in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
 
-            if custom_redact_entities:
-                # Filter entities to only include those supported by the language
-                language_supported_entities = filter_entities_for_language(
-                    custom_redact_entities, valid_language_entities, language
-                )
+        if local_custom_entities:
+            # Filter entities to only include those supported by the language
+            language_supported_entities = filter_entities_for_language(
+                local_custom_entities, valid_language_entities, language
+            )
 
-                if language_supported_entities:
-                    text_analyzer_kwargs["entities"] = language_supported_entities
+            if language_supported_entities:
+                text_analyzer_kwargs["entities"] = language_supported_entities
 
-                # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
-                # Also exclude allow_list since we pass it explicitly
-                presidio_kwargs = {
-                    k: v
-                    for k, v in text_analyzer_kwargs.items()
-                    if k
-                    not in [
-                        "inference_method",
-                        "model_choice",
-                        "api_url",
-                        "local_model",
-                        "tokenizer",
-                        "assistant_model",
-                        "client",
-                        "client_config",
-                        "temperature",
-                        "max_tokens",
-                        "custom_instructions",
-                        "allow_list",
-                    ]
-                }
+            # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+            # Also exclude allow_list since we pass it explicitly
+            presidio_kwargs = {
+                k: v
+                for k, v in text_analyzer_kwargs.items()
+                if k
+                not in [
+                    "inference_method",
+                    "model_choice",
+                    "api_url",
+                    "local_model",
+                    "tokenizer",
+                    "assistant_model",
+                    "client",
+                    "client_config",
+                    "temperature",
+                    "max_tokens",
+                    "custom_instructions",
+                    "allow_list",
+                ]
+            }
 
-                page_analyser_result = nlp_analyser.analyze(
-                    text=page_text,
-                    language=language,
-                    score_threshold=score_threshold,
-                    return_decision_process=True,
-                    allow_list=allow_list,
-                    **presidio_kwargs,
-                )
+            page_analyser_result = nlp_analyser.analyze(
+                text=page_text,
+                language=language,
+                score_threshold=score_threshold,
+                return_decision_process=True,
+                allow_list=allow_list,
+                **presidio_kwargs,
+            )
 
-                all_text_line_results = map_back_entity_results(
-                    page_analyser_result, page_text_mapping, all_text_line_results
-                )
+            all_text_line_results = map_back_entity_results(
+                page_analyser_result,
+                page_text_mapping,
+                all_text_line_results,
+                allow_list=allow_list,
+            )
+
+        # Guard: only call AWS Comprehend when at least one non-custom Comprehend entity is selected.
+        aws_comprehend_entities = [
+            entity
+            for entity in (chosen_redact_comprehend_entities or [])
+            if entity in (FULL_COMPREHEND_ENTITY_LIST or [])
+            and entity not in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
 
         # Process text in batches for AWS Comprehend
         current_batch = ""
@@ -9322,7 +9345,7 @@ def run_page_text_redaction(
                             comprehend_client,
                             aws_language,
                             text_analyzer_kwargs.get("allow_list", allow_list or []),
-                            chosen_redact_comprehend_entities,
+                            aws_comprehend_entities,
                             all_text_line_results,
                         )
                         comprehend_query_number += 1
@@ -9384,7 +9407,7 @@ def run_page_text_redaction(
                             comprehend_client,
                             aws_language,
                             text_analyzer_kwargs.get("allow_list", allow_list or []),
-                            chosen_redact_comprehend_entities,
+                            aws_comprehend_entities,
                             all_text_line_results,
                         )
                         comprehend_query_number += 1
@@ -9424,7 +9447,7 @@ def run_page_text_redaction(
                 comprehend_client,
                 aws_language,
                 text_analyzer_kwargs.get("allow_list", allow_list or []),
-                chosen_redact_comprehend_entities,
+                aws_comprehend_entities,
                 all_text_line_results,
             )
             comprehend_query_number += 1

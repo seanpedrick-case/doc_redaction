@@ -583,35 +583,6 @@ def call_llm_for_entity_detection(
                 f"Ensure AZURE_OPENAI_API_KEY is set or pass client."
             )
 
-    # Prepare local model if needed
-    # if inference_method == "local":
-    # from tools.llm_funcs import USE_LLAMA_CPP
-
-    # Load model and tokenizer together to ensure they're from the same source
-    # This prevents mismatches that could occur if they're loaded separately
-    # if local_model is None or (tokenizer is None and USE_LLAMA_CPP != "True"):
-    #     from tools.llm_funcs import get_model, get_model_and_tokenizer
-
-    #     try:
-    #         if (
-    #             local_model is None
-    #             and tokenizer is None
-    #             and USE_LLAMA_CPP != "True"
-    #         ):
-    #             # Both are needed - load them together atomically
-    #             local_model, tokenizer = get_model_and_tokenizer()
-    #         elif local_model is None:
-    #             # Only model is needed
-    #             local_model = get_model()
-    #         elif tokenizer is None and USE_LLAMA_CPP != "True":
-    #             # Only tokenizer is needed (but get_model_and_tokenizer ensures they match)
-    #             _, tokenizer = get_model_and_tokenizer()
-    #     except Exception as e:
-    #         raise ValueError(
-    #             f"Failed to get local model/tokenizer: {e}. "
-    #             f"Ensure LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START is True or pass local_model/tokenizer."
-    #         )
-
     # Set up API URL for inference-server if needed
     if inference_method == "inference-server" and api_url is None:
         api_url = INFERENCE_SERVER_API_URL

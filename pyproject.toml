@@ -68,7 +68,8 @@ dependencies = [
     "numpy==2.2.6",
     "spaces==0.42.1",
     "google-genai>=1.52.0",
-    "openai>=2.8.1"
+    "openai>=2.8.1",
+    "markdown>=3.7"
 ]
 
 [project.optional-dependencies]

@@ -602,6 +602,10 @@ SHOW_QUICKSTART = convert_string_to_boolean(
     get_or_create_env_var("SHOW_QUICKSTART", "False")
 )
 
+SHOW_SUMMARISATION = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_SUMMARISATION", "False")
+)
+
 # Extraction and PII options open by default:
 EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = convert_string_to_boolean(
     get_or_create_env_var("EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT", "True")
@@ -706,19 +710,21 @@ SHOW_LOCAL_PII_DETECTION_OPTIONS = convert_string_to_boolean(
 SHOW_AWS_PII_DETECTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_AWS_PII_DETECTION_OPTIONS", "True")
 )
-SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS", "False")
-)
 SHOW_INFERENCE_SERVER_PII_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_INFERENCE_SERVER_PII_OPTIONS", "False")
 )
 SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS", "False")
 )
+SHOW_AWS_BEDROCK_LLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AWS_BEDROCK_LLM_MODELS", "False")
+)
+
 
 if (
     not SHOW_LOCAL_PII_DETECTION_OPTIONS
     and not SHOW_AWS_PII_DETECTION_OPTIONS
+    and not SHOW_AWS_BEDROCK_LLM_MODELS
     and not SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
     and not SHOW_INFERENCE_SERVER_PII_OPTIONS
     and not SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
@@ -739,6 +745,8 @@ if SHOW_INFERENCE_SERVER_PII_OPTIONS:
 
 if SHOW_AWS_PII_DETECTION_OPTIONS:
     aws_pii_model_options.append(AWS_PII_OPTION)
+
+if SHOW_AWS_BEDROCK_LLM_MODELS:
     aws_pii_model_options.append(AWS_LLM_PII_OPTION)
 
 PII_DETECTION_MODELS = local_pii_model_options + aws_pii_model_options
@@ -1198,26 +1206,23 @@ SAVE_VLM_INPUT_IMAGES = convert_string_to_boolean(
 )  # Whether to save input images sent to VLM OCR for debugging.
 
 ### LLM options
-RUN_AWS_BEDROCK_PII_MODELS = convert_string_to_boolean(
-    get_or_create_env_var("RUN_AWS_BEDROCK_PII_MODELS", "False")
-)
 
 # Gemini settings
-RUN_GEMINI_PII_MODELS = convert_string_to_boolean(
-    get_or_create_env_var("RUN_GEMINI_PII_MODELS", "False")
+SHOW_GEMINI_LLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_GEMINI_LLM_MODELS", "False")
 )
 GEMINI_API_KEY = get_or_create_env_var("GEMINI_API_KEY", "")
 # Azure/OpenAI AI Inference settings
-RUN_AZURE_PII_MODELS = convert_string_to_boolean(
-    get_or_create_env_var("RUN_AZURE_PII_MODELS", "False")
+SHOW_AZURE_LLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AZURE_LLM_MODELS", "False")
 )
 AZURE_OPENAI_API_KEY = get_or_create_env_var("AZURE_OPENAI_API_KEY", "")
 AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var(
     "AZURE_OPENAI_INFERENCE_ENDPOINT", ""
 )
 
-RUN_PII_INFERENCE_SERVER = convert_string_to_boolean(
-    get_or_create_env_var("RUN_PII_INFERENCE_SERVER", "False")
+SHOW_INFERENCE_SERVER_LLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_INFERENCE_SERVER_LLM_MODELS", "False")
 )
 API_URL = get_or_create_env_var("API_URL", "http://localhost:8080")
 
@@ -1275,7 +1280,7 @@ amazon_models = [
     "mistral.ministral-3-14b-instruct",
 ]
 
-if RUN_AWS_BEDROCK_PII_MODELS:
+if SHOW_AWS_BEDROCK_LLM_MODELS:
     model_full_names.extend(amazon_models)
     model_short_names.extend(
         [
@@ -1296,7 +1301,7 @@ if RUN_AWS_BEDROCK_PII_MODELS:
 
 gemini_models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
 
-if RUN_GEMINI_PII_MODELS:
+if SHOW_GEMINI_LLM_MODELS:
     model_full_names.extend(gemini_models)
     model_short_names.extend(
         ["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"]
@@ -1306,7 +1311,7 @@ if RUN_GEMINI_PII_MODELS:
 azure_models = ["gpt-5-mini", "gpt-4o-mini"]
 
 # Register Azure/OpenAI AI models (model names must match your Azure/OpenAI deployments)
-if RUN_AZURE_PII_MODELS:
+if SHOW_AZURE_LLM_MODELS:
     # Example deployments; adjust to the deployments you actually create in Azure/OpenAI
     model_full_names.extend(azure_models)
     model_short_names.extend(["gpt-5-mini", "gpt-4o-mini"])
@@ -1323,7 +1328,7 @@ inference_server_models = [
     "ministral_3_14b_it",
 ]
 
-if RUN_PII_INFERENCE_SERVER:
+if SHOW_INFERENCE_SERVER_LLM_MODELS:
     # Example inference-server models; adjust to the models you have available on your server
     model_full_names.extend(inference_server_models)
     model_short_names.extend(inference_server_models)
@@ -1362,13 +1367,13 @@ model_name_map = {
 
 if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS:
     default_model_choice = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-elif RUN_PII_INFERENCE_SERVER:
+elif SHOW_INFERENCE_SERVER_LLM_MODELS:
     default_model_choice = CHOSEN_INFERENCE_SERVER_PII_MODEL
-elif RUN_AWS_BEDROCK_PII_MODELS:
+elif SHOW_AWS_BEDROCK_LLM_MODELS:
     default_model_choice = amazon_models[0]
-elif RUN_GEMINI_PII_MODELS:
+elif SHOW_GEMINI_LLM_MODELS:
     default_model_choice = gemini_models[0]
-elif RUN_AZURE_PII_MODELS:
+elif SHOW_AZURE_LLM_MODELS:
     default_model_choice = azure_models[0]
 else:
     default_model_choice = ""
@@ -1413,7 +1418,7 @@ DIRECT_MODE_INFERENCE_SERVER_MODEL = get_or_create_env_var(
 # Note: This should be set after amazon_models is defined
 CLOUD_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
     "CLOUD_LLM_PII_MODEL_CHOICE",
-    "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Default AWS Bedrock model for PII detection
+    "amazon.nova-pro-v1:0",  # "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Default AWS Bedrock model for PII detection
 )
 
 # VLM Model Choice for cloud VLM OCR (defaults to first available cloud model)
@@ -1426,11 +1431,11 @@ CLOUD_VLM_MODEL_CHOICE = get_or_create_env_var(
 # Set default CLOUD_VLM_MODEL_CHOICE if not provided
 if not CLOUD_VLM_MODEL_CHOICE or not CLOUD_VLM_MODEL_CHOICE.strip():
     # Set default based on available models (priority: AWS Bedrock > Gemini > Azure/OpenAI)
-    if RUN_AWS_BEDROCK_PII_MODELS and amazon_models:
+    if SHOW_AWS_BEDROCK_LLM_MODELS and amazon_models:
         CLOUD_VLM_MODEL_CHOICE = amazon_models[0]  # Default to first AWS Bedrock model
-    elif RUN_GEMINI_PII_MODELS and gemini_models:
+    elif SHOW_GEMINI_LLM_MODELS and gemini_models:
         CLOUD_VLM_MODEL_CHOICE = gemini_models[0]  # Default to first Gemini model
-    elif RUN_AZURE_PII_MODELS and azure_models:
+    elif SHOW_AZURE_LLM_MODELS and azure_models:
         CLOUD_VLM_MODEL_CHOICE = azure_models[0]  # Default to first Azure/OpenAI model
     else:
         CLOUD_VLM_MODEL_CHOICE = ""  # No default available
@@ -1647,7 +1652,7 @@ LLM_RESET = convert_string_to_boolean(get_or_create_env_var("LLM_RESET", "False"
 LLM_STREAM = convert_string_to_boolean(get_or_create_env_var("LLM_STREAM", "True"))
 LLM_THREADS = int(get_or_create_env_var("LLM_THREADS", "-1"))
 LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "2048"))
-LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "24576"))
+LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "16384"))  # 24576
 LLM_SAMPLE = convert_string_to_boolean(get_or_create_env_var("LLM_SAMPLE", "True"))
 LLM_STOP_STRINGS = _get_env_list(
     get_or_create_env_var("LLM_STOP_STRINGS", r"['\n\n\n\n\n\n']")
@@ -1714,7 +1719,7 @@ else:
 # Entities for redaction
 CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var(
     "CHOSEN_COMPREHEND_ENTITIES",
-    "['BANK_ACCOUNT_NUMBER','BANK_ROUTING','CREDIT_DEBIT_NUMBER','CREDIT_DEBIT_CVV','CREDIT_DEBIT_EXPIRY','PIN','EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER','DRIVER_ID', 'USERNAME','PASSWORD', 'IP_ADDRESS','MAC_ADDRESS', 'LICENSE_PLATE','VEHICLE_IDENTIFICATION_NUMBER','UK_NATIONAL_INSURANCE_NUMBER', 'INTERNATIONAL_BANK_ACCOUNT_NUMBER','SWIFT_CODE','UK_NATIONAL_HEALTH_SERVICE_NUMBER', 'CUSTOM']",
+    "['EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER', 'UK_NATIONAL_INSURANCE_NUMBER', 'UK_NATIONAL_HEALTH_SERVICE_NUMBER', 'CUSTOM']",
 )
 
 FULL_COMPREHEND_ENTITY_LIST = get_or_create_env_var(
