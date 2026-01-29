@@ -1094,6 +1094,7 @@ python cli_redact.py --task textract --textract_action list
                     _,
                     _,
                     _,
+                    _,
                     total_textract_query_number,
                     _,
                     _,
