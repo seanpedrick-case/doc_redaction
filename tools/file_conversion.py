@@ -242,6 +242,7 @@ def convert_pdf_to_images(
     image_dpi: float = image_dpi,
     num_threads: int = 8,
     input_folder: str = INPUT_FOLDER,
+    progress: Progress = Progress(track_tqdm=True),
 ):
     """
     Converts a PDF document into a series of images, processing each page concurrently.
@@ -270,6 +271,7 @@ def convert_pdf_to_images(
         page_count = pdfinfo_from_path(pdf_path)["Pages"]
 
     print(f"Creating images. Number of pages in PDF: {page_count}")
+    progress(0.1, desc="Creating images")
 
     # Handle special cases for page range
     # If page_min is 0, use the first page (0-indexed)
@@ -705,6 +707,63 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
                 )
 
     return pd.DataFrame(rows)
+
+
+def word_level_ocr_df_to_line_level_ocr_df(
+    word_level_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Convert word-level OCR results dataframe to line-level OCR results dataframe.
+
+    Word-level format has one row per word (page, line, word_text, word_x0, word_y0,
+    word_x1, word_y1, word_conf, ...). Line-level format has one row per line with
+    aggregated text and bounding box (page, text, left, top, width, height, line, conf).
+
+    Args:
+        word_level_df: DataFrame with columns including page, line, word_text,
+            word_x0, word_y0, word_x1, word_y1, and word_conf (or line_conf).
+
+    Returns:
+        DataFrame with columns page, text, left, top, width, height, line, conf.
+    """
+    required = ["page", "line", "word_text", "word_x0", "word_y0", "word_x1", "word_y1"]
+    for col in required:
+        if col not in word_level_df.columns:
+            raise ValueError(
+                f"word_level_df must contain column '{col}'. "
+                f"Found: {list(word_level_df.columns)}"
+            )
+
+    def agg_line(group: pd.DataFrame) -> pd.Series:
+        text = " ".join(group["word_text"].astype(str).dropna())
+        x0 = group["word_x0"].min()
+        y0 = group["word_y0"].min()
+        x1 = group["word_x1"].max()
+        y1 = group["word_y1"].max()
+        if "line_conf" in group.columns and group["line_conf"].notna().any():
+            conf = group["line_conf"].dropna().iloc[0]
+        else:
+            conf = group["word_conf"].mean() if "word_conf" in group.columns else 100.0
+        return pd.Series(
+            {
+                "text": text,
+                "left": x0,
+                "top": y0,
+                "width": x1 - x0,
+                "height": y1 - y0,
+                "conf": conf,
+            }
+        )
+
+    line_level = (
+        word_level_df.groupby(["page", "line"], sort=False)
+        .apply(agg_line)
+        .reset_index()
+    )
+    # Match expected column order: page, text, left, top, width, height, line, conf
+    return line_level[
+        ["page", "text", "left", "top", "width", "height", "line", "conf"]
+    ]
 
 
 def extract_redactions(
@@ -1206,6 +1265,19 @@ def prepare_image_or_pdf(
             elif "_ocr_results_with_words" in file_path_without_ext:
                 all_page_line_level_ocr_results_with_words_df = read_file(file_path)
                 json_from_csv = False
+
+                # Convert word-level OCR results to line-level if line-level is empty
+                if all_line_level_ocr_results_df is None or (
+                    isinstance(all_line_level_ocr_results_df, pd.DataFrame)
+                    and all_line_level_ocr_results_df.empty
+                ):
+                    all_line_level_ocr_results_df = (
+                        word_level_ocr_df_to_line_level_ocr_df(
+                            all_page_line_level_ocr_results_with_words_df
+                        )
+                    )
+                    if "line" not in all_line_level_ocr_results_df.columns:
+                        all_line_level_ocr_results_df["line"] = ""
 
         # If the file name ends with .json, check if we are loading for review. If yes, assume it is an annotations object, overwrite the current annotations object. If false, assume this is a Textract object, load in to Textract
 
