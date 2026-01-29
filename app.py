@@ -720,18 +720,23 @@ in_duplicate_pages = gr.File(
 duplicate_threshold_input = gr.Number(
     value=DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
     label="Similarity threshold",
-    info="Score (0-1) to consider pages a match.",
+    info="Score (0-1) to consider pages/text lines a match.",
 )
 
 min_word_count_input = gr.Number(
     value=DEFAULT_MIN_WORD_COUNT,
     label="Minimum word count",
-    info="Pages with fewer words than this value are ignored.",
+    info="Pages/text lines with fewer words than this value are ignored.",
 )
 
-combine_page_text_for_duplicates_bool = gr.Checkbox(
+combine_page_text_for_duplicates_bool = gr.Radio(
+    label="Duplicate matching mode",
+    choices=[
+        ("Find duplicates by page", True),
+        ("Find duplicates by text line", False),
+    ],
     value=True,
-    label="Analyse duplicate text by page (off for by line)",
+    info="By page: compare full-page text. By text line: compare individual lines.",
 )
 
 ## Tabular examples
@@ -3228,17 +3233,18 @@ with blocks:
 
                     gr.Markdown("#### Matching Strategy")
                     greedy_match_input = gr.Checkbox(
-                        label="Enable 'subdocument' matching",
+                        label="Combine consecutive matches into a single match (subdocument match)",
                         value=USE_GREEDY_DUPLICATE_DETECTION,
-                        info="If checked, finds the longest possible sequence of matching pages (subdocuments), minimum length one page. Overrides the slider below.",
+                        info="If checked, combines the longest possible sequence of consecutive matching pages into a single match.",
                     )
                     min_consecutive_pages_input = gr.Slider(
                         minimum=1,
                         maximum=20,
                         value=DEFAULT_MIN_CONSECUTIVE_PAGES,
                         step=1,
-                        label="Minimum consecutive pages (modified subdocument match)",
-                        info="If greedy matching option above is unticked, use this to find only subdocuments of a minimum number of consecutive pages.",
+                        label="Minimum consecutive matches to be considered a match",
+                        info="A text match will need to have this minimum number of consecutive matches to be considered a match. E.g. if set to 3 for page matching, the text for three consecutive pages will need to be the same in two places in the document to be considered a match.",
+                        visible=not USE_GREEDY_DUPLICATE_DETECTION,
                     )
 
                 find_duplicate_pages_btn = gr.Button(
@@ -3305,6 +3311,9 @@ with blocks:
                         value="Apply relevant duplicate page output to document currently under review",
                         variant="secondary",
                         elem_id="apply-duplicate-pages-btn",
+                    )
+                    go_to_review_redactions_tab_btn_2 = gr.Button(
+                        "Review and modify redactions", variant="primary", scale=1
                     )
 
         ###
@@ -5053,7 +5062,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         api_name="prepare_doc",
-        show_progress_on=[redaction_output_summary_textbox],
+        show_progress_on=[redaction_output_summary_textbox, input_pdf_for_review],
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -7214,6 +7223,12 @@ with blocks:
     # IDENTIFY DUPLICATE PAGES
     ###
 
+    greedy_match_input.change(
+        fn=lambda greedy: gr.update(visible=not greedy),
+        inputs=[greedy_match_input],
+        outputs=[min_consecutive_pages_input],
+    )
+
     find_duplicate_pages_btn.click(
         fn=run_duplicate_analysis,
         inputs=[
@@ -7356,6 +7371,12 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+    )
+
+    go_to_review_redactions_tab_btn_2.click(
+        fn=change_tab_to_review_redactions,
+        inputs=None,
+        outputs=tabs,
     )
 
     ###
@@ -8400,7 +8421,7 @@ with blocks:
                 # theme=gr.themes.Default(primary_hue="blue"),
                 # head=head_html,
                 # css=css,
-                show_error=False,
+                show_error=True,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
                 path="",
@@ -8418,7 +8439,7 @@ with blocks:
                         # theme=gr.themes.Default(primary_hue="blue"),
                         # head=head_html,
                         # css=css,
-                        show_error=False,
+                        show_error=True,
                         inbrowser=True,
                         auth=authenticate_user,
                         max_file_size=MAX_FILE_SIZE,
@@ -8433,7 +8454,7 @@ with blocks:
                         # theme=gr.themes.Default(primary_hue="blue"),
                         # head=head_html,
                         # css=css,
-                        show_error=False,
+                        show_error=True,
                         inbrowser=True,
                         max_file_size=MAX_FILE_SIZE,
                         server_name=GRADIO_SERVER_NAME,

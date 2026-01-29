@@ -1758,7 +1758,7 @@ CUSTOM_ENTITIES = get_or_create_env_var(
 
 
 DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX = get_or_create_env_var(
-    "DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX", "['Extract handwriting']"
+    "DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX", "[]"
 )
 
 HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS = get_or_create_env_var(

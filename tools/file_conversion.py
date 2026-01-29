@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List
 
+import gradio as gr
 import numpy as np
 import pandas as pd
 import pymupdf
@@ -763,34 +764,48 @@ def extract_redactions(
                 annot_info = annot.info or {}
                 annot_colors = annot.colors or {}
 
-                # Extract coordinates from the annotation rectangle
+                # Extract coordinates from the annotation rectangle (PDF space, same units as mediabox)
                 rect = annot.rect
                 x0, y0, x1, y1 = rect.x0, rect.y0, rect.x1, rect.y1
 
-                # Convert coordinates to relative (0-1 range) using mediabox dimensions
+                # Convert PDF coordinates to image pixel coordinates (always scale by image size)
+                page_size_info = None
                 if page_sizes:
-                    # Find the page size info for this page
-                    page_size_info = None
                     for ps in page_sizes:
                         if ps.get("page") == page_num + 1:
                             page_size_info = ps
                             break
 
-                    if page_size_info:
-                        mediabox_width = page_size_info.get("mediabox_width", 1)
-                        mediabox_height = page_size_info.get("mediabox_height", 1)
+                if not page_size_info:
+                    raise ValueError(
+                        f"extract_redactions: no page_sizes entry for page {page_num + 1}. "
+                        "Ensure page_sizes is built and images exist before extracting redactions."
+                    )
 
-                        # Convert to relative coordinates
-                        rel_x0 = x0 / mediabox_width
-                        rel_y0 = y0 / mediabox_height
-                        rel_x1 = x1 / mediabox_width
-                        rel_y1 = y1 / mediabox_height
-                    else:
-                        # Fallback to absolute coordinates if page size not found
-                        rel_x0, rel_y0, rel_x1, rel_y1 = x0, y0, x1, y1
-                else:
-                    # Fallback to absolute coordinates if no page_sizes provided
-                    rel_x0, rel_y0, rel_x1, rel_y1 = x0, y0, x1, y1
+                mediabox_width = page_size_info.get("mediabox_width", 1)
+                mediabox_height = page_size_info.get("mediabox_height", 1)
+                image_width = page_size_info.get("image_width")
+                image_height = page_size_info.get("image_height")
+
+                try:
+                    w = float(image_width) if image_width is not None else 0
+                    h = float(image_height) if image_height is not None else 0
+                    has_valid_image_dims = w > 0 and h > 0
+                except (TypeError, ValueError):
+                    has_valid_image_dims = False
+
+                if not has_valid_image_dims:
+                    raise ValueError(
+                        f"extract_redactions: page {page_num + 1} has no valid image dimensions "
+                        "(image_width/image_height). Create images for all pages before loading redactions."
+                    )
+
+                scale_x = w / mediabox_width
+                scale_y = h / mediabox_height
+                rel_x0 = x0 * scale_x
+                rel_y0 = y0 * scale_y
+                rel_x1 = x1 * scale_x
+                rel_y1 = y1 * scale_y
 
                 # Get color and convert from 0-1 range to 0-255 range
                 fill_color = annot_colors.get(
@@ -1030,6 +1045,8 @@ def prepare_image_or_pdf(
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
+        progress(0.2, desc="Preparing file")
+
         # If a pdf, load as a pymupdf document
         if is_pdf(file_path):
             print(f"File {file_name_with_ext} is a PDF")
@@ -1087,10 +1104,45 @@ def prepare_image_or_pdf(
                     all_annotations_object.append(annotation)
 
             # If we are loading redactions from the pdf, extract the redactions
-            if (
-                LOAD_REDACTION_ANNOTATIONS_FROM_PDF is True
-                and prepare_for_review is True
-            ):
+            if LOAD_REDACTION_ANNOTATIONS_FROM_PDF and prepare_for_review is True:
+                # Ensure every page has a real image so coordinates can be scaled by image size
+                for ps in page_sizes:
+                    try:
+                        w = (
+                            float(ps.get("image_width"))
+                            if ps.get("image_width") is not None
+                            else 0
+                        )
+                        h = (
+                            float(ps.get("image_height"))
+                            if ps.get("image_height") is not None
+                            else 0
+                        )
+                        has_valid_dims = w > 0 and h > 0
+                    except (TypeError, ValueError):
+                        has_valid_dims = False
+                    if not has_valid_dims:
+                        page_num_0 = int(ps["page"]) - 1
+                        _pnum, img_path, width, height = (
+                            process_single_page_for_image_conversion(
+                                file_path,
+                                page_num_0,
+                                create_images=True,
+                                input_folder=input_folder,
+                            )
+                        )
+                        try:
+                            if (
+                                width is not None
+                                and height is not None
+                                and float(width) > 0
+                                and float(height) > 0
+                            ):
+                                ps["image_path"] = img_path
+                                ps["image_width"] = width
+                                ps["image_height"] = height
+                        except (TypeError, ValueError):
+                            pass
 
                 redactions_list = extract_redactions(pymupdf_doc, page_sizes)
                 all_annotations_object = redactions_list
@@ -1419,6 +1471,8 @@ def prepare_image_or_pdf(
         number_of_pages = len(page_sizes)
 
     print(f"Finished loading in {file_path_number} file(s)")
+
+    gr.Info(combined_out_message)
 
     return (
         combined_out_message,
@@ -2768,7 +2822,8 @@ def fill_missing_box_ids_each_box(data_input: Dict) -> Dict:
                     break  # Move to the next box
 
     if num_filled > 0:
-        print(f"Successfully filled {num_filled} missing or invalid box IDs.")
+        pass
+        # print(f"Successfully filled {num_filled} missing or invalid box IDs.")
 
     # The input dictionary 'data_input' has been modified in place
     return data_input

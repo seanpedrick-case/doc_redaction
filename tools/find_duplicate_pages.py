@@ -1433,7 +1433,7 @@ def add_new_annotations_to_existing_page_annotations(
 
 
 def apply_whole_page_redactions_from_list(
-    duplicate_page_numbers_df_or_list,
+    duplicate_page_numbers_df_or_list: pd.DataFrame | list[str],
     doc_file_name_with_extension_textbox: str,
     review_file_state: pd.DataFrame,
     duplicate_output_paths: list[str],
@@ -1475,24 +1475,26 @@ def apply_whole_page_redactions_from_list(
     if combine_pages is True:
         # Get list of pages to redact from either dataframe, list, or file
         # Handle both DataFrame (legacy) and list (new Dropdown format)
-        if isinstance(duplicate_page_numbers_df_or_list, list):
-            # Dropdown component returns a list directly
-            if duplicate_page_numbers_df_or_list:
-                try:
-                    # Try to convert to integers for page numbers
-                    list_whole_pages_to_redact = [
-                        int(item) for item in duplicate_page_numbers_df_or_list if item
-                    ]
-                except (ValueError, TypeError):
-                    # Fall back to string list if conversion fails
-                    list_whole_pages_to_redact = [
-                        str(item) for item in duplicate_page_numbers_df_or_list if item
-                    ]
-        elif isinstance(duplicate_page_numbers_df_or_list, pd.DataFrame):
+        if isinstance(duplicate_page_numbers_df_or_list, pd.DataFrame):
             if not duplicate_page_numbers_df_or_list.empty:
                 list_whole_pages_to_redact = duplicate_page_numbers_df_or_list.iloc[
                     :, 0
                 ].tolist()
+        elif (
+            isinstance(duplicate_page_numbers_df_or_list, list)
+            and len(duplicate_page_numbers_df_or_list) > 0
+        ):
+            # Dropdown component returns a list directly
+            try:
+                # Try to convert to integers for page numbers
+                list_whole_pages_to_redact = [
+                    int(item) for item in duplicate_page_numbers_df_or_list if item
+                ]
+            except (ValueError, TypeError):
+                # Fall back to string list if conversion fails
+                list_whole_pages_to_redact = [
+                    str(item) for item in duplicate_page_numbers_df_or_list if item
+                ]
         elif duplicate_output_paths:
             expected_duplicate_pages_to_redact_name = (
                 f"{doc_file_name_with_extension_textbox}"
@@ -1502,11 +1504,13 @@ def apply_whole_page_redactions_from_list(
             for output_file in duplicate_output_paths:
                 # Note: output_file.name might not be available if output_file is just a string path
                 # If it's a Path object or similar, .name is fine. Otherwise, parse from string.
-                file_name_from_path = (
-                    output_file.split("/")[-1]
-                    if isinstance(output_file, str)
-                    else output_file.name
-                )
+                # Use os.path for cross-platform path handling (e.g. Windows backslashes).
+                if isinstance(output_file, str):
+                    file_name_from_path = os.path.basename(output_file)
+                else:
+                    file_name_from_path = getattr(
+                        output_file, "name", str(output_file).split(os.sep)[-1]
+                    )
                 if expected_duplicate_pages_to_redact_name in file_name_from_path:
                     whole_pages_list = pd.read_csv(
                         output_file, header=None
@@ -1520,6 +1524,22 @@ def apply_whole_page_redactions_from_list(
             raise Warning(message)
 
         list_whole_pages_to_redact = list(set(list_whole_pages_to_redact))
+
+        # When called from "Apply match" with combine_pages=True, the page list may come from
+        # in_fully_redacted_list_state (upload), which can be empty. Fall back to deriving
+        # pages from new_annotations_with_bounding_boxes so suggested duplicate pages are applied.
+        if not list_whole_pages_to_redact and new_annotations_with_bounding_boxes:
+            from tools.secure_regex_utils import safe_extract_page_number_from_path
+
+            list_whole_pages_to_redact = list()
+            for annotation in new_annotations_with_bounding_boxes:
+                page_num = safe_extract_page_number_from_path(annotation.get("image"))
+                if page_num is not None:
+                    list_whole_pages_to_redact.append(page_num + 1)
+                else:
+                    img = annotation.get("image", "")
+                    print(f"Warning: Could not extract page number from {img!r}")
+            list_whole_pages_to_redact = list(set(list_whole_pages_to_redact))
 
     else:
         if not new_annotations_with_bounding_boxes:
@@ -1708,8 +1728,19 @@ def create_annotation_objects_from_duplicates(
     if combine_pages is False:
         page_to_image_map = {item["page"]: item["image_path"] for item in page_sizes}
 
-        # Prepare OCR Data: Add a line number column if it doesn't exist
-        if "line_number_by_page" not in ocr_results_df.columns:
+        # Prepare OCR Data: line_number_by_page must match the duplicate detection
+        # pipeline. That pipeline uses raw CSV row order (no sort) and cumcount()+1,
+        # so "line 4" = 4th row on the page in CSV order. If the OCR has a "line"
+        # column (1-based per page), use it so we redact the same line the match
+        # refers to. Otherwise fall back to (page, top, left) order + cumcount()+1.
+        if "line" in ocr_results_df.columns:
+            ocr_results_df = ocr_results_df.copy()
+            ocr_results_df["line_number_by_page"] = (
+                pd.to_numeric(ocr_results_df["line"], errors="coerce")
+                .fillna(0)
+                .astype(int)
+            )
+        else:
             ocr_results_df = ocr_results_df.sort_values(
                 by=["page", "top", "left"]
             ).reset_index(drop=True)
@@ -1719,27 +1750,43 @@ def create_annotation_objects_from_duplicates(
 
         annotations_by_page = defaultdict(list)
 
-        # Iterate through each duplicate range (this logic is unchanged)
-        for _, row in duplicates_df.iterrows():
-            start_page, start_line = _parse_page_line_id(row["Page2_Start_Page"])
-            end_page, end_line = _parse_page_line_id(row["Page2_End_Page"])
+        # Detect format: subdocument (Page2_Start_Page / Page2_End_Page) vs single-page (Page2_Page)
+        is_subdocument_format = (
+            "Page2_Start_Page" in duplicates_df.columns
+            and "Page2_End_Page" in duplicates_df.columns
+        )
 
-            # Select OCR Lines based on the range (this logic is unchanged)
-            if start_page == end_page:
-                condition = (ocr_results_df["page"] == start_page) & (
-                    ocr_results_df["line_number_by_page"].between(start_line, end_line)
-                )
+        for _, row in duplicates_df.iterrows():
+            if is_subdocument_format:
+                start_page, start_line = _parse_page_line_id(row["Page2_Start_Page"])
+                end_page, end_line = _parse_page_line_id(row["Page2_End_Page"])
+
+                if start_page == end_page:
+                    condition = (ocr_results_df["page"] == start_page) & (
+                        ocr_results_df["line_number_by_page"].between(
+                            start_line, end_line
+                        )
+                    )
+                else:
+                    cond_start = (ocr_results_df["page"] == start_page) & (
+                        ocr_results_df["line_number_by_page"] >= start_line
+                    )
+                    cond_middle = ocr_results_df["page"].between(
+                        start_page + 1, end_page - 1
+                    )
+                    cond_end = (ocr_results_df["page"] == end_page) & (
+                        ocr_results_df["line_number_by_page"] <= end_line
+                    )
+                    condition = cond_start | cond_middle | cond_end
             else:
-                cond_start = (ocr_results_df["page"] == start_page) & (
-                    ocr_results_df["line_number_by_page"] >= start_line
-                )
-                cond_middle = ocr_results_df["page"].between(
-                    start_page + 1, end_page - 1
-                )
-                cond_end = (ocr_results_df["page"] == end_page) & (
-                    ocr_results_df["line_number_by_page"] <= end_line
-                )
-                condition = cond_start | cond_middle | cond_end
+                # Single-page format (min_consecutive_pages=1, not greedy): Page2_Page only
+                if "Page2_Page" not in row.index:
+                    print(
+                        "Warning: duplicates_df has neither Page2_Start_Page/Page2_End_Page nor Page2_Page; skipping row."
+                    )
+                    continue
+                page_num = int(row["Page2_Page"])
+                condition = ocr_results_df["page"] == page_num
 
             lines_to_annotate = ocr_results_df[condition]
 
