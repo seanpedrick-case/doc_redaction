@@ -680,6 +680,25 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
         default=AZURE_OPENAI_INFERENCE_ENDPOINT,
         help="Azure OpenAI endpoint URL for VLM OCR.",
     )
+    pdf_group.add_argument(
+        "--efficient_ocr",
+        action="store_true",
+        default=None,
+        help="Use efficient OCR: try selectable text first per page, run OCR only when needed (saves time/cost). Defaults to EFFICIENT_OCR config.",
+    )
+    pdf_group.add_argument(
+        "--no_efficient_ocr",
+        action="store_false",
+        dest="efficient_ocr",
+        help="Disable efficient OCR (use selected OCR method for all pages).",
+    )
+    pdf_group.add_argument(
+        "--efficient_ocr_min_words",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Minimum words on a page to use text-only route; below this use OCR. Defaults to EFFICIENT_OCR_MIN_WORDS config (e.g. 20).",
+    )
 
     # --- LLM PII Detection Arguments ---
     llm_group = parser.add_argument_group("LLM PII Detection Options")
@@ -1223,6 +1242,10 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                         args.inference_server_vlm_model
                         if args.inference_server_vlm_model
                         else DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                    ),
+                    efficient_ocr=getattr(args, "efficient_ocr", None),
+                    efficient_ocr_min_words=getattr(
+                        args, "efficient_ocr_min_words", None
                     ),
                     # Note: bedrock_runtime, gemini_client, gemini_config, azure_openai_client
                     # are initialized inside choose_and_run_redactor based on text_extraction_method

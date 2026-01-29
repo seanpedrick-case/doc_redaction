@@ -103,6 +103,8 @@ from tools.config import (
     DYNAMODB_ACCESS_LOG_HEADERS,
     DYNAMODB_FEEDBACK_LOG_HEADERS,
     DYNAMODB_USAGE_LOG_HEADERS,
+    EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_WORDS,
     ENFORCE_COST_CODES,
     EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
     FASTAPI_ROOT_PATH,
@@ -313,6 +315,7 @@ ensure_folder_exists(USAGE_LOGS_FOLDER)
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 # CHOSEN_LLM_ENTITIES.extend(custom_entities)
+
 
 # 1. Create a custom error class
 class ProcessStop(UserWarning):
@@ -1603,7 +1606,7 @@ with blocks:
                     "Local",
                     [],
                     ["TITLES", "PERSON", "DATE_TIME"],
-                    CHOSEN_COMPREHEND_ENTITIES,
+                    ["TITLES", "NAME", "DATE_TIME"],
                     [example_files[2]],
                     example_files[2],
                     [],
@@ -1653,7 +1656,7 @@ with blocks:
                     "Local",
                     [],
                     ["CUSTOM"],  # Use CUSTOM entity to enable deny list functionality
-                    CHOSEN_COMPREHEND_ENTITIES,
+                    ["CUSTOM"],
                     [example_files[3]],
                     example_files[3],
                     [example_files[4]],
@@ -2798,27 +2801,30 @@ with blocks:
             )
 
             with gr.Accordion(
-                label="Upload PDFs/images and OCR results for review", open=False
+                label="Upload PDFs/images and OCR results for review", open=True
             ):
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=2):
                         input_pdf_for_review = gr.File(
-                            label="Upload original or '..._for_review.pdf' PDF to begin review process.",
+                            label="1. Upload original or previously redacted '..._for_review.pdf' document to review redactions.",
                             file_count="multiple",
                             height=FILE_INPUT_HEIGHT,
                         )
                         upload_pdf_for_review_btn = gr.Button(
                             "1. Load in original PDF or review PDF with redactions",
                             variant="secondary",
+                            visible=False,
                         )
                     with gr.Column(scale=1):
                         input_review_files = gr.File(
-                            label="Upload review files here to review suggested redactions. 'review_file' csv The 'ocr_results with words' file can also be provided for searching text and making new redactions.",
+                            label="2. An '...ocr_results_with_words' file can be uploaded here for searching text and making new redactions.",
                             file_count="multiple",
                             height=FILE_INPUT_HEIGHT,
                         )
                         upload_review_files_btn = gr.Button(
-                            "2. Upload review or OCR csv files", variant="secondary"
+                            "2. Upload review or OCR csv files",
+                            variant="secondary",
+                            visible=False,
                         )
             with gr.Row():
                 annotate_zoom_in = gr.Button("Zoom in", visible=False)
@@ -3605,7 +3611,7 @@ with blocks:
             data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
         ###
-        # DOCUMENT SUMMARIsATION TAB
+        # DOCUMENT SUMMARISATION TAB
         ###
         # Build summarization inference method options based on the same flags used for PII detection
         # Only show options that are available: AWS_LLM_PII_OPTION, LOCAL_TRANSFORMERS_LLM_PII_OPTION, INFERENCE_SERVER_PII_OPTION
@@ -3642,11 +3648,9 @@ with blocks:
             or SHOW_INFERENCE_SERVER_PII_OPTIONS
         )
         with gr.Tab(
-            label="Document Summarisation", id=8, visible=visible_summarisation_tab
+            label="Document summarisation", id=8, visible=visible_summarisation_tab
         ):
-            gr.Markdown("""
-                # Document Summarisation
-                
+            gr.Markdown("""             
                 This tab allows you to summarise documents using LLM-based summarisation. 
                 The summarisation process:
                 1. Groups pages into chunks that fit within the LLM context length
@@ -3820,6 +3824,23 @@ with blocks:
                 with gr.Row():
                     page_min.render()
                     page_max.render()
+
+            with gr.Accordion("Efficient OCR", open=False):
+                gr.Markdown(
+                    "When enabled, PDFs are processed per page: selectable text extraction is tried first; only pages with too little text use OCR (Tesseract/Textract/VLM), saving time and cost."
+                )
+                with gr.Row():
+                    efficient_ocr_checkbox = gr.Checkbox(
+                        label="Use efficient OCR (try text first, OCR only when needed)",
+                        value=EFFICIENT_OCR,
+                    )
+                    efficient_ocr_min_words_number = gr.Number(
+                        label="Minimum words on page for text-only route (below this use OCR)",
+                        value=EFFICIENT_OCR_MIN_WORDS,
+                        precision=0,
+                        minimum=0,
+                        step=1,
+                    )
 
             if SHOW_LANGUAGE_SELECTION:
                 with gr.Accordion("Language selection", open=False):
@@ -4380,6 +4401,8 @@ with blocks:
             input_review_files,
             custom_llm_instructions_textbox,
             inference_server_vlm_model_textbox,
+            efficient_ocr_checkbox,
+            efficient_ocr_min_words_number,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -4536,6 +4559,8 @@ with blocks:
             local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
+            efficient_ocr_checkbox,
+            efficient_ocr_min_words_number,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -4915,6 +4940,8 @@ with blocks:
             local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
+            efficient_ocr_checkbox,
+            efficient_ocr_min_words_number,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -5012,7 +5039,8 @@ with blocks:
     ###
 
     # Upload previous PDF for modifying redactions
-    upload_pdf_for_review_btn.click(
+    # upload_pdf_for_review_btn.click(
+    input_pdf_for_review.upload(
         fn=reset_review_vars,
         inputs=None,
         outputs=[recogniser_entity_dataframe, recogniser_entity_dataframe_base],
@@ -5101,7 +5129,8 @@ with blocks:
     )
 
     # Upload previous review CSV files for modifying redactions
-    upload_review_files_btn.click(
+    # upload_review_files_btn.click(
+    input_review_files.upload(
         fn=prepare_image_or_pdf,
         inputs=[
             input_review_files,
@@ -7241,6 +7270,8 @@ with blocks:
             min_word_count_input,
             min_consecutive_pages_input,
             greedy_match_input,
+            all_page_line_level_ocr_results_df_base,
+            input_review_files,
             combine_page_text_for_duplicates_bool,
             output_folder_textbox,
         ],
@@ -7250,6 +7281,8 @@ with blocks:
             full_duplicate_data_by_file,
             actual_time_taken_number,
             task_textbox,
+            all_page_line_level_ocr_results_df_base,
+            input_review_files,
         ],
         show_progress_on=[results_df_preview, redaction_output_summary_textbox],
     ).success(
@@ -7443,6 +7476,13 @@ with blocks:
     ###
 
     summarise_btn.click(
+        fn=enforce_cost_codes,
+        inputs=[
+            enforce_cost_code_textbox,
+            cost_code_choice_drop,
+            cost_code_dataframe_base,
+        ],
+    ).success(
         fn=summarise_document_wrapper,
         inputs=[
             all_page_line_level_ocr_results_df_base,

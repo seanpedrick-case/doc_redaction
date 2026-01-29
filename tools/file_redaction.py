@@ -52,6 +52,8 @@ from tools.config import (
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
+    EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_WORDS,
     GEMINI_VLM_TEXT_EXTRACT_OPTION,
     IMAGES_DPI,
     INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
@@ -298,6 +300,8 @@ def choose_and_run_redactor(
     ocr_review_files: list = list(),
     custom_llm_instructions: str = "",
     inference_server_vlm_model: str = "",
+    efficient_ocr: bool = EFFICIENT_OCR,
+    efficient_ocr_min_words: Union[int, float, None] = EFFICIENT_OCR_MIN_WORDS,
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
@@ -357,12 +361,13 @@ def choose_and_run_redactor(
     - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
     - ocr_review_files (list, optional): A list of OCR review files to be used for the redaction process. Defaults to an empty list.
     - custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to an empty string.
+    - inference_server_vlm_model (str, optional): The name of the inference server VLM model to use for OCR. Defaults to an empty string.
+    - efficient_ocr (bool, optional): Boolean to determine whether to use efficient OCR.
+    - efficient_ocr_min_words (int, optional): The minimum number of words on a page for efficient OCR.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - RETURN_REDACTED_PDF (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
-    - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
     - RETURN_PDF_FOR_REVIEW (bool, optional): Boolean to determine whether to return a review PDF at the end of the redaction process.
-    The function returns a redacted document along with processing logs. If both RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF
-    are True, the function will return both a review PDF (with annotation boxes for review) and a final redacted PDF (with text permanently removed).
+    - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
     """
     tic = time.perf_counter()
 
@@ -401,6 +406,8 @@ def choose_and_run_redactor(
     vlm_model_name = ""
     vlm_total_input_tokens = 0
     vlm_total_output_tokens = 0
+
+    efficient_ocr_min_words = int(efficient_ocr_min_words)
 
     # CLI mode may provide options to enter method names in a different format
     if text_extraction_method == "AWS Textract":
@@ -660,12 +667,30 @@ def choose_and_run_redactor(
     # Prepare documents and images as required if they don't already exist
     prepare_images_flag = None  # Determines whether to call prepare_image_or_pdf
 
-    if textract_output_found and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+    if efficient_ocr and file_paths_loop:
+        # Need images for OCR fallback on pages without selectable text
+        first_file = (
+            file_paths_loop[0]
+            if isinstance(file_paths_loop[0], str)
+            else getattr(file_paths_loop[0], "name", "")
+        )
+        if first_file and is_pdf(first_file):
+            print("EFFICIENT_OCR enabled: preparing images for possible OCR fallback.")
+            prepare_images_flag = True
+
+    if (
+        prepare_images_flag is None
+        and textract_output_found
+        and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+    ):
         print("Existing Textract outputs found, not preparing images or documents.")
         prepare_images_flag = False
         # return  # No need to call `prepare_image_or_pdf`, exit early
 
-    elif text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
+    elif (
+        prepare_images_flag is None
+        and text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+    ):
         print("Running text extraction analysis, not preparing images.")
         prepare_images_flag = False
 
@@ -820,8 +845,6 @@ def choose_and_run_redactor(
         )
 
     ### Load/create allow list, deny list, and whole page redaction list
-
-    ### Load/create allow list
     # If string, assume file path
     if isinstance(in_allow_list, str):
         if in_allow_list:
@@ -1317,7 +1340,209 @@ def choose_and_run_redactor(
                 # original_all_page_line_level_ocr_results_with_words = all_page_line_level_ocr_results_with_words.copy()
 
         # Remove any existing review_file paths from the review file outputs
-        if (
+        # EFFICIENT_OCR: two-step process per page - try selectable text first, OCR only if needed
+        if efficient_ocr and is_pdf(file_path):
+            print(
+                "Redacting file "
+                + pdf_file_name_with_ext
+                + " using efficient OCR (text extraction first, OCR fallback per page)"
+            )
+            # OCR method for pages that have no selectable text
+            ocr_fallback_method = (
+                text_extraction_method
+                if text_extraction_method
+                in (
+                    TESSERACT_TEXT_EXTRACT_OPTION,
+                    TEXTRACT_TEXT_EXTRACT_OPTION,
+                    BEDROCK_VLM_TEXT_EXTRACT_OPTION,
+                    GEMINI_VLM_TEXT_EXTRACT_OPTION,
+                    AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
+                )
+                else TESSERACT_TEXT_EXTRACT_OPTION
+            )
+            start_page_0 = (page_min - 1) if page_min > 0 else 0
+            end_page_0 = start_page_0 + number_of_pages_to_process
+
+            efficient_ocr_progress_bar = tqdm(
+                range(start_page_0, end_page_0),
+                desc="Processing pages",
+                unit="pages remaining",
+            )
+
+            for page_no in efficient_ocr_progress_bar:
+                has_text = page_has_extractable_text(
+                    file_path, page_no, efficient_ocr_min_words
+                )
+                page_min_1 = page_no + 1
+                page_max_1 = page_no + 1
+                page_display = page_no + 1  # 1-indexed for user-facing message
+                if has_text:
+                    print(
+                        f"EFFICIENT_OCR: Page {page_display} — using selectable text extraction (no OCR)."
+                    )
+                    (
+                        pymupdf_doc,
+                        all_pages_decision_process_table,
+                        all_page_line_level_ocr_results_df,
+                        annotations_all_pages,
+                        current_loop_page,
+                        page_break_return,
+                        comprehend_query_number,
+                        all_page_line_level_ocr_results_with_words,
+                        llm_model_name_text,
+                        llm_total_input_tokens_text,
+                        llm_total_output_tokens_text,
+                    ) = redact_text_pdf(
+                        file_path,
+                        language,
+                        chosen_redact_entities,
+                        chosen_redact_comprehend_entities,
+                        in_allow_list_flat,
+                        page_min_1,
+                        page_max_1,
+                        0,
+                        page_break_return,
+                        annotations_all_pages,
+                        all_page_line_level_ocr_results_df,
+                        all_pages_decision_process_table,
+                        pymupdf_doc,
+                        all_page_line_level_ocr_results_with_words,
+                        pii_identification_method,
+                        comprehend_query_number,
+                        comprehend_client,
+                        custom_recogniser_word_list_flat,
+                        redact_whole_page_list_flat,
+                        max_fuzzy_spelling_mistakes_num,
+                        match_fuzzy_whole_phrase_bool,
+                        page_sizes_df,
+                        document_cropboxes,
+                        text_extraction_only,
+                        output_folder=output_folder,
+                        input_folder=input_folder,
+                        bedrock_runtime=bedrock_runtime,
+                        model_choice=CLOUD_LLM_PII_MODEL_CHOICE,
+                        custom_llm_instructions=custom_llm_instructions,
+                        chosen_llm_entities=chosen_llm_entities,
+                        efficient_ocr=efficient_ocr,
+                    )
+                    llm_total_input_tokens += llm_total_input_tokens_text
+                    llm_total_output_tokens += llm_total_output_tokens_text
+                    if llm_model_name_text and not llm_model_name:
+                        llm_model_name = llm_model_name_text
+                else:
+                    ocr_method_label = (
+                        "Tesseract (local OCR)"
+                        if ocr_fallback_method == TESSERACT_TEXT_EXTRACT_OPTION
+                        else (
+                            "AWS Textract"
+                            if ocr_fallback_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                            else (
+                                "Bedrock VLM"
+                                if ocr_fallback_method
+                                == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                                else (
+                                    "Gemini VLM"
+                                    if ocr_fallback_method
+                                    == GEMINI_VLM_TEXT_EXTRACT_OPTION
+                                    else (
+                                        "Azure/OpenAI VLM"
+                                        if ocr_fallback_method
+                                        == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION
+                                        else str(ocr_fallback_method)
+                                    )
+                                )
+                            )
+                        )
+                    )
+                    print(
+                        f"EFFICIENT_OCR: Page {page_display} — no selectable text; using OCR ({ocr_method_label})."
+                    )
+                    (
+                        pymupdf_doc,
+                        all_pages_decision_process_table,
+                        log_files_output_paths,
+                        new_textract_request_metadata,
+                        annotations_all_pages,
+                        current_loop_page,
+                        page_break_return,
+                        all_page_line_level_ocr_results_df,
+                        comprehend_query_number,
+                        all_page_line_level_ocr_results,
+                        all_page_line_level_ocr_results_with_words,
+                        selection_element_results_list_df,
+                        form_key_value_results_list_df,
+                        out_file_paths,
+                        llm_model_name,
+                        llm_total_input_tokens,
+                        llm_total_output_tokens,
+                        vlm_model_name_page,
+                        vlm_total_input_tokens_page,
+                        vlm_total_output_tokens_page,
+                    ) = redact_image_pdf(
+                        file_path,
+                        pdf_image_file_paths,
+                        language,
+                        chosen_redact_entities,
+                        chosen_redact_comprehend_entities,
+                        in_allow_list_flat,
+                        chosen_llm_entities,
+                        page_min_1,
+                        page_max_1,
+                        ocr_fallback_method,
+                        handwrite_signature_checkbox,
+                        blank_request_metadata,
+                        0,
+                        page_break_return,
+                        annotations_all_pages,
+                        all_page_line_level_ocr_results_df,
+                        all_pages_decision_process_table,
+                        pymupdf_doc,
+                        pii_identification_method,
+                        comprehend_query_number,
+                        comprehend_client,
+                        bedrock_runtime,
+                        textract_client,
+                        gemini_client,
+                        gemini_config,
+                        azure_openai_client,
+                        custom_recogniser_word_list_flat,
+                        redact_whole_page_list_flat,
+                        max_fuzzy_spelling_mistakes_num,
+                        match_fuzzy_whole_phrase_bool,
+                        page_sizes_df,
+                        text_extraction_only,
+                        textract_output_found,
+                        all_page_line_level_ocr_results,
+                        all_page_line_level_ocr_results_with_words,
+                        chosen_local_ocr_model,
+                        log_files_output_paths=log_files_output_paths,
+                        out_file_paths=out_file_paths,
+                        nlp_analyser=nlp_analyser,
+                        output_folder=output_folder,
+                        input_folder=input_folder,
+                        custom_llm_instructions=custom_llm_instructions,
+                        inference_server_vlm_model=inference_server_vlm_model,
+                        efficient_ocr=efficient_ocr,
+                    )
+                    out_file_paths = out_file_paths.copy()
+                    vlm_total_input_tokens += vlm_total_input_tokens_page
+                    vlm_total_output_tokens += vlm_total_output_tokens_page
+                    if vlm_model_name_page and not vlm_model_name:
+                        vlm_model_name = vlm_model_name_page
+                    llm_total_input_tokens += llm_total_input_tokens_text
+                    llm_total_output_tokens += llm_total_output_tokens_text
+                    if llm_model_name_text and not llm_model_name:
+                        llm_model_name = llm_model_name_text
+                    if new_textract_request_metadata and isinstance(
+                        new_textract_request_metadata, list
+                    ):
+                        all_textract_request_metadata.extend(
+                            new_textract_request_metadata
+                        )
+            # After per-page loop, set current_loop_page so downstream logic sees "all pages done"
+            current_loop_page = number_of_pages_to_process
+
+        elif (
             text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
             or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
             or text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
@@ -1399,6 +1624,7 @@ def choose_and_run_redactor(
                 input_folder=input_folder,
                 custom_llm_instructions=custom_llm_instructions,
                 inference_server_vlm_model=inference_server_vlm_model,
+                efficient_ocr=efficient_ocr,
             )
 
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
@@ -1468,6 +1694,7 @@ def choose_and_run_redactor(
                 model_choice=CLOUD_LLM_PII_MODEL_CHOICE,
                 custom_llm_instructions=custom_llm_instructions,
                 chosen_llm_entities=chosen_llm_entities,
+                efficient_ocr=efficient_ocr,
             )
 
             # Accumulate LLM token usage from text PDF redaction
@@ -1542,100 +1769,50 @@ def choose_and_run_redactor(
                     applied_redaction_pymupdf_doc = None
 
                     if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
-                        if (
+                        # When efficient_ocr is true, some pages come from redact_image_pdf (OCR)
+                        # and some from redact_text_pdf (selectable text). Merge both into one map
+                        # so the final document has redactions applied to all processed pages.
+                        has_image_pages = (
                             hasattr(redact_image_pdf, "_applied_redaction_pages")
                             and redact_image_pdf._applied_redaction_pages
-                        ):
-
-                            # Create final document by copying the original document and replacing specific pages
-                            applied_redaction_pymupdf_doc = pymupdf.open()
-                            applied_redaction_pymupdf_doc.insert_pdf(pymupdf_doc)
-
-                            # Create a mapping of original page numbers to final pages
-                            applied_redaction_pages_map = {}
-                            for (
-                                applied_redaction_page_data
-                            ) in redact_image_pdf._applied_redaction_pages:
-                                if isinstance(applied_redaction_page_data, tuple):
-                                    applied_redaction_page, original_page_number = (
-                                        applied_redaction_page_data
-                                    )
-                                    applied_redaction_pages_map[
-                                        original_page_number
-                                    ] = applied_redaction_page
-                                else:
-                                    applied_redaction_page = applied_redaction_page_data
-                                    applied_redaction_pages_map[0] = (
-                                        applied_redaction_page  # Default to page 0 if no original number
-                                    )
-
-                            # Replace pages in the final document with their final versions
-                            for (
-                                original_page_number,
-                                applied_redaction_page,
-                            ) in applied_redaction_pages_map.items():
-                                if (
-                                    original_page_number
-                                    < applied_redaction_pymupdf_doc.page_count
-                                ):
-                                    # Remove the original page and insert the final page
-                                    applied_redaction_pymupdf_doc.delete_page(
-                                        original_page_number
-                                    )
-                                    try:
-                                        applied_redaction_pymupdf_doc.insert_pdf(
-                                            applied_redaction_page.parent,
-                                            from_page=applied_redaction_page.number,
-                                            to_page=applied_redaction_page.number,
-                                            start_at=original_page_number,
-                                        )
-                                    except IndexError:
-                                        # Retry without link processing if it fails
-                                        print(
-                                            "IndexError: Retrying without link processing"
-                                        )
-                                        applied_redaction_pymupdf_doc.insert_pdf(
-                                            applied_redaction_page.parent,
-                                            from_page=applied_redaction_page.number,
-                                            to_page=applied_redaction_page.number,
-                                            start_at=original_page_number,
-                                            links=False,
-                                        )
-
-                                    applied_redaction_pymupdf_doc[
-                                        original_page_number
-                                    ].apply_redactions(
-                                        images=APPLY_REDACTIONS_IMAGES,
-                                        graphics=APPLY_REDACTIONS_GRAPHICS,
-                                        text=APPLY_REDACTIONS_TEXT,
-                                    )
-                            # Clear the stored final pages
-                            delattr(redact_image_pdf, "_applied_redaction_pages")
-                        elif (
+                        )
+                        has_text_pages = (
                             hasattr(redact_text_pdf, "_applied_redaction_pages")
                             and redact_text_pdf._applied_redaction_pages
-                        ):
+                        )
+                        if has_image_pages or has_text_pages:
                             # Create final document by copying the original document and replacing specific pages
                             applied_redaction_pymupdf_doc = pymupdf.open()
                             applied_redaction_pymupdf_doc.insert_pdf(pymupdf_doc)
 
-                            # Create a mapping of original page numbers to final pages
+                            # Build a single mapping from both image (OCR) and text paths
                             applied_redaction_pages_map = {}
-                            for (
-                                applied_redaction_page_data
-                            ) in redact_text_pdf._applied_redaction_pages:
-                                if isinstance(applied_redaction_page_data, tuple):
-                                    applied_redaction_page, original_page_number = (
-                                        applied_redaction_page_data
-                                    )
-                                    applied_redaction_pages_map[
-                                        original_page_number
-                                    ] = applied_redaction_page
-                                else:
-                                    applied_redaction_page = applied_redaction_page_data
-                                    applied_redaction_pages_map[0] = (
-                                        applied_redaction_page  # Default to page 0 if no original number
-                                    )
+
+                            def add_pages_to_map(source_pages):
+                                for applied_redaction_page_data in source_pages:
+                                    if isinstance(applied_redaction_page_data, tuple):
+                                        applied_redaction_page, original_page_number = (
+                                            applied_redaction_page_data
+                                        )
+                                        applied_redaction_pages_map[
+                                            original_page_number
+                                        ] = applied_redaction_page
+                                    else:
+                                        applied_redaction_page = (
+                                            applied_redaction_page_data
+                                        )
+                                        applied_redaction_pages_map[0] = (
+                                            applied_redaction_page  # Default to page 0 if no original number
+                                        )
+
+                            if has_image_pages:
+                                add_pages_to_map(
+                                    redact_image_pdf._applied_redaction_pages,
+                                )
+                            if has_text_pages:
+                                add_pages_to_map(
+                                    redact_text_pdf._applied_redaction_pages,
+                                )
 
                             # Replace pages in the final document with their final versions
                             for (
@@ -1677,8 +1854,12 @@ def choose_and_run_redactor(
                                         graphics=APPLY_REDACTIONS_GRAPHICS,
                                         text=APPLY_REDACTIONS_TEXT,
                                     )
-                            # Clear the stored final pages
-                            delattr(redact_text_pdf, "_applied_redaction_pages")
+
+                            # Clear the stored final pages from both sources
+                            if has_image_pages:
+                                delattr(redact_image_pdf, "_applied_redaction_pages")
+                            if has_text_pages:
+                                delattr(redact_text_pdf, "_applied_redaction_pages")
 
                     # Save final redacted PDF if we have dual outputs or if RETURN_PDF_FOR_REVIEW is False
                     if RETURN_PDF_FOR_REVIEW is False or applied_redaction_pymupdf_doc:
@@ -3545,6 +3726,7 @@ def redact_image_pdf(
     input_folder: str = INPUT_FOLDER,
     custom_llm_instructions: str = "",
     inference_server_vlm_model: str = "",
+    efficient_ocr: bool = EFFICIENT_OCR,
     progress=Progress(track_tqdm=True),
 ):
     # Initialize LLM token tracking variables
@@ -3600,6 +3782,7 @@ def redact_image_pdf(
     - input_folder (str, optional): The folder for file inputs.
     - custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to an empty string.
     - inference_server_vlm_model (str, optional): The inference-server VLM model to use for OCR. Defaults to an empty string. If empty, uses DEFAULT_INFERENCE_SERVER_VLM_MODEL.
+    - efficient_ocr (bool, optional): Whether to use efficient OCR. Defaults to EFFICIENT_OCR.
     - progress (Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
     The function returns a redacted PDF document along with processing output objects.
     """
@@ -3748,12 +3931,6 @@ def redact_image_pdf(
 
     page_loop_end = page_max
 
-    tqdm(
-        range(page_loop_start, page_loop_end),
-        unit="pages remaining",
-        desc="Redacting pages",
-    )
-
     # If there's data from a previous run (passed in via the DataFrame parameters), add it
     all_line_level_ocr_results_list = list()
     all_pages_decision_process_list = list()
@@ -3777,11 +3954,14 @@ def redact_image_pdf(
     # This collects OCR results without doing PII detection, which is more efficient
     # when using inference servers that need to switch between VLM and LLM models
     print("First pass: Performing OCR on all pages...")
-    ocr_progress_bar = tqdm(
-        range(page_loop_start, page_loop_end),
-        unit="pages remaining",
-        desc="OCR pass",
-    )
+    if efficient_ocr:
+        ocr_progress_bar = range(page_loop_start, page_loop_end)
+    else:
+        ocr_progress_bar = tqdm(
+            range(page_loop_start, page_loop_end),
+            unit="pages remaining",
+            desc="OCR pass",
+        )
 
     for page_no in ocr_progress_bar:
 
@@ -5102,11 +5282,14 @@ def redact_image_pdf(
 
     # SECOND PASS: Perform PII detection on all pages using stored OCR results
     print("Second pass: Performing PII detection on all pages...")
-    pii_progress_bar = tqdm(
-        range(page_loop_start, page_loop_end),
-        unit="pages remaining",
-        desc="PII detection pass",
-    )
+    if efficient_ocr:
+        pii_progress_bar = range(page_loop_start, page_loop_end)
+    else:
+        pii_progress_bar = tqdm(
+            range(page_loop_start, page_loop_end),
+            unit="pages remaining",
+            desc="PII detection pass",
+        )
 
     # Initialize redacted_image - will be updated inside loop for image files
     redacted_image = None
@@ -5587,6 +5770,23 @@ def redact_image_pdf(
                     )
                 else:
                     pymupdf_page, page_image_annotations = redact_result
+                    # When dual output is requested but this page had no redaction boxes,
+                    # we still need an "applied" page entry so the final PDF replace loop
+                    # replaces every page. Otherwise only pages with at least one redaction
+                    # get replaced, and other pages stay as review-style (annotations only).
+                    if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
+                        if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
+                            redact_image_pdf._applied_redaction_pages = list()
+                        applied_doc = pymupdf.open()
+                        applied_doc.insert_pdf(
+                            pymupdf_page.parent,
+                            from_page=page_no,
+                            to_page=page_no,
+                        )
+                        applied_page_copy = applied_doc[0]
+                        redact_image_pdf._applied_redaction_pages.append(
+                            (applied_page_copy, page_no)
+                        )
 
             # If an image_path file, draw onto the image_path
             elif is_pdf(file_path) is False:
@@ -6304,6 +6504,62 @@ def process_page_to_structured_ocr(
     return page_data, line_level_ocr_results_list, lines_char_groups
 
 
+def page_has_extractable_text(
+    file_path: str, page_no: int, min_words: int = EFFICIENT_OCR_MIN_WORDS
+) -> bool:
+    """
+    Determine if a single PDF page has enough selectable text to use the text-only
+    route (using pdfminer). Used by EFFICIENT_OCR to decide whether to use
+    redact_text_pdf or redact_image_pdf for that page.
+
+    Args:
+        file_path: Path to the PDF file.
+        page_no: 0-based page index.
+        min_words: Minimum number of words required on the page to use text-only
+            route; below this the page will use OCR. Defaults to EFFICIENT_OCR_MIN_WORDS.
+
+    Returns:
+        True if the page yields at least min_words of extractable text;
+        False otherwise (page will use OCR).
+    """
+    try:
+        word_count = 0
+        for page_layout in extract_pages(file_path, page_numbers=[page_no], maxpages=1):
+            text_line_no = 1
+            for text_container in page_layout:
+                if isinstance(text_container, LTTextContainer) or isinstance(
+                    text_container, LTAnno
+                ):
+                    characters = get_text_container_characters(text_container)
+                    if not characters:
+                        continue
+                    (
+                        _,
+                        line_level_text_results_list,
+                        _,
+                    ) = process_page_to_structured_ocr(
+                        characters,
+                        page_number=page_no + 1,
+                        text_line_number=text_line_no,
+                    )
+                    if line_level_text_results_list:
+                        for result in line_level_text_results_list:
+                            if result.text and str(result.text).strip():
+                                word_count += len(
+                                    [w for w in str(result.text).split() if w.strip()]
+                                )
+                                if word_count >= min_words:
+                                    return True
+                    text_line_no += (
+                        len(line_level_text_results_list)
+                        if line_level_text_results_list
+                        else 1
+                    )
+        return word_count >= min_words
+    except Exception:
+        return False
+
+
 def create_text_redaction_process_results(
     analyser_results, analysed_bounding_boxes, page_num
 ):
@@ -6422,6 +6678,7 @@ def redact_text_pdf(
     model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
     custom_llm_instructions: str = "",
     chosen_llm_entities: List[str] = None,
+    efficient_ocr: bool = EFFICIENT_OCR,
 ):
     # Initialize LLM token tracking variables
     llm_total_input_tokens = 0
@@ -6461,6 +6718,7 @@ def redact_text_pdf(
     - page_break_val: Value for page break
     - max_time (int, optional): The maximum amount of time (s) that the function should be running before it breaks. To avoid timeout errors with some APIs.
     - nlp_analyser (AnalyzerEngine, optional): The nlp_analyser object to use for entity detection. Defaults to nlp_analyser.
+    - efficient_ocr (bool, optional): Whether to use efficient OCR. Defaults to EFFICIENT_OCR.
     - progress: Progress tracking object
     """
 
@@ -6534,11 +6792,14 @@ def redact_text_pdf(
     print("Page range is", str(page_loop_start + 1), "to", str(page_loop_end))
 
     # Run through each page in document to 1. Extract text and then 2. Create redaction boxes
-    progress_bar = tqdm(
-        range(page_loop_start, page_loop_end),
-        unit="pages remaining",
-        desc="Redacting pages",
-    )
+    if efficient_ocr:
+        progress_bar = range(page_loop_start, page_loop_end)
+    else:
+        progress_bar = tqdm(
+            range(page_loop_start, page_loop_end),
+            unit="pages remaining",
+            desc="Redacting pages",
+        )
 
     for page_no in progress_bar:
         reported_page_number = str(page_no + 1)
@@ -6875,6 +7136,22 @@ def redact_text_pdf(
                         )
                     else:
                         pymupdf_page, page_image_annotations = redact_result
+                        # When dual output is requested but this page had no redaction boxes,
+                        # we still need an "applied" page entry so the final PDF replace loop
+                        # replaces every page (same fix as in redact_image_pdf).
+                        if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
+                            if not hasattr(redact_text_pdf, "_applied_redaction_pages"):
+                                redact_text_pdf._applied_redaction_pages = list()
+                            applied_doc = pymupdf.open()
+                            applied_doc.insert_pdf(
+                                pymupdf_page.parent,
+                                from_page=page_no,
+                                to_page=page_no,
+                            )
+                            applied_page_copy = applied_doc[0]
+                            redact_text_pdf._applied_redaction_pages.append(
+                                (applied_page_copy, page_no)
+                            )
 
                     # Create decision process table
                     page_decision_process_table = create_text_redaction_process_results(

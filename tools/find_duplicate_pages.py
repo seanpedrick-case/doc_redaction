@@ -15,6 +15,7 @@ from tools.config import MAX_SIMULTANEOUS_FILES
 from tools.file_conversion import (
     convert_annotation_data_to_dataframe,
     fill_missing_box_ids_each_box,
+    word_level_ocr_df_to_line_level_ocr_df,
 )
 from tools.file_redaction import redact_whole_pymupdf_page
 from tools.helper_functions import OUTPUT_FOLDER
@@ -543,9 +544,21 @@ def combine_ocr_output_text(
         file_paths_list = input_files
 
     data_to_process = list()
+    i = 0
+    first_ocr_df = pd.DataFrame()
     for file_path in file_paths_list:
         try:
             df = pd.read_csv(file_path)
+            # Convert word-level OCR to line-level if user uploaded word-level file
+            if "ocr_results_with_words" in os.path.basename(file_path) and (
+                "word_text" in df.columns and "text" not in df.columns
+            ):
+                df = word_level_ocr_df_to_line_level_ocr_df(df)
+            # Save the first OCR dataframe to save to the GUI
+            if i == 0:
+                first_ocr_df = df
+                first_ocr_df_path = file_path
+            i += 1
             # Use the base filename as the identifier
             file_identifier = os.path.basename(file_path)
             data_to_process.append((file_identifier, df))
@@ -557,14 +570,16 @@ def combine_ocr_output_text(
     if not data_to_process:
         raise ValueError("No valid CSV files could be read or processed.")
 
-    # Call the core function with the loaded data
-    return combine_ocr_dataframes(
+    df_combined, _, full_out_ocr_df = combine_ocr_dataframes(
         input_data=data_to_process,
         combine_pages=combine_pages,
         output_folder=output_folder,
         output_filename="combined_ocr_from_files.csv",  # Specific name for this path
         remake_index=remake_index,
     )
+
+    # Call the core function with the loaded data
+    return df_combined, first_ocr_df, first_ocr_df_path
 
 
 def clean_and_stem_text_series(df: pd.DataFrame, column: str):
@@ -1257,6 +1272,8 @@ def run_duplicate_analysis(
     min_words: int,
     min_consecutive: int,
     greedy_match: bool,
+    all_page_line_level_ocr_results_df_base: pd.DataFrame,
+    ocr_df_paths_list: list[str],
     combine_pages: bool = True,
     output_folder: str = OUTPUT_FOLDER,
     preview_length: int = 500,
@@ -1274,6 +1291,8 @@ def run_duplicate_analysis(
         min_consecutive (int): The minimum number of consecutive pages that must match for a sequence to be considered a duplicate.
         greedy_match (bool): If True, uses a greedy matching strategy for identifying consecutive sequences.
         combine_pages (bool, optional): If True, text from multiple pages is combined into larger segments for analysis. Defaults to True.
+        all_page_line_level_ocr_results_df_base (pd.DataFrame): The base dataframe containing the OCR results.
+        ocr_df_paths_list (list[str]): A list of file paths to the OCR results.
         output_folder (str, optional): The directory where the similarity results and redaction lists will be saved. Defaults to OUTPUT_FOLDER.
         preview_length (int, optional): The maximum number of characters to display in the text preview panes. Defaults to 500.
         progress (gr.Progress, optional): A Gradio progress tracker object to display progress in the UI.
@@ -1285,6 +1304,9 @@ def run_duplicate_analysis(
     if isinstance(files, str):
         files = [files]
 
+    if not ocr_df_paths_list:
+        ocr_df_paths_list = []
+
     if len(files) > MAX_SIMULTANEOUS_FILES:
         out_message = f"Number of files to deduplicate is greater than {MAX_SIMULTANEOUS_FILES}. Please submit a smaller number of files."
         print(out_message)
@@ -1295,9 +1317,15 @@ def run_duplicate_analysis(
     task_textbox = "deduplicate"
 
     progress(0, desc="Combining input files...")
-    df_combined, _, full_out_ocr_df = combine_ocr_output_text(
+    df_combined, first_ocr_df, first_ocr_df_path = combine_ocr_output_text(
         files, combine_pages=combine_pages, output_folder=output_folder
     )
+
+    # Replace current OCR app components if currently empty
+    if all_page_line_level_ocr_results_df_base.empty:
+        all_page_line_level_ocr_results_df_base = first_ocr_df
+        if first_ocr_df_path not in ocr_df_paths_list:
+            ocr_df_paths_list.append(first_ocr_df_path)
 
     if df_combined.empty:
         raise Warning("No data found in the uploaded files.")
@@ -1331,7 +1359,15 @@ def run_duplicate_analysis(
     end_time = time.time()
     processing_time = round(end_time - start_time, 2)
 
-    return results_df, output_paths, full_data_by_file, processing_time, task_textbox
+    return (
+        results_df,
+        output_paths,
+        full_data_by_file,
+        processing_time,
+        task_textbox,
+        all_page_line_level_ocr_results_df_base,
+        ocr_df_paths_list,
+    )
 
 
 def show_page_previews(
@@ -1466,7 +1502,7 @@ def apply_whole_page_redactions_from_list(
     all_annotations = all_existing_annotations.copy()
 
     if not pymupdf_doc:
-        message = "No document file currently under review"
+        message = "No document file currently under review. Please upload the relevant PDF on the Review redactions tab under the top 'Upload PDFs/images...' section to apply duplicate redactions."
         print(f"Warning: {message}")
         raise Warning(message)
 
@@ -1499,6 +1535,13 @@ def apply_whole_page_redactions_from_list(
             expected_duplicate_pages_to_redact_name = (
                 f"{doc_file_name_with_extension_textbox}"
             )
+            # Substitute out '_for_review' from the expected filename to successfully modify existing redactions files
+            expected_duplicate_pages_to_redact_name = (
+                expected_duplicate_pages_to_redact_name.replace(
+                    "_redactions_for_review", ""
+                ).replace(".pdf", "")
+            )
+
             whole_pages_list = pd.DataFrame()  # Initialize empty DataFrame
 
             for output_file in duplicate_output_paths:
@@ -1511,6 +1554,11 @@ def apply_whole_page_redactions_from_list(
                     file_name_from_path = getattr(
                         output_file, "name", str(output_file).split(os.sep)[-1]
                     )
+
+                # Substitute out '_for_review' from the expected filename to successfully modify existing redactions files
+                file_name_from_path = file_name_from_path.replace(
+                    "_redactions_for_review", ""
+                )
                 if expected_duplicate_pages_to_redact_name in file_name_from_path:
                     whole_pages_list = pd.read_csv(
                         output_file, header=None

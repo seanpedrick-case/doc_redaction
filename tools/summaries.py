@@ -36,6 +36,7 @@ from tools.config import (
     TIMEOUT_WAIT,
     model_name_map,
 )
+from tools.file_conversion import word_level_ocr_df_to_line_level_ocr_df
 from tools.helper_functions import (
     clean_column_name,
     create_batch_file_path_details,
@@ -204,6 +205,11 @@ def load_csv_files_to_dataframe(file_input):
     for file_path in file_paths:
         try:
             df = pd.read_csv(file_path)
+            # Convert word-level OCR to line-level if user uploaded word-level file
+            if "ocr_results_with_words" in os.path.basename(file_path) and (
+                "word_text" in df.columns and "text" not in df.columns
+            ):
+                df = word_level_ocr_df_to_line_level_ocr_df(df)
             # Ensure required columns exist
             if "page" in df.columns and "line" in df.columns and "text" in df.columns:
                 all_dfs.append(df[["page", "line", "text"]])
