@@ -284,7 +284,7 @@ def split_word_with_punctuation(
     # Punctuation characters are typically narrower than alphanumeric characters
     # Use a scaling factor to make punctuation boxes thinner
     PUNCTUATION_WIDTH_SCALE = (
-        0.5  # Punctuation is approximately 50% the width of alphanumeric chars
+        0.4  # Punctuation is approximately 50% the width of alphanumeric chars
     )
 
     # First pass: calculate effective character widths for each part

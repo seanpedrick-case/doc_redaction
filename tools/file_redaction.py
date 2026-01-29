@@ -3156,16 +3156,18 @@ def redact_page_with_pymupdf(
         # Handle dual page objects if returned
         if isinstance(redact_result, tuple):
             page, applied_redaction_page = redact_result
-            # Store the final page for later use
+            # Store the final page with page number for unpacking at end of function
             if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
                 redact_page_with_pymupdf._applied_redaction_page = (
-                    applied_redaction_page
+                    applied_redaction_page,
+                    page.number,
                 )
             else:
                 # If we already have a final page, we need to handle multiple pages
                 # For now, we'll use the last final page
                 redact_page_with_pymupdf._applied_redaction_page = (
-                    applied_redaction_page
+                    applied_redaction_page,
+                    page.number,
                 )
 
     # If whole page is to be redacted, do that here
@@ -3702,7 +3704,7 @@ def redact_image_pdf(
                 )
             )
             if textract_data:
-                textract_output_found = True
+                pass
         original_textract_data = textract_data.copy()
 
         if textract_client_not_found and is_missing:
@@ -4705,30 +4707,15 @@ def redact_image_pdf(
                             if page["page_no"] == reported_page_number
                         )
 
-                # Check if existing Textract output for this page
-
-                if textract_output_found and page_exists:
-                    use_mediabox_for_textract = True
-                else:
-                    use_mediabox_for_textract = False
-
-                if use_mediabox_for_textract:
-                    # Whole-document Textract: use mediabox dimensions
-                    textract_page_width = pymupdf_page.mediabox.width
-                    textract_page_height = pymupdf_page.mediabox.height
-                    # print(
-                    #     f"Using mediabox dimensions for Textract: {textract_page_width}x{textract_page_height}"
-                    # )
-                else:
-                    # Individual image Textract: use image dimensions (current behavior)
-                    textract_page_width = page_width
-                    textract_page_height = page_height
-                    # print(
-                    #     f"Using image dimensions for Textract: {textract_page_width}x{textract_page_height}"
-                    # )
-
-                # textract_page_width = page_width
-                # textract_page_height = page_height
+                # Use image dimensions for json_to_ocrresult so that OCR result coordinates
+                # are in image pixel space. Downstream code (image annotator, review PDF,
+                # redacted PDF) expects image-space coordinates; convert_*_to_pymupdf then
+                # scales from image to PDF when drawing. Using PDF mediabox here would
+                # produce coordinates in PDF space and cause redaction boxes to be
+                # misplaced (shifted up-left and too small) on the second run when
+                # reusing existing Textract output.
+                textract_page_width = page_width
+                textract_page_height = page_height
 
                 (
                     page_line_level_ocr_results,

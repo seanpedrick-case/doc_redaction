@@ -317,7 +317,7 @@ import sys
 
 
 # 1. Create a custom error class
-class ProcessStop(Exception):
+class ProcessStop(UserWarning):
     pass
 
 
@@ -2749,9 +2749,7 @@ with blocks:
                                 )
 
             with gr.Accordion(label="Extract text and redact document", open=True):
-                # gr.Markdown(
-                #     """If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the Redaction Settings tab."""
-                # )
+
                 document_redact_btn = gr.Button(
                     "Extract text and redact document",
                     variant="secondary",
@@ -2787,16 +2785,6 @@ with blocks:
                 visible=False,
             )
             pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
-
-            # Feedback elements are invisible until revealed by redaction action
-            # all_outputs_in_output_folder_title = gr.Markdown(value="## All outputs in output folder", visible=False)
-            # all_outputs_in_output_folder_dataframe = gr.FileExplorer(
-            #     root_dir=OUTPUT_FOLDER,
-            #     label="All outputs in output folder",
-            #     file_count="multiple",
-            #     visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-            #     interactive=True,
-            # )
 
         ###
         # REVIEW REDACTIONS TAB
