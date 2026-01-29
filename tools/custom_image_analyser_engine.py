@@ -8713,10 +8713,11 @@ class CustomImageAnalyzerEngine:
                             word_length + 1
                         )  # +1 for the space after the word
 
-                        # Check if the word's bounding box is within the start and end bounds
-                        if word_start >= start_in_line and word_end <= (
-                            end_in_line + 1
-                        ):
+                        # Include words that overlap the PII range (not only fully contained).
+                        # This fixes cases where PII strips a suffix (e.g. "Hyde" from "Hyde's"):
+                        # the word "Hyde's" was excluded by the strict containment check, leading
+                        # to a too-small proportional fallback box (e.g. only covering "Hyd").
+                        if word_start < end_in_line and word_end > start_in_line:
                             matching_word_boxes.append(word_info["bounding_box"])
 
                     if matching_word_boxes:

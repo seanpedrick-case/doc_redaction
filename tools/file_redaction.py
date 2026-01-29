@@ -3352,11 +3352,13 @@ def merge_img_bboxes(
     reconstructed_bboxes = list()
     for bbox in bboxes:
         bbox_box = (bbox.left, bbox.top, bbox.left + bbox.width, bbox.top + bbox.height)
-        for line_text, line_info in combined_results.items():
+        for line_key, line_info in combined_results.items():
             line_box = line_info["bounding_box"]
+            # Use actual line text (not the key, which is e.g. "text_line_1") for substring matching
+            actual_line_text = line_info.get("text", "")
             if bounding_boxes_overlap(bbox_box, line_box):
-                if bbox.text in line_text:
-                    start_char = line_text.index(bbox.text)
+                if actual_line_text and bbox.text in actual_line_text:
+                    start_char = actual_line_text.index(bbox.text)
                     end_char = start_char + len(bbox.text)
 
                     relevant_words = list()

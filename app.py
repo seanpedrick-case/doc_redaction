@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -312,9 +313,6 @@ ensure_folder_exists(USAGE_LOGS_FOLDER)
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 # CHOSEN_LLM_ENTITIES.extend(custom_entities)
-
-import sys
-
 
 # 1. Create a custom error class
 class ProcessStop(UserWarning):
