@@ -294,6 +294,7 @@ def handle_step_3_next(
     anon_strategy_val,
     do_initial_clean_val,
     redact_duplicate_pages_val,
+    max_fuzzy_spelling_mistakes_num_val,
 ):
     """Handle step 3 next button - write values to main components."""
     # Update text extraction method with walkthrough value
@@ -419,6 +420,13 @@ def handle_step_3_next(
         else gr.Checkbox()
     )
 
+    # Update max fuzzy spelling mistakes number with walkthrough value
+    max_fuzzy_spelling_mistakes_num_update = (
+        gr.Number(value=max_fuzzy_spelling_mistakes_num_val)
+        if max_fuzzy_spelling_mistakes_num_val is not None
+        else gr.Number()
+    )
+
     return (
         text_extract_method_update,  # text_extract_method_radio
         local_ocr_update,  # local_ocr_method_radio
@@ -435,6 +443,7 @@ def handle_step_3_next(
         anon_strategy_update,  # anon_strategy
         do_initial_clean_update,  # do_initial_clean
         redact_duplicate_pages_update,  # redact_duplicate_pages_checkbox
+        max_fuzzy_spelling_mistakes_num_update,  # max_fuzzy_spelling_mistakes_num_number
         gr.Walkthrough(selected=4),  # walkthrough
     )
 

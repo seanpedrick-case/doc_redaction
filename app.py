@@ -145,6 +145,7 @@ from tools.config import (
     PII_DETECTION_MODELS,
     REMOVE_DUPLICATE_ROWS,
     ROOT_PATH,
+    RUN_ALL_EXAMPLES_THROUGH_AWS,
     RUN_AWS_FUNCTIONS,
     RUN_DIRECT_MODE,
     RUN_FASTAPI,
@@ -564,7 +565,7 @@ total_pdf_page_count = gr.Number(
 
 # Override options if OCR GUI is not shown
 if not SHOW_OCR_GUI_OPTIONS:
-    SHOW_AWS_TEXT_EXTRACTION_OPTIONS = False
+    # SHOW_AWS_TEXT_EXTRACTION_OPTIONS = False
     SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS = False
     SHOW_LOCAL_OCR_MODEL_OPTIONS = False
 
@@ -673,7 +674,7 @@ in_allow_list_state = gr.Dropdown(
 
 in_fully_redacted_list_state = gr.Dropdown(
     allow_custom_value=True,
-    label="Fully redacted pages (fully redact these page numbers)",
+    label="Fully redact these pages",
     interactive=True,
     multiselect=True,
     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
@@ -689,6 +690,14 @@ in_fully_redacted_list = gr.File(
     label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.",
     file_count="multiple",
     height=FILE_INPUT_HEIGHT,
+)
+
+max_fuzzy_spelling_mistakes_num = gr.Number(
+    label="Maximum spelling mistakes for matching deny list terms (slows down PII detection).",
+    value=DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+    minimum=0,
+    maximum=9,
+    precision=0,
 )
 
 ## Page options
@@ -1668,6 +1677,13 @@ with blocks:
                 "PDF redaction with custom deny list and whole page redaction"
             )
 
+        # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace text extraction with AWS Textract and PII with AWS Comprehend (except "Only extract text")
+        if RUN_ALL_EXAMPLES_THROUGH_AWS:
+            for ex in available_examples:
+                ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
+                if ex[2] != NO_REDACTION_PII_OPTION:
+                    ex[2] = AWS_PII_OPTION
+
         # Only create examples if we have available files
         if available_examples:
 
@@ -1930,6 +1946,13 @@ with blocks:
             )
             ocr_example_labels.append("CV with photo")
 
+        # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace text extraction with AWS Textract and PII with AWS Comprehend (except "Only extract text")
+        if RUN_ALL_EXAMPLES_THROUGH_AWS:
+            for ex in available_ocr_examples:
+                ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
+                if ex[2] != NO_REDACTION_PII_OPTION:
+                    ex[2] = AWS_PII_OPTION
+
         # Only create examples if we have available files
         if available_ocr_examples:
 
@@ -2098,17 +2121,29 @@ with blocks:
                         # Components for "Redact selected terms" option (conditionally visible)
                         # Note: Accordion removed to avoid block ID mismatches
                         with gr.Row(equal_height=True):
-                            walkthrough_deny_list_state.render()
-                            walkthrough_allow_list_state.render()
-                            walkthrough_fully_redacted_list_state.render()
+                            with gr.Column(scale=3):
+                                with gr.Row(equal_height=True):
+                                    walkthrough_deny_list_state.render()
+                                    walkthrough_allow_list_state.render()
+                                    walkthrough_fully_redacted_list_state.render()
 
-                            # Checkbox for automatically redacting duplicate pages
-                            walkthrough_redact_duplicate_pages_checkbox = gr.Checkbox(
-                                label="Redact duplicate pages",
-                                value=False,
-                                visible=True,
-                                elem_id="redact_duplicate_pages_checkbox_walkthrough",
-                            )
+                            with gr.Column(scale=1):
+                                # Checkbox for automatically redacting duplicate pages
+                                walkthrough_redact_duplicate_pages_checkbox = gr.Checkbox(
+                                    label="Redact duplicate pages",
+                                    value=False,
+                                    visible=True,
+                                    elem_id="redact_duplicate_pages_checkbox_walkthrough",
+                                )
+
+                                walkthrough_max_fuzzy_spelling_mistakes_num = gr.Number(
+                                    label="Maximum spelling mistakes for matching deny list terms (slows down PII detection).",
+                                    value=DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+                                    minimum=0,
+                                    maximum=9,
+                                    precision=0,
+                                    visible=True,
+                                )
 
                         # Tabular data redaction options (conditionally visible for data files)
 
@@ -2395,6 +2430,7 @@ with blocks:
                     walkthrough_anon_strategy,
                     walkthrough_do_initial_clean,
                     walkthrough_redact_duplicate_pages_checkbox,
+                    walkthrough_max_fuzzy_spelling_mistakes_num,
                 ],
                 outputs=[
                     text_extract_method_radio,
@@ -2413,6 +2449,7 @@ with blocks:
                     do_initial_clean,
                     redact_duplicate_pages_checkbox,
                     walkthrough,
+                    max_fuzzy_spelling_mistakes_num,
                 ],
             )
 
@@ -2516,15 +2553,6 @@ with blocks:
                     )
                     with aws_textract_signature_accordion:
                         handwrite_signature_checkbox.render()
-                    # else:
-                    #     text_extract_method_radio.render()
-                    #     local_ocr_method_radio.render()
-                    #     inference_server_vlm_model_textbox.render()
-                    #     handwrite_signature_checkbox.render()
-                    #     # Create hidden accordions for consistency (so event handlers can reference them)
-                    #     local_ocr_accordion = gr.Accordion(visible=False)
-                    #     inference_server_vlm_accordion = gr.Accordion(visible=False)
-                    #     aws_textract_signature_accordion = gr.Accordion(visible=False)
 
                 with gr.Accordion(
                     "Change PII identification method",
@@ -2565,27 +2593,15 @@ with blocks:
                             open=True,
                         ):
                             with gr.Row(equal_height=True):
-                                in_allow_list_state.render()
-                                in_deny_list_state.render()
-                                in_fully_redacted_list_state.render()
-                                # Checkbox for automatically redacting duplicate pages
-                                redact_duplicate_pages_checkbox.render()
-                    # else:
-                    #     pii_identification_method_drop.render()
-                    #     in_redact_entities.render()
-                    #     in_redact_comprehend_entities.render()
-                    #     in_redact_llm_entities.render()
-                    #     custom_llm_instructions_textbox.render()
-                    #     in_allow_list_state.render()
-                    #     in_deny_list_state.render()
-                    #     in_fully_redacted_list_state.render()
-                    #     # Checkbox for automatically redacting duplicate pages
-                    #     redact_duplicate_pages_checkbox.render()
-                    #     # Create hidden accordions for consistency (so event handlers can reference them)
-                    #     # local_entities_accordion = gr.Accordion(visible=False)
-                    #     # comprehend_entities_accordion = gr.Accordion(visible=False)
-                    #     # llm_entities_accordion = gr.Accordion(visible=False)
-                    #     # llm_custom_instructions_accordion = gr.Accordion(visible=False)
+                                with gr.Column(scale=3):
+                                    with gr.Row(equal_height=True):
+                                        in_allow_list_state.render()
+                                        in_deny_list_state.render()
+                                        in_fully_redacted_list_state.render()
+                                with gr.Column(scale=1):
+                                    # Checkbox for automatically redacting duplicate pages
+                                    redact_duplicate_pages_checkbox.render()
+                                    max_fuzzy_spelling_mistakes_num.render()
 
                 if SHOW_COSTS:
                     with gr.Accordion(
@@ -3390,6 +3406,11 @@ with blocks:
                         "Tabular duplicate detection in CSV files"
                     )
 
+                # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace PII with AWS Comprehend for tabular examples
+                if RUN_ALL_EXAMPLES_THROUGH_AWS:
+                    for ex in available_tabular_examples:
+                        ex[2] = AWS_PII_OPTION
+
                 # Only create examples if we have available files
                 if available_tabular_examples:
 
@@ -3797,19 +3818,16 @@ with blocks:
                                 variant="secondary",
                             )
 
-            with gr.Accordion("Select entity types to redact", open=True):
+            with gr.Accordion(
+                "Select entity types to redact", open=True, visible=False
+            ):
 
                 with gr.Row():
-                    max_fuzzy_spelling_mistakes_num = gr.Number(
-                        label="Maximum number of spelling mistakes allowed for fuzzy matching (CUSTOM_FUZZY entity).",
-                        value=DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
-                        minimum=0,
-                        maximum=9,
-                        precision=0,
-                    )
+
                     match_fuzzy_whole_phrase_bool = gr.Checkbox(
                         label="Should fuzzy search match on entire phrases in deny list (as opposed to each word individually)?",
                         value=True,
+                        visible=False,
                     )
 
             with gr.Accordion("Redact only selected pages", open=False):
@@ -8542,7 +8560,16 @@ with blocks:
                 "inference_server_pii_model": DEFAULT_INFERENCE_SERVER_PII_MODEL,
                 "llm_temperature": LLM_PII_TEMPERATURE,
                 "llm_max_tokens": LLM_PII_MAX_TOKENS,
+                "llm_redact_entities": CHOSEN_LLM_ENTITIES,
                 "custom_llm_instructions": "",  # Can be set via environment variable if needed
+                # Document Summarisation Arguments (used when task is summarise)
+                "summarisation_inference_method": AWS_LLM_PII_OPTION,
+                "summarisation_temperature": 0.6,
+                "summarisation_max_pages_per_group": 30,
+                "summarisation_api_key": "",
+                "summarisation_context": "",
+                "summarisation_format": "detailed",
+                "summarisation_additional_instructions": "",
                 # Word/Tabular Anonymisation Arguments
                 "anon_strategy": DIRECT_MODE_ANON_STRATEGY,
                 "text_columns": DEFAULT_TEXT_COLUMNS,
@@ -8583,6 +8610,12 @@ with blocks:
                 if DEFAULT_TEXT_COLUMNS:
                     print(f"Text columns: {DEFAULT_TEXT_COLUMNS}")
                 print(f"Remove duplicate rows: {REMOVE_DUPLICATE_ROWS}")
+
+            if DIRECT_MODE_TASK == "summarise":
+                print(
+                    "Summarisation: use summarisation_inference_method, summarisation_format, "
+                    "summarisation_context, summarisation_additional_instructions in direct_mode_args."
+                )
 
             # Combine extraction options
             extraction_options = (

@@ -415,6 +415,16 @@ def choose_and_run_redactor(
     if chosen_llm_entities is None:
         chosen_llm_entities = chosen_redact_comprehend_entities
 
+    # Auto-include CUSTOM_FUZZY in local entity list when fuzzy matching is enabled
+    chosen_redact_entities = list(chosen_redact_entities or [])
+    if (max_fuzzy_spelling_mistakes_num or 0) > 0:
+        if "CUSTOM_FUZZY" not in chosen_redact_entities:
+            chosen_redact_entities.append("CUSTOM_FUZZY")
+        if "CUSTOM_FUZZY" not in chosen_redact_comprehend_entities:
+            chosen_redact_comprehend_entities.append("CUSTOM_FUZZY")
+        if "CUSTOM_FUZZY" not in chosen_llm_entities:
+            chosen_llm_entities.append("CUSTOM_FUZZY")
+
     if pii_identification_method == "None":
         pii_identification_method = NO_REDACTION_PII_OPTION
 

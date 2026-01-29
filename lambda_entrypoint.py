@@ -7,9 +7,11 @@ from dotenv import load_dotenv
 # Import the main function from your CLI script
 from cli_redact import main as cli_main
 from tools.config import (
+    AWS_LLM_PII_OPTION,
     AWS_REGION,
     AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_INFERENCE_ENDPOINT,
+    CHOSEN_LLM_ENTITIES,
     CHOSEN_LLM_PII_INFERENCE_METHOD,
     CLOUD_LLM_PII_MODEL_CHOICE,
     CLOUD_VLM_MODEL_CHOICE,
@@ -497,8 +499,44 @@ def lambda_handler(event, context):
                 os.getenv("LLM_PII_MAX_TOKENS", LLM_PII_MAX_TOKENS),
             )
         ),
+        "llm_redact_entities": _get_env_list(
+            arguments.get(
+                "llm_redact_entities",
+                os.getenv("CHOSEN_LLM_ENTITIES", CHOSEN_LLM_ENTITIES),
+            )
+        ),
         "custom_llm_instructions": arguments.get(
             "custom_llm_instructions", os.getenv("CUSTOM_LLM_INSTRUCTIONS", "")
+        ),
+        # Document Summarisation Arguments (used when task is summarise)
+        "summarisation_inference_method": arguments.get(
+            "summarisation_inference_method",
+            os.getenv("SUMMARISATION_INFERENCE_METHOD", AWS_LLM_PII_OPTION),
+        ),
+        "summarisation_temperature": float(
+            arguments.get(
+                "summarisation_temperature",
+                os.getenv("SUMMARISATION_TEMPERATURE", "0.6"),
+            )
+        ),
+        "summarisation_max_pages_per_group": int(
+            arguments.get(
+                "summarisation_max_pages_per_group",
+                os.getenv("SUMMARISATION_MAX_PAGES_PER_GROUP", "30"),
+            )
+        ),
+        "summarisation_api_key": arguments.get(
+            "summarisation_api_key", os.getenv("SUMMARISATION_API_KEY", "")
+        ),
+        "summarisation_context": arguments.get(
+            "summarisation_context", os.getenv("SUMMARISATION_CONTEXT", "")
+        ),
+        "summarisation_format": arguments.get(
+            "summarisation_format", os.getenv("SUMMARISATION_FORMAT", "detailed")
+        ),
+        "summarisation_additional_instructions": arguments.get(
+            "summarisation_additional_instructions",
+            os.getenv("SUMMARISATION_ADDITIONAL_INSTRUCTIONS", ""),
         ),
         # Word/Tabular Anonymisation Arguments
         "anon_strategy": arguments.get(

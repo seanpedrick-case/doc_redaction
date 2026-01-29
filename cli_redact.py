@@ -12,12 +12,14 @@ from tools.config import (
     ACCESS_LOGS_FOLDER,
     ALLOW_LIST_PATH,
     AWS_ACCESS_KEY,
+    AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
     AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_INFERENCE_ENDPOINT,
     CHOSEN_COMPREHEND_ENTITIES,
+    CHOSEN_LLM_ENTITIES,
     CHOSEN_LLM_PII_INFERENCE_METHOD,
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
@@ -44,16 +46,19 @@ from tools.config import (
     FEEDBACK_LOGS_FOLDER,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
+    FULL_LLM_ENTITY_LIST,
     GEMINI_API_KEY,
     GRADIO_TEMP_DIR,
     IMAGES_DPI,
     INFERENCE_SERVER_API_URL,
+    INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     LLM_PII_INFERENCE_METHODS,
     LLM_PII_MAX_TOKENS,
     LLM_PII_TEMPERATURE,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     OUTPUT_FOLDER,
     PADDLE_MODEL_PATH,
     PREPROCESS_LOCAL_OCR_IMAGES,
@@ -289,6 +294,8 @@ chosen_redact_entities = CHOSEN_REDACT_ENTITIES
 full_entity_list = FULL_ENTITY_LIST
 chosen_comprehend_entities = CHOSEN_COMPREHEND_ENTITIES
 full_comprehend_entity_list = FULL_COMPREHEND_ENTITY_LIST
+chosen_llm_entities = CHOSEN_LLM_ENTITIES
+full_llm_entity_list = FULL_LLM_ENTITY_LIST
 default_handwrite_signature_checkbox = DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX
 
 
@@ -356,8 +363,16 @@ python cli_redact.py --input_file "example_data/Bold minimalist professional cov
 
 # Redaction with AWS services:
 
-## Use Textract and Comprehend::
+## Use Textract and Comprehend:
 python cli_redact.py --input_file example_data/example_of_emails_sent_to_a_professor_before_applying.pdf --ocr_method "AWS Textract" --pii_detector "AWS Comprehend"
+
+# LLM PII identification (entity subset and custom instructions)
+
+## Redact with LLM PII entity subset (NAME, EMAIL_ADDRESS, etc.) and custom instructions:
+python cli_redact.py --input_file example_data/example_of_emails_sent_to_a_professor_before_applying.pdf --llm_redact_entities NAME EMAIL_ADDRESS PHONE_NUMBER ADDRESS CUSTOM --custom_llm_instructions "Do not redact the name of the university."
+
+## Redact with custom LLM instructions only (use default LLM entities from config):
+python cli_redact.py --input_file example_data/graduate-job-example-cover-letter.pdf --custom_llm_instructions "Redact all company names with the label COMPANY_NAME."
 
 ## Redact specific pages with AWS OCR and signature extraction:
 python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --page_min 6 --page_max 7 --ocr_method "AWS Textract" --handwrite_signature_extraction "Extract handwriting" "Extract signatures"
@@ -390,6 +405,20 @@ python cli_redact.py --task textract --textract_action retrieve --job_id 1234567
 ## List recent Textract jobs:
 python cli_redact.py --task textract --textract_action list
 
+# Document summarisation
+
+## Summarise document(s) from OCR output CSV(s) using AWS Bedrock:
+python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv --summarisation_inference_method "LLM (AWS Bedrock)"
+
+## Summarise with local LLM and detailed format:
+python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv --summarisation_inference_method "Local transformers LLM" --summarisation_format detailed
+
+## Summarise with additional context and instructions (concise format):
+python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv --summarisation_context "This is a partnership agreement" --summarisation_additional_instructions "Focus on key obligations and termination clauses" --summarisation_format concise
+
+## Summarise multiple OCR CSV files:
+python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv example_data/example_outputs/example_of_emails_sent_to_a_professor_before_applying_ocr_output_textract.csv --summarisation_inference_method "LLM (AWS Bedrock)"
+
 """,
     )
 
@@ -397,9 +426,9 @@ python cli_redact.py --task textract --textract_action list
     task_group = parser.add_argument_group("Task Selection")
     task_group.add_argument(
         "--task",
-        choices=["redact", "deduplicate", "textract"],
+        choices=["redact", "deduplicate", "textract", "summarise"],
         default="redact",
-        help="Task to perform: redact (PII redaction/anonymisation), deduplicate (find duplicate content), or textract (AWS Textract batch operations).",
+        help="Task to perform: redact (PII redaction/anonymisation), deduplicate (find duplicate content), textract (AWS Textract batch operations), or summarise (LLM-based document summarisation from OCR CSV files).",
     )
 
     # --- General Arguments (apply to all file types) ---
@@ -686,9 +715,16 @@ python cli_redact.py --task textract --textract_action list
         help="Maximum tokens in LLM response for PII detection.",
     )
     llm_group.add_argument(
+        "--llm_redact_entities",
+        nargs="+",
+        choices=full_llm_entity_list,
+        default=chosen_llm_entities,
+        help=f"Subset of entities for LLM PII detection (when pii_detector uses an LLM). Default: {chosen_llm_entities}. Full list: {full_llm_entity_list}.",
+    )
+    llm_group.add_argument(
         "--custom_llm_instructions",
         default="",
-        help="Custom instructions for LLM-based entity detection.",
+        help="Custom instructions for LLM-based entity detection (e.g. 'don't redact anything related to Mark Wilson' or 'redact all company names with the label COMPANY_NAME').",
     )
 
     # --- Word/Tabular Anonymisation Arguments ---
@@ -775,6 +811,52 @@ python cli_redact.py --task textract --textract_action list
         "--remove_duplicate_rows",
         default=REMOVE_DUPLICATE_ROWS,
         help="Remove duplicate rows from the output.",
+    )
+
+    # --- Document Summarisation Arguments ---
+    summarisation_group = parser.add_argument_group("Document Summarisation Options")
+    summarisation_group.add_argument(
+        "--summarisation_inference_method",
+        choices=[
+            AWS_LLM_PII_OPTION,
+            LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+            INFERENCE_SERVER_PII_OPTION,
+        ],
+        default=AWS_LLM_PII_OPTION,
+        help="LLM inference method for summarisation (same options as GUI).",
+    )
+    summarisation_group.add_argument(
+        "--summarisation_temperature",
+        type=float,
+        default=0.6,
+        help="Temperature for summarisation (0.0-2.0). Lower is more deterministic.",
+    )
+    summarisation_group.add_argument(
+        "--summarisation_max_pages_per_group",
+        type=int,
+        default=30,
+        help="Maximum pages per page-group summary (in addition to context-length limits).",
+    )
+    summarisation_group.add_argument(
+        "--summarisation_api_key",
+        default="",
+        help="API key for summarisation (if required by the chosen LLM).",
+    )
+    summarisation_group.add_argument(
+        "--summarisation_context",
+        default="",
+        help="Additional context for summarisation (e.g. 'This is a consultation response document').",
+    )
+    summarisation_group.add_argument(
+        "--summarisation_format",
+        choices=["concise", "detailed"],
+        default="detailed",
+        help="Summary format: concise (key themes only) or detailed (as much detail as possible).",
+    )
+    summarisation_group.add_argument(
+        "--summarisation_additional_instructions",
+        default="",
+        help="Additional summary instructions (e.g. 'Focus on key decisions and recommendations').",
     )
 
     # --- Textract Batch Operations Arguments ---
@@ -940,7 +1022,7 @@ python cli_redact.py --task textract --textract_action list
         extraction_options.append("Extract layout")
     args.handwrite_signature_extraction = extraction_options
 
-    if args.task in ["redact", "deduplicate"]:
+    if args.task in ["redact", "deduplicate", "summarise"]:
         if args.input_file:
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
@@ -948,7 +1030,7 @@ python cli_redact.py --task textract --textract_action list
             _, file_extension = os.path.splitext(args.input_file[0])
             file_extension = file_extension.lower()
         else:
-            raise ValueError("Error: --input_file is required for 'redact' task.")
+            raise ValueError(f"Error: --input_file is required for '{args.task}' task.")
 
     # Initialise usage logger if logging is enabled
     usage_logger = None
@@ -1003,7 +1085,7 @@ python cli_redact.py --task textract --textract_action list
     # --- Route to the Correct Workflow Based on Task and File Type ---
 
     # Validate input_file requirement for tasks that need it
-    if args.task in ["redact", "deduplicate"] and not args.input_file:
+    if args.task in ["redact", "deduplicate", "summarise"] and not args.input_file:
         print(f"Error: --input_file is required for '{args.task}' task.")
         return
 
@@ -1115,7 +1197,7 @@ python cli_redact.py --task textract --textract_action list
                     pdf_image_file_paths=image_file_paths,
                     chosen_redact_entities=args.local_redact_entities,
                     chosen_redact_comprehend_entities=args.aws_redact_entities,
-                    chosen_llm_entities=args.aws_redact_entities,  # Use same entities for LLM
+                    chosen_llm_entities=args.llm_redact_entities,
                     text_extraction_method=args.ocr_method,
                     in_allow_list=args.allow_list_file,
                     in_deny_list=args.deny_list_file,
@@ -1843,9 +1925,161 @@ python cli_redact.py --task textract --textract_action list
         except Exception as e:
             print(f"\nAn error occurred during the Textract workflow: {e}")
 
+    elif args.task == "summarise":
+        print("--- Document Summarisation ---")
+        start_time = time.time()
+        try:
+            from tools.cli_usage_logger import log_redaction_usage
+            from tools.summaries import (
+                concise_summary_format_prompt,
+                detailed_summary_format_prompt,
+                get_model_choice_from_inference_method,
+                load_csv_files_to_dataframe,
+                summarise_document,
+            )
+
+            # No-op progress for CLI (summarise_document expects progress(frac, desc))
+            class _NoOpProgress:
+                def __call__(self, *args, **kwargs):
+                    pass
+
+            # Map GUI inference method label to internal method name
+            inference_method_map = {
+                AWS_LLM_PII_OPTION: "aws-bedrock",
+                LOCAL_TRANSFORMERS_LLM_PII_OPTION: "local",
+                INFERENCE_SERVER_PII_OPTION: "inference-server",
+            }
+            inference_method = inference_method_map.get(
+                args.summarisation_inference_method, "aws-bedrock"
+            )
+            model_choice = get_model_choice_from_inference_method(inference_method)
+
+            # Map format choice to prompt string (same as GUI)
+            format_map = {
+                "concise": concise_summary_format_prompt,
+                "detailed": detailed_summary_format_prompt,
+            }
+            summarise_format_radio = format_map.get(
+                args.summarisation_format, detailed_summary_format_prompt
+            )
+
+            # Load OCR CSV file(s)
+            ocr_df = load_csv_files_to_dataframe(args.input_file)
+            if ocr_df is None or ocr_df.empty:
+                print(
+                    "Error: No valid OCR data (page, line, text columns) in input file(s)."
+                )
+                return
+
+            # Derive file_name from first input file (same logic as GUI wrapper)
+            first_path = args.input_file[0] if args.input_file else ""
+            if first_path:
+                basename = os.path.basename(first_path)
+                file_name = os.path.splitext(basename)[0][:20]
+                invalid_chars = '<>:"/\\|?*'
+                for char in invalid_chars:
+                    file_name = file_name.replace(char, "_")
+                if not file_name:
+                    file_name = "document"
+            else:
+                file_name = "document"
+
+            (
+                output_files,
+                status_message,
+                llm_model_name,
+                llm_total_input_tokens,
+                llm_total_output_tokens,
+                summary_display_text,
+            ) = summarise_document(
+                ocr_df,
+                args.output_dir,
+                model_choice,
+                args.summarisation_api_key or "",
+                args.summarisation_temperature,
+                file_name=file_name,
+                context_textbox=args.summarisation_context or "",
+                aws_access_key_textbox=args.aws_access_key or "",
+                aws_secret_key_textbox=args.aws_secret_key or "",
+                aws_region_textbox=args.aws_region or "",
+                hf_api_key_textbox="",
+                azure_endpoint_textbox=AZURE_OPENAI_INFERENCE_ENDPOINT or "",
+                api_url=INFERENCE_SERVER_API_URL or None,
+                summarise_format_radio=summarise_format_radio,
+                additional_summary_instructions=args.summarisation_additional_instructions
+                or "",
+                max_pages_per_group=args.summarisation_max_pages_per_group,
+                progress=_NoOpProgress(),
+            )
+
+            end_time = time.time()
+            processing_time = end_time - start_time
+
+            print(f"\n{status_message}")
+            if output_files:
+                print("Output files:")
+                for p in output_files:
+                    print(f"  {p}")
+            if summary_display_text:
+                print("\n--- Summary ---")
+                print(
+                    summary_display_text[:2000]
+                    + ("..." if len(summary_display_text) > 2000 else "")
+                )
+
+            # Usage logging (same fields as GUI summarisation success callback)
+            if usage_logger:
+                try:
+                    doc_file_name = (
+                        os.path.basename(args.input_file[0])
+                        if args.display_file_names_in_logs and args.input_file
+                        else "document"
+                    )
+                    data_file_name = ""
+                    total_pages = (
+                        int(ocr_df["page"].max())
+                        if "page" in ocr_df.columns and not ocr_df.empty
+                        else 0
+                    )
+
+                    log_redaction_usage(
+                        logger=usage_logger,
+                        session_hash=session_hash,
+                        doc_file_name=doc_file_name,
+                        data_file_name=data_file_name,
+                        time_taken=processing_time,
+                        total_pages=total_pages,
+                        textract_queries=0,
+                        pii_method=args.summarisation_inference_method,
+                        comprehend_queries=0,
+                        cost_code=args.cost_code,
+                        handwriting_signature="",
+                        text_extraction_method="",
+                        is_textract_call=False,
+                        task="summarisation",
+                        save_to_dynamodb=args.save_logs_to_dynamodb,
+                        save_to_s3=args.upload_logs_to_s3,
+                        s3_bucket=args.s3_bucket,
+                        s3_key_prefix=args.s3_logs_prefix,
+                        vlm_model_name="",
+                        vlm_total_input_tokens=0,
+                        vlm_total_output_tokens=0,
+                        llm_model_name=llm_model_name or "",
+                        llm_total_input_tokens=llm_total_input_tokens or 0,
+                        llm_total_output_tokens=llm_total_output_tokens or 0,
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not log usage data: {e}")
+
+        except Exception as e:
+            print(f"\nAn error occurred during summarisation: {e}")
+            import traceback
+
+            traceback.print_exc()
+
     else:
         print(f"Error: Invalid task '{args.task}'.")
-        print("Valid options: 'redact', 'deduplicate', or 'textract'")
+        print("Valid options: 'redact', 'deduplicate', 'textract', or 'summarise'")
 
 
 if __name__ == "__main__":

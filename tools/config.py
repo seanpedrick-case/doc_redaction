@@ -1798,7 +1798,7 @@ SPLIT_PUNCTUATION_FROM_WORDS = convert_string_to_boolean(
 
 DEFAULT_SEARCH_QUERY = get_or_create_env_var("DEFAULT_SEARCH_QUERY", "")
 DEFAULT_FUZZY_SPELLING_MISTAKES_NUM = int(
-    get_or_create_env_var("DEFAULT_FUZZY_SPELLING_MISTAKES_NUM", "1")
+    get_or_create_env_var("DEFAULT_FUZZY_SPELLING_MISTAKES_NUM", "0")
 )
 
 DEFAULT_PAGE_MIN = int(get_or_create_env_var("DEFAULT_PAGE_MIN", "0"))
@@ -1994,6 +1994,10 @@ SHOW_AWS_EXAMPLES = convert_string_to_boolean(
 )
 SHOW_DIFFICULT_OCR_EXAMPLES = convert_string_to_boolean(
     get_or_create_env_var("SHOW_DIFFICULT_OCR_EXAMPLES", "False")
+)
+
+RUN_ALL_EXAMPLES_THROUGH_AWS = convert_string_to_boolean(
+    get_or_create_env_var("RUN_ALL_EXAMPLES_THROUGH_AWS", "False")
 )
 
 FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "200"))
