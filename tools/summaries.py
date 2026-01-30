@@ -12,6 +12,7 @@ from gradio import Progress as progress
 from tqdm import tqdm
 
 from tools.config import (
+    API_URL,
     AWS_ACCESS_KEY,
     AWS_LLM_PII_OPTION,
     AWS_REGION,
@@ -242,12 +243,35 @@ def summarise_document_wrapper(
     summarisation_aws_secret_key,
     summarisation_hf_api_key,
     summarisation_azure_endpoint,
-    summarisation_api_url,
     summarisation_format,
     summarisation_additional_instructions,
     summarisation_max_pages_per_group,
     in_summarisation_ocr_files=None,
 ):
+    """
+    Wrapper to select the correct model and format for document summarization, and optionally
+    load input OCR CSV files if they are provided.
+
+    Args:
+        all_page_line_level_ocr_results_df (pd.DataFrame): Pre-loaded DataFrame containing the line-level OCR results.
+        output_folder (str): Path to folder where outputs should be saved.
+        summarisation_inference_method (str): String specifying which inference/LLM method to use ('aws-bedrock', etc).
+        summarisation_api_key (str): API key for the selected inference method, if required.
+        summarisation_temperature (float): The temperature parameter for the model (controls randomness).
+        file_name (str): Name to use as a base for output files.
+        summarisation_context (str): Additional context string to include in the summarization.
+        summarisation_aws_access_key (str): AWS access key if using AWS inference.
+        summarisation_aws_secret_key (str): AWS secret key if using AWS inference.
+        summarisation_hf_api_key (str): HuggingFace API key if required.
+        summarisation_azure_endpoint (str): Endpoint string if using Azure inference.
+        summarisation_format (str): Format for the summary output (e.g., "bullets", "structured").
+        summarisation_additional_instructions (str): Extra instructions to pass to the summarization LLM.
+        summarisation_max_pages_per_group (int): Maximum number of pages to group per LLM summarization pass.
+        in_summarisation_ocr_files (str | list | object, optional): One or more file paths or file-like objects to OCR results in CSV format.
+
+    Returns:
+        Output of the downstream summarisation process (see next code section for details).
+    """
     """Wrapper to convert inference method selection to model choice and load CSV files."""
     # Map inference method option to inference method string
     inference_method_map = {
@@ -262,6 +286,7 @@ def summarise_document_wrapper(
 
     # Use config default for region
     summarisation_aws_region = AWS_REGION
+    summarisation_api_url = API_URL
 
     # Get model choice from inference method
     model_choice = get_model_choice_from_inference_method(inference_method)
@@ -730,6 +755,25 @@ def summarise_document(
 ) -> Tuple[List[str], str]:
     """
     Main function to summarise a document from OCR results.
+
+    Args:
+        all_page_line_level_ocr_results_df (pd.DataFrame): DataFrame containing line-level OCR results.
+        output_folder (str): The folder where outputs will be saved.
+        model_choice (str): The model to use for summarization.
+        in_api_key (str): API key for the selected model/inference method.
+        temperature (float): LLM temperature hyperparameter.
+        file_name (str, optional): Name to use for the output files. Default is "document".
+        context_textbox (str, optional): Extra context for summarization. Default is "".
+        aws_access_key_textbox (str, optional): AWS access key, if using AWS. Default is "".
+        aws_secret_key_textbox (str, optional): AWS secret key, if using AWS. Default is "".
+        aws_region_textbox (str, optional): AWS region string. Default is "".
+        hf_api_key_textbox (str, optional): HuggingFace API key, if used. Default is "".
+        azure_endpoint_textbox (str, optional): Azure endpoint, if used. Default is "".
+        api_url (str, optional): API URL. Default is None.
+        summarise_format_radio (str, optional): Summary output format instructions. Default is detailed summary.
+        additional_summary_instructions (str, optional): Extra instructions for the summarization. Default is "".
+        max_pages_per_group (int, optional): Maximum number of pages to group per LLM pass. Default is 30.
+        progress (gr.Progress, optional): Gradio progress tracker. Default is Gradio Progress with tqdm.
 
     Returns:
         Tuple of (output_file_paths, status_message)

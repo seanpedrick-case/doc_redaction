@@ -545,6 +545,22 @@ walkthrough_do_initial_clean = gr.Checkbox(
     visible=False,
 )
 
+walkthrough_in_redact_llm_entities = gr.Dropdown(
+    value=CHOSEN_LLM_ENTITIES,
+    choices=FULL_LLM_ENTITY_LIST,
+    multiselect=True,
+    label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
+    visible=initial_is_llm_method,
+)
+
+walkthrough_custom_llm_instructions_textbox = gr.Textbox(
+    label="Custom instructions for LLM-based entity detection",
+    placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'redact all company names with the label COMPANY_NAME'",
+    value="",
+    lines=3,
+    visible=initial_is_llm_method,
+)
+
 # Note: Accordion container removed to avoid block ID mismatches
 # Components are now rendered directly in the walkthrough
 
@@ -1890,6 +1906,8 @@ with blocks:
                     1,
                     "paddle",
                     CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_LLM_ENTITIES,
+                    "",
                 ],
             )
             ocr_example_labels.append("Baseline 'easy' document page")
@@ -1907,6 +1925,8 @@ with blocks:
                     6,
                     "hybrid-paddle-vlm",
                     CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
+                    CHOSEN_LLM_ENTITIES,
+                    "",
                 ],
             )
             ocr_example_labels.append("Scanned document page with signatures")
@@ -1925,6 +1945,8 @@ with blocks:
                     0,
                     "vlm",
                     CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_LLM_ENTITIES,
+                    "",
                 ],
             )
             ocr_example_labels.append("Unclear text on handwritten note")
@@ -1943,9 +1965,31 @@ with blocks:
                     0,
                     "hybrid-paddle-vlm",
                     CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
+                    CHOSEN_LLM_ENTITIES,
+                    "",
                 ],
             )
-            ocr_example_labels.append("CV with photo")
+            ocr_example_labels.append("CV with photo - face identification")
+
+        if os.path.exists(ocr_example_files[0]):
+            available_ocr_examples.append(
+                [
+                    [example_files[0]],
+                    "Local OCR model - PDFs without selectable text",
+                    AWS_LLM_PII_OPTION,
+                    ["Extract handwriting", "Extract signatures"],
+                    [example_files[0]],
+                    example_files[0],
+                    1,
+                    0,
+                    0,
+                    "paddle",
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_LLM_ENTITIES,
+                    "Redact anything relating to research topics with the label RESEARCH_TOPIC",
+                ],
+            )
+            ocr_example_labels.append("Example email LLM PII detection")
 
         # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace text extraction with AWS Textract and PII with AWS Comprehend (except "Only extract text")
         if RUN_ALL_EXAMPLES_THROUGH_AWS:
@@ -1969,6 +2013,8 @@ with blocks:
                 page_max,
                 local_ocr_method_radio,
                 in_redact_entities,
+                in_redact_llm_entities,
+                custom_llm_instructions_textbox,
             ):
                 gr.Info(
                     "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
@@ -1991,6 +2037,18 @@ with blocks:
                     gr.Radio(
                         value=pii_identification_method_drop
                     ),  # walkthrough_pii_identification_method_drop
+                    gr.Dropdown(
+                        value=in_redact_llm_entities
+                    ),  # walkthrough_in_redact_llm_entities
+                    gr.Textbox(
+                        value=custom_llm_instructions_textbox
+                    ),  # walkthrough_custom_llm_instructions_textbox
+                    gr.Dropdown(
+                        value=in_redact_llm_entities
+                    ),  # in_redact_llm_entities (main component)
+                    gr.Textbox(
+                        value=custom_llm_instructions_textbox
+                    ),  # custom_llm_instructions_textbox (main component)
                 )
 
             ocr_examples = gr.Examples(
@@ -2007,6 +2065,8 @@ with blocks:
                     page_max,
                     local_ocr_method_radio,
                     in_redact_entities,
+                    in_redact_llm_entities,
+                    custom_llm_instructions_textbox,
                 ],
                 outputs=[
                     walkthrough_file_input,
@@ -2015,6 +2075,10 @@ with blocks:
                     walkthrough_local_ocr_method_radio,
                     walkthrough_handwrite_signature_checkbox,
                     walkthrough_pii_identification_method_drop,
+                    walkthrough_in_redact_llm_entities,
+                    walkthrough_custom_llm_instructions_textbox,
+                    in_redact_llm_entities,  # Main component
+                    custom_llm_instructions_textbox,  # Main component
                 ],
                 example_labels=ocr_example_labels,
                 fn=show_info_box_on_click,
@@ -2028,6 +2092,8 @@ with blocks:
             walkthrough_file_input.render()
             walkthrough_in_redact_entities.render()
             walkthrough_in_redact_comprehend_entities.render()
+            walkthrough_in_redact_llm_entities.render()
+            walkthrough_custom_llm_instructions_textbox.render()
             walkthrough_text_extract_method_radio.render()
             walkthrough_local_ocr_method_radio.render()
             walkthrough_handwrite_signature_checkbox.render()
@@ -2104,20 +2170,10 @@ with blocks:
                         walkthrough_in_redact_entities.render()
 
                         walkthrough_in_redact_comprehend_entities.render()
-                        walkthrough_in_redact_llm_entities = gr.Dropdown(
-                            value=CHOSEN_LLM_ENTITIES,
-                            choices=FULL_LLM_ENTITY_LIST,
-                            multiselect=True,
-                            label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
-                            visible=initial_is_llm_method,
-                        )
-                        walkthrough_custom_llm_instructions_textbox = gr.Textbox(
-                            label="Custom instructions for LLM-based entity detection",
-                            placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'redact all company names with the label COMPANY_NAME'",
-                            value="",
-                            lines=3,
-                            visible=initial_is_llm_method,
-                        )
+
+                        walkthrough_in_redact_llm_entities.render()
+
+                        walkthrough_custom_llm_instructions_textbox.render()
 
                         # Components for "Redact selected terms" option (conditionally visible)
                         # Note: Accordion removed to avoid block ID mismatches
@@ -7495,7 +7551,6 @@ with blocks:
             aws_secret_key_textbox,  # Use existing component from Settings tab
             summarisation_hf_api_key_hidden,  # Not exposed in Settings, use empty
             summarisation_azure_endpoint_hidden,  # Use config default
-            summarisation_api_url_hidden,  # Use config default
             summarisation_format,
             summarisation_additional_instructions,
             summarisation_max_pages_per_group,
