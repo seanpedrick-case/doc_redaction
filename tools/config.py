@@ -1528,6 +1528,21 @@ GEMMA3_12B_MODEL_FOLDER = get_or_create_env_var(
     "GEMMA3_12B_MODEL_FOLDER", "model/gemma3_12b"
 )
 
+GEMMA3_27B_REPO_ID = get_or_create_env_var(
+    "GEMMA3_27B_REPO_ID", "unsloth/gemma-3-27b-it-GGUF"
+)
+GEMMA3_27B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GEMMA3_27B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-27b-it-bnb-4bit"
+)
+if USE_LLAMA_CPP == "False":
+    GEMMA3_27B_REPO_ID = GEMMA3_27B_REPO_TRANSFORMERS_ID
+GEMMA3_27B_MODEL_FILE = get_or_create_env_var(
+    "GEMMA3_27B_MODEL_FILE", "gemma-3-27b-it-UD-Q4_K_XL.gguf"
+)
+GEMMA3_27B_MODEL_FOLDER = get_or_create_env_var(
+    "GEMMA3_27B_MODEL_FOLDER", "model/gemma3_27b"
+)
+
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
 GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var(
     "GPT_OSS_REPO_TRANSFORMERS_ID", "unsloth/gpt-oss-20b-unsloth-bnb-4bit"
@@ -1594,6 +1609,10 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_12B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA3_12B_MODEL_FILE
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GEMMA3_12B_MODEL_FOLDER
+    elif "gemma-3-27b" in model_choice_lower or "gemma3-27b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_27B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA3_27B_MODEL_FILE
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GEMMA3_27B_MODEL_FOLDER
     elif "gemma-2" in model_choice_lower or "gemma2" in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA2_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA2_MODEL_FILE
@@ -1628,6 +1647,8 @@ if "gemma-3-4b" in model_choice_lower or "gemma3-4b" in model_choice_lower:
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 4B"
 elif "gemma-3-12b" in model_choice_lower or "gemma3-12b" in model_choice_lower:
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 12B"
+elif "gemma-3-27b" in model_choice_lower or "gemma3-27b" in model_choice_lower:
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 27B"
 elif "gemma-2" in model_choice_lower or "gemma2" in model_choice_lower:
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 2b"
 elif "qwen-3-4b" in model_choice_lower or "qwen3-4b" in model_choice_lower:
@@ -1640,7 +1661,7 @@ elif "granite-4-micro" in model_choice_lower or "granite4-micro" in model_choice
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Granite 4 Micro"
 
 # Set MULTIMODAL_PROMPT_FORMAT based on model choice
-if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in ["Gemma 3 4B", "Gemma 3 12B"]:
+if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in ["Gemma 3 4B", "Gemma 3 12B", "Gemma 3 27B"]:
     MULTIMODAL_PROMPT_FORMAT = True
 
 LLM_MAX_GPU_LAYERS = int(
