@@ -640,6 +640,11 @@ EFFICIENT_OCR = convert_string_to_boolean(
 )
 # Minimum number of extractable words on a page to use text-only route; below this use OCR.
 EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "20"))
+# Max threads for OCR first pass in redact_image_pdf (1 = sequential). Enables parallel Textract/Tesseract/VLM.
+OCR_FIRST_PASS_MAX_WORKERS = max(
+    1,
+    int(get_or_create_env_var("OCR_FIRST_PASS_MAX_WORKERS", "3")),
+)
 
 SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS", "True")
