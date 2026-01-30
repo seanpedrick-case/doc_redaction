@@ -43,6 +43,8 @@ from tools.config import (
     DISPLAY_FILE_NAMES_IN_LOGS,
     DO_INITIAL_TABULAR_DATA_CLEAN,
     DOCUMENT_REDACTION_BUCKET,
+    EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_WORDS,
     FEEDBACK_LOGS_FOLDER,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
@@ -1243,9 +1245,11 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                         if args.inference_server_vlm_model
                         else DEFAULT_INFERENCE_SERVER_VLM_MODEL
                     ),
-                    efficient_ocr=getattr(args, "efficient_ocr", None),
-                    efficient_ocr_min_words=getattr(
-                        args, "efficient_ocr_min_words", None
+                    efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
+                    efficient_ocr_min_words=(
+                        args.efficient_ocr_min_words
+                        if getattr(args, "efficient_ocr_min_words", None) is not None
+                        else EFFICIENT_OCR_MIN_WORDS
                     ),
                     # Note: bedrock_runtime, gemini_client, gemini_config, azure_openai_client
                     # are initialized inside choose_and_run_redactor based on text_extraction_method
@@ -1525,6 +1529,8 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                         full_data_by_file,
                         processing_time,
                         task_textbox,
+                        _,
+                        _,
                     ) = run_duplicate_analysis(
                         files=args.input_file,
                         threshold=args.similarity_threshold,
@@ -1533,6 +1539,8 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                         greedy_match=args.greedy_match,
                         combine_pages=args.combine_pages,
                         output_folder=args.output_dir,
+                        all_page_line_level_ocr_results_df_base=pd.DataFrame(),
+                        ocr_df_paths_list=[],
                     )
 
                     end_time = time.time()
