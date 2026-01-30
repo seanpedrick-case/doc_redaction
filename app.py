@@ -3650,9 +3650,8 @@ with blocks:
         with gr.Tab(
             label="Document summarisation", id=8, visible=visible_summarisation_tab
         ):
-            gr.Markdown(
-                """             
-                This tab allows you to summarise documents using LLM-based summarisation. 
+            gr.Markdown("""
+            This tab allows you to summarise documents using LLM-based summarisation. 
                 The summarisation process:
                 1. Groups pages into chunks that fit within the LLM context length
                 2. Summarises each page group
@@ -3660,8 +3659,7 @@ with blocks:
                 4. Creates an overall summary of the entire document
                 
                 **Note:** You must first run text extraction (OCR) on your document in the "Redact PDFs/images" tab before using this feature.
-                """
-            )
+                """)
 
             in_summarisation_ocr_files = gr.File(
                 label="Upload one or multiple 'ocr_output.csv' files to summarise",

@@ -147,7 +147,7 @@ NAT_GATEWAY_NAME = get_or_create_env_var("NAT_GATEWAY_NAME", f"{CDK_PREFIX}NatGa
 # IAM roles
 AWS_MANAGED_TASK_ROLES_LIST = get_or_create_env_var(
     "AWS_MANAGED_TASK_ROLES_LIST",
-    '["AmazonCognitoReadOnly", "service-role/AmazonECSTaskExecutionRolePolicy", "AmazonS3FullAccess", "AmazonTextractFullAccess", "ComprehendReadOnly", "AmazonDynamoDBFullAccess", "service-role/AWSAppSyncPushToCloudWatchLogs"]',
+    '["AmazonCognitoReadOnly", "service-role/AmazonECSTaskExecutionRolePolicy", "AmazonS3FullAccess", "AmazonTextractFullAccess", "ComprehendReadOnly", "AmazonDynamoDBFullAccess", "service-role/AWSAppSyncPushToCloudWatchLogs", "AmazonBedrockFullAccess"]',
 )
 POLICY_FILE_LOCATIONS = get_or_create_env_var(
     "POLICY_FILE_LOCATIONS", ""
