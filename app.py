@@ -3650,12 +3650,15 @@ with blocks:
         with gr.Tab(
             label="Document summarisation", id=8, visible=visible_summarisation_tab
         ):
-            gr.Markdown("""
+            gr.Markdown(
+                """
             This tab allows you to summarise documents using Large Language Model (LLM)-based summarisation. The summarisation process:
                 1. Groups pages to fit within the maximum LLM context length, or by a maximum number of pages per group defined below if smaller
                 2. Summarises each page group
                 3. Creates an overall summary of the entire document based on the page group summaries
-                """, line_breaks=True)
+                """,
+                line_breaks=True,
+            )
 
             in_summarisation_ocr_files = gr.File(
                 label="Upload one or multiple 'ocr_output.csv' files to summarise",
@@ -7490,7 +7493,6 @@ with blocks:
             summarisation_context,
             aws_access_key_textbox,  # Use existing component from Settings tab
             aws_secret_key_textbox,  # Use existing component from Settings tab
-            summarisation_aws_region_hidden,  # Use config default for region
             summarisation_hf_api_key_hidden,  # Not exposed in Settings, use empty
             summarisation_azure_endpoint_hidden,  # Use config default
             summarisation_api_url_hidden,  # Use config default

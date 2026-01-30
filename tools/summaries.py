@@ -240,7 +240,6 @@ def summarise_document_wrapper(
     summarisation_context,
     summarisation_aws_access_key,
     summarisation_aws_secret_key,
-    summarisation_aws_region,
     summarisation_hf_api_key,
     summarisation_azure_endpoint,
     summarisation_api_url,
@@ -260,6 +259,9 @@ def summarise_document_wrapper(
     inference_method = inference_method_map.get(
         summarisation_inference_method, "aws-bedrock"
     )
+
+    # Use config default for region
+    summarisation_aws_region = AWS_REGION
 
     # Get model choice from inference method
     model_choice = get_model_choice_from_inference_method(inference_method)
