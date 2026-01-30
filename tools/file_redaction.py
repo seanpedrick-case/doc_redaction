@@ -407,7 +407,11 @@ def choose_and_run_redactor(
     vlm_total_input_tokens = 0
     vlm_total_output_tokens = 0
 
-    efficient_ocr_min_words = int(efficient_ocr_min_words)
+    efficient_ocr_min_words = (
+        int(efficient_ocr_min_words)
+        if efficient_ocr_min_words is not None
+        else EFFICIENT_OCR_MIN_WORDS
+    )
 
     # CLI mode may provide options to enter method names in a different format
     if text_extraction_method == "AWS Textract":
