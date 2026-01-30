@@ -388,6 +388,22 @@ if 0 == 1:
 # Load in Gradio app components
 ###
 
+# Check which example files exist and create examples only for available files
+example_files = [
+    "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
+    "example_data/example_complaint_letter.jpg",
+    "example_data/graduate-job-example-cover-letter.pdf",
+    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+    "example_data/partnership_toolkit_redact_custom_deny_list.csv",
+    "example_data/partnership_toolkit_redact_some_pages.csv",
+]
+
+ocr_example_files = [
+    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+    "example_data/Difficult handwritten note.jpg",
+    "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
+]
+
 # Load some components outside of blocks context that are used for examples
 
 # Components for "Redact all PII" option (conditionally visible)
@@ -1560,16 +1576,6 @@ with blocks:
             "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
         )
 
-        # Check which example files exist and create examples only for available files
-        example_files = [
-            "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
-            "example_data/example_complaint_letter.jpg",
-            "example_data/graduate-job-example-cover-letter.pdf",
-            "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-            "example_data/partnership_toolkit_redact_custom_deny_list.csv",
-            "example_data/partnership_toolkit_redact_some_pages.csv",
-        ]
-
         available_examples = list()
         example_labels = list()
 
@@ -1885,11 +1891,7 @@ with blocks:
         gr.Markdown(
             "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
         )
-        ocr_example_files = [
-            "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-            "example_data/Difficult handwritten note.jpg",
-            "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
-        ]
+        
         available_ocr_examples = list()
         ocr_example_labels = list()
         if os.path.exists(ocr_example_files[0]):
@@ -1976,7 +1978,7 @@ with blocks:
                 [
                     [example_files[0]],
                     "Local OCR model - PDFs without selectable text",
-                    AWS_LLM_PII_OPTION,
+                    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
                     ["Extract handwriting", "Extract signatures"],
                     [example_files[0]],
                     example_files[0],
