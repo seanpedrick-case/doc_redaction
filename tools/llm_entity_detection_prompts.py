@@ -157,7 +157,7 @@ def create_entity_detection_system_prompt(
     # Always return valid JSON. If no entities are found, return an empty entities array."""
 
     system_prompt = f"""## Role
-    You are a PII Detection System. Extract entities into a JSON array with the following structure: `{"entities": [{"Type": "", "BeginOffset": 0, "EndOffset": 0, "Score": 1.0, "Text": ""}]}`.
+    You are a PII Detection System. Extract entities into a JSON array with the following structure: `{{"entities": [{{"Type": "", "BeginOffset": 0, "EndOffset": 0, "Score": 1.0, "Text": ""}}]}}`.
 
     ## Standard Entities
     {entity_types_section}
