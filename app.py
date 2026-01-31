@@ -86,6 +86,7 @@ from tools.config import (
     DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
     DIRECT_MODE_MIN_CONSECUTIVE_PAGES,
     DIRECT_MODE_MIN_WORD_COUNT,
+    DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS,
     DIRECT_MODE_OCR_METHOD,
     DIRECT_MODE_OUTPUT_DIR,
     DIRECT_MODE_PAGE_MAX,
@@ -95,6 +96,7 @@ from tools.config import (
     DIRECT_MODE_REMOVE_DUPLICATE_ROWS,
     DIRECT_MODE_RETURN_PDF_END_OF_REDACTION,
     DIRECT_MODE_SIMILARITY_THRESHOLD,
+    DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS,
     DIRECT_MODE_TASK,
     DIRECT_MODE_TEXTRACT_ACTION,
     DISPLAY_FILE_NAMES_IN_LOGS,
@@ -1891,7 +1893,7 @@ with blocks:
         gr.Markdown(
             "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
         )
-        
+
         available_ocr_examples = list()
         ocr_example_labels = list()
         if os.path.exists(ocr_example_files[0]):
@@ -8610,6 +8612,7 @@ with blocks:
                 "spacy_model_path": SPACY_MODEL_PATH,
                 # PDF/Image Redaction Arguments
                 "ocr_method": DIRECT_MODE_OCR_METHOD,
+                "ocr_first_pass_max_workers": DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS,
                 "page_min": DIRECT_MODE_PAGE_MIN,
                 "page_max": DIRECT_MODE_PAGE_MAX,
                 "images_dpi": DIRECT_MODE_IMAGES_DPI,
@@ -8647,6 +8650,7 @@ with blocks:
                 "summarisation_inference_method": AWS_LLM_PII_OPTION,
                 "summarisation_temperature": 0.6,
                 "summarisation_max_pages_per_group": 30,
+                "summary_page_group_max_workers": DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS,
                 "summarisation_api_key": "",
                 "summarisation_context": "",
                 "summarisation_format": "detailed",

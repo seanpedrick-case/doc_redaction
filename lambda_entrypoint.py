@@ -33,6 +33,8 @@ from tools.config import (
     LAMBDA_PREPARE_IMAGES,
     LLM_PII_MAX_TOKENS,
     LLM_PII_TEMPERATURE,
+    OCR_FIRST_PASS_MAX_WORKERS,
+    SUMMARY_PAGE_GROUP_MAX_WORKERS,
 )
 
 
@@ -468,6 +470,14 @@ def lambda_handler(event, context):
                 "AZURE_OPENAI_INFERENCE_ENDPOINT", AZURE_OPENAI_INFERENCE_ENDPOINT
             ),
         ),
+        "ocr_first_pass_max_workers": int(
+            arguments.get(
+                "ocr_first_pass_max_workers",
+                os.getenv(
+                    "OCR_FIRST_PASS_MAX_WORKERS", str(OCR_FIRST_PASS_MAX_WORKERS)
+                ),
+            )
+        ),
         # LLM PII Detection Arguments
         # Note: The actual model used is determined by pii_identification_method in the downstream code
         # This is just the default - it will be overridden based on the selected PII method
@@ -523,6 +533,15 @@ def lambda_handler(event, context):
             arguments.get(
                 "summarisation_max_pages_per_group",
                 os.getenv("SUMMARISATION_MAX_PAGES_PER_GROUP", "30"),
+            )
+        ),
+        "summary_page_group_max_workers": int(
+            arguments.get(
+                "summary_page_group_max_workers",
+                os.getenv(
+                    "SUMMARY_PAGE_GROUP_MAX_WORKERS",
+                    str(SUMMARY_PAGE_GROUP_MAX_WORKERS),
+                ),
             )
         ),
         "summarisation_api_key": arguments.get(

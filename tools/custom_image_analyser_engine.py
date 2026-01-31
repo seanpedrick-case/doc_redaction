@@ -90,6 +90,9 @@ from tools.word_segmenter import AdaptiveSegmenter
 DEFAULT_NEW_BATCH_CHAR_COUNT = 2000
 DEFAULT_NEW_BATCH_WORD_COUNT = 400
 
+# AWS Comprehend billing: 1 unit = 100 characters (entity recognition, PII, etc.)
+COMPREHEND_CHARACTERS_PER_UNIT = 100
+
 # Phrase-ending punctuation marks
 PHRASE_ENDING_PUNCTUATION = {".", "!", "?", ";", ":"}
 
@@ -7404,7 +7407,11 @@ class CustomImageAnalyzerEngine:
                                 aws_comprehend_entities,
                                 all_text_line_results,
                             )
-                            comprehend_query_number += 1
+                            comprehend_query_number += (
+                                len(current_batch.strip())
+                                + COMPREHEND_CHARACTERS_PER_UNIT
+                                - 1
+                            ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                             # Reset batch
                             current_batch = ""
@@ -7469,7 +7476,11 @@ class CustomImageAnalyzerEngine:
                                 aws_comprehend_entities,
                                 all_text_line_results,
                             )
-                            comprehend_query_number += 1
+                            comprehend_query_number += (
+                                len(current_batch.strip())
+                                + COMPREHEND_CHARACTERS_PER_UNIT
+                                - 1
+                            ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                             # Reset batch
                             current_batch = ""
@@ -7512,7 +7523,9 @@ class CustomImageAnalyzerEngine:
                     aws_comprehend_entities,
                     all_text_line_results,
                 )
-                comprehend_query_number += 1
+                comprehend_query_number += (
+                    len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+                ) // COMPREHEND_CHARACTERS_PER_UNIT
 
         elif pii_identification_method == AWS_LLM_PII_OPTION:
             # LLM-based entity detection using AWS Bedrock
@@ -9128,7 +9141,7 @@ def run_page_text_redaction(
         nlp_analyser (AnalyzerEngine, optional): The NLP analyzer engine used for local analysis. Defaults to None.
         score_threshold (float, optional): The threshold score for entity detection. Defaults to 0.0.
         custom_entities (List[str], optional): A list of custom entities for redaction. Defaults to None.
-        comprehend_query_number (int, optional): A counter for the number of Comprehend queries made. Defaults to 0.
+        comprehend_query_number (int, optional): A counter for AWS Comprehend usage in units of 100 characters (1 unit = 100 characters, per AWS billing). Defaults to 0.
         bedrock_runtime: The AWS Bedrock runtime client for LLM-based entity detection. Defaults to None.
         model_choice (str, optional): The LLM model choice for entity detection. Defaults to CLOUD_LLM_PII_MODEL_CHOICE.
         custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to "".
@@ -9349,7 +9362,11 @@ def run_page_text_redaction(
                             aws_comprehend_entities,
                             all_text_line_results,
                         )
-                        comprehend_query_number += 1
+                        comprehend_query_number += (
+                            len(current_batch.strip())
+                            + COMPREHEND_CHARACTERS_PER_UNIT
+                            - 1
+                        ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                         # Reset batch
                         current_batch = ""
@@ -9411,7 +9428,11 @@ def run_page_text_redaction(
                             aws_comprehend_entities,
                             all_text_line_results,
                         )
-                        comprehend_query_number += 1
+                        comprehend_query_number += (
+                            len(current_batch.strip())
+                            + COMPREHEND_CHARACTERS_PER_UNIT
+                            - 1
+                        ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                         # Reset batch
                         current_batch = ""
@@ -9451,7 +9472,9 @@ def run_page_text_redaction(
                 aws_comprehend_entities,
                 all_text_line_results,
             )
-            comprehend_query_number += 1
+            comprehend_query_number += (
+                len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+            ) // COMPREHEND_CHARACTERS_PER_UNIT
 
     elif pii_identification_method == AWS_LLM_PII_OPTION:
         # LLM-based entity detection using AWS Bedrock

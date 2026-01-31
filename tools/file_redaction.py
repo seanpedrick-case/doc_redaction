@@ -56,7 +56,6 @@ from tools.config import (
     EFFICIENT_OCR,
     EFFICIENT_OCR_MIN_WORDS,
     GEMINI_VLM_TEXT_EXTRACT_OPTION,
-    OCR_FIRST_PASS_MAX_WORKERS,
     IMAGES_DPI,
     INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
     INFERENCE_SERVER_API_URL,
@@ -71,6 +70,7 @@ from tools.config import (
     MAX_SIMULTANEOUS_FILES,
     MAX_TIME_VALUE,
     NO_REDACTION_PII_OPTION,
+    OCR_FIRST_PASS_MAX_WORKERS,
     OUTPUT_FOLDER,
     OVERWRITE_EXISTING_OCR_RESULTS,
     PAGE_BREAK_VALUE,
@@ -304,6 +304,7 @@ def choose_and_run_redactor(
     inference_server_vlm_model: str = "",
     efficient_ocr: bool = EFFICIENT_OCR,
     efficient_ocr_min_words: Union[int, float, None] = EFFICIENT_OCR_MIN_WORDS,
+    ocr_first_pass_max_workers: Optional[int] = None,
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
@@ -1278,6 +1279,10 @@ def choose_and_run_redactor(
         if file_path:
             pdf_file_name_without_ext = get_file_name_without_type(file_path)
             pdf_file_name_with_ext = os.path.basename(file_path)
+            efficient_ocr_text_pages = (
+                None  # set when efficient_ocr used; for combined_out_message
+            )
+            efficient_ocr_ocr_pages = None
 
             is_a_pdf = is_pdf(file_path) is True
             if (
@@ -1375,9 +1380,12 @@ def choose_and_run_redactor(
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 page_has_text_list = list(
                     executor.map(
-                        lambda p: (p, page_has_extractable_text(
-                            file_path, p, efficient_ocr_min_words
-                        )),
+                        lambda p: (
+                            p,
+                            page_has_extractable_text(
+                                file_path, p, efficient_ocr_min_words
+                            ),
+                        ),
                         page_range,
                     )
                 )
@@ -1385,10 +1393,14 @@ def choose_and_run_redactor(
             page_has_text_list.sort(key=lambda x: x[0])
 
             # Build lists of pages for text vs OCR so we can call each function once (enables parallel OCR in redact_image_pdf)
-            pages_with_text_1based = [p + 1 for p, has_text in page_has_text_list if has_text]
+            pages_with_text_1based = [
+                p + 1 for p, has_text in page_has_text_list if has_text
+            ]
             pages_needing_ocr_1based = [
                 p + 1 for p, has_text in page_has_text_list if not has_text
             ]
+            efficient_ocr_text_pages = len(pages_with_text_1based)
+            efficient_ocr_ocr_pages = len(pages_needing_ocr_1based)
 
             if pages_with_text_1based:
                 print(
@@ -1538,6 +1550,7 @@ def choose_and_run_redactor(
                     inference_server_vlm_model=inference_server_vlm_model,
                     efficient_ocr=efficient_ocr,
                     pages_to_process=pages_needing_ocr_1based,
+                    ocr_first_pass_max_workers=ocr_first_pass_max_workers,
                 )
                 out_file_paths = out_file_paths.copy()
                 vlm_total_input_tokens += vlm_total_input_tokens_page
@@ -1547,9 +1560,7 @@ def choose_and_run_redactor(
                 if new_textract_request_metadata and isinstance(
                     new_textract_request_metadata, list
                 ):
-                    all_textract_request_metadata.extend(
-                        new_textract_request_metadata
-                    )
+                    all_textract_request_metadata.extend(new_textract_request_metadata)
 
             # Set current_loop_page so downstream logic sees "all pages done"
             current_loop_page = number_of_pages_to_process
@@ -1637,6 +1648,7 @@ def choose_and_run_redactor(
                 custom_llm_instructions=custom_llm_instructions,
                 inference_server_vlm_model=inference_server_vlm_model,
                 efficient_ocr=efficient_ocr,
+                ocr_first_pass_max_workers=ocr_first_pass_max_workers,
             )
 
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
@@ -2252,6 +2264,16 @@ def choose_and_run_redactor(
             combined_out_message = combined_out_message + "\n".join(out_message)
         elif isinstance(out_message, str) and out_message:
             combined_out_message = combined_out_message + "\n" + out_message
+
+        if efficient_ocr_text_pages is not None:
+            combined_out_message = (
+                combined_out_message
+                + "\nEfficient OCR: "
+                + str(efficient_ocr_text_pages)
+                + " page(s) via text extraction, "
+                + str(efficient_ocr_ocr_pages)
+                + " page(s) via full OCR."
+            )
 
         toc = time.perf_counter()
         time_taken = toc - tic
@@ -3740,6 +3762,7 @@ def redact_image_pdf(
     inference_server_vlm_model: str = "",
     efficient_ocr: bool = EFFICIENT_OCR,
     pages_to_process: Optional[List[int]] = None,
+    ocr_first_pass_max_workers: Optional[int] = None,
     progress=Progress(track_tqdm=True),
 ):
     # Initialize LLM token tracking variables
@@ -3974,8 +3997,13 @@ def redact_image_pdf(
     # When > 1, OCR first pass runs analyse_page_with_textract in parallel (AWS Textract only).
     # With efficient_ocr, the caller can pass pages_to_process so multiple OCR-needed pages
     # are processed in one call, enabling parallel OCR.
+    _ocr_first_pass_max_workers = (
+        ocr_first_pass_max_workers
+        if ocr_first_pass_max_workers is not None
+        else OCR_FIRST_PASS_MAX_WORKERS
+    )
     use_ocr_parallel_textract = (
-        OCR_FIRST_PASS_MAX_WORKERS > 1
+        _ocr_first_pass_max_workers > 1
         and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
     )
     ocr_parallel_jobs_textract = [] if use_ocr_parallel_textract else None
@@ -3986,21 +4014,15 @@ def redact_image_pdf(
     # when using inference servers that need to switch between VLM and LLM models
     print("First pass: Performing OCR on all pages...")
     if page_loop_pages is not None:
-        ocr_progress_bar = (
-            page_loop_pages
-            if efficient_ocr
-            else tqdm(
-                page_loop_pages,
-                unit="pages remaining",
-                desc="OCR pass",
-            )
+        ocr_progress_bar = tqdm(
+            page_loop_pages,
+            unit="pages",
+            desc="OCR pass",
         )
-    elif efficient_ocr:
-        ocr_progress_bar = range(page_loop_start, page_loop_end)
     else:
         ocr_progress_bar = tqdm(
             range(page_loop_start, page_loop_end),
-            unit="pages remaining",
+            unit="pages",
             desc="OCR pass",
         )
 
@@ -4821,9 +4843,7 @@ def redact_image_pdf(
                             normalized_path = os.path.normpath(
                                 os.path.abspath(image_path)
                             )
-                            if validate_path_containment(
-                                normalized_path, input_folder
-                            ):
+                            if validate_path_containment(normalized_path, input_folder):
                                 image = Image.open(normalized_path)
                                 page_width, page_height = image.size
                         except Exception as e:
@@ -4834,10 +4854,14 @@ def redact_image_pdf(
                     image_buffer = io.BytesIO()
                     image.save(image_buffer, format="PNG")
                     pdf_page_as_bytes = image_buffer.getvalue()
-                    page_exists = any(
-                        pg.get("page_no") == reported_page_number
-                        for pg in textract_data.get("pages", [])
-                    ) if textract_data else False
+                    page_exists = (
+                        any(
+                            pg.get("page_no") == reported_page_number
+                            for pg in textract_data.get("pages", [])
+                        )
+                        if textract_data
+                        else False
+                    )
                     cached_text_blocks = None
                     if page_exists:
                         cached_text_blocks = next(
@@ -5385,13 +5409,11 @@ def redact_image_pdf(
                 }
                 new_textract_request_metadata = "cached"
             else:
-                text_blocks, new_textract_request_metadata = (
-                    analyse_page_with_textract(
-                        job["image_bytes"],
-                        job["reported_page_number"],
-                        textract_client,
-                        handwrite_signature_checkbox,
-                    )
+                text_blocks, new_textract_request_metadata = analyse_page_with_textract(
+                    job["image_bytes"],
+                    job["reported_page_number"],
+                    textract_client,
+                    handwrite_signature_checkbox,
                 )
             (
                 page_line_level_ocr_results,
@@ -5419,7 +5441,7 @@ def redact_image_pdf(
                 form_key_value_results,
             )
 
-        max_workers = min(OCR_FIRST_PASS_MAX_WORKERS, len(ocr_parallel_jobs_textract))
+        max_workers = min(_ocr_first_pass_max_workers, len(ocr_parallel_jobs_textract))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = list(
                 executor.map(_textract_first_pass_worker, ocr_parallel_jobs_textract)
@@ -5427,7 +5449,10 @@ def redact_image_pdf(
 
         textract_data = {"pages": [r[0] for r in results]}
         textract_request_metadata.extend(r[1] for r in results)
-        if textract_json_file_path and textract_json_file_path not in log_files_output_paths:
+        if (
+            textract_json_file_path
+            and textract_json_file_path not in log_files_output_paths
+        ):
             log_files_output_paths.append(textract_json_file_path)
 
         if all_page_line_level_ocr_results_with_words is None:
@@ -5588,10 +5613,7 @@ def redact_image_pdf(
                         model_choice=model_choice,
                         bedrock_runtime=bedrock_runtime,
                     )
-                    if (
-                        isinstance(sig_ocr_result, tuple)
-                        and len(sig_ocr_result) == 4
-                    ):
+                    if isinstance(sig_ocr_result, tuple) and len(sig_ocr_result) == 4:
                         (
                             sig_ocr,
                             sig_vlm_input_tokens,

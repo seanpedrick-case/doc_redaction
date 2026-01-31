@@ -339,6 +339,14 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Minimum number of extractable words on a page to use the text-only route when `EFFICIENT_OCR` is enabled; below this threshold the page uses OCR.
     * **Default Value:** `20`
 
+* **`OCR_FIRST_PASS_MAX_WORKERS`**
+    * **Description:** Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g. when using AWS Textract). Set to `1` for sequential processing; use a value greater than `1` to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g. Textract). Can be overridden via CLI `--ocr_first_pass_max_workers` or direct-mode/Lambda env.
+    * **Default Value:** `3`
+
+* **`SUMMARY_PAGE_GROUP_MAX_WORKERS`**
+    * **Description:** Maximum number of threads for page-group summarisation in document summarisation. Set to `1` for sequential processing (recommended for local LLM models); use a value greater than `1` to summarise multiple page groups in parallel (typically for API-based models). Can be overridden via CLI `--summary_page_group_max_workers` or direct-mode/Lambda env.
+    * **Default Value:** `1`
+
 * **`SHOW_BEDROCK_VLM_MODELS`**, **`SHOW_GEMINI_VLM_MODELS`**, **`SHOW_AZURE_OPENAI_VLM_MODELS`**
     * **Description:** Controls whether AWS Bedrock, Google Gemini, or Azure/OpenAI VLM text extraction options are shown in the UI.
     * **Default Value:** `"False"` for all.
@@ -872,6 +880,14 @@ Settings for running the application from the command line (Direct Mode) or as a
 * **`DIRECT_MODE_OCR_METHOD`**
     * **Description:** OCR method for PDF/image processing in direct mode.
     * **Default Value:** `"Local OCR"`
+
+* **`DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS`**
+    * **Description:** Maximum number of threads for the OCR first pass in direct mode. Inherits from `OCR_FIRST_PASS_MAX_WORKERS` if not set.
+    * **Default Value:** Same as `OCR_FIRST_PASS_MAX_WORKERS` (e.g. `3`)
+
+* **`DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS`**
+    * **Description:** Maximum number of threads for page-group summarisation in direct mode (when task is summarise). Inherits from `SUMMARY_PAGE_GROUP_MAX_WORKERS` if not set.
+    * **Default Value:** Same as `SUMMARY_PAGE_GROUP_MAX_WORKERS` (e.g. `1`)
 
 * **`DIRECT_MODE_PAGE_MIN`** / **`DIRECT_MODE_PAGE_MAX`**
     * **Description:** First and last page to process in direct mode. `0` for max means process all pages.

@@ -61,6 +61,7 @@ from tools.config import (
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+    OCR_FIRST_PASS_MAX_WORKERS,
     OUTPUT_FOLDER,
     PADDLE_MODEL_PATH,
     PREPROCESS_LOCAL_OCR_IMAGES,
@@ -75,6 +76,7 @@ from tools.config import (
     SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
     SPACY_MODEL_PATH,
+    SUMMARY_PAGE_GROUP_MAX_WORKERS,
     TEXTRACT_JOBS_LOCAL_LOC,
     TEXTRACT_JOBS_S3_LOC,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
@@ -701,6 +703,13 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
         metavar="N",
         help="Minimum words on a page to use text-only route; below this use OCR. Defaults to EFFICIENT_OCR_MIN_WORDS config (e.g. 20).",
     )
+    pdf_group.add_argument(
+        "--ocr_first_pass_max_workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max threads for OCR first pass (1 = sequential). Defaults to OCR_FIRST_PASS_MAX_WORKERS config (e.g. 3).",
+    )
 
     # --- LLM PII Detection Arguments ---
     llm_group = parser.add_argument_group("LLM PII Detection Options")
@@ -857,6 +866,13 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
         type=int,
         default=30,
         help="Maximum pages per page-group summary (in addition to context-length limits).",
+    )
+    summarisation_group.add_argument(
+        "--summary_page_group_max_workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max threads for page-group summarisation (1 = sequential). Defaults to SUMMARY_PAGE_GROUP_MAX_WORKERS config (e.g. 1).",
     )
     summarisation_group.add_argument(
         "--summarisation_api_key",
@@ -1250,6 +1266,11 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                         args.efficient_ocr_min_words
                         if getattr(args, "efficient_ocr_min_words", None) is not None
                         else EFFICIENT_OCR_MIN_WORDS
+                    ),
+                    ocr_first_pass_max_workers=(
+                        args.ocr_first_pass_max_workers
+                        if getattr(args, "ocr_first_pass_max_workers", None) is not None
+                        else OCR_FIRST_PASS_MAX_WORKERS
                     ),
                     # Note: bedrock_runtime, gemini_client, gemini_config, azure_openai_client
                     # are initialized inside choose_and_run_redactor based on text_extraction_method
@@ -2040,6 +2061,11 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                 additional_summary_instructions=args.summarisation_additional_instructions
                 or "",
                 max_pages_per_group=args.summarisation_max_pages_per_group,
+                summary_page_group_max_workers=(
+                    args.summary_page_group_max_workers
+                    if getattr(args, "summary_page_group_max_workers", None) is not None
+                    else SUMMARY_PAGE_GROUP_MAX_WORKERS
+                ),
                 progress=_NoOpProgress(),
             )
 
