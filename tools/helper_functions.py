@@ -837,8 +837,22 @@ def update_file_explorer_object():
     return gr.FileExplorer()
 
 
+def _is_file_path(path: str) -> bool:
+    """True if path looks like a file (has a file-type suffix), not a folder."""
+    if not path or not path.strip():
+        return False
+    name = os.path.basename(path.rstrip("/\\"))
+    if not name or "." not in name:
+        return False
+    ext = name.rsplit(".", 1)[-1]
+    return bool(ext and len(ext) <= 10 and ext.isalnum())
+
+
 def all_outputs_file_download_fn(file_explorer_object: list[str]):
-    return file_explorer_object
+    """Return only paths that are files (have a suffix like .csv, .txt), not folder paths."""
+    if not file_explorer_object:
+        return file_explorer_object
+    return [p for p in file_explorer_object if _is_file_path(p)]
 
 
 def calculate_aws_costs(
