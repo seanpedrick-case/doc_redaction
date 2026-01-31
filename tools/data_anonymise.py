@@ -65,6 +65,9 @@ from tools.load_spacy_model_custom_recognisers import (
 from tools.presidio_analyzer_custom import analyze_dict
 from tools.secure_path_utils import secure_join
 
+# AWS Comprehend billing: 1 unit = 100 characters (entity recognition, PII, etc.)
+COMPREHEND_CHARACTERS_PER_UNIT = 100
+
 custom_entities = CUSTOM_ENTITIES
 
 fake = Faker("en_UK")
@@ -493,7 +496,7 @@ def anonymise_files_with_open_text(
     - max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
     - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service.
-    - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
+    - comprehend_query_number (int, optional): A counter for AWS Comprehend usage in units of 100 characters (1 unit = 100 characters, per AWS billing). Defaults to 0.
     - aws_access_key_textbox (str, optional): AWS access key for account with Textract and Comprehend permissions.
     - aws_secret_key_textbox (str, optional): AWS secret key for account with Textract and Comprehend permissions.
     - actual_time_taken_number (float, optional): Time taken to do the redaction.
@@ -880,7 +883,7 @@ def tabular_anonymise_wrapper_func(
     - max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
     - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
     - chosen_redact_comprehend_entities (List[str]): A list of entity types to redact from files, chosen from the official list from AWS Comprehend service.
-    - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
+    - comprehend_query_number (int, optional): A counter for AWS Comprehend usage in units of 100 characters (1 unit = 100 characters, per AWS billing). Defaults to 0.
     - comprehend_client (optional): The client object from AWS containing a client connection to AWS Comprehend if that option is chosen on the first tab.
     - output_folder: The folder where the anonymized files will be saved. Defaults to the 'output_folder' variable.
     - do_initial_clean (bool, optional): Whether to perform an initial cleaning of the text. Defaults to True.
@@ -1091,7 +1094,7 @@ def anonymise_script(
         max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of fuzzy spelling mistakes to tolerate for custom recognizers. Defaults to 0.
         pii_identification_method (str, optional): The method for PII identification ("Local", "AWS Comprehend", or "LLM (AWS Bedrock)"). Defaults to "Local".
         chosen_redact_comprehend_entities (List[str], optional): A list of entity types to redact using AWS Comprehend or LLM. Defaults to an empty list.
-        comprehend_query_number (int, optional): The number of queries to send to AWS Comprehend or LLM per batch. Defaults to 0.
+        comprehend_query_number (int, optional): For AWS Comprehend, counter in units of 100 characters (1 unit = 100 characters, per AWS billing). For LLM, incremented per batch. Defaults to 0.
         comprehend_client (botocore.client.BaseClient, optional): An initialized AWS Comprehend client. Defaults to an empty string.
         custom_entities (List[str], optional): A list of custom entities to be recognized. Defaults to `custom_entities`.
         nlp_analyser (AnalyzerEngine, optional): The Presidio AnalyzerEngine instance to use. Defaults to `nlp_analyser`.
@@ -1274,7 +1277,9 @@ def anonymise_script(
                             Text=text_str, LanguageCode=language
                         )
 
-                        comprehend_query_number += 1
+                        comprehend_query_number += (
+                            len(text_str.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+                        ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                         # Add all entities from this text to the column's recognizer_results
                         for entity in response["Entities"]:

@@ -86,6 +86,7 @@ from tools.config import (
     DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
     DIRECT_MODE_MIN_CONSECUTIVE_PAGES,
     DIRECT_MODE_MIN_WORD_COUNT,
+    DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS,
     DIRECT_MODE_OCR_METHOD,
     DIRECT_MODE_OUTPUT_DIR,
     DIRECT_MODE_PAGE_MAX,
@@ -95,6 +96,7 @@ from tools.config import (
     DIRECT_MODE_REMOVE_DUPLICATE_ROWS,
     DIRECT_MODE_RETURN_PDF_END_OF_REDACTION,
     DIRECT_MODE_SIMILARITY_THRESHOLD,
+    DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS,
     DIRECT_MODE_TASK,
     DIRECT_MODE_TEXTRACT_ACTION,
     DISPLAY_FILE_NAMES_IN_LOGS,
@@ -387,6 +389,22 @@ if 0 == 1:
 ###
 # Load in Gradio app components
 ###
+
+# Check which example files exist and create examples only for available files
+example_files = [
+    "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
+    "example_data/example_complaint_letter.jpg",
+    "example_data/graduate-job-example-cover-letter.pdf",
+    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+    "example_data/partnership_toolkit_redact_custom_deny_list.csv",
+    "example_data/partnership_toolkit_redact_some_pages.csv",
+]
+
+ocr_example_files = [
+    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+    "example_data/Difficult handwritten note.jpg",
+    "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
+]
 
 # Load some components outside of blocks context that are used for examples
 
@@ -1560,16 +1578,6 @@ with blocks:
             "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
         )
 
-        # Check which example files exist and create examples only for available files
-        example_files = [
-            "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
-            "example_data/example_complaint_letter.jpg",
-            "example_data/graduate-job-example-cover-letter.pdf",
-            "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-            "example_data/partnership_toolkit_redact_custom_deny_list.csv",
-            "example_data/partnership_toolkit_redact_some_pages.csv",
-        ]
-
         available_examples = list()
         example_labels = list()
 
@@ -1885,11 +1893,7 @@ with blocks:
         gr.Markdown(
             "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
         )
-        ocr_example_files = [
-            "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-            "example_data/Difficult handwritten note.jpg",
-            "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
-        ]
+
         available_ocr_examples = list()
         ocr_example_labels = list()
         if os.path.exists(ocr_example_files[0]):
@@ -1976,7 +1980,7 @@ with blocks:
                 [
                     [example_files[0]],
                     "Local OCR model - PDFs without selectable text",
-                    AWS_LLM_PII_OPTION,
+                    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
                     ["Extract handwriting", "Extract signatures"],
                     [example_files[0]],
                     example_files[0],
@@ -8608,6 +8612,7 @@ with blocks:
                 "spacy_model_path": SPACY_MODEL_PATH,
                 # PDF/Image Redaction Arguments
                 "ocr_method": DIRECT_MODE_OCR_METHOD,
+                "ocr_first_pass_max_workers": DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS,
                 "page_min": DIRECT_MODE_PAGE_MIN,
                 "page_max": DIRECT_MODE_PAGE_MAX,
                 "images_dpi": DIRECT_MODE_IMAGES_DPI,
@@ -8645,6 +8650,7 @@ with blocks:
                 "summarisation_inference_method": AWS_LLM_PII_OPTION,
                 "summarisation_temperature": 0.6,
                 "summarisation_max_pages_per_group": 30,
+                "summary_page_group_max_workers": DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS,
                 "summarisation_api_key": "",
                 "summarisation_context": "",
                 "summarisation_format": "detailed",

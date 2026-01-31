@@ -1,7 +1,8 @@
 import os
 import re
 import time
-from typing import List, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Optional, Tuple
 
 import boto3
 import gradio as gr
@@ -34,6 +35,7 @@ from tools.config import (
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     REASONING_SUFFIX,
     RUN_AWS_FUNCTIONS,
+    SUMMARY_PAGE_GROUP_MAX_WORKERS,
     TIMEOUT_WAIT,
     model_name_map,
 )
@@ -751,6 +753,7 @@ def summarise_document(
     summarise_format_radio: str = "Return a summary up to two paragraphs long that includes as much detail as possible from the original text",
     additional_summary_instructions: str = "",
     max_pages_per_group: int = 30,
+    summary_page_group_max_workers: Optional[int] = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[List[str], str]:
     """
@@ -838,14 +841,19 @@ def summarise_document(
         if not page_groups:
             return [], "No OCR results found. Please run text extraction first."
 
-        # Step 2: Summarise each page group
+        # Step 2: Summarise each page group (optionally in parallel)
+        _summary_page_group_max_workers = (
+            summary_page_group_max_workers
+            if summary_page_group_max_workers is not None
+            else SUMMARY_PAGE_GROUP_MAX_WORKERS
+        )
+        use_parallel_page_groups = (
+            _summary_page_group_max_workers > 1 and len(page_groups) > 1
+        )
         progress(0.2, f"Summarising {len(page_groups)} page groups...")
-        for i, (page_nums, group_text) in enumerate(page_groups):
-            progress(
-                0.2 + (i / len(page_groups)) * 0.5,
-                f"Summarising page group {i+1}/{len(page_groups)} (pages {min(page_nums)}-{max(page_nums)})...",
-            )
 
+        def _summarise_one_group(args):
+            i, page_nums, group_text = args
             summary_text, full_prompt, metadata = summarise_text_chunk(
                 group_text,
                 model_choice,
@@ -864,38 +872,121 @@ def summarise_document(
                 summarise_format_radio=summarise_format_radio,
                 additional_summary_instructions=additional_summary_instructions,
             )
+            return (i, page_nums, summary_text, full_prompt, metadata)
 
-            if summary_text:
-                # Track the page range for this page-group output (aligned with prompts/responses)
-                try:
-                    min_page = int(min(page_nums)) if page_nums else 0
-                    max_page = int(max(page_nums)) if page_nums else 0
-                except Exception:
-                    min_page, max_page = 0, 0
-                page_group_page_ranges.append((min_page, max_page))
-
-                page_group_summaries.append(summary_text)
-                all_prompts.append(full_prompt)
-                all_responses.append(summary_text)
-
-                # Extract token counts from metadata
-                input_tokens = 0
-                output_tokens = 0
-                if metadata:
-                    # Convert metadata to string if it's a list
-                    metadata_string = (
-                        str(metadata) if not isinstance(metadata, str) else metadata
+        if use_parallel_page_groups:
+            max_workers = min(_summary_page_group_max_workers, len(page_groups))
+            tasks = [
+                (i, page_nums, group_text)
+                for i, (page_nums, group_text) in enumerate(page_groups)
+            ]
+            results_by_index = [None] * len(page_groups)
+            pbar = tqdm(
+                total=len(page_groups),
+                unit="groups",
+                desc="Summarising page groups",
+            )
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(_summarise_one_group, t): t[0] for t in tasks
+                }
+                completed = 0
+                for future in as_completed(futures):
+                    i, page_nums, summary_text, full_prompt, metadata = future.result()
+                    results_by_index[i] = (
+                        page_nums,
+                        summary_text,
+                        full_prompt,
+                        metadata,
                     )
-                    input_tokens, output_tokens, _ = calculate_tokens_from_metadata(
-                        metadata_string, model_choice, model_name_map
+                    completed += 1
+                    pbar.update(1)
+                    progress(
+                        0.2 + (completed / len(page_groups)) * 0.5,
+                        f"Summarising page group {completed}/{len(page_groups)} (pages {min(page_nums)}-{max(page_nums)})...",
                     )
-                    llm_total_input_tokens += input_tokens
-                    llm_total_output_tokens += output_tokens
-                    if not llm_model_name and model_choice:
-                        llm_model_name = model_choice
-
-                # Store token counts for this prompt/response pair
-                all_token_counts.append((input_tokens, output_tokens))
+            pbar.close()
+            # Build lists in page-group order
+            for i in range(len(page_groups)):
+                if results_by_index[i] is None:
+                    continue
+                page_nums, summary_text, full_prompt, metadata = results_by_index[i]
+                if summary_text:
+                    try:
+                        min_page = int(min(page_nums)) if page_nums else 0
+                        max_page = int(max(page_nums)) if page_nums else 0
+                    except Exception:
+                        min_page, max_page = 0, 0
+                    page_group_page_ranges.append((min_page, max_page))
+                    page_group_summaries.append(summary_text)
+                    all_prompts.append(full_prompt)
+                    all_responses.append(summary_text)
+                    input_tokens, output_tokens = 0, 0
+                    if metadata:
+                        metadata_string = (
+                            str(metadata) if not isinstance(metadata, str) else metadata
+                        )
+                        input_tokens, output_tokens, _ = calculate_tokens_from_metadata(
+                            metadata_string, model_choice, model_name_map
+                        )
+                        llm_total_input_tokens += input_tokens
+                        llm_total_output_tokens += output_tokens
+                        if not llm_model_name and model_choice:
+                            llm_model_name = model_choice
+                    all_token_counts.append((input_tokens, output_tokens))
+        else:
+            seq_pbar = tqdm(
+                page_groups,
+                unit="groups",
+                desc="Summarising page groups",
+            )
+            for i, (page_nums, group_text) in enumerate(seq_pbar):
+                progress(
+                    0.2 + (i / len(page_groups)) * 0.5,
+                    f"Summarising page group {i+1}/{len(page_groups)} (pages {min(page_nums)}-{max(page_nums)})...",
+                )
+                summary_text, full_prompt, metadata = summarise_text_chunk(
+                    group_text,
+                    model_choice,
+                    in_api_key,
+                    temperature,
+                    context_textbox=context_textbox,
+                    aws_access_key_textbox=aws_access_key_textbox,
+                    aws_secret_key_textbox=aws_secret_key_textbox,
+                    aws_region_textbox=aws_region_textbox,
+                    hf_api_key_textbox=hf_api_key_textbox,
+                    azure_endpoint_textbox=azure_endpoint_textbox,
+                    api_url=api_url,
+                    local_model=local_model,
+                    tokenizer=tokenizer,
+                    assistant_model=assistant_model,
+                    summarise_format_radio=summarise_format_radio,
+                    additional_summary_instructions=additional_summary_instructions,
+                )
+                if summary_text:
+                    try:
+                        min_page = int(min(page_nums)) if page_nums else 0
+                        max_page = int(max(page_nums)) if page_nums else 0
+                    except Exception:
+                        min_page, max_page = 0, 0
+                    page_group_page_ranges.append((min_page, max_page))
+                    page_group_summaries.append(summary_text)
+                    all_prompts.append(full_prompt)
+                    all_responses.append(summary_text)
+                    input_tokens, output_tokens = 0, 0
+                    if metadata:
+                        metadata_string = (
+                            str(metadata) if not isinstance(metadata, str) else metadata
+                        )
+                        input_tokens, output_tokens, _ = calculate_tokens_from_metadata(
+                            metadata_string, model_choice, model_name_map
+                        )
+                        llm_total_input_tokens += input_tokens
+                        llm_total_output_tokens += output_tokens
+                        if not llm_model_name and model_choice:
+                            llm_model_name = model_choice
+                    all_token_counts.append((input_tokens, output_tokens))
+            seq_pbar.close()
 
         # Step 3: Recursively summarise if needed
         progress(0.7, "Checking if recursive summarisation is needed...")

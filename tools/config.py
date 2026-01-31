@@ -640,6 +640,16 @@ EFFICIENT_OCR = convert_string_to_boolean(
 )
 # Minimum number of extractable words on a page to use text-only route; below this use OCR.
 EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "20"))
+# Max threads for OCR first pass in redact_image_pdf (1 = sequential). Enables parallel Textract/Tesseract/VLM.
+OCR_FIRST_PASS_MAX_WORKERS = max(
+    1,
+    int(get_or_create_env_var("OCR_FIRST_PASS_MAX_WORKERS", "3")),
+)
+# Max threads for page-group summarisation in summarise_document (1 = sequential). Use 1 for local models.
+SUMMARY_PAGE_GROUP_MAX_WORKERS = max(
+    1,
+    int(get_or_create_env_var("SUMMARY_PAGE_GROUP_MAX_WORKERS", "1")),
+)
 
 SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS", "True")
@@ -1661,7 +1671,11 @@ elif "granite-4-micro" in model_choice_lower or "granite4-micro" in model_choice
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Granite 4 Micro"
 
 # Set MULTIMODAL_PROMPT_FORMAT based on model choice
-if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in ["Gemma 3 4B", "Gemma 3 12B", "Gemma 3 27B"]:
+if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
+    "Gemma 3 4B",
+    "Gemma 3 12B",
+    "Gemma 3 27B",
+]:
     MULTIMODAL_PROMPT_FORMAT = True
 
 LLM_MAX_GPU_LAYERS = int(
@@ -2063,6 +2077,24 @@ DIRECT_MODE_PII_DETECTOR = get_or_create_env_var(
 DIRECT_MODE_OCR_METHOD = get_or_create_env_var(
     "DIRECT_MODE_OCR_METHOD", "Local OCR"
 )  # OCR method for PDF/image processing
+DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS = max(
+    1,
+    int(
+        get_or_create_env_var(
+            "DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS",
+            str(OCR_FIRST_PASS_MAX_WORKERS),
+        )
+    ),
+)  # Max threads for OCR first pass in redact_image_pdf (1 = sequential)
+DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS = max(
+    1,
+    int(
+        get_or_create_env_var(
+            "DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS",
+            str(SUMMARY_PAGE_GROUP_MAX_WORKERS),
+        )
+    ),
+)  # Max threads for page-group summarisation (1 = sequential)
 DIRECT_MODE_PAGE_MIN = int(
     get_or_create_env_var("DIRECT_MODE_PAGE_MIN", str(DEFAULT_PAGE_MIN))
 )  # First page to process
