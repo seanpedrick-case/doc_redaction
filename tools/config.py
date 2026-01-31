@@ -932,6 +932,10 @@ REPORT_VLM_OUTPUTS_TO_GUI = convert_string_to_boolean(
     get_or_create_env_var("REPORT_VLM_OUTPUTS_TO_GUI", "False")
 )  # Whether to report VLM outputs to the GUI with info boxes as they are processed..
 
+REPORT_LLM_OUTPUTS_TO_GUI = convert_string_to_boolean(
+    get_or_create_env_var("REPORT_LLM_OUTPUTS_TO_GUI", "False")
+)  # Whether to report streamed LLM outputs (local transformers or inference-server) to the GUI with gr.Info as they are processed.
+
 OVERWRITE_EXISTING_OCR_RESULTS = convert_string_to_boolean(
     get_or_create_env_var("OVERWRITE_EXISTING_OCR_RESULTS", "False")
 )  # If True, always create new OCR results instead of loading from existing JSON files

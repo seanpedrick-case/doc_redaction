@@ -643,6 +643,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** If set to `"True"`, reports VLM outputs to the GUI with info boxes as they are processed.
     * **Default Value:** `"False"`
 
+* **`REPORT_LLM_OUTPUTS_TO_GUI`**
+    * **Description:** If set to `"True"`, reports streamed LLM outputs (local transformers or local inference-server PII detection) to the GUI with `gr.Info` as they are processed.
+    * **Default Value:** `"False"`
+
 * **`CLOUD_VLM_MODEL_CHOICE`**
     * **Description:** Default model choice for cloud VLM OCR (AWS Bedrock, Gemini, or Azure/OpenAI). Used when cloud VLM options are enabled.
     * **Default Value:** `"qwen.qwen3-vl-235b-a22b"` (or first available cloud model if empty)

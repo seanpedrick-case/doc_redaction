@@ -8,7 +8,11 @@ import boto3
 import requests
 import spaces
 
-from tools.config import MAX_SPACES_GPU_RUN_TIME, PRINT_TRANSFORMERS_USER_PROMPT
+from tools.config import (
+    MAX_SPACES_GPU_RUN_TIME,
+    PRINT_TRANSFORMERS_USER_PROMPT,
+    REPORT_LLM_OUTPUTS_TO_GUI,
+)
 
 # Import mock patches if in test mode
 if os.environ.get("USE_MOCK_LLM") == "1" or os.environ.get("TEST_MODE") == "1":
@@ -112,6 +116,20 @@ from tools.config import (
     USE_LLAMA_CPP,
     USE_LLAMA_SWAP,
 )
+
+
+def _report_llm_output_to_gui(text: str) -> None:
+    """Report streamed LLM output to Gradio UI via gr.Info when REPORT_LLM_OUTPUTS_TO_GUI is True."""
+    if not REPORT_LLM_OUTPUTS_TO_GUI or not (text and str(text).strip()):
+        return
+    try:
+        import gradio as gr
+
+        gr.Info(text, duration=2)
+    except Exception:
+        # gr.Info may not be available (e.g. in worker process or CLI), ignore
+        pass
+
 
 if isinstance(NUM_PRED_TOKENS, str):
     NUM_PRED_TOKENS = int(NUM_PRED_TOKENS)
@@ -827,6 +845,26 @@ def call_transformers_model(
     import torch
     from transformers import TextStreamer
 
+    # Custom streamer that reports streamed output to gr.Info when REPORT_LLM_OUTPUTS_TO_GUI is True
+    class _LLMGUIStreamer(TextStreamer):
+        def __init__(self, tokenizer, skip_prompt=True):
+            super().__init__(tokenizer, skip_prompt=skip_prompt)
+            self._line_buffer = ""
+
+        def on_finalized_text(self, text, stream_end=False):
+            super().on_finalized_text(text, stream_end)
+            if not REPORT_LLM_OUTPUTS_TO_GUI:
+                return
+            self._line_buffer += text
+            if "\n" in text or stream_end:
+                parts = self._line_buffer.split("\n")
+                for line in parts[:-1]:
+                    if line.strip():
+                        _report_llm_output_to_gui(line)
+                self._line_buffer = parts[-1] if parts else ""
+                if stream_end and self._line_buffer.strip():
+                    _report_llm_output_to_gui(self._line_buffer)
+
     # Load model and tokenizer together to ensure they're from the same source
     # This prevents mismatches that could occur if they're loaded separately
     if model is None or tokenizer is None:
@@ -981,7 +1019,11 @@ def call_transformers_model(
     }
 
     if gen_config.stream:
-        streamer = TextStreamer(tokenizer, skip_prompt=True)
+        streamer = (
+            _LLMGUIStreamer(tokenizer, skip_prompt=True)
+            if REPORT_LLM_OUTPUTS_TO_GUI
+            else TextStreamer(tokenizer, skip_prompt=True)
+        )
     else:
         streamer = None
 
@@ -1774,6 +1816,7 @@ def call_inference_server_api(
 
             final_tokens = []
             output_tokens = 0
+            line_buffer = ""
 
             for line in response.iter_lines():
                 if line:
@@ -1781,6 +1824,8 @@ def call_inference_server_api(
                     if line.startswith("data: "):
                         data = line[6:]  # Remove 'data: ' prefix
                         if data.strip() == "[DONE]":
+                            if REPORT_LLM_OUTPUTS_TO_GUI and line_buffer.strip():
+                                _report_llm_output_to_gui(line_buffer)
                             break
                         try:
                             chunk = json.loads(data)
@@ -1791,9 +1836,21 @@ def call_inference_server_api(
                                     print(token, end="", flush=True)
                                     final_tokens.append(token)
                                     output_tokens += 1
+                                    if REPORT_LLM_OUTPUTS_TO_GUI:
+                                        line_buffer += token
+                                        if "\n" in token:
+                                            parts = line_buffer.split("\n")
+                                            for complete_line in parts[:-1]:
+                                                if complete_line.strip():
+                                                    _report_llm_output_to_gui(
+                                                        complete_line
+                                                    )
+                                            line_buffer = parts[-1] if parts else ""
                         except json.JSONDecodeError:
                             continue
 
+            if REPORT_LLM_OUTPUTS_TO_GUI and line_buffer.strip():
+                _report_llm_output_to_gui(line_buffer)
             print()  # newline after stream finishes
 
             text = "".join(final_tokens)

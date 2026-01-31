@@ -372,9 +372,13 @@ def save_llm_prompt_response(
     """
     Save LLM prompt and response to a text file for traceability.
 
+    Writes the exact system prompt and user prompt that were sent to the model
+    (e.g. for local transformers, inference-server, AWS, etc.). Each section is
+    clearly delimited so the log never duplicates or conflates system vs user.
+
     Args:
-        system_prompt: System prompt sent to LLM
-        user_prompt: User prompt sent to LLM
+        system_prompt: System prompt sent to LLM (exactly as passed to the model).
+        user_prompt: User prompt sent to LLM (exactly as passed to the model).
         response_text: Response text from LLM
         output_folder: Output folder path
         batch_number: Batch number for this call
@@ -389,6 +393,10 @@ def save_llm_prompt_response(
     Returns:
         Path to the saved file
     """
+    # Normalise to strings so we never write "None" or non-string types
+    system_prompt_str = (system_prompt if system_prompt is not None else "").strip()
+    user_prompt_str = (user_prompt if user_prompt is not None else "").strip()
+
     # Create LLM logs subfolder
     llm_logs_folder = os.path.join(output_folder, "llm_prompts_responses")
     os.makedirs(llm_logs_folder, exist_ok=True)
@@ -409,7 +417,8 @@ def save_llm_prompt_response(
         filename = f"llm_batch_{batch_number:04d}_{timestamp}.txt"
     filepath = os.path.join(llm_logs_folder, filename)
 
-    # Write prompt and response to file
+    # Write prompt and response to file with explicit section boundaries
+    # so system and user prompts are never duplicated or mixed.
     with open(filepath, "w", encoding="utf-8") as f:
         f.write("=" * 80 + "\n")
         f.write("LLM ENTITY DETECTION - PROMPT AND RESPONSE LOG\n")
@@ -426,14 +435,29 @@ def save_llm_prompt_response(
         f.write(f"Temperature: {temperature}\n")
         f.write(f"Max Tokens: {max_tokens}\n")
         f.write(f"Entities to Detect: {', '.join(entities_to_detect)}\n")
+
         f.write("\n" + "=" * 80 + "\n")
-        f.write("SYSTEM PROMPT\n")
-        f.write("=" * 80 + "\n\n")
-        f.write(system_prompt)
-        f.write("\n\n" + "=" * 80 + "\n")
-        f.write("USER PROMPT\n")
-        f.write("=" * 80 + "\n\n")
-        f.write(user_prompt)
+        f.write("SYSTEM PROMPT (sent as system role)\n")
+        f.write("=" * 80 + "\n")
+        f.write("--- BEGIN SYSTEM PROMPT ---\n")
+        f.write(system_prompt_str)
+        f.write("\n--- END SYSTEM PROMPT ---\n")
+
+        f.write("\n" + "=" * 80 + "\n")
+        f.write("USER PROMPT (sent as user role)\n")
+        f.write("=" * 80 + "\n")
+        if (
+            system_prompt_str
+            and user_prompt_str
+            and system_prompt_str == user_prompt_str
+        ):
+            f.write(
+                "[NOTE: System and user prompt content were identical - check caller.]\n"
+            )
+        f.write("--- BEGIN USER PROMPT ---\n")
+        f.write(user_prompt_str)
+        f.write("\n--- END USER PROMPT ---\n")
+
         f.write("\n\n" + "=" * 80 + "\n")
         f.write("LLM RESPONSE\n")
         f.write("=" * 80 + "\n\n")
@@ -625,7 +649,9 @@ def call_llm_for_entity_detection(
         print(f"LLM entity detection failed: {e}")
         raise
 
-    # Save prompt and response if output_folder is provided
+    # Save prompt and response if output_folder is provided.
+    # Use the same system_prompt and user_prompt that were sent to the model
+    # (no combined/rendered version) so the log correctly shows system vs user.
     if output_folder and response_text:
         try:
             saved_file = save_llm_prompt_response(

@@ -1990,7 +1990,7 @@ with blocks:
                     "paddle",
                     CHOSEN_REDACT_ENTITIES,
                     CHOSEN_LLM_ENTITIES,
-                    "Redact anything relating to research topics with the label RESEARCH_TOPIC",
+                    "Redact only names and personal information related to Lauren, and nobody else. Redact any university names with the label UNIVERSITY.",
                 ],
             )
             ocr_example_labels.append("Example email LLM PII detection")
