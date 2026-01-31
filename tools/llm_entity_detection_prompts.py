@@ -81,7 +81,7 @@ def create_entity_detection_prompt(
 
     # Return only the JSON object, nothing else:"""
 
-    prompt = """### Task
+    prompt = f"""### Task
 Analyse the following text according to the instructions provided in the system prompt.
     
 ### Text:
