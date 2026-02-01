@@ -1979,7 +1979,7 @@ with blocks:
             available_ocr_examples.append(
                 [
                     [example_files[0]],
-                    "Local OCR model - PDFs without selectable text",
+                    "Local model - selectable text",
                     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
                     ["Extract handwriting", "Extract signatures"],
                     [example_files[0]],

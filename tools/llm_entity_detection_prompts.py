@@ -163,8 +163,8 @@ def create_entity_detection_system_prompt(
     {entity_types_section}
 
     ## CRITICAL HIERARCHY (Follow in order)
-    1. USER OVERRIDES: If the "USER-SPECIFIC CONSTRAINTS" section below contains instructions, they supersede ALL standard rules.
-    2. If a user instruction contradicts a standard entity rule (e.g., "Only detect Lauren"), the user instruction is the final authority.
+    1. USER OVERRIDES: If the "USER-SPECIFIC CONSTRAINTS" section below contains instructions, they supersede ALL standard rules. Users may refer to entities as labels, redactions, entity types, or other similar terms, so map instructions to the nearest equivalent entity type.
+    2. If a user instruction contradicts a standard entity rule, the user instruction is the final authority. For example, with the USER-SPECIFIC CONSTRAINT "Only redact information related to John", return entities only for text where John is named that relates to him. With the example USER-SPECIFIC CONSTRAINT "Don't redact anything about Jane", exclude entities from your response for text where Jane is named, or entites about anything that relates to her.
     3. OFFSETS: 0-based index; EndOffset is exclusive.
     4. SCORE: A confidence score between 0.0 and 1.0. 1.0 is the highest confidence score.
     5. TEXT: The exact text substring that was identified.
