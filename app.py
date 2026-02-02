@@ -1888,6 +1888,7 @@ with blocks:
                 example_labels=example_labels,
                 fn=show_info_box_on_click,
                 run_on_click=True,
+                cache_examples=False,
             )
     if SHOW_DIFFICULT_OCR_EXAMPLES:
         gr.Markdown(
@@ -2087,6 +2088,7 @@ with blocks:
                 example_labels=ocr_example_labels,
                 fn=show_info_box_on_click,
                 run_on_click=True,
+                cache_examples=False,
             )
 
     # Render walkthrough components in a hidden container when SHOW_QUICKSTART is False
@@ -3286,6 +3288,7 @@ with blocks:
                         ],
                         fn=show_duplicate_info_box_on_click,
                         run_on_click=True,
+                        cache_examples=False,
                     )
 
             with gr.Accordion("Step 1: Configure and run analysis", open=True):
@@ -3506,6 +3509,7 @@ with blocks:
                         example_labels=tabular_example_labels,
                         fn=show_tabular_info_box_on_click,
                         run_on_click=True,
+                        cache_examples=False,
                     )
 
             with gr.Accordion(
