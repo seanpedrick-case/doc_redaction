@@ -503,7 +503,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     if VLM_SEED is not None:
         model_default_seed = VLM_SEED
 
-    global _loaded_vlm_model, _loaded_vlm_processor
+    # Store at module level for USE_TRANFORMERS_VLM_MODEL_AS_LLM (no global needed at module level)
     _loaded_vlm_model = model
     _loaded_vlm_processor = processor
 
