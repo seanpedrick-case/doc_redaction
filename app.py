@@ -316,7 +316,7 @@ ensure_folder_exists(USAGE_LOGS_FOLDER)
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
-# CHOSEN_LLM_ENTITIES.extend(custom_entities)
+FULL_LLM_ENTITY_LIST.extend(custom_entities)
 
 
 # 1. Create a custom error class
@@ -573,15 +573,11 @@ walkthrough_in_redact_llm_entities = gr.Dropdown(
 
 walkthrough_custom_llm_instructions_textbox = gr.Textbox(
     label="Custom instructions for LLM-based entity detection",
-    placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'redact all company names with the label COMPANY_NAME'",
+    placeholder="Specify new labels to redact with a description. E.g. 'Redact information related to Mark Wilson with the label MARK_WILSON' or 'redact all company names with the label COMPANY_NAME'.",
     value="",
     lines=3,
     visible=initial_is_llm_method,
 )
-
-# Note: Accordion container removed to avoid block ID mismatches
-# Components are now rendered directly in the walkthrough
-
 
 ## Redaction examples
 in_doc_files = gr.File(
@@ -694,7 +690,7 @@ in_redact_llm_entities = gr.Dropdown(
 
 custom_llm_instructions_textbox = gr.Textbox(
     label="Custom instructions for LLM-based entity detection",
-    placeholder="Positive instructions are more likely to be successful than negative instructions. E.g. 'Redact information related to Mark Wilson with the label MARK_WILSON' or 'redact all company names with the label COMPANY_NAME' create labels you can filter by on the review screen, and are both more likely to be successful than 'Don't redact anything related to Mark Wilson' or 'Don't redact any company names.",
+    placeholder="Specify new labels to redact with a description. E.g. 'Redact information related to Mark Wilson with the label MARK_WILSON' or 'redact all company names with the label COMPANY_NAME'.",
     value="",
     lines=3,
     visible=initial_is_llm_method,
@@ -2001,8 +1997,8 @@ with blocks:
                     0,
                     "paddle",
                     CHOSEN_REDACT_ENTITIES,
-                    CHOSEN_LLM_ENTITIES,
-                    "Redact personal information about Lauren with the label LAUREN. Redact any university names with the label UNIVERSITY.",
+                    [],
+                    "Redact Lauren's name, email addresses, and phone numbers with the label LAUREN. Redact university names with the label UNIVERSITY.",
                 ],
             )
             ocr_example_labels.append("Example email LLM PII detection")
@@ -4673,6 +4669,8 @@ with blocks:
             local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
+            custom_llm_instructions_textbox,
+            inference_server_vlm_model_textbox,
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
         ],
@@ -5054,6 +5052,8 @@ with blocks:
             local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
+            custom_llm_instructions_textbox,
+            inference_server_vlm_model_textbox,
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
         ],

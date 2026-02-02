@@ -1,6 +1,6 @@
 """
 LLM-based entity detection using AWS Bedrock.
-This module provides functions to detect PII entities using LLMs instead of AWS Comprehend.
+This module provides functions to detect PII entities using LLMs instead of AWS llm.
 """
 
 import json
@@ -33,9 +33,6 @@ try:
     # Use send_request from llm_funcs.py which handles all model sources, retries, and response parsing
 
     from tools.llm_funcs import (
-        ResponseObject,
-        call_aws_bedrock,
-        construct_azure_client,
         send_request,
     )
 except ImportError as e:
@@ -48,21 +45,42 @@ except ImportError as e:
 
 
 def _find_text_in_passage(
-    search_text: str, original_text: str, reported_offset: Optional[int] = None
+    search_text: str,
+    original_text: str,
+    reported_offset: Optional[int] = None,
+    start_from: int = 0,
 ) -> Optional[Tuple[int, int]]:
     """
     Find the position of search_text in original_text and return (begin, end) offsets.
+
+    Only considers occurrences at or after start_from. This allows a "first pass" where
+    each entity is matched starting after the previous entity's end, so repeated phrases
+    (e.g. "University of Notre Dame" vs "University" + "of Notre Dame") map to the
+    correct occurrence.
 
     Args:
         search_text: The text to search for
         original_text: The text to search in
         reported_offset: Optional offset reported by LLM (used to disambiguate multiple matches)
+        start_from: Only consider matches at or after this position (default 0).
 
     Returns:
         Tuple of (begin_offset, end_offset) if found, None otherwise
     """
     if not search_text:
         return None
+
+    def first_or_closest(
+        positions: List[int], length: int
+    ) -> Optional[Tuple[int, int]]:
+        candidates = [p for p in positions if p >= start_from]
+        if not candidates:
+            return None
+        if reported_offset is not None:
+            closest_pos = min(candidates, key=lambda p: abs(p - reported_offset))
+        else:
+            closest_pos = min(candidates)
+        return (closest_pos, closest_pos + length)
 
     # Clean search text - remove trailing ellipsis that LLM might add
     search_text_clean = search_text.rstrip("...").strip()
@@ -78,13 +96,9 @@ def _find_text_in_passage(
         start = pos + 1
 
     if all_positions:
-        # If we have a reported offset, prefer the match closest to it
-        if reported_offset is not None:
-            closest_pos = min(all_positions, key=lambda p: abs(p - reported_offset))
-            return (closest_pos, closest_pos + len(search_text))
-        else:
-            # Otherwise, use the first occurrence
-            return (all_positions[0], all_positions[0] + len(search_text))
+        result = first_or_closest(all_positions, len(search_text))
+        if result is not None:
+            return result
 
     # Try with cleaned text (without ellipsis) if original didn't match
     if search_text_clean != search_text:
@@ -98,18 +112,9 @@ def _find_text_in_passage(
             start = pos + 1
 
         if all_positions_clean:
-            # If we have a reported offset, prefer the match closest to it
-            if reported_offset is not None:
-                closest_pos = min(
-                    all_positions_clean, key=lambda p: abs(p - reported_offset)
-                )
-                return (closest_pos, closest_pos + len(search_text_clean))
-            else:
-                # Otherwise, use the first occurrence
-                return (
-                    all_positions_clean[0],
-                    all_positions_clean[0] + len(search_text_clean),
-                )
+            result = first_or_closest(all_positions_clean, len(search_text_clean))
+            if result is not None:
+                return result
 
     # Try case-insensitive match
     search_text_lower = search_text.lower()
@@ -124,15 +129,9 @@ def _find_text_in_passage(
         start = pos + 1
 
     if all_positions_lower:
-        # If we have a reported offset, prefer the match closest to it
-        if reported_offset is not None:
-            closest_pos = min(
-                all_positions_lower, key=lambda p: abs(p - reported_offset)
-            )
-            return (closest_pos, closest_pos + len(search_text))
-        else:
-            # Otherwise, use the first occurrence
-            return (all_positions_lower[0], all_positions_lower[0] + len(search_text))
+        result = first_or_closest(all_positions_lower, len(search_text))
+        if result is not None:
+            return result
 
     # Try case-insensitive match with cleaned text
     if search_text_clean != search_text:
@@ -147,18 +146,9 @@ def _find_text_in_passage(
             start = pos + 1
 
         if all_positions_clean_lower:
-            # If we have a reported offset, prefer the match closest to it
-            if reported_offset is not None:
-                closest_pos = min(
-                    all_positions_clean_lower, key=lambda p: abs(p - reported_offset)
-                )
-                return (closest_pos, closest_pos + len(search_text_clean))
-            else:
-                # Otherwise, use the first occurrence
-                return (
-                    all_positions_clean_lower[0],
-                    all_positions_clean_lower[0] + len(search_text_clean),
-                )
+            result = first_or_closest(all_positions_clean_lower, len(search_text_clean))
+            if result is not None:
+                return result
 
     return None
 
@@ -236,11 +226,13 @@ def parse_llm_entity_response(
 ) -> List[Dict[str, Any]]:
     """
     Parse LLM response and extract entity information.
-    LLM BeginOffset/EndOffset are never used as character positions. Positions are
-    taken only from searching for the entity text in the passage. When the same
-    text is returned multiple times (e.g. "University of Notre Dame" three times),
-    entities are sorted by their reported BeginOffset to define order; the i-th
-    entity (by that order) is assigned to the i-th search result (by position).
+    LLM BeginOffset/EndOffset are used only to define order. Positions are
+    resolved by a first-pass text search: for each entity (in reported order),
+    search for the entity's Text in the passage starting from the end of the
+    preceding entity's resolved span. If not found there, search from the
+    start of the passage. This ensures repeated phrases (e.g. "University of
+    Notre Dame" once, then "University" and "of Notre Dame" separately) map
+    to the correct occurrence and avoid duplicate redaction boxes.
 
     Args:
         response_text: The LLM response text (should contain JSON)
@@ -395,45 +387,48 @@ def parse_llm_entity_response(
                         }
                     )
 
-                # Group by entity text (normalised) so we can assign search positions by order
-                groups: Dict[str, List[Dict[str, Any]]] = {}
-                for rec in raw_entities:
-                    key = rec["Text"].strip().lower()
-                    if key not in groups:
-                        groups[key] = []
-                    groups[key].append(rec)
-
-                # For each group: find all positions by search only; sort entities by reported BeginOffset; assign 1:1
-                for _key, group in groups.items():
-                    # Use the first entity's Text for searching (exact string to find)
-                    search_text = group[0]["Text"]
-                    positions = _find_all_text_in_passage(search_text, original_text)
-                    if not positions:
+                # Process entities in reported order. First-pass: search for each entity's
+                # Text starting from the preceding entity's EndOffset; if not found, search
+                # from the start of the passage. This disambiguates repeated phrases.
+                ordered = sorted(
+                    raw_entities,
+                    key=lambda r: (
+                        r["reported_begin"] is None,
+                        r["reported_begin"] or 0,
+                    ),
+                )
+                search_start = 0
+                for rec in ordered:
+                    search_text = rec["Text"]
+                    result = _find_text_in_passage(
+                        search_text,
+                        original_text,
+                        reported_offset=rec["reported_begin"],
+                        start_from=search_start,
+                    )
+                    if result is None:
+                        result = _find_text_in_passage(
+                            search_text,
+                            original_text,
+                            reported_offset=rec["reported_begin"],
+                            start_from=0,
+                        )
+                    if result is None:
                         print(
                             f"Warning: Could not find text '{search_text[:50]}...' in original passage"
                         )
                         continue
-                    # Order entities by reported BeginOffset (ascending); None goes last
-                    ordered = sorted(
-                        group,
-                        key=lambda r: (
-                            r["reported_begin"] is None,
-                            r["reported_begin"] or 0,
-                        ),
+                    start, end = result
+                    entities_out.append(
+                        {
+                            "Type": rec["Type"],
+                            "BeginOffset": start,
+                            "EndOffset": end,
+                            "Score": rec["Score"],
+                            "Text": original_text[start:end],
+                        }
                     )
-                    # Assign i-th entity (by reported order) to i-th search result (by position)
-                    for i in range(min(len(ordered), len(positions))):
-                        start, end = positions[i]
-                        rec = ordered[i]
-                        entities_out.append(
-                            {
-                                "Type": rec["Type"],
-                                "BeginOffset": start,
-                                "EndOffset": end,
-                                "Score": rec["Score"],
-                                "Text": original_text[start:end],
-                            }
-                        )
+                    search_start = end
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON from LLM response: {e}")
             print(f"Response text: {response_text[:500]}")
@@ -827,18 +822,18 @@ def map_back_llm_entity_results(
     entities: List[Dict[str, Any]],
     current_batch_mapping: List[Tuple],
     allow_list: List[str],
-    chosen_redact_comprehend_entities: List[str],
+    chosen_redact_llm_entities: List[str],
     all_text_line_results: List[Tuple],
 ) -> List[Tuple]:
     """
     Map LLM-detected entities back to line-level results.
-    Similar to map_back_comprehend_entity_results but for LLM responses.
+    Similar to map_back_llm_entity_results but for LLM responses.
 
     Args:
         entities: List of entity dictionaries from LLM
         current_batch_mapping: Mapping of batch positions to line indices
         allow_list: List of allowed text values (to skip) - case-insensitive matching
-        chosen_redact_comprehend_entities: List of entity types to include
+        chosen_redact_llm_entities: List of entity types to include
         all_text_line_results: Existing line-level results to append to
 
     Returns:
@@ -857,7 +852,7 @@ def map_back_llm_entity_results(
         entity_type = entity.get("Type")
         # Allow all entity types returned by LLM, including custom types from custom instructions
         # Log when a custom entity type (not in the original list) is found
-        # if entity_type not in chosen_redact_comprehend_entities:
+        # if entity_type not in chosen_redact_llm_entities:
         #     print(
         #         f"Info: Found custom entity type '{entity_type}' (not in original detection list). "
         #         f"Including it in results as it was returned by LLM."
@@ -865,7 +860,6 @@ def map_back_llm_entity_results(
 
         entity_start = entity["BeginOffset"]
         entity_end = entity["EndOffset"]
-        entity.get("Text", "")
 
         # Track if the entity has been added to any line
         added_to_line = False
@@ -908,7 +902,7 @@ def map_back_llm_entity_results(
                 # This allows allow_list terms to "overrule" LLM PII detection
                 result_text_normalized = result_text.strip().lower()
                 if result_text_normalized not in allow_list_normalized:
-                    # Create entity dict in Comprehend-like format
+                    # Create entity dict in llm-like format
                     adjusted_entity = {
                         "Type": entity_type,
                         "BeginOffset": relative_start,
@@ -954,7 +948,7 @@ def do_llm_entity_detection_call(
     bedrock_runtime: Optional[boto3.Session.client] = None,
     language: str = "en",
     allow_list: List[str] = None,
-    chosen_redact_comprehend_entities: List[str] = None,
+    chosen_redact_llm_entities: List[str] = None,
     all_text_line_results: List[Tuple] = None,
     model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
     temperature: float = LLM_PII_TEMPERATURE,
@@ -974,7 +968,7 @@ def do_llm_entity_detection_call(
 ) -> Tuple[List[Tuple], int, int]:
     """
     Call LLM for entity detection on a batch of text.
-    Similar interface to do_aws_comprehend_call.
+    Similar interface to do_aws_llm_call.
 
     Args:
         current_batch: Text batch to analyze
@@ -982,7 +976,7 @@ def do_llm_entity_detection_call(
         bedrock_runtime: AWS Bedrock runtime client (required for AWS method)
         language: Language code
         allow_list: List of allowed text values
-        chosen_redact_comprehend_entities: List of entity types to detect
+        chosen_redact_llm_entities: List of entity types to detect
         all_text_line_results: Existing line-level results
         model_choice: Model identifier (varies by inference method)
         temperature: Temperature for LLM generation
@@ -1008,15 +1002,15 @@ def do_llm_entity_detection_call(
 
     if allow_list is None:
         allow_list = []
-    if chosen_redact_comprehend_entities is None:
-        chosen_redact_comprehend_entities = []
+    if chosen_redact_llm_entities is None:
+        chosen_redact_llm_entities = []
     if all_text_line_results is None:
         all_text_line_results = []
 
     try:
         entities, input_tokens, output_tokens = call_llm_for_entity_detection(
             text=current_batch.strip(),
-            entities_to_detect=chosen_redact_comprehend_entities,
+            entities_to_detect=chosen_redact_llm_entities,
             language=language,
             bedrock_runtime=bedrock_runtime,
             model_choice=model_choice,
@@ -1040,7 +1034,7 @@ def do_llm_entity_detection_call(
             entities,
             current_batch_mapping,
             allow_list,
-            chosen_redact_comprehend_entities,
+            chosen_redact_llm_entities,
             all_text_line_results,
         )
 

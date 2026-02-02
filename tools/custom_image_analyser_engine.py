@@ -7682,7 +7682,7 @@ class CustomImageAnalyzerEngine:
                                 bedrock_runtime=bedrock_runtime,
                                 language=aws_language,
                                 allow_list=text_analyzer_kwargs.get("allow_list", []),
-                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
@@ -7784,7 +7784,7 @@ class CustomImageAnalyzerEngine:
                                 bedrock_runtime=bedrock_runtime,
                                 language=aws_language,
                                 allow_list=text_analyzer_kwargs.get("allow_list", []),
-                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
@@ -7861,7 +7861,7 @@ class CustomImageAnalyzerEngine:
                         bedrock_runtime=bedrock_runtime,
                         language=aws_language,
                         allow_list=text_analyzer_kwargs.get("allow_list", []),
-                        chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                        chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                         all_text_line_results=all_text_line_results,
                         model_choice=model_choice,
                         temperature=text_analyzer_kwargs.get(
@@ -8043,7 +8043,7 @@ class CustomImageAnalyzerEngine:
                                 bedrock_runtime=bedrock_runtime,
                                 language=aws_language,
                                 allow_list=text_analyzer_kwargs.get("allow_list", []),
-                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
@@ -8145,7 +8145,7 @@ class CustomImageAnalyzerEngine:
                                 bedrock_runtime=bedrock_runtime,
                                 language=aws_language,
                                 allow_list=text_analyzer_kwargs.get("allow_list", []),
-                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
@@ -8222,7 +8222,7 @@ class CustomImageAnalyzerEngine:
                         bedrock_runtime=bedrock_runtime,
                         language=aws_language,
                         allow_list=text_analyzer_kwargs.get("allow_list", []),
-                        chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                        chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                         all_text_line_results=all_text_line_results,
                         model_choice=model_choice,
                         temperature=text_analyzer_kwargs.get(
@@ -8433,7 +8433,7 @@ class CustomImageAnalyzerEngine:
                                 bedrock_runtime=bedrock_runtime,
                                 language=aws_language,
                                 allow_list=text_analyzer_kwargs.get("allow_list", []),
-                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
@@ -8535,7 +8535,7 @@ class CustomImageAnalyzerEngine:
                                 bedrock_runtime=bedrock_runtime,
                                 language=aws_language,
                                 allow_list=text_analyzer_kwargs.get("allow_list", []),
-                                chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
@@ -8612,7 +8612,7 @@ class CustomImageAnalyzerEngine:
                         bedrock_runtime=bedrock_runtime,
                         language=aws_language,
                         allow_list=text_analyzer_kwargs.get("allow_list", []),
-                        chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                        chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                         all_text_line_results=all_text_line_results,
                         model_choice=model_choice,
                         temperature=text_analyzer_kwargs.get(
@@ -9633,7 +9633,7 @@ def run_page_text_redaction(
                             allow_list=text_analyzer_kwargs.get(
                                 "allow_list", allow_list or []
                             ),
-                            chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
@@ -9727,7 +9727,7 @@ def run_page_text_redaction(
                             allow_list=text_analyzer_kwargs.get(
                                 "allow_list", allow_list or []
                             ),
-                            chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
@@ -9793,7 +9793,7 @@ def run_page_text_redaction(
                     bedrock_runtime=bedrock_runtime,
                     language=aws_language,
                     allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
-                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                    chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                     all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(
@@ -9969,7 +9969,7 @@ def run_page_text_redaction(
                             allow_list=text_analyzer_kwargs.get(
                                 "allow_list", allow_list or []
                             ),
-                            chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
@@ -10063,7 +10063,7 @@ def run_page_text_redaction(
                             allow_list=text_analyzer_kwargs.get(
                                 "allow_list", allow_list or []
                             ),
-                            chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
@@ -10129,7 +10129,7 @@ def run_page_text_redaction(
                     bedrock_runtime=bedrock_runtime,
                     language=aws_language,
                     allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
-                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                    chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                     all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(
@@ -10336,7 +10336,7 @@ def run_page_text_redaction(
                             allow_list=text_analyzer_kwargs.get(
                                 "allow_list", allow_list or []
                             ),
-                            chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
@@ -10430,7 +10430,7 @@ def run_page_text_redaction(
                             allow_list=text_analyzer_kwargs.get(
                                 "allow_list", allow_list or []
                             ),
-                            chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
@@ -10496,7 +10496,7 @@ def run_page_text_redaction(
                     bedrock_runtime=bedrock_runtime,
                     language=aws_language,
                     allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
-                    chosen_redact_comprehend_entities=llm_chosen_redact_comprehend_entities,
+                    chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
                     all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(

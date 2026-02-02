@@ -1463,7 +1463,7 @@ CLOUD_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
 # If set and non-empty, overrides CLOUD_LLM_PII_MODEL_CHOICE whenever custom instructions are passed to the LLM (e.g. allow-list style rules). Leave empty to always use CLOUD_LLM_PII_MODEL_CHOICE.
 CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE = get_or_create_env_var(
     "CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE",
-    "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Empty = use CLOUD_LLM_PII_MODEL_CHOICE even with custom instructions
+    "amazon.nova-pro-v1:0",  # Empty = use CLOUD_LLM_PII_MODEL_CHOICE even with custom instructions
 )
 
 # Cloud LLM Model Choice for summarisation (AWS Bedrock / cloud)
@@ -1806,13 +1806,13 @@ FULL_COMPREHEND_ENTITY_LIST = get_or_create_env_var(
 
 FULL_LLM_ENTITY_LIST = get_or_create_env_var(
     "FULL_LLM_ENTITY_LIST",
-    "['EMAIL_ADDRESS','ADDRESS','NAME','PHONE_NUMBER', 'DATE_TIME', 'URL', 'IP_ADDRESS', 'MAC_ADDRESS', 'AGE', 'BANK_ACCOUNT_NUMBER', 'PASSPORT_NUMBER', 'CA_HEALTH_NUMBER', 'CUSTOM', 'CUSTOM_FUZZY']",
+    "['EMAIL_ADDRESS', 'STREET_ADDRESS','PERSON_NAME','PHONE_NUMBER', 'DATE_TIME', 'URL', 'IP_ADDRESS', 'AGE', 'BANK_ACCOUNT_NUMBER', 'PASSPORT_NUMBER', 'CUSTOM', 'CUSTOM_FUZZY']",
 )
 
 # Entities for LLM-based PII redaction option
 CHOSEN_LLM_ENTITIES = get_or_create_env_var(
     "CHOSEN_LLM_ENTITIES",
-    "['EMAIL_ADDRESS','ADDRESS','NAME','PHONE_NUMBER', 'CUSTOM']",
+    "['EMAIL_ADDRESS','STREET_ADDRESS','PERSON_NAME','PHONE_NUMBER', 'CUSTOM']",
 )
 
 
