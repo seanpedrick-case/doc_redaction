@@ -694,7 +694,7 @@ in_redact_llm_entities = gr.Dropdown(
 
 custom_llm_instructions_textbox = gr.Textbox(
     label="Custom instructions for LLM-based entity detection",
-    placeholder="e.g., 'don't redact anything related to Mark Wilson' or 'redact all company names with the label COMPANY_NAME'",
+    placeholder="Positive instructions are more likely to be successful than negative instructions. E.g. 'Redact information related to Mark Wilson with the label MARK_WILSON' or 'redact all company names with the label COMPANY_NAME' create labels you can filter by on the review screen, and are both more likely to be successful than 'Don't redact anything related to Mark Wilson' or 'Don't redact any company names.",
     value="",
     lines=3,
     visible=initial_is_llm_method,

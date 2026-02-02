@@ -840,9 +840,12 @@ def call_transformers_model(
     tokenizer=_pii_tokenizer,
     assistant_model=_pii_assistant_model,
     speculative_decoding=speculative_decoding,
+    use_vlm_safe_generation=False,
 ):
     """
     This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
+    When use_vlm_safe_generation is True (e.g. VLM model used for LLM tasks), uses greedy decoding to avoid
+    sampling-related CUDA errors (e.g. invalid probability tensor in multinomial).
     """
     import torch
     from transformers import TextStreamer
@@ -1009,16 +1012,24 @@ def call_transformers_model(
 
     attention_mask = torch.ones_like(input_ids).to(device)
 
-    # Map LlamaCPP parameters to transformers parameters
-    generation_kwargs = {
-        "max_new_tokens": gen_config.max_tokens,
-        "temperature": gen_config.temperature,
-        "top_p": gen_config.top_p,
-        "top_k": gen_config.top_k,
-        "do_sample": True,
-        "attention_mask": attention_mask,
-        #'pad_token_id': tokenizer.eos_token_id
-    }
+    # Map LlamaCPP parameters to transformers parameters.
+    # When use_vlm_safe_generation (VLM model used for LLM tasks), use greedy decoding to avoid
+    # "probability tensor contains inf/nan or element < 0" errors in torch.multinomial on some setups.
+    if use_vlm_safe_generation:
+        generation_kwargs = {
+            "max_new_tokens": gen_config.max_tokens,
+            "do_sample": False,
+            "attention_mask": attention_mask,
+        }
+    else:
+        generation_kwargs = {
+            "max_new_tokens": gen_config.max_tokens,
+            "temperature": gen_config.temperature,
+            "top_p": gen_config.top_p,
+            "top_k": gen_config.top_k,
+            "do_sample": True,
+            "attention_mask": attention_mask,
+        }
 
     if gen_config.stream:
         streamer = (
@@ -1029,8 +1040,8 @@ def call_transformers_model(
     else:
         streamer = None
 
-    # Remove parameters that don't exist in transformers
-    if hasattr(gen_config, "repeat_penalty"):
+    # Remove parameters that don't exist in transformers (repetition_penalty is valid for both sampling and greedy)
+    if hasattr(gen_config, "repeat_penalty") and gen_config.repeat_penalty is not None:
         generation_kwargs["repetition_penalty"] = gen_config.repeat_penalty
 
     if PRINT_TRANSFORMERS_USER_PROMPT:
@@ -1434,6 +1445,7 @@ def send_request(
                         gen_config,
                         model=vlm_model,
                         tokenizer=vlm_tokenizer,
+                        use_vlm_safe_generation=True,
                     )
                 else:
                     (
