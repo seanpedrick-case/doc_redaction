@@ -97,7 +97,7 @@ On the **'Redact PDFs/images'** tab, the **'Redaction settings'** accordion at t
 
 ### Text extraction
 
-Inside the same **'Redaction settings'** accordion, open the nested accordion **'Change default redaction settings'** (it may already be open). Under **'Change default text extraction OCR method'** you can choose how text is extracted:
+Inside the same **'Redaction settings'** accordion, open the nested accordion **'Change default redaction settings'** (it may already be open). If enabled, under **'Change default text extraction OCR method'** you can choose how text is extracted:
 
 - **'Local model - selectable text'** - Reads text directly from PDFs that have selectable text (using PikePDF). Best for most PDFs; finds nothing if the PDF has no selectable text and is not suitable for handwriting or signatures. Image files are passed to the next option.
 - **'Local OCR model - PDFs without selectable text'** - Uses a local OCR model (Tesseract) to extract text from PDFs/images. Handles most typed text without selectable text but is less reliable for handwriting and signatures; use the AWS option below if you need those.
@@ -113,7 +113,9 @@ If you select **'AWS Textract service - all PDF types'** as the text extraction 
 
 ### PII redaction method
 
-Still under **'Change default redaction settings'**, the **'Change PII identification method'** section lets you choose how PII is detected:
+At the start of the **'Change PII identification method'** accordion (under **'Change default redaction settings'**) you will see **'Choose redaction method'**, a radio with three options. **'Extract text only'** runs text extraction without redaction—useful when you only need OCR output or want to review text before redacting; when selected, the **'Select entity types to redact'** and **'Terms to always include or exclude in redactions...'** accordions are hidden. **'Redact all PII'** (the default) uses the chosen PII detection method to find and redact personal information; the entity-types accordion is shown and the terms (allow/deny/page) accordion is hidden. **'Redact selected terms'** shows both accordions and focuses on custom allow/deny lists and entity types (e.g. CUSTOM) so you can redact only the terms you specify.
+
+Still under **'Change default redaction settings'**, you may see the **'Change PII identification method'** section, if enabled, which lets you choose how PII is detected:
 
 - **'Only extract text - (no redaction)'** - Use this if you only need extracted text (e.g. for duplicate detection or to review on the Review redactions tab).
 - **'Local'** - Uses a local model (e.g. spaCy) to detect PII at no extra cost. Often enough when you mainly care about custom terms (see [Customising redaction options](#customising-redaction-options)).

@@ -651,6 +651,17 @@ inference_server_vlm_model_textbox = gr.Textbox(
 if not SHOW_PII_IDENTIFICATION_OPTIONS:
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS = False
 
+redaction_method_radio = gr.Radio(
+    label="Choose redaction method",
+    choices=[
+        "Extract text only",
+        "Redact all PII",
+        "Redact selected terms",
+    ],
+    value="Redact all PII",
+    interactive=True,
+)
+
 pii_identification_method_drop = gr.Radio(
     label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
     value=DEFAULT_PII_DETECTION_MODEL,
@@ -1991,7 +2002,7 @@ with blocks:
                     "paddle",
                     CHOSEN_REDACT_ENTITIES,
                     CHOSEN_LLM_ENTITIES,
-                    "Redact only names and personal information related to Lauren, and nobody else. Redact any university names with the label UNIVERSITY.",
+                    "Redact personal information only directly about Lauren. Redact any university names with the label UNIVERSITY.",
                 ],
             )
             ocr_example_labels.append("Example email LLM PII detection")
@@ -2622,10 +2633,14 @@ with blocks:
                     open=True,
                     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
                 ):
+                    redaction_method_radio.render()
                     with gr.Row(equal_height=True):
                         pii_identification_method_drop.render()
 
-                        with gr.Accordion("Select entity types to redact", open=True):
+                        entity_types_to_redact_accordion = gr.Accordion(
+                            "Select entity types to redact", open=True
+                        )
+                        with entity_types_to_redact_accordion:
                             # Store accordion references for dynamic visibility control
                             # Determine initial visibility based on default PII method
                             default_pii_method = DEFAULT_PII_DETECTION_MODEL
@@ -2651,10 +2666,11 @@ with blocks:
 
                         custom_llm_instructions_textbox.render()
                     with gr.Row(equal_height=True):
-                        with gr.Accordion(
+                        terms_accordion = gr.Accordion(
                             "Terms to always include or exclude in redactions, and whole page redaction. To add many terms at once, you can load in a file on the Redaction Settings tab.",
                             open=True,
-                        ):
+                        )
+                        with terms_accordion:
                             with gr.Row(equal_height=True):
                                 with gr.Column(scale=3):
                                     with gr.Row(equal_height=True):
@@ -4237,6 +4253,41 @@ with blocks:
                 local_ocr_accordion,
                 inference_server_vlm_accordion,
                 aws_textract_signature_accordion,
+            ],
+        )
+
+        # Update visibility of PII-related components and accordions when general redaction method is selected
+        def handle_main_redaction_method_selection(redaction_method):
+            """Wrapper that applies handle_redaction_method_selection and updates accordion visibility."""
+            results = list(handle_redaction_method_selection(redaction_method))
+            is_redact_all_pii = redaction_method == "Redact all PII"
+            is_redact_selected_terms = redaction_method == "Redact selected terms"
+            show_pii_method = (
+                is_redact_all_pii or is_redact_selected_terms
+            ) and SHOW_PII_IDENTIFICATION_OPTIONS
+            show_selected_terms_lists = is_redact_selected_terms
+            results.append(
+                gr.update(visible=show_pii_method)
+            )  # entity_types_to_redact_accordion
+            results.append(
+                gr.update(visible=show_selected_terms_lists)
+            )  # terms_accordion
+            return results
+
+        redaction_method_radio.change(
+            fn=handle_main_redaction_method_selection,
+            inputs=[redaction_method_radio],
+            outputs=[
+                pii_identification_method_drop,
+                in_redact_entities,
+                in_redact_comprehend_entities,
+                in_redact_llm_entities,
+                custom_llm_instructions_textbox,
+                in_deny_list_state,
+                in_allow_list_state,
+                in_fully_redacted_list_state,
+                entity_types_to_redact_accordion,
+                terms_accordion,
             ],
         )
 

@@ -652,7 +652,15 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Default Value:** `"qwen.qwen3-vl-235b-a22b"` (or first available cloud model if empty)
 
 * **`CLOUD_LLM_PII_MODEL_CHOICE`**
-    * **Description:** Default AWS Bedrock (or cloud) model for LLM-based PII detection when `SHOW_AWS_BEDROCK_LLM_MODELS` (or other cloud LLM options) is enabled.
+    * **Description:** Default AWS Bedrock (or cloud) model for LLM-based PII detection when `SHOW_AWS_BEDROCK_LLM_MODELS` (or other cloud LLM options) is enabled. Used by `tools/llm_entity_detection.py`.
+    * **Default Value:** `"amazon.nova-pro-v1:0"`
+
+* **`CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE`**
+    * **Description:** Optional “upgraded” cloud model used for LLM-based PII detection when custom instructions are provided (e.g. allow-list or user-specific rules). If set and non-empty, it overrides `CLOUD_LLM_PII_MODEL_CHOICE` whenever `custom_instructions` are passed to the entity-detection LLM. Leave empty to always use `CLOUD_LLM_PII_MODEL_CHOICE`.
+    * **Default Value:** `''` (empty; no override)
+
+* **`CLOUD_SUMMARISATION_MODEL_CHOICE`**
+    * **Description:** Default AWS Bedrock (or cloud) model for LLM-based summarisation when using cloud inference (e.g. AWS Bedrock). Used by `tools/summaries.py`. Separate from `CLOUD_LLM_PII_MODEL_CHOICE` so you can assign a different model for summarisation than for entity detection.
     * **Default Value:** `"amazon.nova-pro-v1:0"`
 
 * **`VLM_SEED`**

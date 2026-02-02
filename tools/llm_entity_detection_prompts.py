@@ -1,7 +1,14 @@
 """
 Prompts for LLM-based entity detection.
 These prompts are designed to extract PII entities with character positions.
+Text passed to the LLM is chunked using the same limits as AWS Comprehend batching:
+up to BATCH_CHAR_LIMIT characters or BATCH_WORD_LIMIT words, with boundaries at
+phrase-ending punctuation, newlines, or end of page (never mid-sentence).
 """
+
+# Must match custom_image_analyser_engine.DEFAULT_NEW_BATCH_* so prompts describe actual chunking
+BATCH_CHAR_LIMIT = 1000
+BATCH_WORD_LIMIT = 200
 
 
 def create_entity_detection_prompt(
@@ -22,6 +29,13 @@ def create_entity_detection_prompt(
     Returns:
         Formatted prompt string
     """
+    # Ensure custom_instructions is a string (callers may pass bool or other types).
+    # Treat boolean True and the string "True" as empty (e.g. from an unchecked/empty Gradio box).
+    if not isinstance(custom_instructions, str):
+        custom_instructions = ""
+    elif custom_instructions.strip().lower() == "true":
+        custom_instructions = ""
+
     # Filter out CUSTOM_VLM_* entities (these are handled separately via VLM)
     filtered_entities = [
         entity for entity in entities_to_detect if not entity.startswith("CUSTOM_VLM_")
@@ -81,8 +95,8 @@ def create_entity_detection_prompt(
 
     # Return only the JSON object, nothing else:"""
 
-    prompt = f"""### Task
-Analyse the following text according to the instructions provided in the system prompt.
+    prompt = f"""### User prompt
+Analyse the following text according to the provided instructions in the system prompt.
     
 ### Text:
 {text}
@@ -109,6 +123,13 @@ def create_entity_detection_system_prompt(
     Returns:
         System prompt string
     """
+    # Ensure custom_instructions is a string (callers may pass bool or other types).
+    # Treat boolean True and the string "True" as empty (e.g. from an unchecked/empty Gradio box).
+    if not isinstance(custom_instructions, str):
+        custom_instructions = ""
+    elif custom_instructions.strip().lower() == "true":
+        custom_instructions = ""
+
     # Filter out CUSTOM_VLM_* entities (these are handled separately via VLM)
     filtered_entities = [
         entity for entity in entities_to_detect if not entity.startswith("CUSTOM_VLM_")
@@ -128,7 +149,7 @@ def create_entity_detection_system_prompt(
 
     # Handle case where no standard entities are selected
     if filtered_entities:
-        entity_types_section = f"Entity types to detect: {filtered_entities}"
+        entity_types_section = f"Stanard entity types to detect, if not overridden by USER-SPECIFIC CONSTRAINTS: {filtered_entities}"
     else:
         entity_types_section = "Entity types to detect: Based on custom instructions provided (no standard entity types selected)."
         if not custom_instructions or not custom_instructions.strip():
@@ -156,21 +177,23 @@ def create_entity_detection_system_prompt(
 
     # Always return valid JSON. If no entities are found, return an empty entities array."""
 
-    system_prompt = f"""## Role
-    You are a PII Detection System. Extract entities into a JSON array with the following structure: `{{"entities": [{{"Type": "", "BeginOffset": 0, "EndOffset": 0, "Score": 1.0, "Text": ""}}]}}`.
+    system_prompt = f"""# System Prompt
+You are a personal information detection system. Extract entities from the standard entity list, according to the CRITICAL INSTRUCTIONS HIERARCHY rules below, into a JSON array with the following structure: `{{"entities": [{{"Type": "", "BeginOffset": 0, "EndOffset": 0, "Score": 1.0, "Text": ""}}]}}`.    
 
-    ## Standard Entities
-    {entity_types_section}
+## CRITICAL INSTRUCTIONS HIERARCHY (Follow in order)
+1. USER-SPECIFIC CONSTRAINTS: If the "USER-SPECIFIC CONSTRAINTS" section below contains instructions, they supersede ALL entity analysis using the standard entity list. Users may refer to entities as labels, redactions, entity types, or other similar terms, so map instructions to the nearest equivalent entity type.
+2. If a user instruction contradicts a standard entity rule, the user instruction is the final authority. For example, with the USER-SPECIFIC CONSTRAINT "Only redact information related to John", return entities only for text where John is named that relates to him. With the example USER-SPECIFIC CONSTRAINT "Don't redact anything about Jane", exclude entities from your response for text where Jane is named, or entites about anything that relates to her.
+4. Only when the USER-SPECIFIC CONSTRAINTS section has been taken into account, use the standard entity list to analyse the text. If the USER-SPECIFIC CONSTRAINTS section states that nothing for a given entity type is relevant (e.g. if the instruction says "Only redact information about Jane", and there is nothing in the text that relates to Jane, return no entities for the "NAME" entity type).
+5. OFFSETS: 0-based index; EndOffset is exclusive.
+6. SCORE: A confidence score between 0.0 and 1.0. 1.0 is the highest confidence score.
+7. TEXT: The exact text substring that was identified.
+8. Return every relevant instance of a valid entity type after taking into account the USER-SPECIFIC CONSTRAINTS, no matter how many times they appear in the text.
+*. OUTPUT: Return ONLY valid JSON. No preamble.
 
-    ## CRITICAL HIERARCHY (Follow in order)
-    1. USER OVERRIDES: If the "USER-SPECIFIC CONSTRAINTS" section below contains instructions, they supersede ALL standard rules. Users may refer to entities as labels, redactions, entity types, or other similar terms, so map instructions to the nearest equivalent entity type.
-    2. If a user instruction contradicts a standard entity rule, the user instruction is the final authority. For example, with the USER-SPECIFIC CONSTRAINT "Only redact information related to John", return entities only for text where John is named that relates to him. With the example USER-SPECIFIC CONSTRAINT "Don't redact anything about Jane", exclude entities from your response for text where Jane is named, or entites about anything that relates to her.
-    3. OFFSETS: 0-based index; EndOffset is exclusive.
-    4. SCORE: A confidence score between 0.0 and 1.0. 1.0 is the highest confidence score.
-    5. TEXT: The exact text substring that was identified.
-    6. OUTPUT: Return ONLY valid JSON. No preamble.
+{custom_instructions_section}
 
-    {custom_instructions_section}
+## Standard entity list
+{entity_types_section}
 """
 
     return system_prompt

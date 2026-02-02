@@ -1440,7 +1440,21 @@ DIRECT_MODE_INFERENCE_SERVER_MODEL = get_or_create_env_var(
 # Note: This should be set after amazon_models is defined
 CLOUD_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
     "CLOUD_LLM_PII_MODEL_CHOICE",
-    "amazon.nova-pro-v1:0",  # "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Default AWS Bedrock model for PII detection
+    "amazon.nova-pro-v1:0",  # "anthropic.claude-3-7-sonnet-20250219-v1:0" # "amazon.nova-pro-v1:0",  # "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Default AWS Bedrock model for PII detection
+)
+
+# Cloud LLM model used for PII detection when custom_instructions are provided.
+# If set and non-empty, overrides CLOUD_LLM_PII_MODEL_CHOICE whenever custom instructions are passed to the LLM (e.g. allow-list style rules). Leave empty to always use CLOUD_LLM_PII_MODEL_CHOICE.
+CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE = get_or_create_env_var(
+    "CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE",
+    "anthropic.claude-3-7-sonnet-20250219-v1:0",  # Empty = use CLOUD_LLM_PII_MODEL_CHOICE even with custom instructions
+)
+
+# Cloud LLM Model Choice for summarisation (AWS Bedrock / cloud)
+# Used by tools/summaries.py; separate from CLOUD_LLM_PII_MODEL_CHOICE so a different model can be used for summarisation vs entity detection.
+CLOUD_SUMMARISATION_MODEL_CHOICE = get_or_create_env_var(
+    "CLOUD_SUMMARISATION_MODEL_CHOICE",
+    "amazon.nova-lite-v1:0",  # Default AWS Bedrock model for summarisation
 )
 
 # VLM Model Choice for cloud VLM OCR (defaults to first available cloud model)
@@ -1685,7 +1699,7 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
 LLM_MAX_GPU_LAYERS = int(
     get_or_create_env_var("LLM_MAX_GPU_LAYERS", "-1")
 )  # Maximum possible
-LLM_TEMPERATURE = float(get_or_create_env_var("LLM_TEMPERATURE", "0.6"))
+LLM_TEMPERATURE = float(get_or_create_env_var("LLM_TEMPERATURE", "0.1"))
 LLM_TOP_K = int(
     get_or_create_env_var("LLM_TOP_K", "64")
 )  # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
@@ -1699,7 +1713,7 @@ LLM_RESET = convert_string_to_boolean(get_or_create_env_var("LLM_RESET", "False"
 LLM_STREAM = convert_string_to_boolean(get_or_create_env_var("LLM_STREAM", "True"))
 LLM_THREADS = int(get_or_create_env_var("LLM_THREADS", "-1"))
 LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "2048"))
-LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "16384"))  # 24576
+LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "32768"))  # 24576
 LLM_SAMPLE = convert_string_to_boolean(get_or_create_env_var("LLM_SAMPLE", "True"))
 LLM_STOP_STRINGS = _get_env_list(
     get_or_create_env_var("LLM_STOP_STRINGS", r"['\n\n\n\n\n\n']")

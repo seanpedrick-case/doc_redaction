@@ -2182,7 +2182,7 @@ def choose_and_run_redactor(
             out_file_paths.append(form_key_value_results_list_df_file_path)
 
         # Convert the gradio annotation boxes to relative coordinates
-        progress(0.93, "Creating review file output")
+        progress(0.95, "Creating review file output")
         page_sizes = page_sizes_df.to_dict(orient="records")
         all_image_annotations_df = convert_annotation_data_to_dataframe(
             annotations_all_pages

@@ -87,13 +87,16 @@ from tools.secure_path_utils import validate_folder_containment
 from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
 
-DEFAULT_NEW_BATCH_CHAR_COUNT = 2000
-DEFAULT_NEW_BATCH_WORD_COUNT = 400
+# Batch limits for AWS Comprehend and LLM entity detection. Batches are cut at the nearest
+# phrase-ending punctuation (PHRASE_ENDING_PUNCTUATION), newline, or end of page so text
+# is never cut mid-sentence.
+DEFAULT_NEW_BATCH_CHAR_COUNT = 1000
+DEFAULT_NEW_BATCH_WORD_COUNT = 200
 
 # AWS Comprehend billing: 1 unit = 100 characters (entity recognition, PII, etc.)
 COMPREHEND_CHARACTERS_PER_UNIT = 100
 
-# Phrase-ending punctuation marks
+# Phrase-ending punctuation marks (batch boundaries)
 PHRASE_ENDING_PUNCTUATION = {".", "!", "?", ";", ":"}
 
 
@@ -7430,7 +7433,6 @@ class CustomImageAnalyzerEngine:
                             # Continue adding words until we find phrase-ending punctuation or end of line
                             while lookahead_idx < len(words):
                                 lookahead_word = words[lookahead_idx]
-                                (len(lookahead_batch) + len(lookahead_word) + 1)
 
                                 # Add the word to lookahead batch
                                 if lookahead_batch:
@@ -7558,21 +7560,22 @@ class CustomImageAnalyzerEngine:
             llm_model_name = model_choice or ""
 
             # Handle custom entities first (same as AWS Comprehend)
-            if custom_entities:
-                custom_redact_entities = [
-                    entity
-                    for entity in chosen_llm_entities
-                    if entity in custom_entities
-                ]
+            # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+            local_custom_entities = [
+                entity
+                for entity in (chosen_llm_entities or [])
+                if entity in (custom_entities or [])
+                or entity in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
 
-                if custom_redact_entities:
-                    # Filter entities to only include those supported by the language
-                    language_supported_entities = filter_entities_for_language(
-                        custom_redact_entities, valid_language_entities, language
-                    )
+            if local_custom_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    local_custom_entities, valid_language_entities, language
+                )
 
-                    if language_supported_entities:
-                        text_analyzer_kwargs["entities"] = language_supported_entities
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
 
                     # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
                     presidio_kwargs = {
@@ -7726,7 +7729,6 @@ class CustomImageAnalyzerEngine:
                             # Continue adding words until we find phrase-ending punctuation or end of line
                             while lookahead_idx < len(words):
                                 lookahead_word = words[lookahead_idx]
-                                (len(lookahead_batch) + len(lookahead_word) + 1)
 
                                 # Add the word to lookahead batch
                                 if lookahead_batch:
@@ -7919,21 +7921,22 @@ class CustomImageAnalyzerEngine:
             )
 
             # Handle custom entities first (same as AWS Comprehend)
-            if custom_entities:
-                custom_redact_entities = [
-                    entity
-                    for entity in chosen_llm_entities
-                    if entity in custom_entities
-                ]
+            # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+            local_custom_entities = [
+                entity
+                for entity in (chosen_llm_entities or [])
+                if entity in (custom_entities or [])
+                or entity in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
 
-                if custom_redact_entities:
-                    # Filter entities to only include those supported by the language
-                    language_supported_entities = filter_entities_for_language(
-                        custom_redact_entities, valid_language_entities, language
-                    )
+            if local_custom_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    local_custom_entities, valid_language_entities, language
+                )
 
-                    if language_supported_entities:
-                        text_analyzer_kwargs["entities"] = language_supported_entities
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
 
                     # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
                     presidio_kwargs = {
@@ -8087,7 +8090,6 @@ class CustomImageAnalyzerEngine:
                             # Continue adding words until we find phrase-ending punctuation or end of line
                             while lookahead_idx < len(words):
                                 lookahead_word = words[lookahead_idx]
-                                (len(lookahead_batch) + len(lookahead_word) + 1)
 
                                 # Add the word to lookahead batch
                                 if lookahead_batch:
@@ -8302,21 +8304,22 @@ class CustomImageAnalyzerEngine:
             #         )
 
             # Handle custom entities first (same as AWS Comprehend)
-            if custom_entities:
-                custom_redact_entities = [
-                    entity
-                    for entity in chosen_llm_entities
-                    if entity in custom_entities
-                ]
+            # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+            local_custom_entities = [
+                entity
+                for entity in (chosen_llm_entities or [])
+                if entity in (custom_entities or [])
+                or entity in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
 
-                if custom_redact_entities:
-                    # Filter entities to only include those supported by the language
-                    language_supported_entities = filter_entities_for_language(
-                        custom_redact_entities, valid_language_entities, language
-                    )
+            if local_custom_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    local_custom_entities, valid_language_entities, language
+                )
 
-                    if language_supported_entities:
-                        text_analyzer_kwargs["entities"] = language_supported_entities
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
 
                     # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
                     presidio_kwargs = {
@@ -8470,7 +8473,6 @@ class CustomImageAnalyzerEngine:
                             # Continue adding words until we find phrase-ending punctuation or end of line
                             while lookahead_idx < len(words):
                                 lookahead_word = words[lookahead_idx]
-                                (len(lookahead_batch) + len(lookahead_word) + 1)
 
                                 # Add the word to lookahead batch
                                 if lookahead_batch:
@@ -9385,7 +9387,6 @@ def run_page_text_redaction(
                         # Continue adding words until we find phrase-ending punctuation or end of line
                         while lookahead_idx < len(words):
                             lookahead_word = words[lookahead_idx]
-                            (len(lookahead_batch) + len(lookahead_word) + 1)
 
                             # Add the word to lookahead batch
                             if lookahead_batch:
@@ -9507,19 +9508,21 @@ def run_page_text_redaction(
         llm_model_name = model_choice or ""
 
         # Handle custom entities first (same as AWS Comprehend)
-        if custom_entities:
-            custom_redact_entities = [
-                entity for entity in chosen_llm_entities if entity in custom_entities
-            ]
+        # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+        local_custom_entities = [
+            entity
+            for entity in (chosen_llm_entities or [])
+            if entity in (custom_entities or []) or entity in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
 
-            if custom_redact_entities:
-                # Filter entities to only include those supported by the language
-                language_supported_entities = filter_entities_for_language(
-                    custom_redact_entities, valid_language_entities, language
-                )
+        if local_custom_entities:
+            # Filter entities to only include those supported by the language
+            language_supported_entities = filter_entities_for_language(
+                local_custom_entities, valid_language_entities, language
+            )
 
-                if language_supported_entities:
-                    text_analyzer_kwargs["entities"] = language_supported_entities
+            if language_supported_entities:
+                text_analyzer_kwargs["entities"] = language_supported_entities
 
                 # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
                 # Also exclude allow_list since we pass it explicitly
@@ -9665,7 +9668,6 @@ def run_page_text_redaction(
                         # Continue adding words until we find phrase-ending punctuation or end of line
                         while lookahead_idx < len(words):
                             lookahead_word = words[lookahead_idx]
-                            (len(lookahead_batch) + len(lookahead_word) + 1)
 
                             # Add the word to lookahead batch
                             if lookahead_batch:
@@ -9842,19 +9844,21 @@ def run_page_text_redaction(
         llm_model_name = model_choice or ""
 
         # Handle custom entities first (same as AWS Comprehend)
-        if custom_entities:
-            custom_redact_entities = [
-                entity for entity in chosen_llm_entities if entity in custom_entities
-            ]
+        # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+        local_custom_entities = [
+            entity
+            for entity in (chosen_llm_entities or [])
+            if entity in (custom_entities or []) or entity in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
 
-            if custom_redact_entities:
-                # Filter entities to only include those supported by the language
-                language_supported_entities = filter_entities_for_language(
-                    custom_redact_entities, valid_language_entities, language
-                )
+        if local_custom_entities:
+            # Filter entities to only include those supported by the language
+            language_supported_entities = filter_entities_for_language(
+                local_custom_entities, valid_language_entities, language
+            )
 
-                if language_supported_entities:
-                    text_analyzer_kwargs["entities"] = language_supported_entities
+            if language_supported_entities:
+                text_analyzer_kwargs["entities"] = language_supported_entities
 
                 # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
                 # Also exclude allow_list since we pass it explicitly
@@ -10000,7 +10004,6 @@ def run_page_text_redaction(
                         # Continue adding words until we find phrase-ending punctuation or end of line
                         while lookahead_idx < len(words):
                             lookahead_word = words[lookahead_idx]
-                            (len(lookahead_batch) + len(lookahead_word) + 1)
 
                             # Add the word to lookahead batch
                             if lookahead_batch:
@@ -10201,19 +10204,21 @@ def run_page_text_redaction(
         #         )
 
         # Handle custom entities first (same as AWS Comprehend)
-        if custom_entities:
-            custom_redact_entities = [
-                entity for entity in chosen_llm_entities if entity in custom_entities
-            ]
+        # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+        local_custom_entities = [
+            entity
+            for entity in (chosen_llm_entities or [])
+            if entity in (custom_entities or []) or entity in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
 
-            if custom_redact_entities:
-                # Filter entities to only include those supported by the language
-                language_supported_entities = filter_entities_for_language(
-                    custom_redact_entities, valid_language_entities, language
-                )
+        if local_custom_entities:
+            # Filter entities to only include those supported by the language
+            language_supported_entities = filter_entities_for_language(
+                local_custom_entities, valid_language_entities, language
+            )
 
-                if language_supported_entities:
-                    text_analyzer_kwargs["entities"] = language_supported_entities
+            if language_supported_entities:
+                text_analyzer_kwargs["entities"] = language_supported_entities
 
                 # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
                 # Also exclude allow_list since we pass it explicitly
@@ -10359,7 +10364,6 @@ def run_page_text_redaction(
                         # Continue adding words until we find phrase-ending punctuation or end of line
                         while lookahead_idx < len(words):
                             lookahead_word = words[lookahead_idx]
-                            (len(lookahead_batch) + len(lookahead_word) + 1)
 
                             # Add the word to lookahead batch
                             if lookahead_batch:

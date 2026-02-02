@@ -14,6 +14,7 @@ from gradio import Progress
 
 from tools.config import (
     CHOSEN_LLM_PII_INFERENCE_METHOD,
+    CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE,
     CLOUD_LLM_PII_MODEL_CHOICE,
     INFERENCE_SERVER_API_URL,
     LLM_PII_MAX_TOKENS,
@@ -162,14 +163,84 @@ def _find_text_in_passage(
     return None
 
 
+def _find_all_text_in_passage(
+    search_text: str, original_text: str
+) -> List[Tuple[int, int]]:
+    """
+    Find all positions of search_text in original_text and return a list of (begin, end) offsets.
+    Uses the same search strategy as _find_text_in_passage (exact, then cleaned, then case-insensitive).
+    LLM offset values are never used; positions come only from search.
+
+    Returns:
+        List of (begin_offset, end_offset) tuples, sorted by begin_offset (ascending).
+    """
+    if not search_text:
+        return []
+
+    search_text_clean = search_text.rstrip("...").strip()
+
+    def find_all_exact(needle: str, haystack: str) -> List[Tuple[int, int]]:
+        result = []
+        start = 0
+        while True:
+            pos = haystack.find(needle, start)
+            if pos == -1:
+                break
+            result.append((pos, pos + len(needle)))
+            start = pos + 1
+        return result
+
+    positions = find_all_exact(search_text, original_text)
+    if positions:
+        return sorted(positions, key=lambda p: p[0])
+
+    if search_text_clean != search_text:
+        positions = find_all_exact(search_text_clean, original_text)
+        if positions:
+            return sorted(positions, key=lambda p: p[0])
+
+    # Case-insensitive
+    needle_lower = search_text.lower()
+    haystack_lower = original_text.lower()
+    positions = find_all_exact(needle_lower, haystack_lower)
+    if positions:
+        # Return (start, start + len(search_text)) so length matches original entity text
+        return sorted(
+            [(p[0], p[0] + len(search_text)) for p in positions], key=lambda p: p[0]
+        )
+
+    if search_text_clean != search_text:
+        needle_clean_lower = search_text_clean.lower()
+        positions = find_all_exact(needle_clean_lower, haystack_lower)
+        if positions:
+            return sorted(
+                [(p[0], p[0] + len(search_text_clean)) for p in positions],
+                key=lambda p: p[0],
+            )
+
+    return []
+
+
+def _entity_get(obj: Dict[str, Any], key: str, default: Any = None) -> Any:
+    """Get value from entity dict with case-insensitive key lookup (e.g. BeginOffset vs beginOffset)."""
+    key_lower = key.lower()
+    for k, v in obj.items():
+        if k.lower() == key_lower:
+            return v
+    return default
+
+
 def parse_llm_entity_response(
     response_text: str,
     original_text: str,
 ) -> List[Dict[str, Any]]:
     """
     Parse LLM response and extract entity information.
-    Instead of using LLM-provided offsets, searches for the entity text
-    in the original passage and derives offsets from the match position.
+    LLM BeginOffset/EndOffset are never used as character positions. Positions are
+    taken only from searching for the entity text in the passage. When the same
+    text is returned multiple times (e.g. "University of Notre Dame" three times),
+    entities are sorted by their reported BeginOffset to define order; the i-th
+    entity (by that order) is assigned to the i-th search result (by position).
 
     Args:
         response_text: The LLM response text (should contain JSON)
@@ -178,7 +249,7 @@ def parse_llm_entity_response(
     Returns:
         List of entity dictionaries with keys: Type, BeginOffset, EndOffset, Score, Text
     """
-    entities = []
+    entities_out: List[Dict[str, Any]] = []
 
     # Remove <think> tags and their content (common in some LLM outputs)
     # This handles cases where LLMs include thinking/reasoning tags
@@ -282,66 +353,86 @@ def parse_llm_entity_response(
                     raise e2
 
             if "entities" in data and isinstance(data["entities"], list):
+                # Collect raw entity records (Type, Text, Score, reported BeginOffset for order only)
+                raw_entities: List[Dict[str, Any]] = []
                 for entity in data["entities"]:
-                    # Validate entity has at least Type
-                    if "Type" not in entity:
+                    entity_type_val = _entity_get(entity, "Type")
+                    if entity_type_val is None:
                         print(f"Warning: Entity missing Type field: {entity}")
                         continue
-
-                    entity_type = str(entity["Type"])
-
-                    # Get the text value from LLM response, or extract using offsets as fallback
-                    entity_text = entity.get("Text", "")
-                    reported_begin_offset = None
-                    reported_end_offset = None
-
-                    # Try to get reported offsets for disambiguation if text appears multiple times
-                    if "BeginOffset" in entity and "EndOffset" in entity:
+                    entity_text = _entity_get(entity, "Text", "")
+                    reported_begin = _entity_get(entity, "BeginOffset")
+                    if reported_begin is not None:
                         try:
-                            reported_begin_offset = int(entity["BeginOffset"])
-                            reported_end_offset = int(entity["EndOffset"])
-
-                            # If no Text provided, extract it using the offsets
-                            if (
-                                not entity_text
-                                and 0
-                                <= reported_begin_offset
-                                < reported_end_offset
-                                <= len(original_text)
-                            ):
-                                entity_text = original_text[
-                                    reported_begin_offset:reported_end_offset
-                                ]
+                            reported_begin = int(reported_begin)
                         except (ValueError, TypeError):
-                            pass
-
-                    # If we still don't have text, skip this entity
+                            reported_begin = None
+                    reported_end = _entity_get(entity, "EndOffset")
+                    if reported_end is not None:
+                        try:
+                            reported_end = int(reported_end)
+                        except (ValueError, TypeError):
+                            reported_end = None
+                    # If no Text, try to derive from reported offsets (for display/grouping only)
+                    if (
+                        not entity_text
+                        and reported_begin is not None
+                        and reported_end is not None
+                        and 0 <= reported_begin < reported_end <= len(original_text)
+                    ):
+                        entity_text = original_text[reported_begin:reported_end]
                     if not entity_text:
                         print(
-                            f"Warning: Entity of type '{entity_type}' has no Text value and invalid offsets"
+                            f"Warning: Entity of type '{entity_type_val}' has no Text value and invalid offsets"
                         )
                         continue
-
-                    # Search for the text in the original passage
-                    offsets = _find_text_in_passage(
-                        entity_text, original_text, reported_begin_offset
+                    raw_entities.append(
+                        {
+                            "Type": str(entity_type_val),
+                            "Text": entity_text,
+                            "Score": float(_entity_get(entity, "Score", 0.8)),
+                            "reported_begin": reported_begin,
+                        }
                     )
 
-                    if offsets:
-                        begin_offset, end_offset = offsets
-                        entity_dict = {
-                            "Type": entity_type,
-                            "BeginOffset": begin_offset,
-                            "EndOffset": end_offset,
-                            "Score": float(entity.get("Score", 0.8)),
-                            "Text": original_text[
-                                begin_offset:end_offset
-                            ],  # Use actual text from passage
-                        }
-                        entities.append(entity_dict)
-                    else:
+                # Group by entity text (normalised) so we can assign search positions by order
+                groups: Dict[str, List[Dict[str, Any]]] = {}
+                for rec in raw_entities:
+                    key = rec["Text"].strip().lower()
+                    if key not in groups:
+                        groups[key] = []
+                    groups[key].append(rec)
+
+                # For each group: find all positions by search only; sort entities by reported BeginOffset; assign 1:1
+                for _key, group in groups.items():
+                    # Use the first entity's Text for searching (exact string to find)
+                    search_text = group[0]["Text"]
+                    positions = _find_all_text_in_passage(search_text, original_text)
+                    if not positions:
                         print(
-                            f"Warning: Could not find text '{entity_text[:50]}...' in original passage for entity type '{entity_type}'"
+                            f"Warning: Could not find text '{search_text[:50]}...' in original passage"
+                        )
+                        continue
+                    # Order entities by reported BeginOffset (ascending); None goes last
+                    ordered = sorted(
+                        group,
+                        key=lambda r: (
+                            r["reported_begin"] is None,
+                            r["reported_begin"] or 0,
+                        ),
+                    )
+                    # Assign i-th entity (by reported order) to i-th search result (by position)
+                    for i in range(min(len(ordered), len(positions))):
+                        start, end = positions[i]
+                        rec = ordered[i]
+                        entities_out.append(
+                            {
+                                "Type": rec["Type"],
+                                "BeginOffset": start,
+                                "EndOffset": end,
+                                "Score": rec["Score"],
+                                "Text": original_text[start:end],
+                            }
                         )
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON from LLM response: {e}")
@@ -352,7 +443,7 @@ def parse_llm_entity_response(
         print("Warning: Could not find JSON in LLM response")
         print(f"Response text: {response_text[:500]}")
 
-    return entities
+    return entities_out
 
 
 def save_llm_prompt_response(
@@ -522,9 +613,37 @@ def call_llm_for_entity_detection(
     Returns:
         List of entity dictionaries
     """
+    # Ensure custom_instructions is a string (callers may pass bool or other types).
+    # Treat boolean True and the string "True" as empty (e.g. from an unchecked/empty Gradio box).
+    if not isinstance(custom_instructions, str):
+        custom_instructions = (
+            ""
+            if custom_instructions is True or not custom_instructions
+            else str(custom_instructions)
+        )
+    if (
+        isinstance(custom_instructions, str)
+        and custom_instructions.strip().lower() == "true"
+    ):
+        custom_instructions = ""
+
     # Determine inference method
     if inference_method is None:
         inference_method = CHOSEN_LLM_PII_INFERENCE_METHOD
+
+    # When custom instructions are provided, use the upgraded model if configured
+    custom_instructions_model = (
+        CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+        if isinstance(CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE, str)
+        and CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+        else ""
+    )
+    if (
+        custom_instructions.strip()
+        and model_choice == CLOUD_LLM_PII_MODEL_CHOICE
+        and custom_instructions_model
+    ):
+        model_choice = custom_instructions_model
 
     # Filter out CUSTOM_VLM_* entities (these are handled separately via VLM)
     filtered_entities = [

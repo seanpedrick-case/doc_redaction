@@ -20,6 +20,7 @@ from tools.config import (
     AWS_SECRET_KEY,
     BATCH_SIZE_DEFAULT,
     CLOUD_LLM_PII_MODEL_CHOICE,
+    CLOUD_SUMMARISATION_MODEL_CHOICE,
     DEDUPLICATION_THRESHOLD,
     DEFAULT_INFERENCE_SERVER_PII_MODEL,
     INFERENCE_SERVER_PII_OPTION,
@@ -124,8 +125,8 @@ Summary:"""
 ###
 def get_model_choice_from_inference_method(inference_method: str) -> str:
     """
-    Get the default model choice for a given inference method.
-    Uses the default values defined in config.py.
+    Get the default model choice for a given inference method (for summarisation).
+    Uses the default values defined in config.py (CLOUD_SUMMARISATION_MODEL_CHOICE for cloud).
 
     Args:
         inference_method: One of "aws-bedrock", "local", "inference-server"
@@ -135,7 +136,7 @@ def get_model_choice_from_inference_method(inference_method: str) -> str:
     """
     # Map inference method to model choice using defaults from config.py
     if inference_method == "aws-bedrock":
-        return CLOUD_LLM_PII_MODEL_CHOICE
+        return CLOUD_SUMMARISATION_MODEL_CHOICE
     elif inference_method == "local":
         return LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
     elif inference_method == "inference-server":
@@ -163,7 +164,10 @@ def get_model_source_from_model_choice(model_choice: str) -> str:
         return "Local"
     elif model_choice == DEFAULT_INFERENCE_SERVER_PII_MODEL:
         return "inference-server"
-    elif model_choice == CLOUD_LLM_PII_MODEL_CHOICE:
+    elif (
+        model_choice == CLOUD_LLM_PII_MODEL_CHOICE
+        or model_choice == CLOUD_SUMMARISATION_MODEL_CHOICE
+    ):
         return "AWS"
     else:
         # If it doesn't match any default, infer from common patterns
@@ -1130,6 +1134,8 @@ def summarise_document(
                 f.write(f"Input Tokens: {input_tokens}\n")
                 f.write(f"Output Tokens: {output_tokens}\n")
                 f.write(f"Maximum Context Length: {LLM_CONTEXT_LENGTH}\n")
+                f.write(f"Model: {model_choice}\n")
+                f.write(f"Temperature: {temperature}\n")
                 f.write("=" * 80 + "\n\n")
                 f.write("=" * 80 + "\n")
                 f.write("PROMPT\n")
@@ -1178,6 +1184,8 @@ def summarise_document(
                 f.write(f"Input Tokens: {overall_input_tokens}\n")
                 f.write(f"Output Tokens: {overall_output_tokens}\n")
                 f.write(f"Maximum Context Length: {LLM_CONTEXT_LENGTH}\n")
+                f.write(f"Model: {model_choice}\n")
+                f.write(f"Temperature: {temperature}\n")
                 f.write("=" * 80 + "\n\n")
                 f.write("=" * 80 + "\n")
                 f.write("PROMPT\n")
