@@ -112,6 +112,10 @@ if LOAD_PADDLE_AT_STARTUP is True:
         )
 
 
+# Module-level refs to loaded VLM model/processor (set when SHOW_VLM_MODEL_OPTIONS and model is loaded). Used by LLM entity detection when USE_TRANFORMERS_VLM_MODEL_AS_LLM.
+_loaded_vlm_model = None
+_loaded_vlm_processor = None
+
 # Define module-level defaults for model parameters (always available for import)
 # These will be overridden inside the SHOW_VLM_MODEL_OPTIONS block if enabled
 model_default_prompt = """Read all the text in the image."""
@@ -499,7 +503,23 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     if VLM_SEED is not None:
         model_default_seed = VLM_SEED
 
+    global _loaded_vlm_model, _loaded_vlm_processor
+    _loaded_vlm_model = model
+    _loaded_vlm_processor = processor
+
     print(f"Successfully loaded {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
+
+
+def get_loaded_vlm_model_and_tokenizer():
+    """
+    Return the currently loaded VLM model and its tokenizer for use by LLM tasks (e.g. entity detection) when USE_TRANFORMERS_VLM_MODEL_AS_LLM is True.
+    Returns (model, tokenizer) or (None, None) if the VLM has not been loaded yet.
+    """
+    global _loaded_vlm_model, _loaded_vlm_processor
+    if _loaded_vlm_model is None or _loaded_vlm_processor is None:
+        return None, None
+    tokenizer = getattr(_loaded_vlm_processor, "tokenizer", _loaded_vlm_processor)
+    return _loaded_vlm_model, tokenizer
 
 
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)

@@ -2002,7 +2002,7 @@ with blocks:
                     "paddle",
                     CHOSEN_REDACT_ENTITIES,
                     CHOSEN_LLM_ENTITIES,
-                    "Redact personal information only directly about Lauren. Redact any university names with the label UNIVERSITY.",
+                    "Redact personal information about Lauren with the label LAUREN. Redact any university names with the label UNIVERSITY.",
                 ],
             )
             ocr_example_labels.append("Example email LLM PII detection")

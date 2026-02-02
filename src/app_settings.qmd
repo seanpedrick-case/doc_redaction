@@ -515,8 +515,12 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** If set to `"True"`, loads the PaddleOCR model at application startup.
     * **Default Value:** `"False"`
 
+* **`USE_TRANFORMERS_VLM_MODEL_AS_LLM`**
+    * **Description:** When set to `"True"`, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (e.g. PII entity detection in `tools/llm_entity_detection.py`) as for VLM/OCR. Overrides `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE` when local transformers LLM is selected. The VLM model must be loaded first (e.g. by running VLM OCR); otherwise the standard PII model is used.
+    * **Default Value:** `"False"`
+
 * **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`**
-    * **Description:** Identifier for the local transformers LLM used for PII detection (e.g. `"gemma-3-4b"`, `"qwen-3-4b"`). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, gpt-oss-20b, granite-4-tiny, granite-4-micro.
+    * **Description:** Identifier for the local transformers LLM used for PII detection (e.g. `"gemma-3-4b"`, `"qwen-3-4b"`). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, gpt-oss-20b, granite-4-tiny, granite-4-micro. Ignored for local LLM when `USE_TRANFORMERS_VLM_MODEL_AS_LLM` is `"True"` (the VLM model is used instead).
     * **Default Value:** `"gemma-3-4b"`
 
 * **`LOCAL_TRANSFORMERS_LLM_PII_REPO_ID`**, **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE`**, **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER`**

@@ -886,6 +886,11 @@ SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL = get_or_create_env_var(
     "SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL", "Qwen3-VL-8B-Instruct"
 )  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "Qwen3-VL-30B-A3B-Instruct", "Qwen3-VL-235B-A22B-Instruct", "PaddleOCR-VL"
 
+# When True, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (e.g. PII entity detection) as for VLM/OCR. Overrides LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for local LLM.
+USE_TRANFORMERS_VLM_MODEL_AS_LLM = convert_string_to_boolean(
+    get_or_create_env_var("USE_TRANFORMERS_VLM_MODEL_AS_LLM", "False")
+)
+
 if SHOW_VLM_MODEL_OPTIONS:
     VLM_MODEL_OPTIONS = [
         SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
@@ -1287,6 +1292,17 @@ if (
     model_full_names.append(display_name)
     model_short_names.append(display_name)
     model_source.append("Local")
+
+# When USE_TRANFORMERS_VLM_MODEL_AS_LLM is True, register the VLM model as a Local option so LLM entity detection can use it
+if (
+    USE_TRANFORMERS_VLM_MODEL_AS_LLM
+    and SHOW_VLM_MODEL_OPTIONS
+    and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+):
+    if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL not in model_full_names:
+        model_full_names.append(SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL)
+        model_short_names.append(SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL)
+        model_source.append("Local")
 
 amazon_models = [
     "anthropic.claude-3-haiku-20240307-v1:0",

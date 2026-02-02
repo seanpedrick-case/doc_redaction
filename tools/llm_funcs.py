@@ -110,11 +110,13 @@ from tools.config import (
     NUMBER_OF_RETRY_ATTEMPTS,
     QUANTISE_TRANSFORMERS_LLM_MODELS,
     REASONING_SUFFIX,
+    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SPECULATIVE_DECODING,
     TIMEOUT_WAIT,
     USE_LLAMA_CPP,
     USE_LLAMA_SWAP,
+    USE_TRANFORMERS_VLM_MODEL_AS_LLM,
 )
 
 
@@ -1398,7 +1400,21 @@ def send_request(
                     num_transformer_generated_tokens,
                 )
     elif "Local" in model_source:
-        # This is the local model
+        # This is the local model. When USE_TRANFORMERS_VLM_MODEL_AS_LLM and model_choice is the VLM model, use the loaded VLM model/tokenizer.
+        vlm_model, vlm_tokenizer = None, None
+        if (
+            USE_TRANFORMERS_VLM_MODEL_AS_LLM
+            and model_choice == SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+        ):
+            try:
+                from tools.run_vlm import get_loaded_vlm_model_and_tokenizer
+
+                vlm_model, vlm_tokenizer = get_loaded_vlm_model_and_tokenizer()
+            except Exception as e:
+                print(
+                    f"Could not get VLM model for LLM task (USE_TRANFORMERS_VLM_MODEL_AS_LLM): {e}"
+                )
+
         for i in progress_bar:
             try:
                 print("Calling local model, attempt", i + 1)
@@ -1406,25 +1422,29 @@ def send_request(
                 gen_config = LlamaCPPGenerationConfig()
                 gen_config.update_temp(temperature)
 
-                # if USE_LLAMA_CPP == "True":
-                #     response = call_llama_cpp_chatmodel(
-                #         prompt, system_prompt, gen_config, model=local_model
-                #     )
-
-                # else:
-                # Call transformers model using global model and tokeniser objects
-                (
-                    response,
-                    num_transformer_input_tokens,
-                    num_transformer_generated_tokens,
-                ) = call_transformers_model(
-                    prompt,
-                    system_prompt,
-                    gen_config,
-                    # model=local_model,
-                    # tokenizer=tokenizer,
-                    # assistant_model=assistant_model,
-                )
+                # Call transformers model; use VLM model/tokenizer when USE_TRANFORMERS_VLM_MODEL_AS_LLM and available
+                if vlm_model is not None and vlm_tokenizer is not None:
+                    (
+                        response,
+                        num_transformer_input_tokens,
+                        num_transformer_generated_tokens,
+                    ) = call_transformers_model(
+                        prompt,
+                        system_prompt,
+                        gen_config,
+                        model=vlm_model,
+                        tokenizer=vlm_tokenizer,
+                    )
+                else:
+                    (
+                        response,
+                        num_transformer_input_tokens,
+                        num_transformer_generated_tokens,
+                    ) = call_transformers_model(
+                        prompt,
+                        system_prompt,
+                        gen_config,
+                    )
                 response_text = response
 
                 break

@@ -62,6 +62,7 @@ from tools.config import (
     TESSERACT_SEGMENTATION_LEVEL,
     TESSERACT_WORD_LEVEL_OCR,
     USE_LLAMA_SWAP,
+    USE_TRANFORMERS_VLM_MODEL_AS_LLM,
     VLM_MAX_IMAGE_SIZE,
 )
 from tools.helper_functions import clean_unicode_text, get_system_font_path
@@ -8263,15 +8264,22 @@ class CustomImageAnalyzerEngine:
             if text_analyzer_kwargs.get("inference_method") is None:
                 text_analyzer_kwargs["inference_method"] = "local"
 
-            # Set model choice if not already set - use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            # Set model choice if not already set - use VLM model when USE_TRANFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             if text_analyzer_kwargs.get("model_choice") is None:
                 text_analyzer_kwargs["model_choice"] = (
-                    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                    else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                 )
 
             # Update model_choice to use the value from text_analyzer_kwargs
             model_choice = text_analyzer_kwargs.get(
-                "model_choice", LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                "model_choice",
+                (
+                    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                    else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                ),
             )
 
             # # Load PII-specific model and tokenizer if not already provided
@@ -10163,15 +10171,22 @@ def run_page_text_redaction(
         if text_analyzer_kwargs.get("inference_method") is None:
             text_analyzer_kwargs["inference_method"] = "local"
 
-        # Set model choice if not already set - use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+        # Set model choice if not already set - use VLM model when USE_TRANFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
         if text_analyzer_kwargs.get("model_choice") is None:
             text_analyzer_kwargs["model_choice"] = (
-                LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             )
 
         # Update model_choice to use the value from text_analyzer_kwargs
         model_choice = text_analyzer_kwargs.get(
-            "model_choice", LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            "model_choice",
+            (
+                SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            ),
         )
 
         # Load PII-specific model and tokenizer if not already provided
