@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.7.31">
+<meta name="generator" content="quarto-1.8.26">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -67,14 +67,15 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <meta name="quarto:offset" content="../">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/axe/axe-check.js" type="module"></script>
 <script src="../site_libs/quarto-html/popper.min.js"></script>
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-e1a5c8363afafaef2c763b6775fbf3ca.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-587c61ba64f3a5504c4d52d930310e48.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-dfb324f25d9b1687192fa8be62ac8f9c.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -177,10 +178,11 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#text-extraction" id="toc-text-extraction" class="nav-link" data-scroll-target="#text-extraction">Text extraction</a></li>
   <li><a href="#enable-aws-textract-signature-extraction" id="toc-enable-aws-textract-signature-extraction" class="nav-link" data-scroll-target="#enable-aws-textract-signature-extraction">Enable AWS Textract signature extraction</a></li>
   <li><a href="#pii-redaction-method" id="toc-pii-redaction-method" class="nav-link" data-scroll-target="#pii-redaction-method">PII redaction method</a></li>
+  <li><a href="#allow-list-deny-list-and-whole-page-redaction" id="toc-allow-list-deny-list-and-whole-page-redaction" class="nav-link" data-scroll-target="#allow-list-deny-list-and-whole-page-redaction">Allow list, deny list, and whole-page redaction</a></li>
   <li><a href="#optional---costs-and-time-estimation" id="toc-optional---costs-and-time-estimation" class="nav-link" data-scroll-target="#optional---costs-and-time-estimation">Optional - costs and time estimation</a></li>
   <li><a href="#optional---cost-code-selection" id="toc-optional---cost-code-selection" class="nav-link" data-scroll-target="#optional---cost-code-selection">Optional - cost code selection</a></li>
   <li><a href="#optional---submit-whole-documents-to-textract-api" id="toc-optional---submit-whole-documents-to-textract-api" class="nav-link" data-scroll-target="#optional---submit-whole-documents-to-textract-api">Optional - Submit whole documents to Textract API</a></li>
-  <li><a href="#redact-the-document" id="toc-redact-the-document" class="nav-link" data-scroll-target="#redact-the-document">Redact the document</a></li>
+  <li><a href="#run-redaction" id="toc-run-redaction" class="nav-link" data-scroll-target="#run-redaction">Run redaction</a></li>
   <li><a href="#redaction-outputs" id="toc-redaction-outputs" class="nav-link" data-scroll-target="#redaction-outputs">Redaction outputs</a></li>
   <li><a href="#additional-aws-textract-local-ocr-outputs" id="toc-additional-aws-textract-local-ocr-outputs" class="nav-link" data-scroll-target="#additional-aws-textract-local-ocr-outputs">Additional AWS Textract / local OCR outputs</a></li>
   <li><a href="#downloading-output-files-from-previous-redaction-tasks" id="toc-downloading-output-files-from-previous-redaction-tasks" class="nav-link" data-scroll-target="#downloading-output-files-from-previous-redaction-tasks">Downloading output files from previous redaction tasks</a></li>
@@ -190,9 +192,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <ul class="collapse">
   <li><a href="#custom-allow-deny-and-page-redaction-lists" id="toc-custom-allow-deny-and-page-redaction-lists" class="nav-link" data-scroll-target="#custom-allow-deny-and-page-redaction-lists">Custom allow, deny, and page redaction lists</a></li>
   <li><a href="#redacting-additional-types-of-personal-information" id="toc-redacting-additional-types-of-personal-information" class="nav-link" data-scroll-target="#redacting-additional-types-of-personal-information">Redacting additional types of personal information</a></li>
-  </ul></li>
   <li><a href="#redacting-only-specific-pages" id="toc-redacting-only-specific-pages" class="nav-link" data-scroll-target="#redacting-only-specific-pages">Redacting only specific pages</a></li>
   <li><a href="#handwriting-and-signature-redaction" id="toc-handwriting-and-signature-redaction" class="nav-link" data-scroll-target="#handwriting-and-signature-redaction">Handwriting and signature redaction</a></li>
+  </ul></li>
   <li><a href="#reviewing-and-modifying-suggested-redactions" id="toc-reviewing-and-modifying-suggested-redactions" class="nav-link" data-scroll-target="#reviewing-and-modifying-suggested-redactions">Reviewing and modifying suggested redactions</a>
   <ul class="collapse">
   <li><a href="#uploading-documents-for-review" id="toc-uploading-documents-for-review" class="nav-link" data-scroll-target="#uploading-documents-for-review">Uploading documents for review</a></li>
@@ -251,7 +253,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#using-an-alternative-ocr-model" id="toc-using-an-alternative-ocr-model" class="nav-link" data-scroll-target="#using-an-alternative-ocr-model">Using an alternative OCR model</a></li>
   <li><a href="#inference-server-options" id="toc-inference-server-options" class="nav-link" data-scroll-target="#inference-server-options">Inference server options</a></li>
   <li><a href="#identifying-people-and-signatures-with-vlms" id="toc-identifying-people-and-signatures-with-vlms" class="nav-link" data-scroll-target="#identifying-people-and-signatures-with-vlms">Identifying people and signatures with VLMs</a></li>
+  <li><a href="#pii-identification-with-llms" id="toc-pii-identification-with-llms" class="nav-link" data-scroll-target="#pii-identification-with-llms">PII identification with LLMs</a></li>
   </ul></li>
+  <li><a href="#document-summarisation-tab" id="toc-document-summarisation-tab" class="nav-link" data-scroll-target="#document-summarisation-tab">Document summarisation tab</a></li>
   <li><a href="#command-line-interface-cli" id="toc-command-line-interface-cli" class="nav-link" data-scroll-target="#command-line-interface-cli">Command Line Interface (CLI)</a>
   <ul class="collapse">
   <li><a href="#getting-started-with-the-cli" id="toc-getting-started-with-the-cli" class="nav-link" data-scroll-target="#getting-started-with-the-cli">Getting started with the CLI</a></li>
@@ -260,6 +264,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#tabular-data-redaction" id="toc-tabular-data-redaction" class="nav-link" data-scroll-target="#tabular-data-redaction">Tabular data redaction</a></li>
   <li><a href="#duplicate-detection" id="toc-duplicate-detection" class="nav-link" data-scroll-target="#duplicate-detection">Duplicate detection</a></li>
   <li><a href="#aws-textract-operations" id="toc-aws-textract-operations" class="nav-link" data-scroll-target="#aws-textract-operations">AWS Textract operations</a></li>
+  <li><a href="#document-summarisation" id="toc-document-summarisation" class="nav-link" data-scroll-target="#document-summarisation">Document summarisation</a></li>
   <li><a href="#common-cli-options" id="toc-common-cli-options" class="nav-link" data-scroll-target="#common-cli-options">Common CLI options</a></li>
   <li><a href="#output-files" id="toc-output-files" class="nav-link" data-scroll-target="#output-files">Output files</a></li>
   </ul></li>
@@ -333,6 +338,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <h3 class="anchored" data-anchor-id="features-for-expert-userssystem-administrators">Features for expert users/system administrators</h3>
 <ul>
 <li><a href="#advanced-ocr-options-hybrid-ocr">Advanced OCR options (Hybrid OCR)</a></li>
+<li><a href="#pii-identification-with-llms">PII identification with LLMs</a></li>
+<li><a href="#document-summarisation-tab">Document summarisation tab</a></li>
 <li><a href="#command-line-interface-cli">Command Line Interface (CLI)</a></li>
 </ul>
 </section>
@@ -378,8 +385,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="basic-redaction" class="level2">
 <h2 class="anchored" data-anchor-id="basic-redaction">Basic redaction</h2>
-<p>The document redaction app can detect personally-identifiable information (PII) in documents. Documents can be redacted directly, or suggested redactions can be reviewed and modified using a grapical user interface. Basic document redaction can be performed quickly using the default options.</p>
-<p>Download the example PDFs above to your computer. Open up the redaction app with the link provided by email.</p>
+<p>The document redaction app can detect personally-identifiable information (PII) in documents. Documents can be redacted directly, or suggested redactions can be reviewed and modified using a graphical user interface. Basic document redaction can be performed quickly using the default options.</p>
+<p>Download the example PDFs above to your computer. Open the redaction app with the link provided by email.</p>
+<p><strong>Where to work:</strong> All of the main redaction options and the redact button are on the <strong>‘Redact PDFs/images’</strong> tab. When the quickstart walkthrough is not shown, this tab opens with a <strong>‘Redaction settings’</strong> accordion <strong>open by default</strong>, so you can upload files and adjust options without switching tabs.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/file_upload_highlight.PNG" class="img-fluid figure-img"></p>
@@ -388,31 +396,54 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </div>
 <section id="upload-files-to-the-app" class="level3">
 <h3 class="anchored" data-anchor-id="upload-files-to-the-app">Upload files to the app</h3>
-<p>The ‘Redact PDFs/images tab’ currently accepts PDFs and image files (JPG, PNG) for redaction. Click on the ‘Drop files here or Click to Upload’ area of the screen, and select one of the three different <a href="#example-data-files">example files</a> (they should all be stored in the same folder if you want them to be redacted at the same time).</p>
+<p>On the <strong>‘Redact PDFs/images’</strong> tab, the <strong>‘Redaction settings’</strong> accordion at the top accepts PDFs and image files (JPG, PNG) for redaction. Click on the <strong>‘Drop files here or Click to Upload’</strong> area and select one or more <a href="#example-data-files">example files</a> (store them in the same folder if you want to redact several at once).</p>
 </section>
 <section id="text-extraction" class="level3">
 <h3 class="anchored" data-anchor-id="text-extraction">Text extraction</h3>
-<p>You can modify default text extraction methods by clicking on the ‘Change default text extraction method…’ box’.</p>
-<p>Here you can select one of the three text extraction options: - <strong>‘Local model - selectable text’</strong> - This will read text directly from PDFs that have selectable text to redact (using PikePDF). This is fine for most PDFs, but will find nothing if the PDF does not have selectable text, and it is not good for handwriting or signatures. If it encounters an image file, it will send it onto the second option below. - <strong>‘Local OCR model - PDFs without selectable text’</strong> - This option will use a simple Optical Character Recognition (OCR) model (Tesseract) to pull out text from a PDF/image that it ‘sees’. This can handle most typed text in PDFs/images without selectable text, but struggles with handwriting/signatures. If you are interested in the latter, then you should use the third option if available. - <strong>‘AWS Textract service - all PDF types’</strong> - Only available for instances of the app running on AWS. AWS Textract is a service that performs OCR on documents within their secure service. This is a more advanced version of OCR compared to the local option, and carries a (relatively small) cost. Textract excels in complex documents based on images, or documents that contain a lot of handwriting and signatures.</p>
+<p>Inside the same <strong>‘Redaction settings’</strong> accordion, open the nested accordion <strong>‘Change default redaction settings’</strong> (it may already be open). If enabled, under <strong>‘Change default text extraction OCR method’</strong> you can choose how text is extracted:</p>
+<ul>
+<li><strong>‘Local model - selectable text’</strong> - Reads text directly from PDFs that have selectable text (using PikePDF). Best for most PDFs; finds nothing if the PDF has no selectable text and is not suitable for handwriting or signatures. Image files are passed to the next option.</li>
+<li><strong>‘Local OCR model - PDFs without selectable text’</strong> - Uses a local OCR model (Tesseract) to extract text from PDFs/images. Handles most typed text without selectable text but is less reliable for handwriting and signatures; use the AWS option below if you need those.</li>
+<li><strong>‘AWS Textract service - all PDF types’</strong> - Available when the app is configured for AWS. Textract runs in the cloud and is more capable for complex layouts, handwriting, and signatures. It incurs a (relatively small) cost per page.</li>
+</ul>
 </section>
 <section id="enable-aws-textract-signature-extraction" class="level3">
 <h3 class="anchored" data-anchor-id="enable-aws-textract-signature-extraction">Enable AWS Textract signature extraction</h3>
-<p>If you chose the AWS Textract service above, you can choose if you want handwriting and/or signatures redacted by default. Choosing signatures here will have a cost implication, as identifying signatures will cost ~£2.66 ($3.50) per 1,000 pages vs ~£1.14 ($1.50) per 1,000 pages without signature detection.</p>
+<p>If you select <strong>‘AWS Textract service - all PDF types’</strong> as the text extraction method, an accordion <strong>‘Enable AWS Textract signature detection (default is off)’</strong> appears. Open it to turn on handwriting and/or signature detection. Enabling signatures has a cost impact (~£2.66 ($3.50) per 1,000 pages vs ~£1.14 ($1.50) per 1,000 pages without signature detection).</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_handwriting_signatures.PNG" class="img-fluid figure-img"></p>
 <figcaption>AWS Textract handwriting and signature options</figcaption>
 </figure>
 </div>
-<p><strong>NOTE:</strong> it is also possible to enable form extraction, layout extraction, and table extraction with AWS Textract. This is not enabled by default, but it is possible for your system admin to enable this feature in the config file.</p>
+<p><strong>NOTE:</strong> Form, layout, and table extraction with AWS Textract can be enabled by your system administrator in the config; they are off by default.</p>
 </section>
 <section id="pii-redaction-method" class="level3">
 <h3 class="anchored" data-anchor-id="pii-redaction-method">PII redaction method</h3>
-<p>If you are running with the AWS service enabled, here you will also have a choice for PII redaction method: - <strong>‘Only extract text - (no redaction)’</strong> - If you are only interested in getting the text out of the document for further processing (e.g.&nbsp;to find duplicate pages, or to review text on the Review redactions page) - <strong>‘Local’</strong> - This uses the spacy package to rapidly detect PII in extracted text. This method is often sufficient if you are just interested in redacting specific terms defined in a custom list. - <strong>‘AWS Comprehend’</strong> - This method calls an AWS service to provide more accurate identification of PII in extracted text.</p>
+<p>At the start of the <strong>‘Change PII identification method’</strong> accordion (under <strong>‘Change default redaction settings’</strong>) you will see <strong>‘Choose redaction method’</strong>, a radio with three options. <strong>‘Extract text only’</strong> runs text extraction without redaction—useful when you only need OCR output or want to review text before redacting; when selected, the <strong>‘Select entity types to redact’</strong> and <strong>‘Terms to always include or exclude in redactions…’</strong> accordions are hidden. <strong>‘Redact all PII’</strong> (the default) uses the chosen PII detection method to find and redact personal information; the entity-types accordion is shown and the terms (allow/deny/page) accordion is hidden. <strong>‘Redact selected terms’</strong> shows both accordions and focuses on custom allow/deny lists and entity types (e.g.&nbsp;CUSTOM) so you can redact only the terms you specify.</p>
+<p>Still under <strong>‘Change default redaction settings’</strong>, you may see the <strong>‘Change PII identification method’</strong> section, if enabled, which lets you choose how PII is detected:</p>
+<ul>
+<li><strong>‘Only extract text - (no redaction)’</strong> - Use this if you only need extracted text (e.g.&nbsp;for duplicate detection or to review on the Review redactions tab).</li>
+<li><strong>‘Local’</strong> - Uses a local model (e.g.&nbsp;spaCy) to detect PII at no extra cost. Often enough when you mainly care about custom terms (see <a href="#customising-redaction-options">Customising redaction options</a>).</li>
+<li><strong>‘AWS Comprehend’</strong> - Uses AWS Comprehend for PII detection when the app is configured for AWS; typically more accurate but incurs a cost (around £0.0075 ($0.01) per 10,000 characters).</li>
+</ul>
+<p>Under <strong>‘Select entity types to redact’</strong> you can choose which types of PII to redact (e.g.&nbsp;names, emails, dates). The dropdown label varies by method (Local, AWS Comprehend, or LLM); click in the box or near the dropdown arrow to see the full list.</p>
+</section>
+<section id="allow-list-deny-list-and-whole-page-redaction" class="level3">
+<h3 class="anchored" data-anchor-id="allow-list-deny-list-and-whole-page-redaction">Allow list, deny list, and whole-page redaction</h3>
+<p>On the same <strong>‘Redaction settings’</strong> accordion you will see <strong>‘Terms to always include or exclude in redactions, and whole page redaction’</strong>. Here you can:</p>
+<ul>
+<li><strong>Allow list</strong> – Terms that should never be redacted.</li>
+<li><strong>Deny list</strong> – Terms that should always be redacted.</li>
+<li><strong>Fully redact these pages</strong> – Page numbers that should be fully redacted.</li>
+<li><strong>Redact duplicate pages</strong> – Checkbox: when enabled, the app identifies duplicate pages and redacts them in the same run (see <a href="#identifying-and-redacting-duplicate-pages">Identifying and redacting duplicate pages</a>).</li>
+<li><strong>Maximum spelling mistakes for matching deny list terms</strong> – Number (0–9) used for <a href="#fuzzy-search-and-redaction">fuzzy matching</a> when <strong>CUSTOM_FUZZY</strong> is selected in the entity list.</li>
+</ul>
+<p>You can add or remove terms directly in these controls. To load many terms from a file (e.g.&nbsp;a CSV), use the <strong>Settings</strong> tab; see <a href="#custom-allow-deny-and-page-redaction-lists">Custom allow, deny, and page redaction lists</a>.</p>
 </section>
 <section id="optional---costs-and-time-estimation" class="level3">
 <h3 class="anchored" data-anchor-id="optional---costs-and-time-estimation">Optional - costs and time estimation</h3>
-<p>If the option is enabled (by your system admin, in the config file), you will see a cost and time estimate for the redaction process. ‘Existing Textract output file found’ will be checked automatically if previous Textract text extraction files exist in the output folder, or have been <a href="#aws-textract-outputs">previously uploaded by the user</a> (saving time and money for redaction).</p>
+<p>If your administrator has enabled it (in the config), an <strong>‘Estimated costs and time taken’</strong> section appears on the <strong>‘Redact PDFs/images’</strong> tab. <strong>‘Existing Textract output file found’</strong> (or <strong>‘Existing local OCR output file found’</strong>) is ticked automatically when previous extraction output exists in the output folder or was <a href="#aws-textract-outputs">uploaded by you</a>, which can save time and cost.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/costs_and_time.PNG" class="img-fluid figure-img"></p>
@@ -422,18 +453,17 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="optional---cost-code-selection" class="level3">
 <h3 class="anchored" data-anchor-id="optional---cost-code-selection">Optional - cost code selection</h3>
-<p>If the option is enabled (by your system admin, in the config file), you may be prompted to select a cost code before continuing with the redaction task.</p>
+<p>If cost codes are enabled, an <strong>‘Assign task to cost code’</strong> section appears on the same tab. Choose a cost code before running redaction. You can search the table or type in the <strong>‘Choose cost code for analysis’</strong> dropdown to filter.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/cost_code_selection.PNG" class="img-fluid figure-img"></p>
 <figcaption>Cost code selection</figcaption>
 </figure>
 </div>
-<p>The relevant cost code can be found either by: 1. Using the search bar above the data table to find relevant cost codes, then clicking on the relevant row, or 2. typing it directly into the dropdown to the right, where it should filter as you type.</p>
 </section>
 <section id="optional---submit-whole-documents-to-textract-api" class="level3">
 <h3 class="anchored" data-anchor-id="optional---submit-whole-documents-to-textract-api">Optional - Submit whole documents to Textract API</h3>
-<p>If this option is enabled (by your system admin, in the config file), you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the ‘Redact document’ process described here). This feature is described in more detail in the <a href="#using-the-aws-textract-document-api">advanced user guide</a>.</p>
+<p>If enabled by your administrator, an accordion <strong>‘Submit whole document to AWS Textract API (quickest text extraction for large documents)’</strong> appears on the <strong>‘Redact PDFs/images’</strong> tab. This sends whole documents to Textract for fast extraction, separate from the main redaction flow. Details are in the <a href="#using-the-aws-textract-document-api">advanced user guide</a>.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_document_api.PNG" class="img-fluid figure-img"></p>
@@ -441,12 +471,13 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </figure>
 </div>
 </section>
-<section id="redact-the-document" class="level3">
-<h3 class="anchored" data-anchor-id="redact-the-document">Redact the document</h3>
-<p>Click ‘Redact document’. After loading in the document, the app should be able to process about 30 pages per minute (depending on redaction methods chose above). When ready, you should see a message saying that processing is complete, with output files appearing in the bottom right.</p>
+<section id="run-redaction" class="level3">
+<h3 class="anchored" data-anchor-id="run-redaction">Run redaction</h3>
+<p>At the bottom of the <strong>‘Redact PDFs/images’</strong> tab, open the <strong>‘Extract text and redact document’</strong> accordion and click <strong>‘Extract text and redact document’</strong>. The app will process the document (typically around 30 pages per minute, depending on options). When finished, a message will indicate completion and output files will appear in the <strong>‘Output files’</strong> area. Use <strong>‘Review and modify redactions’</strong> to open the review tab.</p>
 </section>
 <section id="redaction-outputs" class="level3">
 <h3 class="anchored" data-anchor-id="redaction-outputs">Redaction outputs</h3>
+<p>After you click <strong>‘Extract text and redact document’</strong>, the <strong>‘Output files’</strong> area on the <strong>‘Redact PDFs/images’</strong> tab shows:</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/redaction_outputs.PNG" class="img-fluid figure-img"></p>
@@ -454,27 +485,25 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </figure>
 </div>
 <ul>
-<li><strong>‘…redacted.pdf’</strong> files contain the original pdf with suggested redacted text deleted and replaced by a black box on top of the document.</li>
-<li><strong>‘…redactions_for_review.pdf’</strong> files contain the original PDF with redaction boxes overlaid but the original text still visible underneath. This file is designed for use in Adobe Acrobat and other PDF viewers where you can see the suggested redactions without the text being permanently removed. This is particularly useful for reviewing redactions before finalising them.</li>
-<li><strong>‘…ocr_results.csv’</strong> files contain the line-by-line text outputs from the entire document. This file can be useful for later searching through for any terms of interest in the document (e.g.&nbsp;using Excel or a similar program).</li>
-<li><strong>‘…review_file.csv’</strong> files are the review files that contain details and locations of all of the suggested redactions in the document. This file is key to the <a href="#reviewing-and-modifying-suggested-redactions">review process</a>, and should be downloaded to use later for this.</li>
+<li><strong>‘…redacted.pdf’</strong> – The original PDF with suggested redactions applied (text removed and replaced by a black box).</li>
+<li><strong>‘…redactions_for_review.pdf’</strong> – The original PDF with redaction boxes overlaid but text still visible. Use this in Adobe Acrobat or other PDF viewers to review suggested redactions before finalising.</li>
+<li><strong>‘…ocr_results.csv’</strong> – Line-by-line extracted text from the document (useful for searching in Excel or similar).</li>
+<li><strong>‘…review_file.csv’</strong> – Details and locations of all suggested redactions; required for the <a href="#reviewing-and-modifying-suggested-redactions">review process</a>.</li>
 </ul>
 </section>
 <section id="additional-aws-textract-local-ocr-outputs" class="level3">
 <h3 class="anchored" data-anchor-id="additional-aws-textract-local-ocr-outputs">Additional AWS Textract / local OCR outputs</h3>
-<p>If you have used the AWS Textract option for extracting text, you may also see a ’…_textract.json’ file. This file contains all the relevant extracted text information that comes from the AWS Textract service. You can keep this file and upload it at a later date alongside your input document, which will enable you to skip calling AWS Textract every single time you want to do a redaction task, as follows:</p>
+<p>If you used <strong>AWS Textract</strong> for text extraction, you may also see a **’…_textract.json’** file. You can keep this and upload it later with your input document to skip calling Textract again for the same document:</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/document_upload_with_textract.PNG" class="img-fluid figure-img"></p>
 <figcaption>Document upload alongside Textract</figcaption>
 </figure>
 </div>
-<section id="additional-outputs-in-the-log-file-outputs" class="level4">
-<h4 class="anchored" data-anchor-id="additional-outputs-in-the-log-file-outputs">Additional outputs in the log file outputs</h4>
-<p>On the Redaction settings tab, near the bottom of the pagethere is a section called ‘Log file outputs’. This section contains the following files:</p>
-<p>You may see a ’…_ocr_results_with_words… .json’ file. This file works in the same way as the AWS Textract .json results described above, and can be uploaded alongside an input document to save time on text extraction in future in the same way.</p>
-<p>Also you will see a ‘decision_process_table.csv’ file. This file contains a table of the decisions made by the app for each page of the document. This can be useful for debugging and understanding the decisions made by the app.</p>
-<p>Additionally, if the option is enabled by your system administrator, on this tab you may see an image of the output from the OCR model used to extract the text from the document, an image ending with page number and ’_visualisations.jpg’. A separate image will be created for each page of the document like the one below. This can be useful for seeing at a glance whether the text extraction process for a page was successful, and whether word-level bounding boxes are correctly positioned.</p>
+<p>Similarly, if you used local OCR you may see a **’…_ocr_results_with_words… .json’** file, which can be uploaded with the input document to save time on future runs.</p>
+<section id="log-file-outputs-and-other-optional-outputs" class="level4">
+<h4 class="anchored" data-anchor-id="log-file-outputs-and-other-optional-outputs">Log file outputs and other optional outputs</h4>
+<p>On the <strong>Settings</strong> tab, open the <strong>‘Log file outputs’</strong> accordion to access log and optional output files. You may see a <strong>‘decision_process_table.csv’</strong> (decisions made per page) and, if enabled by your administrator, **’…_visualisations.jpg’** images showing OCR bounding boxes per page:</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/example_complaint_letter_1_textract_visualisations.jpg" class="img-fluid figure-img"></p>
@@ -485,7 +514,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="downloading-output-files-from-previous-redaction-tasks" class="level3">
 <h3 class="anchored" data-anchor-id="downloading-output-files-from-previous-redaction-tasks">Downloading output files from previous redaction tasks</h3>
-<p>If you are logged in via AWS Cognito and you lose your app page for some reason (e.g.&nbsp;from a crash, reloading), it is possible recover your previous output files, provided the server has not been shut down since you redacted the document. If enabled, this feature can be found at the bottom of the front tab, called ‘View and download all output files from this session’. If you open this and click on ‘Refresh files in output folder’ you should see a file directory of all files. If you click on the box next to a given file, it should appear below for you to download.</p>
+<p>If you are logged in via AWS Cognito and lose the app page (e.g.&nbsp;after a crash or reload), you may still recover output files if the server has not been restarted. When enabled, open the <strong>Settings</strong> tab and use <strong>‘View and download all output files from this session’</strong> at the bottom. Click <strong>‘Refresh files in output folder’</strong>, then tick the box next to a file to display and download it.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/view_all_output_files.PNG" class="img-fluid figure-img"></p>
@@ -495,15 +524,16 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="basic-redaction-summary" class="level3">
 <h3 class="anchored" data-anchor-id="basic-redaction-summary">Basic redaction summary</h3>
-<p>We have covered redacting documents with the default redaction options. The ‘…redacted.pdf’ file output may be enough for your purposes. But it is very likely that you will need to customise your redaction options, which we will cover below.</p>
+<p>You can redact documents using the options on the <strong>‘Redact PDFs/images’</strong> tab. The <strong>‘…redacted.pdf’</strong> output may be sufficient, or you may want to <a href="#customising-redaction-options">customise redaction options</a> (allow/deny lists, entity types, page range, etc.) as described below.</p>
 </section>
 </section>
 <section id="customising-redaction-options" class="level2">
 <h2 class="anchored" data-anchor-id="customising-redaction-options">Customising redaction options</h2>
-<p>On the ‘Redaction settings’ page, there are a number of options that you can tweak to better match your use case and needs.</p>
+<p>Most options are on the <strong>‘Redact PDFs/images’</strong> tab inside the <strong>‘Redaction settings’</strong> accordion. A few options (loading allow/deny/page lists from files, page range, efficient OCR, language, API keys) are on the <strong>Settings</strong> tab.</p>
 <section id="custom-allow-deny-and-page-redaction-lists" class="level3">
 <h3 class="anchored" data-anchor-id="custom-allow-deny-and-page-redaction-lists">Custom allow, deny, and page redaction lists</h3>
-<p>The app allows you to specify terms that should never be redacted (an allow list), terms that should always be redacted (a deny list), and also to provide a list of page numbers for pages that should be fully redacted.</p>
+<p><strong>On the ‘Redact PDFs/images’ tab:</strong> Inside <strong>‘Redaction settings’</strong>, the accordion <strong>‘Terms to always include or exclude in redactions, and whole page redaction’</strong> contains the <strong>Allow list</strong>, <strong>Deny list</strong>, and <strong>Fully redact these pages</strong> controls. You can add or remove terms directly there. There is also <strong>‘Maximum spelling mistakes for matching deny list terms’</strong> for fuzzy matching.</p>
+<p><strong>To load many terms from a file:</strong> Go to the <strong>Settings</strong> tab and open <strong>‘Custom allow, deny, and full page redaction lists’</strong>. Use <strong>‘Import allow list file’</strong>, <strong>‘Import custom deny list’</strong>, or <strong>‘Import fully redacted pages list’</strong> to load a CSV (one column, no header). After loading, return to the <strong>‘Redact PDFs/images’</strong> tab and click <strong>‘Extract text and redact document’</strong>; the loaded terms apply to the next run.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/allow_deny_full_page_list.PNG" class="img-fluid figure-img"></p>
@@ -512,59 +542,36 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </div>
 <section id="allow-list-example" class="level4">
 <h4 class="anchored" data-anchor-id="allow-list-example">Allow list example</h4>
-<p>It may be the case that specific terms that are frequently redacted are not interesting to</p>
-<p>In the redacted outputs of the ‘Example of files sent to a professor before applying’ PDF, you can see that it is frequently redacting references to Dr Hyde’s lab in the main body of the text. Let’s say that references to Dr Hyde were not considered personal information in this context. You can exclude this term from redaction (and others) by providing an ‘allow list’ file. This is simply a csv that contains the case sensitive terms to exclude in the first column, in our example, ‘Hyde’ and ‘Muller glia’. The example file is provided <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/allow_list.csv">here</a>.</p>
-<p>To import this to use with your redaction tasks, go to the ‘Redaction settings’ tab, click on the ‘Import allow list file’ button halfway down, and select the csv file you have created. It should be loaded for next time you hit the redact button. Go back to the first tab and do this.</p>
+<p>In the redacted outputs of the ‘Example of files sent to a professor before applying’ PDF, the app may redact references to Dr Hyde’s lab. If those are not personal information in your context, add them to the allow list.You can exclude these terms from redaction in one of two ways: 1. On the Redact PDFs/images tab, go to ‘Allow list’. Type in ‘Hyde’ in the box and press enter. The next redaction task should will exclude this term from redaction. You can add other terms here. 2. Create a CSV with one term per row in the first column (e.g.&nbsp;‘Hyde’, ‘Muller glia’); an example is <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/allow_list.csv">here</a>. On the <strong>Settings</strong> tab, open <strong>‘Custom allow, deny, and full page redaction lists’</strong>, click <strong>‘Import allow list file’</strong>, and select your CSV. Then go back to the <strong>‘Redact PDFs/images’</strong> tab and click <strong>‘Extract text and redact document’</strong>. This will then apply the loaded list to the allow list on the Redact PDFs/images tab</p>
 </section>
 <section id="deny-list-example" class="level4">
 <h4 class="anchored" data-anchor-id="deny-list-example">Deny list example</h4>
-<p>Say you wanted to remove specific terms from a document. In this app you can do this by providing a custom deny list as a csv. Like for the allow list described above, this should be a one-column csv without a column header. The app will suggest each individual term in the list with exact spelling as whole words. So it won’t select text from within words. To enable this feature, the ‘CUSTOM’ tag needs to be chosen as a redaction entity <a href="#redacting-additional-types-of-personal-information">(the process for adding/removing entity types to redact is described below)</a>.</p>
-<p><strong>NOTE:</strong> As of version 1.5.2, you can now provide deny list terms as regex patterns.</p>
+<p>Say you wanted to remove specific terms from a document. In this app you can do this by providing a custom deny list as a csv. Like for the allow list described above, this should be a one-column csv without a column header. The app will suggest each individual term in the list with exact spelling as whole words. So it won’t select text from within words. You must have <strong>‘CUSTOM’</strong> (or equivalent) included in <strong>‘Select entity types to redact’</strong> on the <strong>‘Redact PDFs/images’</strong> tab; see <a href="#redacting-additional-types-of-personal-information">Redacting additional types of personal information</a>. As for the allow list above, you can add new deny list terms in one of two ways. Either 1. type them manually into the Deny list box on the Redact PDFs/images tab, or 2. load in a custom deny list csv file on the <strong>Settings</strong> tab (see above for Allow list). NOTE: You can also provide deny list terms in your csv file as regex patterns.</p>
 <p>Here is an example using the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership Agreement Toolkit file</a>. This is an <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_custom_deny_list.csv">example of a custom deny list file</a>. ‘Sister’, ‘Sister City’ ‘Sister Cities’, ‘Friendship City’ have been listed as specific terms to redact. You can see the outputs of this redaction process on the review page:</p>
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/deny_list_partnership_example.PNG" class="img-fluid" alt="Deny list redaction Partnership file">.</p>
 <p>You can see that the app has highlighted all instances of these terms on the page shown. You can then consider each of these terms for modification or removal on the review page <a href="#reviewing-and-modifying-suggested-redactions">explained here</a>.</p>
 </section>
 <section id="full-page-redaction-list-example" class="level4">
 <h4 class="anchored" data-anchor-id="full-page-redaction-list-example">Full page redaction list example</h4>
-<p>There may be full pages in a document that you want to redact. The app also provides the capability of redacting pages completely based on a list of input page numbers in a csv. The format of the input file is the same as that for the allow and deny lists described above - a one-column csv without a column header. An <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_some_pages.csv">example of this is here</a>. You can see an example of the redacted page on the review page:</p>
+<p>To fully redact specific pages, provide a one-column CSV of page numbers (no header), e.g.&nbsp;<a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_some_pages.csv">this example</a>. On the <strong>Settings</strong> tab, open <strong>‘Custom allow, deny, and full page redaction lists’</strong> and use <strong>‘Import fully redacted pages list’</strong>. Alternatively, add page numbers in the <strong>‘Fully redact these pages’</strong> box on the <strong>‘Redact PDFs/images’</strong> tab.</p>
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/whole_page_partnership_example.PNG" class="img-fluid" alt="Whole page partnership redaction">.</p>
 <p>Using the above approaches to allow, deny, and full page redaction lists will give you an output <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/Partnership-Agreement-Toolkit_0_0_redacted.pdf">like this</a>.</p>
-</section>
-<section id="adding-to-the-loaded-allow-deny-and-whole-page-lists-in-app" class="level4">
-<h4 class="anchored" data-anchor-id="adding-to-the-loaded-allow-deny-and-whole-page-lists-in-app">Adding to the loaded allow, deny, and whole page lists in-app</h4>
-<p>If you open the accordion below the allow list options called ‘Manually modify custom allow…’, you should be able to see a few tables with options to add new rows:</p>
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/manually_modify.PNG" class="img-fluid figure-img"></p>
-<figcaption>Manually modify allow or deny list</figcaption>
-</figure>
-</div>
-<p>If the table is empty, you can add a new entry, you can add a new row by clicking on the ‘+’ item below each table header. If there is existing data, you may need to click on the three dots to the right and select ‘Add row below’. Type the item you wish to keep/remove in the cell, and then (important) press enter to add this new item to the allow/deny/whole page list. Your output tables should look something like below.</p>
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/manually_modify_filled.PNG" class="img-fluid figure-img"></p>
-<figcaption>Manually modify allow or deny list filled</figcaption>
-</figure>
-</div>
 </section>
 </section>
 <section id="redacting-additional-types-of-personal-information" class="level3">
 <h3 class="anchored" data-anchor-id="redacting-additional-types-of-personal-information">Redacting additional types of personal information</h3>
-<p>You may want to redact additional types of information beyond the defaults, or you may not be interested in default suggested entity types. There are dates in the example complaint letter. Say we wanted to redact those dates also?</p>
-<p>Under the ‘Redaction settings’ tab, go to ‘Entities to redact (click close to down arrow for full list)’. Different dropdowns are provided according to whether you are using the Local service to redact PII, or the AWS Comprehend service. Click within the empty box close to the dropdown arrow and you should see a list of possible ‘entities’ to redact. Select ‘DATE_TIME’ and it should appear in the main list. To remove items, click on the ‘x’ next to their name.</p>
+<p>On the <strong>‘Redact PDFs/images’</strong> tab, open <strong>‘Redaction settings’</strong> and then <strong>‘Change default redaction settings’</strong>. Under <strong>‘Change PII identification method’</strong>, open <strong>‘Select entity types to redact’</strong>. The dropdown shown depends on your PII method (Local, AWS Comprehend, or LLM); its label may be <strong>‘Local PII identification model (click empty space in box for full list)’</strong>, <strong>‘AWS Comprehend PII identification model…’</strong>, or similar. Click in the empty box or near the dropdown arrow to see the full list of entity types (e.g.&nbsp;DATE_TIME, NAME, EMAIL). Select the types you want to redact; they appear in the list. Click the <strong>‘x’</strong> next to an item to remove it.</p>
+<p>Example: to also redact dates in the example complaint letter, add <strong>‘DATE_TIME’</strong> here, then click <strong>‘Extract text and redact document’</strong>. You should get a redacted version of ‘Example complaint letter’ with dates and times removed. To start with different files or a clean slate, refresh the browser to begin a new session.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/additional_entities/additional_entities_select.PNG" class="img-fluid figure-img"></p>
 <figcaption>Redacting additional types of information dropdown</figcaption>
 </figure>
 </div>
-<p>Now, go back to the main screen and click ‘Redact Document’ again. You should now get a redacted version of ‘Example complaint letter’ that has the dates and times removed.</p>
-<p>If you want to redact different files, I suggest you refresh your browser page to start a new session and unload all previous data.</p>
 </section>
-</section>
-<section id="redacting-only-specific-pages" class="level2">
-<h2 class="anchored" data-anchor-id="redacting-only-specific-pages">Redacting only specific pages</h2>
-<p>Say also we are only interested in redacting page 1 of the loaded documents. On the Redaction settings tab, select ‘Lowest page to redact’ as 1, and ‘Highest page to redact’ also as 1. When you next redact your documents, only the first page will be modified. The output files should now have a suffix similar to ’…_1_1.pdf’, indicating the lowest and highest page numbers that were redacted.</p>
+<section id="redacting-only-specific-pages" class="level3">
+<h3 class="anchored" data-anchor-id="redacting-only-specific-pages">Redacting only specific pages</h3>
+<p>To redact only a subset of pages (e.g.&nbsp;only page 1), go to the <strong>Settings</strong> tab and open the <strong>‘Redact only selected pages’</strong> accordion. Set <strong>‘Lowest page to redact (set to 0 to redact from the first page)’</strong> and <strong>‘Highest page to redact (set to 0 to redact to the last page)’</strong> (e.g.&nbsp;both 1 for only page 1). The next redaction run will only process that range; output filenames will include a suffix like **’…_1_1.pdf’**.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/select_pages.PNG" class="img-fluid figure-img"></p>
@@ -572,17 +579,21 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </figure>
 </div>
 </section>
-<section id="handwriting-and-signature-redaction" class="level2">
-<h2 class="anchored" data-anchor-id="handwriting-and-signature-redaction">Handwriting and signature redaction</h2>
-<p>The file <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership Agreement Toolkit (for signatures and more advanced usage)</a> is provided as an example document to test AWS Textract + redaction with a document that has signatures in. If you have access to AWS Textract in the app, try removing all entity types from redaction on the Redaction settings and clicking the big X to the right of ‘Entities to redact’.</p>
-<p>To ensure that handwriting and signatures are enabled (enabled by default), on the front screen go the ‘AWS Textract signature detection’ to enable/disable the following options :</p>
+<section id="handwriting-and-signature-redaction" class="level3">
+<h3 class="anchored" data-anchor-id="handwriting-and-signature-redaction">Handwriting and signature redaction</h3>
+<p>The <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership Agreement Toolkit</a> is a good example for testing AWS Textract with signatures. On the <strong>‘Redact PDFs/images’</strong> tab, follow the steps below.</p>
+<ol type="1">
+<li>In <strong>‘Redaction settings’</strong> → <strong>‘Change default redaction settings’</strong>, set the text extraction method to <strong>‘AWS Textract service - all PDF types’</strong>.</li>
+<li>An accordion <strong>‘Enable AWS Textract signature detection (default is off)’</strong> will appear. Open it and enable handwriting and/or signatures as needed.</li>
+<li>If you only want signatures/handwriting redacted, under <strong>‘Select entity types to redact’</strong> you can clear other entity types (click the <strong>‘x’</strong> next to each) so that only the signature/handwriting options apply.</li>
+</ol>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/textract_handwriting_signatures.PNG" class="img-fluid figure-img"></p>
 <figcaption>Handwriting and signatures</figcaption>
 </figure>
 </div>
-<p>The outputs should show handwriting/signatures redacted (see pages 5 - 7), which you can inspect and modify on the ‘Review redactions’ tab.</p>
+<p>Run <strong>‘Extract text and redact document’</strong>. Handwriting and signatures (e.g.&nbsp;on pages 5–7) will be redacted and can be reviewed on the <strong>‘Review redactions’</strong> tab.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/refs/heads/main/review_redactions/Signatures%20and%20handwriting%20found.PNG" class="img-fluid figure-img"></p>
@@ -590,10 +601,11 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </figure>
 </div>
 </section>
+</section>
 <section id="reviewing-and-modifying-suggested-redactions" class="level2">
 <h2 class="anchored" data-anchor-id="reviewing-and-modifying-suggested-redactions">Reviewing and modifying suggested redactions</h2>
 <p>Sometimes the app will suggest redactions that are incorrect, or will miss personal information entirely. The app allows you to review and modify suggested redactions to compensate for this. You can do this on the ‘Review redactions’ tab.</p>
-<p>We will go through ways to review suggested redactions with an example.On the first tab ‘PDFs/images’ upload the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf">‘Example of files sent to a professor before applying.pdf’</a> file. Let’s stick with the ‘Local model - selectable text’ option, and click ‘Redact document’. Once the outputs are created, go to the ‘Review redactions’ tab.</p>
+<p>We will go through ways to review suggested redactions with an example. On the <strong>‘Redact PDFs/images’</strong> tab, upload the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf">‘Example of files sent to a professor before applying.pdf’</a> file. Keep the default ‘Local model - selectable text’ option and click <strong>‘Extract text and redact document’</strong>. Once the outputs are created, go to the <strong>‘Review redactions’</strong> tab.</p>
 <p>On the ‘Review redactions’ tab you have a visual interface that allows you to inspect and modify redactions suggested by the app. There are quite a few options to look at, so we’ll go from top to bottom.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -723,7 +735,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="searching-and-adding-custom-redactions" class="level3">
 <h3 class="anchored" data-anchor-id="searching-and-adding-custom-redactions">Searching and Adding Custom Redactions</h3>
-<p>After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The <strong>“Search text to make new redactions”</strong> tab gives you the power to find and redact any text within your document manually.</p>
+<p>After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The <strong>“Search text and redact”</strong> tab gives you the power to find and redact any text within your document manually.</p>
 <section id="how-to-use-the-search-and-redact-feature" class="level4">
 <h4 class="anchored" data-anchor-id="how-to-use-the-search-and-redact-feature">How to Use the Search and Redact Feature</h4>
 <p>The workflow is designed to be simple: <strong>Search → Select → Redact</strong>.</p>
@@ -732,7 +744,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <section id="step-1-search-for-text" class="level4">
 <h4 class="anchored" data-anchor-id="step-1-search-for-text"><strong>Step 1: Search for Text</strong></h4>
 <ol type="1">
-<li>Navigate to the <strong>“Search text to make new redactions”</strong> tab.</li>
+<li>Navigate to the <strong>“Search text and redact”</strong> tab.</li>
 <li>The main table will initially be populated with all the text extracted from the document for a page, broken down by word.</li>
 <li>To narrow this down, use the <strong>“Multi-word text search”</strong> box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the ‘Enable regex pattern matching’ box under ‘Search options’ below.</li>
 <li>Click the <strong>“Search”</strong> button or press Enter.</li>
@@ -840,7 +852,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <figcaption>xlsx upload</figcaption>
 </figure>
 </div>
-<p>Once you have chosen your input file and sheets/columns to redact, you can choose the redaction method. ‘Local’ will use the same local model as used for documents on the first tab. ‘AWS Comprehend’ will give better results, at a slight cost.</p>
+<p>Once you have chosen your input file and sheets/columns to redact, you can choose the redaction method. ‘Local’ will use the same local model as used for documents on the <strong>‘Redact PDFs/images’</strong> tab. ‘AWS Comprehend’ will give better results, at a slight cost.</p>
 <p>When you click Redact text/data files, you will see the progress of the redaction task by file and sheet, and you will receive a csv output with the redacted data.</p>
 </section>
 <section id="choosing-output-anonymisation-format" class="level3">
@@ -859,7 +871,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="redaction-log-outputs" class="level3">
 <h3 class="anchored" data-anchor-id="redaction-log-outputs">Redaction log outputs</h3>
-<p>A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the Redaction settings page under ‘Log file outputs’.</p>
+<p>A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the <strong>Settings</strong> tab under <strong>‘Log file outputs’</strong>.</p>
 </section>
 </section>
 <section id="identifying-and-redacting-duplicate-pages" class="level2">
@@ -875,17 +887,22 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <figcaption>Example duplicate page inputs</figcaption>
 </figure>
 </div>
-<p><strong>Step 1: Upload and Configure the Analysis</strong> First, navigate to the “Identify duplicate pages” tab. Upload all the ocr_output.csv files you wish to compare into the file area. These files are generated every time you run a redaction task and contain the text for each page of a document.</p>
-<p>For our example, you can upload the four ‘ocr_output.csv’ files provided in the example folder into the file area. Click ‘Identify duplicate pages’ and you will see a number of files returned. In case you want to see the original PDFs, they are available <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/input_pdfs/">here</a>.</p>
-<p>The default options will search for matching subdocuments of any length. Before running the analysis, you can configure these matching parameters to tell the tool what you’re looking for:</p>
+<p><strong>Step 1: Upload and Configure the Analysis</strong> First, navigate to the <strong>‘Identify duplicate pages’</strong> tab. In <strong>‘Step 1: Configure and run analysis’</strong>, upload all the ocr_output.csv files you wish to compare. These files are generated every time you run a redaction task and contain the text for each page of a document.</p>
+<p>For our example, you can upload the four ‘ocr_output.csv’ files provided in the example folder. Open the <strong>‘Duplicate matching parameters’</strong> accordion to set:</p>
+<ul>
+<li><strong>Similarity threshold:</strong> A score from 0 to 1. Pages or sequences with text similarity above this value are considered a match (default 0.95).</li>
+<li><strong>Minimum word count:</strong> Pages or lines with fewer words than this are ignored (default 10).</li>
+<li><strong>Duplicate matching mode:</strong> <strong>‘Find duplicates by page’</strong> compares full-page text; <strong>‘Find duplicates by text line’</strong> compares individual lines.</li>
+</ul>
+<p><strong>Matching strategy</strong> (below the parameters): - <strong>‘Combine consecutive matches into a single match (subdocument match)’</strong> (default: checked): Finds the longest possible sequence of matching pages (subdocuments). Uncheck to use the next option. - <strong>Minimum consecutive matches</strong> (slider, shown when subdocument matching is unchecked): Only report sequences of at least this many consecutive matches (e.g.&nbsp;3 for at least 3-page runs). Set to 1 for single-page matching.</p>
+<p>Once your parameters are set, click <strong>‘Identify duplicate pages/subdocuments’</strong>.</p>
+<p>In case you want to see the original PDFs for the example, they are available <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/input_pdfs/">here</a>.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_matching_parameters.PNG" class="img-fluid figure-img"></p>
 <figcaption>Duplicate matching parameters</figcaption>
 </figure>
 </div>
-<p><em>Matching Parameters</em> - <strong>Similarity Threshold:</strong> A score from 0 to 1. Pages or sequences of pages with a calculated text similarity above this value will be considered a match. The default of 0.9 (90%) is a good starting point for finding near-identical pages. - <strong>Min Word Count:</strong> Pages with fewer words than this value will be completely ignored during the comparison. This is extremely useful for filtering out blank pages, title pages, or boilerplate pages that might otherwise create noise in the results. The default is 10. - <strong>Choosing a Matching Strategy:</strong> You have three main options to find duplicate content. - <em>‘Subdocument’ matching (default):</em> Use this to find the longest possible sequence of matching pages. The tool will find an initial match and then automatically expand it forward page-by-page until the consecutive match breaks. This is the best method for identifying complete copied chapters or sections of unknown length. This is enabled by default by ticking the “Enable ‘subdocument’ matching” box. This setting overrides the described below. - <em>Minimum length subdocument matching:</em> Use this to find sequences of consecutively matching pages with a minimum page lenght. For example, setting the slider to 3 will only return sections that are at least 3 pages long. How to enable: Untick the “Enable ‘subdocument’ matching” box and set the “Minimum consecutive pages” slider to a value greater than 1. - <em>Single Page Matching:</em> Use this to find all individual page pairs that are similar to each other. Leave the “Enable ‘subdocument’ matching” box unchecked and keep the “Minimum consecutive pages” slider at 1.</p>
-<p>Once your parameters are set, click the “Identify duplicate pages/subdocuments” button.</p>
 <p><strong>Step 2: Review Results in the Interface</strong> After the analysis is complete, the results will be displayed directly in the interface.</p>
 <p><em>Analysis Summary:</em> A table will appear showing a summary of all the matches found. The columns will change depending on the matching strategy you chose. For subdocument matches, it will show the start and end pages of the matched sequence.</p>
 <p><em>Interactive Preview:</em> This is the most important part of the review process. Click on any row in the summary table. The full text of the matching page(s) will appear side-by-side in the “Full Text Preview” section below, allowing you to instantly verify the accuracy of the match.</p>
@@ -915,6 +932,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </figure>
 </div>
 <p>If you want to combine the results from this redaction process with previous redaction tasks for the same PDF, you could merge review file outputs following the steps described in <a href="#merging-existing-redaction-review-files">Merging existing redaction review files</a> above.</p>
+<p><strong>Redact duplicate pages on the Redact PDFs/images tab</strong></p>
+<p>On the <strong>‘Redact PDFs/images’</strong> tab, in the <strong>‘Redaction settings’</strong> area (accordion <strong>‘Terms to always include or exclude in redactions, and whole page redaction’</strong>), there is a <strong>‘Redact duplicate pages’</strong> checkbox. When this is enabled, the app will identify duplicate pages and apply whole-page redaction to them as part of the same redaction run. This option is shown when PII identification options are enabled. You can use it instead of (or in addition to) running duplicate detection on the <strong>‘Identify duplicate pages’</strong> tab and then applying the output to a document on <strong>‘Review redactions’</strong>.</p>
 </section>
 <section id="duplicate-detection-in-tabular-data" class="level3">
 <h3 class="anchored" data-anchor-id="duplicate-detection-in-tabular-data">Duplicate detection in tabular data</h3>
@@ -943,17 +962,17 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <h2 class="anchored" data-anchor-id="fuzzy-search-and-redaction">Fuzzy search and redaction</h2>
 <p>The files for this section are stored <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/">here</a>.</p>
 <p>Sometimes you may be searching for terms that are slightly mispelled throughout a document, for example names. The document redaction app gives the option for searching for long phrases that may contain spelling mistakes, a method called ‘fuzzy matching’.</p>
-<p>To do this, go to the Redaction Settings, and the ‘Select entity types to redact’ area. In the box below relevant to your chosen redaction method (local or AWS Comprehend), select ‘CUSTOM_FUZZY’ from the list. Next, we can select the maximum number of spelling mistakes allowed in the search (up to nine). Here, you can either type in a number or use the small arrows to the right of the box. Change this option to 3. This will allow for a maximum of three ‘changes’ in text needed to match to the desired search terms.</p>
-<p>The other option we can leave as is (should fuzzy search match on entire phrases in deny list) - this option would allow you to fuzzy search on each individual word in the search phrase (apart from stop words).</p>
-<p>Next, we can upload a deny list on the same page to do the fuzzy search. A relevant deny list file can be found <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv">here</a> - you can upload it following <a href="#deny-list-example">these steps</a>. You will notice that the suggested deny list has spelling mistakes compared to phrases found in the example document.</p>
+<p>To do this, go to the <strong>‘Redact PDFs/images’</strong> tab and open the <strong>‘Redaction settings’</strong> area. In the section <strong>‘Terms to always include or exclude in redactions, and whole page redaction’</strong>, first ensure your chosen PII method (Local or AWS Comprehend) is selected, then in the entity list for that method select <strong>‘CUSTOM_FUZZY’</strong>. In the same section you will see <strong>‘Maximum spelling mistakes for matching deny list terms’</strong> (0–9): type a number or use the arrows (e.g.&nbsp;set to 3) to allow up to that many changes in text for a match.</p>
+<p>If shown in your deployment, the option to match on entire phrases in the deny list (as opposed to each word individually) can be left as is.</p>
+<p>To load a deny list from a file for the fuzzy search, use the <strong>Settings</strong> tab under <strong>‘Redaction settings’</strong> and the <strong>‘Import allow list file’</strong> / <strong>‘Import custom deny list’</strong> / <strong>‘Import fully redacted pages list’</strong> area, or add terms directly in the deny list box on the <strong>‘Redact PDFs/images’</strong> tab. A relevant deny list file can be found <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv">here</a> — you can upload it following <a href="#deny-list-example">these steps</a>. You will notice that the suggested deny list has spelling mistakes compared to phrases found in the example document.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/fuzzy_search/img/fuzzy_deny_list_example.PNG" class="img-fluid figure-img"></p>
 <figcaption>Deny list example with spelling mistakes</figcaption>
 </figure>
 </div>
-<p>Upload the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership-Agreement-Toolkit file</a> into the ‘Redact document’ area on the first tab. Now, press the ‘Redact document’ button.</p>
-<p>Using these deny list with spelling mistakes, the app fuzzy match these terms to the correct text in the document. After redaction is complete, go to the Review Redactions tab to check the first tabs. You should see that the phrases in the deny list have been successfully matched.</p>
+<p>Upload the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf">Partnership-Agreement-Toolkit file</a> on the <strong>‘Redact PDFs/images’</strong> tab (in the <strong>‘Redaction settings’</strong> area). Then click <strong>‘Extract text and redact document’</strong>.</p>
+<p>Using these deny list with spelling mistakes, the app fuzzy match these terms to the correct text in the document. After redaction is complete, go to the <strong>‘Review redactions’</strong> tab to check the outputs. You should see that the phrases in the deny list have been successfully matched.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/fuzzy_search/img/fuzzy_search_review.PNG" class="img-fluid figure-img"></p>
@@ -1020,10 +1039,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="using-the-aws-textract-document-api" class="level2">
 <h2 class="anchored" data-anchor-id="using-the-aws-textract-document-api">Using the AWS Textract document API</h2>
-<p>This option can be enabled by your system admin, in the config file (‘SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS’ environment variable, and subsequent variables). Using this, you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the ‘Redact document’ process described here).</p>
+<p>This option can be enabled by your system admin, in the config file (‘SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS’ environment variable, and subsequent variables). Using this, you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the <strong>‘Extract text and redact document’</strong> process described here).</p>
 <section id="starting-a-new-textract-api-job" class="level3">
 <h3 class="anchored" data-anchor-id="starting-a-new-textract-api-job">Starting a new Textract API job</h3>
-<p>To use this feature, first upload a document file in the file input box <a href="#upload-files-to-the-app">in the usual way</a> on the first tab of the app. Under AWS Textract signature detection you can select whether or not you would like to analyse signatures or not (with a <a href="#optional---select-signature-extraction">cost implication</a>).</p>
+<p>To use this feature, first upload a document file <a href="#upload-files-to-the-app">in the usual way</a> on the <strong>‘Redact PDFs/images’</strong> tab. Under <strong>‘Enable AWS Textract signature detection’</strong> (inside <strong>‘Change default redaction settings’</strong>) you can choose whether to analyse signatures or not (with a <a href="#enable-aws-textract-signature-extraction">cost implication</a>).</p>
 <p>Then, open the section under the heading ‘Submit whole document to AWS Textract API…’.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -1124,6 +1143,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li><strong>Hybrid-paddle</strong>: Combines Tesseract and PaddleOCR - uses Tesseract for initial extraction, then PaddleOCR for re-extraction of low-confidence text regions.</li>
 <li><strong>Hybrid-vlm</strong>: Combines Tesseract with Vision Language Models (VLM) - uses Tesseract for initial extraction, then a VLM model (default: Dots.OCR) for re-extraction of low-confidence text.</li>
 <li><strong>Hybrid-paddle-vlm</strong>: Combines PaddleOCR with Vision Language Models - uses PaddleOCR first, then a VLM model for low-confidence regions.</li>
+<li><strong>AWS Bedrock VLM</strong>: Cloud-based Vision Language Model OCR via AWS Bedrock. Extracts text (and optionally detects people and signatures) from PDFs and images without running models locally. Requires AWS credentials and is subject to Bedrock quotas and pricing.</li>
 </ul>
 </section>
 <section id="enabling-advanced-ocr-options" class="level3">
@@ -1135,7 +1155,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <pre><code>SHOW_PADDLE_MODEL_OPTIONS = "True"</code></pre>
 <p><strong>To enable Vision Language Model options (hybrid-vlm, hybrid-paddle-vlm):</strong></p>
 <pre><code>SHOW_VLM_MODEL_OPTIONS = "True"</code></pre>
-<p>Once enabled, users will see a “Change default local OCR model” section in the redaction settings where they can choose between the available models based on what has been enabled.</p>
+<p><strong>To enable AWS Bedrock VLM OCR (cloud-based VLM text extraction):</strong></p>
+<pre><code>SHOW_BEDROCK_VLM_MODELS = "True"</code></pre>
+<p>Once enabled, users will see a “Change default local OCR model” (or text extraction method) section in the redaction settings where they can choose between the available models based on what has been enabled, including Bedrock VLM analysis when configured.</p>
 </section>
 <section id="ocr-configuration-parameters" class="level3">
 <h3 class="anchored" data-anchor-id="ocr-configuration-parameters">OCR configuration parameters</h3>
@@ -1178,7 +1200,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <p>When VLM options are enabled, the following settings are available:</p>
 <ul>
 <li><strong>SHOW_VLM_MODEL_OPTIONS</strong> (default: False): If enabled, VLM options will be shown in the UI.</li>
-<li><strong>SELECTED_MODEL</strong> (default: “Dots.OCR”): The VLM model to use. Options include: “Nanonets-OCR2-3B”, “Dots.OCR”, “Qwen3-VL-2B-Instruct”, “Qwen3-VL-4B-Instruct”, “Qwen3-VL-8B-Instruct”, “PaddleOCR-VL”. Generally, the Qwen3-VL-8B-Instruct model is the most accurate, and vlm/inference server inference is based on using this model, but is also the slowest. Qwen3-VL-4B-Instruct can also work quite well on easier documents.</li>
+<li><strong>SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL</strong> (default: “Dots.OCR”): The VLM model to use. Options include: “Nanonets-OCR2-3B”, “Dots.OCR”, “Qwen3-VL-2B-Instruct”, “Qwen3-VL-4B-Instruct”, “Qwen3-VL-8B-Instruct”, “PaddleOCR-VL”. Generally, the Qwen3-VL-8B-Instruct model is the most accurate, and vlm/inference server inference is based on using this model, but is also the slowest. Qwen3-VL-4B-Instruct can also work quite well on easier documents.</li>
 <li><strong>MAX_SPACES_GPU_RUN_TIME</strong> (default: 60): Maximum seconds to run GPU operations on Hugging Face Spaces.</li>
 <li><strong>MAX_NEW_TOKENS</strong> (default: 30): Maximum number of tokens to generate for VLM responses.</li>
 <li><strong>MAX_INPUT_TOKEN_LENGTH</strong> (default: 4096): Maximum number of tokens that can be input to the VLM.</li>
@@ -1198,12 +1220,13 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="using-an-alternative-ocr-model" class="level3">
 <h3 class="anchored" data-anchor-id="using-an-alternative-ocr-model">Using an alternative OCR model</h3>
-<p>If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_OPTIONS are set to ‘True’ in your app_config.env file, you should see the following options available under ‘Change default redaction settings…’ on the front tab. The different OCR options can be used in different contexts.</p>
+<p>If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_VLM_OPTIONS are set to ‘True’ in your app_config.env file, you should see the following options available under <strong>‘Change default redaction settings’</strong> on the <strong>‘Redact PDFs/images’</strong> tab. The different OCR options can be used in different contexts.</p>
 <ul>
 <li><strong>Tesseract (option ‘tesseract’)</strong>: Best for documents with clear, well-formatted text, providing a good balance of speed and accuracy with precise word-level bounding boxes. But struggles a lot with handwriting or ‘noisy’ documents (e.g.&nbsp;scanned documents).</li>
 <li><strong>PaddleOCR (option ‘paddle’)</strong>: More powerful than Tesseract, but slower. Does a decent job with unclear typed text on scanned documents. Also, bounding boxes may not all be accurate as they will be calculated from the line-level bounding boxes produced by Paddle after analysis.</li>
-<li><strong>VLM (option ‘vlm’)</strong>: Recommended for use with the Qwen-3-VL 8B model (can set this with the SELECTED_MODEL environment variable in config.py). This model is extremely good at identifying difficult to read handwriting and noisy documents. However, it is much slower than the above options. Other models are available as you can see in the tools/run_vlm.py code file. This will conduct inference with the transformers package, and quantise with bitsandbytes if the QUANTISE_VLM_MODELS environment variable is set to True. Inference with this package is <em>much</em> slower than with e.g.&nbsp;llama.cpp or vllm servers, which can be used with the inference-server options described below.</li>
+<li><strong>VLM (option ‘vlm’)</strong>: Recommended for use with the Qwen-3-VL 8B model (can set this with the SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL environment variable in config.py). This model is extremely good at identifying difficult to read handwriting and noisy documents. However, it is much slower than the above options. Other models are available as you can see in the tools/run_vlm.py code file. This will conduct inference with the transformers package, and quantise with bitsandbytes if the QUANTISE_VLM_MODELS environment variable is set to True. Inference with this package is <em>much</em> slower than with e.g.&nbsp;llama.cpp or vllm servers, which can be used with the inference-server options described below.</li>
 <li><strong>Inference server (option ‘inference-server’)</strong>: This can be used with OpenAI compatible API endpoints, for example <a href="https://github.com/ggml-org/llama.cpp">llama-cpp using llama-server</a>, or <a href="https://docs.vllm.ai/en/stable">vllm</a>. Both of these options will be much faster for inference than the VLM ‘in-app’ model calls described above, and produce results of a similar quality, but you will need to be able to set up the server separately.</li>
+<li><strong>AWS Bedrock VLM (option ‘AWS Bedrock VLM OCR - all PDF types’)</strong>: When SHOW_BEDROCK_VLM_MODELS is True, this option appears in the text extraction method list. It uses a Bedrock vision model (e.g.&nbsp;Qwen VL) to perform OCR and optional person/signature detection in the cloud. No local GPU is required; AWS credentials and Bedrock model access are needed. Useful for PDFs and images when you prefer not to run VLMs locally.</li>
 </ul>
 <section id="hybrid-options" class="level4">
 <h4 class="anchored" data-anchor-id="hybrid-options">Hybrid options</h4>
@@ -1236,7 +1259,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     --no-warmup \
     --n-cpu-moe 13</code></pre>
 <p>If running llama.cpp on the same computer as the doc redaction app, you can then set the following variable in config/app_config.env to run:</p>
-<pre><code>SHOW_INFERENCE_SERVER_OPTIONS=True
+<pre><code>SHOW_INFERENCE_SERVER_VLM_OPTIONS=True
 INFERENCE_SERVER_API_URL=http://localhost:7862</code></pre>
 </section>
 <section id="identifying-people-and-signatures-with-vlms" class="level3">
@@ -1244,10 +1267,54 @@ INFERENCE_SERVER_API_URL=http://localhost:7862</code></pre>
 <p>If VLM or inference server options are enabled, you can also use the VLM to identify photos of people’s faces and signatures in the document, and redact them accordingly.</p>
 <p>On the ‘Redaction Settings’ tab, select the CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people’s faces and signatures in the document, and redact them accordingly if a redaction option is selected.</p>
 </section>
+<section id="pii-identification-with-llms" class="level3">
+<h3 class="anchored" data-anchor-id="pii-identification-with-llms">PII identification with LLMs</h3>
+<p>In addition to rule-based (Local) and AWS Comprehend PII detection, the app can use <strong>Large Language Models (LLMs)</strong> to identify and label personal information. This is useful for entity types that are context-dependent (e.g.&nbsp;job titles, organisation names) or when you want custom instructions (e.g.&nbsp;“do not redact the name of the university”). LLM-based PII can be run via <strong>AWS Bedrock</strong>, a <strong>local transformers</strong> model, or an <strong>inference server</strong> (e.g.&nbsp;llama.cpp, vLLM).</p>
+<p><strong>Options (when enabled by your administrator):</strong></p>
+<ul>
+<li><strong>LLM (AWS Bedrock)</strong>: Uses a Bedrock model (e.g.&nbsp;Claude, Nova) for PII detection. Requires AWS credentials and Bedrock model access. No local GPU needed.</li>
+<li><strong>Local transformers LLM</strong>: Runs a Hugging Face transformers model on your machine for PII detection. Requires sufficient RAM/VRAM and model download.</li>
+<li><strong>Local inference server</strong>: Sends text to an OpenAI-compatible API (e.g.&nbsp;llama.cpp, vLLM) for PII detection. You run the server separately; the app only calls the API.</li>
+</ul>
+<p><strong>Enabling LLM PII options</strong></p>
+<p>Visibility of these methods is controlled by config (e.g.&nbsp;<code>app_config.env</code>):</p>
+<ul>
+<li><strong>SHOW_AWS_BEDROCK_LLM_MODELS</strong> / <strong>SHOW_AWS_PII_DETECTION_OPTIONS</strong>: Show “LLM (AWS Bedrock)” in the PII identification dropdown.</li>
+<li><strong>SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS</strong>: Show “Local transformers LLM”.</li>
+<li><strong>SHOW_INFERENCE_SERVER_PII_OPTIONS</strong>: Show “Local inference server”.</li>
+</ul>
+<p>On the <strong>‘Redact PDFs/images’</strong> tab, under <strong>‘Redaction settings’</strong>, choose the desired <strong>PII identification</strong> method (e.g.&nbsp;“LLM (AWS Bedrock)”). You can then:</p>
+<ul>
+<li>Select which <strong>LLM entities</strong> to detect (e.g.&nbsp;NAME, EMAIL_ADDRESS, PHONE_NUMBER, ADDRESS, CUSTOM).</li>
+<li>Optionally add <strong>custom instructions</strong> (e.g.&nbsp;“Do not redact company names” or “Redact all organisation names with the label ORGANISATION”).</li>
+</ul>
+<p>Model choice (Bedrock model ID, inference server URL, or local model name) and parameters (temperature, max tokens) are typically set in <strong>Settings</strong> or via environment variables; see the App settings / config documentation for your deployment.</p>
+</section>
+</section>
+<section id="document-summarisation-tab" class="level2">
+<h2 class="anchored" data-anchor-id="document-summarisation-tab">Document summarisation tab</h2>
+<p>When summarisation is enabled (e.g.&nbsp;<strong>SHOW_SUMMARISATION</strong> and at least one LLM option available), a <strong>Document summarisation</strong> tab is shown in the app. It lets you generate LLM-based summaries from OCR output CSVs (e.g.&nbsp;from a previous redaction run).</p>
+<p><strong>How to use the Document summarisation tab</strong></p>
+<ol type="1">
+<li><strong>Upload OCR output files</strong>: In the summarisation tab, use “Upload one or multiple ‘ocr_output.csv’ files to summarise” to attach one or more <code>*_ocr_output.csv</code> files (produced by the redaction pipeline when you extract text from PDFs/images).</li>
+<li><strong>Summarisation settings</strong> (accordion):
+<ul>
+<li><strong>Choose LLM inference method for summarisation</strong>: e.g.&nbsp;“LLM (AWS Bedrock)”, “Local transformers LLM”, or “Local inference server”, depending on what is enabled.</li>
+<li><strong>Temperature</strong>: Controls randomness (lower is more deterministic).</li>
+<li><strong>Max pages per page-group summary</strong>: Limits how many pages are summarised together before recursive summarisation.</li>
+<li><strong>API Key (if required)</strong>: For providers that need an API key.</li>
+<li><strong>Additional context (optional)</strong>: Short description of the document type (e.g.&nbsp;“This is a partnership agreement”).</li>
+<li><strong>Summary format</strong>: <strong>Concise</strong> (key themes only) or <strong>Detailed</strong> (as much detail as possible).</li>
+<li><strong>Additional summary instructions (optional)</strong>: e.g.&nbsp;“Focus on key obligations and termination clauses”.</li>
+</ul></li>
+<li><strong>Generate summary</strong>: Click <strong>“Generate summary”</strong> to run the summarisation. The app groups pages, calls the LLM, and optionally recurses if the combined summary is long.</li>
+<li><strong>Outputs</strong>: When finished, you can download summary files and view the summary in the tab.</li>
+</ol>
+<p>Summarisation uses the same LLM/inference settings as configured for the app (AWS region, inference server URL, etc.). For batch or scripted summarisation, use the CLI <code>--task summarise</code> (see Command Line Interface).</p>
 </section>
 <section id="command-line-interface-cli" class="level2">
 <h2 class="anchored" data-anchor-id="command-line-interface-cli">Command Line Interface (CLI)</h2>
-<p>The app includes a comprehensive command-line interface (<code>cli_redact.py</code>) that allows you to perform redaction, deduplication, and AWS Textract operations directly from the terminal. This is particularly useful for batch processing, automation, and integration with other systems.</p>
+<p>The app includes a comprehensive command-line interface (<code>cli_redact.py</code>) that allows you to perform redaction, deduplication, AWS Textract batch operations, and document summarisation directly from the terminal. This is particularly useful for batch processing, automation, and integration with other systems.</p>
 <section id="getting-started-with-the-cli" class="level3">
 <h3 class="anchored" data-anchor-id="getting-started-with-the-cli">Getting started with the CLI</h3>
 <p>To use the CLI, you need to:</p>
@@ -1260,99 +1327,152 @@ INFERENCE_SERVER_API_URL=http://localhost:7862</code></pre>
 </section>
 <section id="basic-cli-syntax" class="level3">
 <h3 class="anchored" data-anchor-id="basic-cli-syntax">Basic CLI syntax</h3>
-<div class="sourceCode" id="cb6"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> [redact<span class="kw">|</span><span class="ex">deduplicate</span><span class="kw">|</span><span class="ex">textract]</span> <span class="at">--input_file</span> <span class="pp">[</span><span class="ss">file_path</span><span class="pp">]</span> <span class="pp">[</span><span class="ss">additional_options</span><span class="pp">]</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> [redact<span class="kw">|</span><span class="ex">deduplicate</span><span class="kw">|</span><span class="ex">textract</span><span class="kw">|</span><span class="ex">summarise]</span> <span class="at">--input_file</span> <span class="pp">[</span><span class="ss">file_path</span><span class="pp">]</span> <span class="pp">[</span><span class="ss">additional_options</span><span class="pp">]</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Default task is <code>redact</code> if <code>--task</code> is omitted.</p>
 </section>
 <section id="redaction-examples" class="level3">
 <h3 class="anchored" data-anchor-id="redaction-examples">Redaction examples</h3>
 <p><strong>Basic PDF redaction with default settings:</strong></p>
-<div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Extract text only (no redaction) with whole page redaction:</strong></p>
-<div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--redact_whole_page_file</span> example_data/partnership_toolkit_redact_some_pages.csv <span class="at">--pii_detector</span> None</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--redact_whole_page_file</span> example_data/partnership_toolkit_redact_some_pages.csv <span class="at">--pii_detector</span> None</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Redact with custom entities and allow list:</strong></p>
-<div class="sourceCode" id="cb9"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/graduate-job-example-cover-letter.pdf <span class="at">--allow_list_file</span> example_data/test_allow_list_graduate.csv <span class="at">--local_redact_entities</span> TITLES PERSON DATE_TIME</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/graduate-job-example-cover-letter.pdf <span class="at">--allow_list_file</span> example_data/test_allow_list_graduate.csv <span class="at">--local_redact_entities</span> TITLES PERSON DATE_TIME</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Redact with fuzzy matching and custom deny list:</strong></p>
-<div class="sourceCode" id="cb10"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--deny_list_file</span> example_data/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv <span class="at">--local_redact_entities</span> CUSTOM_FUZZY <span class="at">--page_min</span> 1 <span class="at">--page_max</span> 3 <span class="at">--fuzzy_mistakes</span> 3</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--deny_list_file</span> example_data/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv <span class="at">--local_redact_entities</span> CUSTOM_FUZZY <span class="at">--page_min</span> 1 <span class="at">--page_max</span> 3 <span class="at">--fuzzy_mistakes</span> 3</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Redact with AWS services:</strong></p>
-<div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--pii_detector</span> <span class="st">"AWS Comprehend"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--pii_detector</span> <span class="st">"AWS Comprehend"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Redact specific pages with signature extraction:</strong></p>
-<div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--page_min</span> 6 <span class="at">--page_max</span> 7 <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--handwrite_signature_extraction</span> <span class="st">"Extract handwriting"</span> <span class="st">"Extract signatures"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--page_min</span> 6 <span class="at">--page_max</span> 7 <span class="at">--ocr_method</span> <span class="st">"AWS Textract"</span> <span class="at">--handwrite_signature_extraction</span> <span class="st">"Extract handwriting"</span> <span class="st">"Extract signatures"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Redact with LLM PII (entity subset and custom instructions):</strong><br>
+When your deployment uses an LLM-based PII method (e.g.&nbsp;via config/defaults), you can pass LLM entities and instructions:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf <span class="at">--llm_redact_entities</span> NAME EMAIL_ADDRESS PHONE_NUMBER ADDRESS CUSTOM <span class="at">--custom_llm_instructions</span> <span class="st">"Do not redact the name of the university."</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="tabular-data-redaction" class="level3">
 <h3 class="anchored" data-anchor-id="tabular-data-redaction">Tabular data redaction</h3>
 <p><strong>Anonymize CSV file with specific columns:</strong></p>
-<div class="sourceCode" id="cb13"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.csv <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.csv <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Anonymize Excel file:</strong></p>
-<div class="sourceCode" id="cb14"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.xlsx <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--excel_sheets</span> combined_case_notes <span class="at">--anon_strategy</span> redact</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> example_data/combined_case_notes.xlsx <span class="at">--text_columns</span> <span class="st">"Case Note"</span> <span class="st">"Client"</span> <span class="at">--excel_sheets</span> combined_case_notes <span class="at">--anon_strategy</span> redact</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Anonymize Word document:</strong></p>
-<div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> <span class="st">"example_data/Bold minimalist professional cover letter.docx"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--input_file</span> <span class="st">"example_data/Bold minimalist professional cover letter.docx"</span> <span class="at">--anon_strategy</span> replace_redacted</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="duplicate-detection" class="level3">
 <h3 class="anchored" data-anchor-id="duplicate-detection">Duplicate detection</h3>
 <p><strong>Find duplicate pages in OCR files:</strong></p>
-<div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Find duplicates at line level:</strong></p>
-<div class="sourceCode" id="cb17"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95 <span class="at">--combine_pages</span> False <span class="at">--min_word_count</span> 3</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv <span class="at">--duplicate_type</span> pages <span class="at">--similarity_threshold</span> 0.95 <span class="at">--combine_pages</span> False <span class="at">--min_word_count</span> 3</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Find duplicate rows in tabular data:</strong></p>
-<div class="sourceCode" id="cb18"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv <span class="at">--duplicate_type</span> tabular <span class="at">--text_columns</span> <span class="st">"text"</span> <span class="at">--similarity_threshold</span> 0.95</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb20"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> deduplicate <span class="at">--input_file</span> example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv <span class="at">--duplicate_type</span> tabular <span class="at">--text_columns</span> <span class="st">"text"</span> <span class="at">--similarity_threshold</span> 0.95</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="aws-textract-operations" class="level3">
 <h3 class="anchored" data-anchor-id="aws-textract-operations">AWS Textract operations</h3>
 <p><strong>Submit document for analysis:</strong></p>
-<div class="sourceCode" id="cb19"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb21"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/example_of_emails_sent_to_a_professor_before_applying.pdf</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Submit with signature extraction:</strong></p>
-<div class="sourceCode" id="cb20"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--extract_signatures</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb22"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> submit <span class="at">--input_file</span> example_data/Partnership-Agreement-Toolkit_0_0.pdf <span class="at">--extract_signatures</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Retrieve results by job ID:</strong></p>
-<div class="sourceCode" id="cb21"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> retrieve <span class="at">--job_id</span> 12345678-1234-1234-1234-123456789012</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb23"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> retrieve <span class="at">--job_id</span> 12345678-1234-1234-1234-123456789012</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>List recent jobs:</strong></p>
-<div class="sourceCode" id="cb22"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> list</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb24"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> textract <span class="at">--textract_action</span> list</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="document-summarisation" class="level3">
+<h3 class="anchored" data-anchor-id="document-summarisation">Document summarisation</h3>
+<p><strong>Summarise OCR output CSV(s) with AWS Bedrock:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb25"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> summarise <span class="at">--input_file</span> example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv <span class="at">--summarisation_inference_method</span> <span class="st">"LLM (AWS Bedrock)"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Summarise with local LLM and detailed format:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb26"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> summarise <span class="at">--input_file</span> example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv <span class="at">--summarisation_inference_method</span> <span class="st">"Local transformers LLM"</span> <span class="at">--summarisation_format</span> detailed</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Summarise with context and extra instructions (concise format):</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb27"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> summarise <span class="at">--input_file</span> example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv <span class="at">--summarisation_context</span> <span class="st">"This is a partnership agreement"</span> <span class="at">--summarisation_additional_instructions</span> <span class="st">"Focus on key obligations and termination clauses"</span> <span class="at">--summarisation_format</span> concise</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Summarise multiple OCR CSV files:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb28"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--task</span> summarise <span class="at">--input_file</span> example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv example_data/example_outputs/example_of_emails_sent_to_a_professor_before_applying_ocr_output_textract.csv <span class="at">--summarisation_inference_method</span> <span class="st">"LLM (AWS Bedrock)"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="common-cli-options" class="level3">
 <h3 class="anchored" data-anchor-id="common-cli-options">Common CLI options</h3>
 <section id="general-options" class="level4">
 <h4 class="anchored" data-anchor-id="general-options">General options</h4>
 <ul>
-<li><code>--task</code>: Choose between “redact”, “deduplicate”, or “textract”</li>
-<li><code>--input_file</code>: Path to input file(s) - can specify multiple files separated by spaces</li>
+<li><code>--task</code>: Task to perform: “redact”, “deduplicate”, “textract”, or “summarise” (default: redact)</li>
+<li><code>--input_file</code>: Path to input file(s); multiple files separated by spaces</li>
 <li><code>--output_dir</code>: Directory for output files (default: output/)</li>
 <li><code>--input_dir</code>: Directory for input files (default: input/)</li>
-<li><code>--language</code>: Language of document content (e.g., “en”, “es”, “fr”)</li>
+<li><code>--language</code>: Language of document content (e.g.&nbsp;“en”, “es”, “fr”)</li>
 <li><code>--username</code>: Username for session tracking</li>
-<li><code>--pii_detector</code>: Choose PII detection method (“Local”, “AWS Comprehend”, or “None”)</li>
-<li><code>--local_redact_entities</code>: Specify local entities to redact (space-separated list)</li>
-<li><code>--aws_redact_entities</code>: Specify AWS Comprehend entities to redact (space-separated list)</li>
+<li><code>--save_to_user_folders</code>: Save outputs under username-based subfolders (True/False)</li>
+<li><code>--allow_list</code>: Path to CSV of terms to exclude from redaction (default from config)</li>
+<li><code>--pii_detector</code>: PII detection method: “Local”, “AWS Comprehend”, or “None”</li>
+<li><code>--local_redact_entities</code>: Local entities to redact (space-separated list)</li>
+<li><code>--aws_redact_entities</code>: AWS Comprehend entities to redact (space-separated list)</li>
 <li><code>--aws_access_key</code> / <code>--aws_secret_key</code>: AWS credentials for cloud services</li>
 <li><code>--aws_region</code>: AWS region for cloud services</li>
 <li><code>--s3_bucket</code>: S3 bucket name for cloud operations</li>
 <li><code>--cost_code</code>: Cost code for tracking usage</li>
+<li><code>--save_outputs_to_s3</code>: Upload output files to S3 after processing (True/False)</li>
+<li><code>--s3_outputs_folder</code>: S3 key prefix for output files</li>
+<li><code>--s3_outputs_bucket</code>: S3 bucket for outputs (defaults to –s3_bucket if not set)</li>
+<li><code>--do_initial_clean</code>: Perform initial text cleaning for tabular data (True/False)</li>
+<li><code>--save_logs_to_csv</code>: Save processing logs to CSV (True/False)</li>
+<li><code>--save_logs_to_dynamodb</code>: Save processing logs to DynamoDB (True/False)</li>
+<li><code>--display_file_names_in_logs</code>: Include file names in log output (True/False)</li>
+<li><code>--upload_logs_to_s3</code>: Upload log files to S3 after processing (True/False)</li>
+<li><code>--s3_logs_prefix</code>: S3 prefix for usage log files</li>
+<li><code>--feedback_logs_folder</code>: Directory for feedback log files</li>
+<li><code>--access_logs_folder</code>: Directory for access log files</li>
+<li><code>--usage_logs_folder</code>: Directory for usage log files</li>
+<li><code>--paddle_model_path</code>: Directory for PaddleOCR model storage</li>
+<li><code>--spacy_model_path</code>: Directory for spaCy model storage</li>
 </ul>
 </section>
 <section id="pdfimage-redaction-options" class="level4">
 <h4 class="anchored" data-anchor-id="pdfimage-redaction-options">PDF/Image redaction options</h4>
 <ul>
-<li><code>--ocr_method</code>: Choose text extraction method (“AWS Textract”, “Local OCR”, or “Local text”)</li>
-<li><code>--chosen_local_ocr_model</code>: Local OCR model to use (e.g., “tesseract”, “paddle”, “hybrid-paddle”, “hybrid-vlm”)</li>
-<li><code>--page_min</code> / <code>--page_max</code>: Process only specific page range (0 for max means all pages)</li>
+<li><code>--ocr_method</code>: Text extraction method: “AWS Textract”, “Local OCR”, or “Local text”</li>
+<li><code>--chosen_local_ocr_model</code>: Local OCR model (e.g.&nbsp;“tesseract”, “paddle”, “hybrid-paddle”, “hybrid-vlm”, “inference-server”)</li>
+<li><code>--page_min</code> / <code>--page_max</code>: Page range to process (0 for page_max means all pages)</li>
 <li><code>--images_dpi</code>: DPI for image processing (default: 300.0)</li>
 <li><code>--preprocess_local_ocr_images</code>: Preprocess images before OCR (True/False)</li>
 <li><code>--compress_redacted_pdf</code>: Compress the final redacted PDF (True/False)</li>
-<li><code>--return_pdf_end_of_redaction</code>: Return PDF at end of redaction process (True/False)</li>
+<li><code>--return_pdf_end_of_redaction</code>: Return PDF at end of redaction (True/False)</li>
 <li><code>--allow_list_file</code> / <code>--deny_list_file</code>: Paths to custom allow/deny list CSV files</li>
-<li><code>--redact_whole_page_file</code>: Path to CSV file listing pages to redact completely</li>
-<li><code>--handwrite_signature_extraction</code>: Handwriting and signature extraction options for Textract (“Extract handwriting”, “Extract signatures”)</li>
+<li><code>--redact_whole_page_file</code>: Path to CSV listing pages to redact completely</li>
+<li><code>--handwrite_signature_extraction</code>: Textract options (“Extract handwriting”, “Extract signatures”)</li>
 <li><code>--extract_forms</code>: Extract forms during Textract analysis (flag)</li>
 <li><code>--extract_tables</code>: Extract tables during Textract analysis (flag)</li>
 <li><code>--extract_layout</code>: Extract layout during Textract analysis (flag)</li>
+<li><code>--vlm_model_choice</code>: VLM model for OCR (e.g.&nbsp;Bedrock model ID when using cloud VLM)</li>
+<li><code>--inference_server_vlm_model</code>: Inference server VLM model name for OCR</li>
+<li><code>--inference_server_api_url</code>: Inference server API URL for VLM OCR</li>
+<li><code>--gemini_api_key</code>: Google Gemini API key for VLM OCR</li>
+<li><code>--azure_openai_api_key</code>: Azure OpenAI API key for VLM OCR</li>
+<li><code>--azure_openai_endpoint</code>: Azure OpenAI endpoint URL for VLM OCR</li>
+<li><code>--efficient_ocr</code>: Use efficient OCR: try selectable text first per page, run OCR only when needed (flag)</li>
+<li><code>--no_efficient_ocr</code>: Disable efficient OCR (flag)</li>
+<li><code>--efficient_ocr_min_words</code>: Min words on page to use text-only route; below this use OCR (default from config)</li>
+</ul>
+</section>
+<section id="llm-pii-detection-options" class="level4">
+<h4 class="anchored" data-anchor-id="llm-pii-detection-options">LLM PII detection options</h4>
+<p>Used when the PII method is LLM-based (e.g.&nbsp;via config/defaults). Model used depends on inference method.</p>
+<ul>
+<li><code>--llm_model_choice</code>: LLM model for PII (e.g.&nbsp;Bedrock model ID); defaults to config CLOUD_LLM_PII_MODEL_CHOICE for Bedrock</li>
+<li><code>--llm_inference_method</code>: “aws-bedrock”, “local”, “inference-server”, “azure-openai”, or “gemini”</li>
+<li><code>--inference_server_pii_model</code>: Inference server PII detection model name</li>
+<li><code>--llm_temperature</code>: Temperature for LLM PII (lower = more deterministic)</li>
+<li><code>--llm_max_tokens</code>: Max tokens in LLM response for PII detection</li>
+<li><code>--llm_redact_entities</code>: LLM entities to detect (space-separated, e.g.&nbsp;NAME, EMAIL_ADDRESS, PHONE_NUMBER, ADDRESS, CUSTOM)</li>
+<li><code>--custom_llm_instructions</code>: Custom instructions for LLM entity detection (e.g.&nbsp;“Do not redact company names”)</li>
 </ul>
 </section>
 <section id="tabularword-anonymization-options" class="level4">
 <h4 class="anchored" data-anchor-id="tabularword-anonymization-options">Tabular/Word anonymization options</h4>
 <ul>
-<li><code>--anon_strategy</code>: Anonymization strategy (e.g., “redact”, “redact completely”, “replace_redacted”, “encrypt”, “hash”)</li>
-<li><code>--text_columns</code>: List of column names to anonymize (space-separated)</li>
-<li><code>--excel_sheets</code>: Specific Excel sheet names to process (space-separated)</li>
-<li><code>--fuzzy_mistakes</code>: Number of spelling mistakes allowed in fuzzy matching (default: 1)</li>
+<li><code>--anon_strategy</code>: One of “redact”, “redact completely”, “replace_redacted”, “entity_type”, “encrypt”, “hash”, “replace with ‘REDACTED’”, “replace with <entity_name>”, “mask”, “fake_first_name”</entity_name></li>
+<li><code>--text_columns</code>: Column names to anonymise or use for deduplication (space-separated)</li>
+<li><code>--excel_sheets</code>: Excel sheet names to process (space-separated)</li>
+<li><code>--fuzzy_mistakes</code>: Allowed spelling mistakes for fuzzy matching (default: 0)</li>
 <li><code>--match_fuzzy_whole_phrase_bool</code>: Match fuzzy whole phrase (True/False)</li>
-<li><code>--do_initial_clean</code>: Perform initial text cleaning for tabular data (True/False)</li>
+<li><code>--do_initial_clean</code>: Initial text cleaning for tabular data (True/False)</li>
 </ul>
 </section>
 <section id="duplicate-detection-options" class="level4">
@@ -1367,15 +1487,31 @@ INFERENCE_SERVER_API_URL=http://localhost:7862</code></pre>
 <li><code>--remove_duplicate_rows</code>: Remove duplicate rows from output (True/False)</li>
 </ul>
 </section>
+<section id="document-summarisation-options" class="level4">
+<h4 class="anchored" data-anchor-id="document-summarisation-options">Document summarisation options</h4>
+<ul>
+<li><code>--summarisation_inference_method</code>: “LLM (AWS Bedrock)”, “Local transformers LLM”, or “Local inference server”</li>
+<li><code>--summarisation_temperature</code>: Temperature for summarisation (0.0–2.0; default: 0.6)</li>
+<li><code>--summarisation_max_pages_per_group</code>: Max pages per page-group summary (default: 30)</li>
+<li><code>--summarisation_api_key</code>: API key if required by the chosen LLM</li>
+<li><code>--summarisation_context</code>: Additional context (e.g.&nbsp;“This is a consultation response document”)</li>
+<li><code>--summarisation_format</code>: “concise” (key themes) or “detailed” (default)</li>
+<li><code>--summarisation_additional_instructions</code>: Extra instructions (e.g.&nbsp;“Focus on key decisions and recommendations”)</li>
+</ul>
+</section>
 <section id="textract-batch-operations-options" class="level4">
 <h4 class="anchored" data-anchor-id="textract-batch-operations-options">Textract batch operations options</h4>
 <ul>
-<li><code>--textract_action</code>: Action to perform (“submit”, “retrieve”, or “list”)</li>
+<li><code>--textract_action</code>: “submit”, “retrieve”, or “list”</li>
 <li><code>--job_id</code>: Textract job ID for retrieve action</li>
 <li><code>--extract_signatures</code>: Extract signatures during Textract analysis (flag)</li>
-<li><code>--textract_bucket</code>: S3 bucket name for Textract operations</li>
+<li><code>--textract_bucket</code>: S3 bucket for Textract operations</li>
+<li><code>--textract_input_prefix</code>: S3 prefix for input files in Textract operations</li>
+<li><code>--textract_output_prefix</code>: S3 prefix for output files in Textract operations</li>
+<li><code>--s3_textract_document_logs_subfolder</code>: S3 prefix for Textract job logs</li>
+<li><code>--local_textract_document_logs_subfolder</code>: Local path for Textract job logs</li>
 <li><code>--poll_interval</code>: Polling interval in seconds for job status (default: 30)</li>
-<li><code>--max_poll_attempts</code>: Maximum polling attempts before timeout (default: 120)</li>
+<li><code>--max_poll_attempts</code>: Max polling attempts before timeout (default: 120)</li>
 </ul>
 </section>
 </section>
@@ -1383,7 +1519,7 @@ INFERENCE_SERVER_API_URL=http://localhost:7862</code></pre>
 <h3 class="anchored" data-anchor-id="output-files">Output files</h3>
 <p>The CLI generates the same output files as the GUI: - <code>...redacted.pdf</code>: Final redacted document - <code>...redactions_for_review.pdf</code>: Document with redaction boxes for review - <code>...review_file.csv</code>: Detailed redaction information - <code>...ocr_results.csv</code>: Extracted text results - <code>..._textract.json</code>: AWS Textract results (if applicable)</p>
 <p>For more advanced options and configuration, refer to the help text by running:</p>
-<div class="sourceCode" id="cb23"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb29"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 
 
 </section>
@@ -1442,13 +1578,14 @@ INFERENCE_SERVER_API_URL=http://localhost:7862</code></pre>
       e.clearSelection();
     }
     const getTextToCopy = function(trigger) {
-        const codeEl = trigger.previousElementSibling.cloneNode(true);
-        for (const childEl of codeEl.children) {
-          if (isCodeAnnotation(childEl)) {
-            childEl.remove();
-          }
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
         }
-        return codeEl.innerText;
+      }
+      return codeEl.innerText;
     }
     const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
       text: getTextToCopy

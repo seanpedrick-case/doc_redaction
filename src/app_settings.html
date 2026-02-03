@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.7.31">
+<meta name="generator" content="quarto-1.8.26">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -32,14 +32,15 @@ ul.task-list li input[type="checkbox"] {
 <meta name="quarto:offset" content="../">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/axe/axe-check.js" type="module"></script>
 <script src="../site_libs/quarto-html/popper.min.js"></script>
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-e1a5c8363afafaef2c763b6775fbf3ca.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-587c61ba64f3a5504c4d52d930310e48.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-dfb324f25d9b1687192fa8be62ac8f9c.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -288,6 +289,11 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> Sets the maximum number of pixels for an image that the application will process. Leave blank for no limit. This can help prevent issues with very large images.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
+<li><strong><code>MAX_SPACES_GPU_RUN_TIME</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of seconds to run the GPU on Hugging Face Spaces. Used to limit long-running VLM/OCR jobs when deployed on Spaces.</li>
+<li><strong>Default Value:</strong> <code>60</code></li>
+</ul></li>
 </ul>
 </section>
 <section id="file-io-options" class="level2">
@@ -435,7 +441,7 @@ ul.task-list li input[type="checkbox"] {
 <li><strong><code>MAX_QUEUE_SIZE</code></strong>
 <ul>
 <li><strong>Description:</strong> The maximum number of requests that can be queued in the Gradio interface.</li>
-<li><strong>Default Value:</strong> <code>5</code></li>
+<li><strong>Default Value:</strong> <code>20</code></li>
 </ul></li>
 <li><strong><code>MAX_FILE_SIZE</code></strong>
 <ul>
@@ -528,6 +534,26 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> Sets the height (in pixels) of the file input component in the Gradio UI.</li>
 <li><strong>Default Value:</strong> <code>200</code></li>
 </ul></li>
+<li><strong><code>SHOW_QUICKSTART</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, displays a quickstart/walkthrough component in the Gradio interface to guide new users.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SHOW_SUMMARISATION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, shows the summarisation tab in the Gradio interface.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>APPLY_DUPLICATES_TO_FILE_AUTOMATICALLY</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, duplicate detection results can be applied to the file automatically in the UI workflow.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>RUN_ALL_EXAMPLES_THROUGH_AWS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, example documents will be run through AWS (e.g.&nbsp;Textract) when examples are used.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
 </ul>
 </section>
 <section id="redaction-pii-options" class="level2">
@@ -552,10 +578,70 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> Labels for text extraction model options displayed in the UI. Customize the display names for “Local model - selectable text”, “Local OCR model - PDFs without selectable text”, and “AWS Textract service - all PDF types” respectively.</li>
 <li><strong>Default Values:</strong> <code>"Local model - selectable text"</code>, <code>"Local OCR model - PDFs without selectable text"</code>, <code>"AWS Textract service - all PDF types"</code></li>
 </ul></li>
+<li><strong><code>BEDROCK_VLM_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>GEMINI_VLM_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Labels for cloud VLM text extraction options (AWS Bedrock, Google Gemini, Azure/OpenAI) displayed in the UI when the corresponding show options are enabled.</li>
+<li><strong>Default Values:</strong> <code>"AWS Bedrock VLM OCR - all PDF types"</code>, <code>"Google Gemini VLM OCR - all PDF types"</code>, <code>"Azure/OpenAI VLM OCR - all PDF types"</code></li>
+</ul></li>
+<li><strong><code>EFFICIENT_OCR</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses a two-step OCR process for PDFs: try selectable text extraction per page first; only run OCR (Tesseract/Textract/VLM) on pages where no text could be extracted. Saves cost and time. Affects both the Gradio app and the CLI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>EFFICIENT_OCR_MIN_WORDS</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum number of extractable words on a page to use the text-only route when <code>EFFICIENT_OCR</code> is enabled; below this threshold the page uses OCR.</li>
+<li><strong>Default Value:</strong> <code>20</code></li>
+</ul></li>
+<li><strong><code>OCR_FIRST_PASS_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g.&nbsp;when using AWS Textract). Set to <code>1</code> for sequential processing; use a value greater than <code>1</code> to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g.&nbsp;Textract). Can be overridden via CLI <code>--ocr_first_pass_max_workers</code> or direct-mode/Lambda env.</li>
+<li><strong>Default Value:</strong> <code>3</code></li>
+</ul></li>
+<li><strong><code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of threads for page-group summarisation in document summarisation. Set to <code>1</code> for sequential processing (recommended for local LLM models); use a value greater than <code>1</code> to summarise multiple page groups in parallel (typically for API-based models). Can be overridden via CLI <code>--summary_page_group_max_workers</code> or direct-mode/Lambda env.</li>
+<li><strong>Default Value:</strong> <code>1</code></li>
+</ul></li>
+<li><strong><code>SHOW_BEDROCK_VLM_MODELS</code></strong>, <strong><code>SHOW_GEMINI_VLM_MODELS</code></strong>, <strong><code>SHOW_AZURE_OPENAI_VLM_MODELS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether AWS Bedrock, Google Gemini, or Azure/OpenAI VLM text extraction options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for all.</li>
+</ul></li>
 <li><strong><code>NO_REDACTION_PII_OPTION</code></strong>, <strong><code>LOCAL_PII_OPTION</code></strong>, <strong><code>AWS_PII_OPTION</code></strong>
 <ul>
 <li><strong>Description:</strong> Labels for PII detection model options displayed in the UI. Customize the display names for “Only extract text (no redaction)”, “Local”, and “AWS Comprehend” respectively.</li>
 <li><strong>Default Values:</strong> <code>"Only extract text (no redaction)"</code>, <code>"Local"</code>, <code>"AWS Comprehend"</code></li>
+</ul></li>
+<li><strong><code>AWS_LLM_PII_OPTION</code></strong>, <strong><code>INFERENCE_SERVER_PII_OPTION</code></strong>, <strong><code>LOCAL_TRANSFORMERS_LLM_PII_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Labels for LLM-based PII detection options: AWS Bedrock, local inference server, and local transformers LLM.</li>
+<li><strong>Default Values:</strong> <code>"LLM (AWS Bedrock)"</code>, <code>"Local inference server"</code>, <code>"Local transformers LLM"</code></li>
+</ul></li>
+<li><strong><code>SHOW_INFERENCE_SERVER_PII_OPTIONS</code></strong>, <strong><code>SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS</code></strong>, <strong><code>SHOW_AWS_BEDROCK_LLM_MODELS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether inference-server, local transformers LLM, or AWS Bedrock LLM PII detection options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for inference-server and transformers; <code>"False"</code> for AWS Bedrock LLM.</li>
+</ul></li>
+<li><strong><code>CHOSEN_LLM_PII_INFERENCE_METHOD</code></strong>
+<ul>
+<li><strong>Description:</strong> Default LLM inference method for PII detection. Options include <code>"aws-bedrock"</code>, <code>"local"</code>, <code>"inference-server"</code>, <code>"azure-openai"</code>, <code>"gemini"</code>. Only methods enabled via the corresponding <code>SHOW_*_LLM_PII_OPTIONS</code> appear in the UI.</li>
+<li><strong>Default Value:</strong> <code>"aws-bedrock"</code></li>
+</ul></li>
+<li><strong><code>SHOW_LOCAL_LLM_PII_OPTIONS</code></strong>, <strong><code>SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS</code></strong>, <strong><code>SHOW_AZURE_LLM_PII_OPTIONS</code></strong>, <strong><code>SHOW_GEMINI_LLM_PII_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether local, inference-server, Azure/OpenAI, or Gemini LLM PII options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for all.</li>
+</ul></li>
+<li><strong><code>SHOW_PII_IDENTIFICATION_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, shows the PII entity identification/selection options in the UI.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>SHOW_GEMINI_LLM_MODELS</code></strong>, <strong><code>SHOW_AZURE_LLM_MODELS</code></strong>, <strong><code>SHOW_INFERENCE_SERVER_LLM_MODELS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether Google Gemini, Azure/OpenAI, or inference-server LLM options appear in the PII detection model list. When enabled, the corresponding models (e.g.&nbsp;gemini-2.5-flash, gpt-4o-mini) can be selected for PII detection.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for all.</li>
 </ul></li>
 <li><strong><code>SHOW_LOCAL_PII_DETECTION_OPTIONS</code></strong> / <strong><code>SHOW_AWS_PII_DETECTION_OPTIONS</code></strong>
 <ul>
@@ -610,126 +696,217 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> Custom font path for PaddleOCR. If empty, the application will attempt to use system fonts to avoid downloading <code>simfang.ttf</code> or <code>PingFang-SC-Regular.ttf</code>. Set this if you want to use a specific font file for PaddleOCR text rendering.</li>
 <li><strong>Default Value:</strong> <code>''</code> (uses system fonts).</li>
 </ul></li>
+<li><strong><code>GEMINI_API_KEY</code></strong>
+<ul>
+<li><strong>Description:</strong> API key for Google Gemini. Required when using Gemini for PII detection or VLM OCR (<code>SHOW_GEMINI_LLM_MODELS</code> or <code>SHOW_GEMINI_VLM_MODELS</code>).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>AZURE_OPENAI_API_KEY</code></strong>
+<ul>
+<li><strong>Description:</strong> API key for Azure or OpenAI. Required when using Azure/OpenAI for PII detection or VLM OCR (<code>SHOW_AZURE_LLM_MODELS</code> or <code>SHOW_AZURE_OPENAI_VLM_MODELS</code>).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>AZURE_OPENAI_INFERENCE_ENDPOINT</code></strong>
+<ul>
+<li><strong>Description:</strong> Inference endpoint URL for Azure/OpenAI. Used with <code>AZURE_OPENAI_API_KEY</code> when Azure/OpenAI LLM or VLM options are enabled.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>API_URL</code></strong>
+<ul>
+<li><strong>Description:</strong> Base URL of the LLM inference-server API (used for PII detection when <code>SHOW_INFERENCE_SERVER_LLM_MODELS</code> is enabled). Distinct from <code>INFERENCE_SERVER_API_URL</code>, which is used for VLM/OCR.</li>
+<li><strong>Default Value:</strong> <code>"http://localhost:8080"</code></li>
+</ul></li>
+<li><strong><code>HF_TOKEN</code></strong>
+<ul>
+<li><strong>Description:</strong> Hugging Face token. May be required for downloading gated or private models (e.g.&nbsp;some local transformers LLM or VLM models).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
 </ul>
 </section>
 <section id="local-ocr-tesseract-paddleocr" class="level3">
 <h3 class="anchored" data-anchor-id="local-ocr-tesseract-paddleocr">Local OCR (Tesseract &amp; PaddleOCR)</h3>
 <ul>
-<li><strong><code>CHOSEN_LOCAL_OCR_MODEL</code></strong>
+<li><p><strong><code>CHOSEN_LOCAL_OCR_MODEL</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, <code>"hybrid-paddle"</code>, <code>"hybrid-vlm"</code>, <code>"hybrid-paddle-vlm"</code>, <code>"hybrid-paddle-inference-server"</code>, <code>"vlm"</code>, or <code>"inference-server"</code>.</li>
 <li><strong>Default Value:</strong> <code>"tesseract"</code></li>
 </ul></li>
-<li><strong><code>SHOW_LOCAL_OCR_MODEL_OPTIONS</code></strong>
+<li><p><strong><code>SHOW_LOCAL_OCR_MODEL_OPTIONS</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select the local OCR model from the UI.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>HYBRID_OCR_CONFIDENCE_THRESHOLD</code></strong>
+<li><p><strong><code>HYBRID_OCR_CONFIDENCE_THRESHOLD</code></strong></p>
 <ul>
 <li><strong>Description:</strong> In “hybrid-paddle” mode, this is the Tesseract confidence score below which PaddleOCR will be used for re-extraction.</li>
-<li><strong>Default Value:</strong> <code>80</code></li>
+<li><strong>Default Value:</strong> <code>95</code></li>
 </ul></li>
-<li><strong><code>HYBRID_OCR_PADDING</code></strong>
+<li><p><strong><code>HYBRID_OCR_PADDING</code></strong></p>
 <ul>
 <li><strong>Description:</strong> In “hybrid-paddle” mode, padding added to the word’s bounding box before re-extraction.</li>
 <li><strong>Default Value:</strong> <code>1</code></li>
 </ul></li>
-<li><strong><code>PADDLE_USE_TEXTLINE_ORIENTATION</code></strong>
+<li><p><strong><code>PADDLE_USE_TEXTLINE_ORIENTATION</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Toggles textline orientation detection for PaddleOCR.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>PADDLE_DET_DB_UNCLIP_RATIO</code></strong>
+<li><p><strong><code>PADDLE_DET_DB_UNCLIP_RATIO</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Controls the expansion ratio of the detected text region in PaddleOCR.</li>
 <li><strong>Default Value:</strong> <code>1.2</code></li>
 </ul></li>
-<li><strong><code>SAVE_EXAMPLE_HYBRID_IMAGES</code></strong>
+<li><p><strong><code>SAVE_EXAMPLE_HYBRID_IMAGES</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Saves comparison images when using “hybrid-paddle” OCR mode.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>SAVE_PAGE_OCR_VISUALISATIONS</code></strong>
+<li><p><strong><code>SAVE_PAGE_OCR_VISUALISATIONS</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, saves visualisations of Tesseract, PaddleOCR, and Textract bounding boxes overlaid on the page images.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES</code></strong>
+<li><p><strong><code>INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, OCR visualisation output files (created when <code>SAVE_PAGE_OCR_VISUALISATIONS</code> is enabled) will be included in the final output file list returned by <code>choose_and_run_redactor</code>. This makes the visualisation files available in the Gradio output interface.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>SAVE_WORD_SEGMENTER_OUTPUT_IMAGES</code></strong>
+<li><p><strong><code>SAVE_WORD_SEGMENTER_OUTPUT_IMAGES</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, saves output images from the word segmenter for debugging purposes.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>PREPROCESS_LOCAL_OCR_IMAGES</code></strong>
+<li><p><strong><code>PREPROCESS_LOCAL_OCR_IMAGES</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, images will be preprocessed before local OCR. Can slow down processing.</li>
 <li><strong>Default Value:</strong> <code>"True"</code></li>
 <li><strong>Note:</strong> Testing has shown that preprocessing doesn’t necessarily improve OCR results and can significantly slow down extraction. Consider setting this to <code>"False"</code> if processing speed is a priority.</li>
 </ul></li>
-<li><strong><code>SAVE_PREPROCESS_IMAGES</code></strong>
+<li><p><strong><code>SAVE_PREPROCESS_IMAGES</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, saves the preprocessed images for debugging purposes.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>SHOW_PADDLE_MODEL_OPTIONS</code></strong>
+<li><p><strong><code>SHOW_PADDLE_MODEL_OPTIONS</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select PaddleOCR-related options (paddle, hybrid-paddle) from the UI.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>MODEL_CACHE_PATH</code></strong>
+<li><p><strong><code>MODEL_CACHE_PATH</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Path to the directory where models are cached.</li>
 <li><strong>Default Value:</strong> <code>"./model_cache"</code></li>
 </ul></li>
-<li><strong><code>TESSERACT_SEGMENTATION_LEVEL</code></strong>
+<li><p><strong><code>TESSERACT_SEGMENTATION_LEVEL</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Tesseract PSM (Page Segmentation Mode) level to use for OCR. Valid values are 0-13.</li>
 <li><strong>Default Value:</strong> <code>11</code></li>
 </ul></li>
-<li><strong><code>TESSERACT_WORD_LEVEL_OCR</code></strong>
+<li><p><strong><code>TESSERACT_WORD_LEVEL_OCR</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, uses Tesseract word-level OCR instead of line-level.</li>
 <li><strong>Default Value:</strong> <code>"True"</code></li>
 </ul></li>
-<li><strong><code>CONVERT_LINE_TO_WORD_LEVEL</code></strong>
+<li><p><strong><code>CONVERT_LINE_TO_WORD_LEVEL</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, converts PaddleOCR line-level OCR results to word-level for better precision.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>LOAD_PADDLE_AT_STARTUP</code></strong>
+<li><p><strong><code>LOAD_PADDLE_AT_STARTUP</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, loads the PaddleOCR model at application startup.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>SHOW_INFERENCE_SERVER_OPTIONS</code></strong>
+<li><p><strong><code>USE_TRANFORMERS_VLM_MODEL_AS_LLM</code></strong></p>
+<ul>
+<li><strong>Description:</strong> When set to <code>"True"</code>, use the same local transformers VLM model (e.g.&nbsp;Qwen3-VL-4B-Instruct) for LLM tasks (e.g.&nbsp;PII entity detection in <code>tools/llm_entity_detection.py</code>) as for VLM/OCR. Overrides <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code> when local transformers LLM is selected. The VLM model must be loaded first (e.g.&nbsp;by running VLM OCR); otherwise the standard PII model is used.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Identifier for the local transformers LLM used for PII detection (e.g.&nbsp;<code>"gemma-3-4b"</code>, <code>"qwen-3-4b"</code>). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, gpt-oss-20b, granite-4-tiny, granite-4-micro. Ignored for local LLM when <code>USE_TRANFORMERS_VLM_MODEL_AS_LLM</code> is <code>"True"</code> (the VLM model is used instead).</li>
+<li><strong>Default Value:</strong> <code>"gemma-3-4b"</code></li>
+</ul></li>
+<li><p><strong><code>LOCAL_TRANSFORMERS_LLM_PII_REPO_ID</code></strong>, <strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE</code></strong>, <strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Hugging Face repo ID, optional model filename, and local folder for the local transformers PII detection model. Can be overridden automatically based on <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code>.</li>
+<li><strong>Default Values:</strong> e.g.&nbsp;<code>"unsloth/gemma-3-4b-it-bnb-4bit"</code>, <code>"gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"</code>, <code>"model/gemma3_4b"</code>.</li>
+</ul></li>
+<li><p><strong><code>LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, loads the local transformers LLM PII model at application startup (reduces latency on first use).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>MULTIMODAL_PROMPT_FORMAT</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses multimodal prompt format for the local LLM. Set automatically for some model choices (e.g.&nbsp;Gemma 3 4B/12B).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>LOW_VRAM_SYSTEM</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, applies lower-memory settings (e.g.&nbsp;smaller batch size, optional use of llama.cpp). Use on systems with limited GPU memory.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>USE_LLAMA_CPP</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, use llama.cpp for local LLM inference. When <code>LOW_VRAM_SYSTEM</code> is true, this defaults to <code>"True"</code>. Not fully supported in all flows.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> (or <code>"True"</code> when <code>LOW_VRAM_SYSTEM</code> is true).</li>
+</ul></li>
+<li><p><strong><code>REASONING_SUFFIX</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Suffix added to prompts for reasoning-capable models (e.g.&nbsp;<code>"Reasoning: low"</code> for gpt-oss-20b, <code>"/nothink"</code> for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.</li>
+<li><strong>Default Value:</strong> Model-dependent (e.g.&nbsp;<code>"Reasoning: low"</code> or <code>"/nothink"</code> or <code>''</code>).</li>
+</ul></li>
+<li><p><strong>LLM generation parameters:</strong> <strong><code>LLM_TEMPERATURE</code></strong> (default <code>0.6</code>), <strong><code>LLM_TOP_K</code></strong> (<code>64</code>), <strong><code>LLM_MIN_P</code></strong> (<code>0</code>), <strong><code>LLM_TOP_P</code></strong> (<code>0.95</code>), <strong><code>LLM_REPETITION_PENALTY</code></strong> (<code>1.0</code>), <strong><code>LLM_MAX_NEW_TOKENS</code></strong> (<code>4096</code>), <strong><code>LLM_CONTEXT_LENGTH</code></strong> (<code>16384</code>), <strong><code>LLM_SEED</code></strong> (<code>42</code>), <strong><code>LLM_STREAM</code></strong> (<code>True</code>), <strong><code>LLM_SAMPLE</code></strong> (<code>True</code>), <strong><code>LLM_MAX_GPU_LAYERS</code></strong> (<code>-1</code>), and related <strong><code>LLM_*</code></strong> variables in <code>tools/config.py</code> control local/transformers LLM generation. <strong><code>LLM_PII_TEMPERATURE</code></strong>, <strong><code>LLM_PII_MAX_TOKENS</code></strong>, <strong><code>LLM_PII_NUMBER_OF_RETRY_ATTEMPTS</code></strong> (<code>3</code>), and <strong><code>LLM_PII_TIMEOUT_WAIT</code></strong> (<code>5</code>) control PII detection LLM calls and retries.</p></li>
+<li><p><strong><code>SHOW_INFERENCE_SERVER_VLM_OPTIONS</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select inference-server-related options from the UI.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>SHOW_HYBRID_MODELS</code></strong>
+<li><p><strong><code>SHOW_HYBRID_MODELS</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, enables hybrid model options (e.g., hybrid-paddle-vlm, hybrid-paddle-inference-server) in the UI.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>INFERENCE_SERVER_API_URL</code></strong>
+<li><p><strong><code>INFERENCE_SERVER_API_URL</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Base URL of the inference-server API for remote OCR processing.</li>
 <li><strong>Default Value:</strong> <code>"http://localhost:8080"</code></li>
 </ul></li>
-<li><strong><code>INFERENCE_SERVER_MODEL_NAME</code></strong>
+<li><p><strong><code>INFERENCE_SERVER_MODEL_NAME</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Optional model name to use for inference-server API. If empty, uses the default model on the server.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
-<li><strong><code>INFERENCE_SERVER_TIMEOUT</code></strong>
+<li><p><strong><code>INFERENCE_SERVER_TIMEOUT</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Timeout in seconds for inference-server API requests.</li>
 <li><strong>Default Value:</strong> <code>300</code></li>
+</ul></li>
+<li><p><strong><code>DEFAULT_INFERENCE_SERVER_VLM_MODEL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Default model name for inference-server VLM API calls. If empty, uses <code>INFERENCE_SERVER_MODEL_NAME</code> or the server default.</li>
+<li><strong>Default Value:</strong> <code>"qwen_3_vl_30b_a3b_it"</code></li>
+</ul></li>
+<li><p><strong><code>DEFAULT_INFERENCE_SERVER_PII_MODEL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Default model name for inference-server PII detection API calls. If empty, uses <code>INFERENCE_SERVER_MODEL_NAME</code>, <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code>, or the server default.</li>
+<li><strong>Default Value:</strong> <code>"gemma_3_12b"</code></li>
+</ul></li>
+<li><p><strong><code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Default inference-server PII model selected when <code>SHOW_INFERENCE_SERVER_LLM_MODELS</code> is enabled. Must be one of the registered inference-server models.</li>
+<li><strong>Default Value:</strong> First model in the inference-server models list (e.g.&nbsp;<code>"unnamed-inference-server-model"</code>).</li>
+</ul></li>
+<li><p><strong><code>INFERENCE_SERVER_LLM_PII_MODEL_CHOICE</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Primary config variable for the inference-server PII model used at runtime. Defaults to <code>DEFAULT_INFERENCE_SERVER_PII_MODEL</code>, then <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code>, if not set.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_INFERENCE_SERVER_PII_MODEL</code> or <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code>.</li>
+</ul></li>
+<li><p><strong><code>SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select from inference-server VLM model options in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 </ul>
 </section>
@@ -741,10 +918,10 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> If set to <code>"True"</code>, VLM (Vision Language Model) options will be shown in the UI.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>SELECTED_MODEL</code></strong>
+<li><strong><code>SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL</code></strong>
 <ul>
-<li><strong>Description:</strong> Selected vision model for OCR. Choose from: <code>"Nanonets-OCR2-3B"</code>, <code>"Dots.OCR"</code>, <code>"Qwen3-VL-2B-Instruct"</code>, <code>"Qwen3-VL-4B-Instruct"</code>, <code>"Qwen3-VL-8B-Instruct"</code>, <code>"PaddleOCR-VL"</code>.</li>
-<li><strong>Default Value:</strong> <code>"Qwen3-VL-4B-Instruct"</code></li>
+<li><strong>Description:</strong> Selected vision model for OCR. Choose from: <code>"Nanonets-OCR2-3B"</code>, <code>"Dots.OCR"</code>, <code>"Qwen3-VL-2B-Instruct"</code>, <code>"Qwen3-VL-4B-Instruct"</code>, <code>"Qwen3-VL-8B-Instruct"</code>, <code>"Qwen3-VL-30B-A3B-Instruct"</code>, <code>"Qwen3-VL-235B-A22B-Instruct"</code>, <code>"PaddleOCR-VL"</code>.</li>
+<li><strong>Default Value:</strong> <code>"Qwen3-VL-8B-Instruct"</code></li>
 </ul></li>
 <li><strong><code>QUANTISE_VLM_MODELS</code></strong>
 <ul>
@@ -771,20 +948,15 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.</li>
 <li><strong>Default Value:</strong> <code>300.0</code></li>
 </ul></li>
-<li><strong><code>MAX_SPACES_GPU_RUN_TIME</code></strong>
-<ul>
-<li><strong>Description:</strong> Maximum number of seconds to run the GPU on Spaces (Hugging Face Spaces).</li>
-<li><strong>Default Value:</strong> <code>60</code></li>
-</ul></li>
 <li><strong><code>MAX_NEW_TOKENS</code></strong>
 <ul>
 <li><strong>Description:</strong> Maximum number of tokens to generate for VLM responses.</li>
-<li><strong>Default Value:</strong> <code>4192</code></li>
+<li><strong>Default Value:</strong> <code>4096</code></li>
 </ul></li>
 <li><strong><code>DEFAULT_MAX_NEW_TOKENS</code></strong>
 <ul>
 <li><strong>Description:</strong> Default maximum number of tokens to generate for VLM responses.</li>
-<li><strong>Default Value:</strong> <code>4192</code></li>
+<li><strong>Default Value:</strong> <code>4096</code></li>
 </ul></li>
 <li><strong><code>MAX_INPUT_TOKEN_LENGTH</code></strong>
 <ul>
@@ -811,44 +983,69 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Description:</strong> If set to <code>"True"</code>, reports VLM outputs to the GUI with info boxes as they are processed.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
+<li><strong><code>REPORT_LLM_OUTPUTS_TO_GUI</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, reports streamed LLM outputs (local transformers or local inference-server PII detection) to the GUI with <code>gr.Info</code> as they are processed.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>CLOUD_VLM_MODEL_CHOICE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default model choice for cloud VLM OCR (AWS Bedrock, Gemini, or Azure/OpenAI). Used when cloud VLM options are enabled.</li>
+<li><strong>Default Value:</strong> <code>"qwen.qwen3-vl-235b-a22b"</code> (or first available cloud model if empty)</li>
+</ul></li>
+<li><strong><code>CLOUD_LLM_PII_MODEL_CHOICE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default AWS Bedrock (or cloud) model for LLM-based PII detection when <code>SHOW_AWS_BEDROCK_LLM_MODELS</code> (or other cloud LLM options) is enabled. Used by <code>tools/llm_entity_detection.py</code>.</li>
+<li><strong>Default Value:</strong> <code>"amazon.nova-pro-v1:0"</code></li>
+</ul></li>
+<li><strong><code>CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE</code></strong>
+<ul>
+<li><strong>Description:</strong> Optional “upgraded” cloud model used for LLM-based PII detection when custom instructions are provided (e.g.&nbsp;allow-list or user-specific rules). If set and non-empty, it overrides <code>CLOUD_LLM_PII_MODEL_CHOICE</code> whenever <code>custom_instructions</code> are passed to the entity-detection LLM. Leave empty to always use <code>CLOUD_LLM_PII_MODEL_CHOICE</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code> (empty; no override)</li>
+</ul></li>
+<li><strong><code>CLOUD_SUMMARISATION_MODEL_CHOICE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default AWS Bedrock (or cloud) model for LLM-based summarisation when using cloud inference (e.g.&nbsp;AWS Bedrock). Used by <code>tools/summaries.py</code>. Separate from <code>CLOUD_LLM_PII_MODEL_CHOICE</code> so you can assign a different model for summarisation than for entity detection.</li>
+<li><strong>Default Value:</strong> <code>"amazon.nova-pro-v1:0"</code></li>
+</ul></li>
 <li><strong><code>VLM_SEED</code></strong>
 <ul>
 <li><strong>Description:</strong> Random seed for VLM generation. If empty, no seed is set (non-deterministic). If set to an integer, generation will be deterministic.</li>
-<li><strong>Default Value:</strong> <code>"42"</code></li>
+<li><strong>Default Value:</strong> <code>''</code> (empty; no seed set)</li>
 </ul></li>
 <li><strong><code>VLM_DEFAULT_TEMPERATURE</code></strong>
 <ul>
-<li><strong>Description:</strong> Default temperature for VLM generation. Used when model-specific defaults are not set.</li>
-<li><strong>Default Value:</strong> <code>0.1</code></li>
+<li><strong>Description:</strong> Default temperature for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>VLM_DEFAULT_TOP_P</code></strong>
 <ul>
-<li><strong>Description:</strong> Default top_p (nucleus sampling) for VLM generation. Used when model-specific defaults are not set.</li>
-<li><strong>Default Value:</strong> <code>0.8</code></li>
+<li><strong>Description:</strong> Default top_p (nucleus sampling) for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>VLM_DEFAULT_MIN_P</code></strong>
 <ul>
-<li><strong>Description:</strong> Default min_p (minimum probability threshold) for VLM generation. Used when model-specific defaults are not set.</li>
-<li><strong>Default Value:</strong> <code>0.0</code></li>
+<li><strong>Description:</strong> Default min_p (minimum probability threshold) for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>VLM_DEFAULT_TOP_K</code></strong>
 <ul>
-<li><strong>Description:</strong> Default top_k for VLM generation. Used when model-specific defaults are not set.</li>
-<li><strong>Default Value:</strong> <code>20</code></li>
+<li><strong>Description:</strong> Default top_k for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>VLM_DEFAULT_REPETITION_PENALTY</code></strong>
 <ul>
-<li><strong>Description:</strong> Default repetition penalty for VLM generation. Used when model-specific defaults are not set.</li>
-<li><strong>Default Value:</strong> <code>1.3</code></li>
+<li><strong>Description:</strong> Default repetition penalty for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>VLM_DEFAULT_DO_SAMPLE</code></strong>
 <ul>
-<li><strong>Description:</strong> Default do_sample setting for VLM generation. <code>"True"</code> means use sampling (do_sample=True), <code>"False"</code> means use greedy decoding (do_sample=False). Used when model-specific defaults are not set.</li>
-<li><strong>Default Value:</strong> <code>"True"</code></li>
+<li><strong>Description:</strong> Default do_sample setting for VLM generation. <code>"True"</code> means use sampling (do_sample=True), <code>"False"</code> means use greedy decoding (do_sample=False). If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 <li><strong><code>VLM_DEFAULT_PRESENCE_PENALTY</code></strong>
 <ul>
-<li><strong>Description:</strong> Default presence penalty for VLM generation. If empty, defaults to None. Used when model-specific defaults are not set.</li>
+<li><strong>Description:</strong> Default presence penalty for VLM generation. If empty, model-specific defaults are used.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
 </ul>
@@ -860,6 +1057,11 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> The selected and available PII entity types for AWS Comprehend.</li>
 <li><strong>Default Value:</strong> Predefined lists of entities (see script).</li>
+</ul></li>
+<li><strong><code>CHOSEN_LLM_ENTITIES</code></strong> / <strong><code>FULL_LLM_ENTITY_LIST</code></strong>
+<ul>
+<li><strong>Description:</strong> The selected and available PII entity types for LLM-based PII detection (e.g.&nbsp;AWS Bedrock, local transformers, inference server).</li>
+<li><strong>Default Value:</strong> Predefined lists (e.g.&nbsp;<code>['EMAIL_ADDRESS','ADDRESS','NAME','PHONE_NUMBER', 'CUSTOM']</code> for chosen; see script for full list).</li>
 </ul></li>
 <li><strong><code>CHOSEN_REDACT_ENTITIES</code></strong> / <strong><code>FULL_ENTITY_LIST</code></strong>
 <ul>
@@ -879,7 +1081,7 @@ ul.task-list li input[type="checkbox"] {
 <li><strong><code>DEFAULT_FUZZY_SPELLING_MISTAKES_NUM</code></strong>
 <ul>
 <li><strong>Description:</strong> Default number of allowed spelling mistakes for fuzzy searches.</li>
-<li><strong>Default Value:</strong> <code>1</code></li>
+<li><strong>Default Value:</strong> <code>0</code></li>
 </ul></li>
 <li><strong><code>DEFAULT_PAGE_MIN</code></strong> / <strong><code>DEFAULT_PAGE_MAX</code></strong>
 <ul>
@@ -893,8 +1095,8 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong><code>DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX</code></strong>
 <ul>
-<li><strong>Description:</strong> The default options selected for Textract’s handwriting and signature detection.</li>
-<li><strong>Default Value:</strong> <code>['Extract handwriting']</code></li>
+<li><strong>Description:</strong> The default options selected for Textract’s handwriting and signature detection. Provide as a list string, e.g.&nbsp;<code>"['Extract handwriting', 'Extract signatures']"</code>.</li>
+<li><strong>Default Value:</strong> <code>[]</code></li>
 </ul></li>
 <li><strong><code>HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS</code></strong>
 <ul>
@@ -956,6 +1158,11 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Lists of supported language codes for Textract and Comprehend.</li>
 <li><strong>Default Value:</strong> <code>['en', 'es', 'fr', 'de', 'it', 'pt']</code> and <code>['en', 'es']</code></li>
+</ul></li>
+<li><strong><code>SPLIT_PUNCTUATION_FROM_WORDS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, splits punctuation from words in Textract output.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>MAPPED_LANGUAGE_CHOICES</code></strong> / <strong><code>LANGUAGE_CHOICES</code></strong>
 <ul>
@@ -1039,6 +1246,21 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 <li><strong>Warning:</strong> On low memory systems, the compression options in PyMuPDF can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to <code>"False"</code> will save the PDF only with a basic cleaning option enabled, which is more memory-efficient.</li>
 </ul></li>
+<li><strong><code>SAVE_OUTPUTS_TO_S3</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the application will automatically upload redaction outputs (PDFs, text/tabular outputs, duplicate-analysis files, and Adobe XFDF review files) to Amazon S3 when <code>RUN_AWS_FUNCTIONS</code> is also enabled. Uploads use the <code>S3_OUTPUTS_FOLDER</code> prefix within the <code>DOCUMENT_REDACTION_BUCKET</code>, optionally with a per-session subfolder when <code>SESSION_OUTPUT_FOLDER</code> is enabled.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>S3_OUTPUTS_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Base S3 key prefix (folder path) within <code>DOCUMENT_REDACTION_BUCKET</code> where redaction outputs are stored, for example <code>'outputs/'</code> or <code>'redaction/outputs/'</code>. When <code>SESSION_OUTPUT_FOLDER</code> is <code>'True'</code>, a session-specific subfolder (based on <code>session_hash</code>) is appended to this path so each user/session writes to its own S3 subdirectory. If left blank, outputs will not be uploaded to S3 even if <code>SAVE_OUTPUTS_TO_S3</code> is <code>'True'</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>S3_OUTPUTS_BUCKET</code></strong>
+<ul>
+<li><strong>Description:</strong> Name of the S3 bucket where redaction outputs are stored.</li>
+<li><strong>Default Value:</strong> <code>'DOCUMENT_REDACTION_BUCKET'</code></li>
+</ul></li>
 </ul>
 </section>
 <section id="direct-mode-lambda-configuration" class="level2">
@@ -1087,6 +1309,16 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> OCR method for PDF/image processing in direct mode.</li>
 <li><strong>Default Value:</strong> <code>"Local OCR"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of threads for the OCR first pass in direct mode. Inherits from <code>OCR_FIRST_PASS_MAX_WORKERS</code> if not set.</li>
+<li><strong>Default Value:</strong> Same as <code>OCR_FIRST_PASS_MAX_WORKERS</code> (e.g.&nbsp;<code>3</code>)</li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of threads for page-group summarisation in direct mode (when task is summarise). Inherits from <code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code> if not set.</li>
+<li><strong>Default Value:</strong> Same as <code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code> (e.g.&nbsp;<code>1</code>)</li>
 </ul></li>
 <li><strong><code>DIRECT_MODE_PAGE_MIN</code></strong> / <strong><code>DIRECT_MODE_PAGE_MAX</code></strong>
 <ul>
@@ -1192,6 +1424,11 @@ ul.task-list li input[type="checkbox"] {
 <ul>
 <li><strong>Description:</strong> Job ID for Textract operations in direct mode.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_INFERENCE_SERVER_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Inference server model to use for PII detection in direct mode. If empty, uses <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code> (inherits from <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code> when set)</li>
 </ul></li>
 </ul>
 </section>
@@ -1374,13 +1611,14 @@ ul.task-list li input[type="checkbox"] {
       e.clearSelection();
     }
     const getTextToCopy = function(trigger) {
-        const codeEl = trigger.previousElementSibling.cloneNode(true);
-        for (const childEl of codeEl.children) {
-          if (isCodeAnnotation(childEl)) {
-            childEl.remove();
-          }
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
         }
-        return codeEl.innerText;
+      }
+      return codeEl.innerText;
     }
     const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
       text: getTextToCopy
