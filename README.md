@@ -11,9 +11,9 @@ short_description: OCR / redact PDF documents and tabular data
 ---
 # Document redaction
 
-version: 1.7.0
+version: 1.7.1
 
-Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
+Redact personally identifiable information (PII) from documents (PDF, PNG, JPG), Word files (DOCX), or tabular data (XLSX/CSV/Parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
 To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
 
@@ -274,6 +274,8 @@ Now you have the app installed, what follows is a guide on how to use it for bas
 
 ### Features for expert users/system administrators
 - [Advanced OCR options (Hybrid OCR)](#advanced-ocr-options-hybrid-ocr)
+- [PII identification with LLMs](#pii-identification-with-llms)
+- [Document summarisation tab](#document-summarisation-tab)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
 
 ## Built-in example data
@@ -318,118 +320,136 @@ If you prefer to use your own example files or want to follow along with specifi
 
 ## Basic redaction
 
-The document redaction app can detect personally-identifiable information (PII) in documents. Documents can be redacted directly, or suggested redactions can be reviewed and modified using a grapical user interface. Basic document redaction can be performed quickly using the default options.
+The document redaction app can detect personally-identifiable information (PII) in documents. Documents can be redacted directly, or suggested redactions can be reviewed and modified using a graphical user interface. Basic document redaction can be performed quickly using the default options.
 
-Download the example PDFs above to your computer. Open up the redaction app with the link provided by email.
+Download the example PDFs above to your computer. Open the redaction app with the link provided by email.
+
+**Where to work:** All of the main redaction options and the redact button are on the **'Redact PDFs/images'** tab. When the quickstart walkthrough is not shown, this tab opens with a **'Redaction settings'** accordion **open by default**, so you can upload files and adjust options without switching tabs.
 
 ![Upload files](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/file_upload_highlight.PNG)
 
 ### Upload files to the app
 
-The 'Redact PDFs/images tab' currently accepts PDFs and image files (JPG, PNG) for redaction. Click on the 'Drop files here or Click to Upload' area of the screen, and select one of the three different [example files](#example-data-files) (they should all be stored in the same folder if you want them to be redacted at the same time).
+On the **'Redact PDFs/images'** tab, the **'Redaction settings'** accordion at the top accepts PDFs and image files (JPG, PNG) for redaction. Click on the **'Drop files here or Click to Upload'** area and select one or more [example files](#example-data-files) (store them in the same folder if you want to redact several at once).
 
 ### Text extraction
 
-You can modify default text extraction methods by clicking on the 'Change default text extraction method...' box'.
+Inside the same **'Redaction settings'** accordion, open the nested accordion **'Change default redaction settings'** (it may already be open). If enabled, under **'Change default text extraction OCR method'** you can choose how text is extracted:
 
-Here you can select one of the three text extraction options:
-- **'Local model - selectable text'** - This will read text directly from PDFs that have selectable text to redact (using PikePDF). This is fine for most PDFs, but will find nothing if the PDF does not have selectable text, and it is not good for handwriting or signatures. If it encounters an image file, it will send it onto the second option below.
-- **'Local OCR model - PDFs without selectable text'** - This option will use a simple Optical Character Recognition (OCR) model (Tesseract) to pull out text from a PDF/image that it 'sees'. This can handle most typed text in PDFs/images without selectable text, but struggles with handwriting/signatures. If you are interested in the latter, then you should use the third option if available.
-- **'AWS Textract service - all PDF types'** - Only available for instances of the app running on AWS. AWS Textract is a service that performs OCR on documents within their secure service. This is a more advanced version of OCR compared to the local option, and carries a (relatively small) cost. Textract excels in complex documents based on images, or documents that contain a lot of handwriting and signatures.
+- **'Local model - selectable text'** - Reads text directly from PDFs that have selectable text (using PikePDF). Best for most PDFs; finds nothing if the PDF has no selectable text and is not suitable for handwriting or signatures. Image files are passed to the next option.
+- **'Local OCR model - PDFs without selectable text'** - Uses a local OCR model (Tesseract) to extract text from PDFs/images. Handles most typed text without selectable text but is less reliable for handwriting and signatures; use the AWS option below if you need those.
+- **'AWS Textract service - all PDF types'** - Available when the app is configured for AWS. Textract runs in the cloud and is more capable for complex layouts, handwriting, and signatures. It incurs a (relatively small) cost per page.
 
 ### Enable AWS Textract signature extraction
-If you chose the AWS Textract service above, you can choose if you want handwriting and/or signatures redacted by default. Choosing signatures here will have a cost implication, as identifying signatures will cost ~£2.66 ($3.50) per 1,000 pages vs ~£1.14 ($1.50) per 1,000 pages without signature detection. 
+
+If you select **'AWS Textract service - all PDF types'** as the text extraction method, an accordion **'Enable AWS Textract signature detection (default is off)'** appears. Open it to turn on handwriting and/or signature detection. Enabling signatures has a cost impact (~£2.66 ($3.50) per 1,000 pages vs ~£1.14 ($1.50) per 1,000 pages without signature detection).
 
 ![AWS Textract handwriting and signature options](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_handwriting_signatures.PNG)
 
-**NOTE:** it is also possible to enable form extraction, layout extraction, and table extraction with AWS Textract. This is not enabled by default, but it is possible for your system admin to enable this feature in the config file.
+**NOTE:** Form, layout, and table extraction with AWS Textract can be enabled by your system administrator in the config; they are off by default.
 
 ### PII redaction method
 
-If you are running with the AWS service enabled, here you will also have a choice for PII redaction method:
-- **'Only extract text - (no redaction)'** - If you are only interested in getting the text out of the document for further processing (e.g. to find duplicate pages, or to review text on the Review redactions page)
-- **'Local'** - This uses the spacy package to rapidly detect PII in extracted text. This method is often sufficient if you are just interested in redacting specific terms defined in a custom list. 
-- **'AWS Comprehend'** - This method calls an AWS service to provide more accurate identification of PII in extracted text.
+At the start of the **'Change PII identification method'** accordion (under **'Change default redaction settings'**) you will see **'Choose redaction method'**, a radio with three options. **'Extract text only'** runs text extraction without redaction—useful when you only need OCR output or want to review text before redacting; when selected, the **'Select entity types to redact'** and **'Terms to always include or exclude in redactions...'** accordions are hidden. **'Redact all PII'** (the default) uses the chosen PII detection method to find and redact personal information; the entity-types accordion is shown and the terms (allow/deny/page) accordion is hidden. **'Redact selected terms'** shows both accordions and focuses on custom allow/deny lists and entity types (e.g. CUSTOM) so you can redact only the terms you specify.
+
+Still under **'Change default redaction settings'**, you may see the **'Change PII identification method'** section, if enabled, which lets you choose how PII is detected:
+
+- **'Only extract text - (no redaction)'** - Use this if you only need extracted text (e.g. for duplicate detection or to review on the Review redactions tab).
+- **'Local'** - Uses a local model (e.g. spaCy) to detect PII at no extra cost. Often enough when you mainly care about custom terms (see [Customising redaction options](#customising-redaction-options)).
+- **'AWS Comprehend'** - Uses AWS Comprehend for PII detection when the app is configured for AWS; typically more accurate but incurs a cost (around £0.0075 ($0.01) per 10,000 characters).
+
+Under **'Select entity types to redact'** you can choose which types of PII to redact (e.g. names, emails, dates). The dropdown label varies by method (Local, AWS Comprehend, or LLM); click in the box or near the dropdown arrow to see the full list.
+
+### Allow list, deny list, and whole-page redaction
+
+On the same **'Redaction settings'** accordion you will see **'Terms to always include or exclude in redactions, and whole page redaction'**. Here you can:
+
+- **Allow list** – Terms that should never be redacted.
+- **Deny list** – Terms that should always be redacted.
+- **Fully redact these pages** – Page numbers that should be fully redacted.
+- **Redact duplicate pages** – Checkbox: when enabled, the app identifies duplicate pages and redacts them in the same run (see [Identifying and redacting duplicate pages](#identifying-and-redacting-duplicate-pages)).
+- **Maximum spelling mistakes for matching deny list terms** – Number (0–9) used for [fuzzy matching](#fuzzy-search-and-redaction) when **CUSTOM_FUZZY** is selected in the entity list.
+
+You can add or remove terms directly in these controls. To load many terms from a file (e.g. a CSV), use the **Settings** tab; see [Custom allow, deny, and page redaction lists](#custom-allow-deny-and-page-redaction-lists).
 
 ### Optional - costs and time estimation
-If the option is enabled (by your system admin, in the config file), you will see a cost and time estimate for the redaction process. 'Existing Textract output file found' will be checked automatically if previous Textract text extraction files exist in the output folder, or have been [previously uploaded by the user](#aws-textract-outputs) (saving time and money for redaction). 
+
+If your administrator has enabled it (in the config), an **'Estimated costs and time taken'** section appears on the **'Redact PDFs/images'** tab. **'Existing Textract output file found'** (or **'Existing local OCR output file found'**) is ticked automatically when previous extraction output exists in the output folder or was [uploaded by you](#aws-textract-outputs), which can save time and cost.
 
 ![Cost and time estimation](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/costs_and_time.PNG)
 
 ### Optional - cost code selection
-If the option is enabled (by your system admin, in the config file), you may be prompted to select a cost code before continuing with the redaction task.
+
+If cost codes are enabled, an **'Assign task to cost code'** section appears on the same tab. Choose a cost code before running redaction. You can search the table or type in the **'Choose cost code for analysis'** dropdown to filter.
 
 ![Cost code selection](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/cost_code_selection.PNG)
 
-The relevant cost code can be found either by: 1. Using the search bar above the data table to find relevant cost codes, then clicking on the relevant row, or 2. typing it directly into the dropdown to the right, where it should filter as you type.
-
 ### Optional - Submit whole documents to Textract API
-If this option is enabled (by your system admin, in the config file), you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the 'Redact document' process described here). This feature is described in more detail in the [advanced user guide](#using-the-aws-textract-document-api).
+
+If enabled by your administrator, an accordion **'Submit whole document to AWS Textract API (quickest text extraction for large documents)'** appears on the **'Redact PDFs/images'** tab. This sends whole documents to Textract for fast extraction, separate from the main redaction flow. Details are in the [advanced user guide](#using-the-aws-textract-document-api).
 
 ![Textract document API](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_document_api.PNG)
 
-### Redact the document
+### Run redaction
 
-Click 'Redact document'. After loading in the document, the app should be able to process about 30 pages per minute (depending on redaction methods chose above). When ready, you should see a message saying that processing is complete, with output files appearing in the bottom right.
+At the bottom of the **'Redact PDFs/images'** tab, open the **'Extract text and redact document'** accordion and click **'Extract text and redact document'**. The app will process the document (typically around 30 pages per minute, depending on options). When finished, a message will indicate completion and output files will appear in the **'Output files'** area. Use **'Review and modify redactions'** to open the review tab.
 
 ### Redaction outputs
 
+After you click **'Extract text and redact document'**, the **'Output files'** area on the **'Redact PDFs/images'** tab shows:
+
 ![Redaction outputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/redaction_outputs.PNG)
 
-- **'...redacted.pdf'** files contain the original pdf with suggested redacted text deleted and replaced by a black box on top of the document.
-- **'...redactions_for_review.pdf'** files contain the original PDF with redaction boxes overlaid but the original text still visible underneath. This file is designed for use in Adobe Acrobat and other PDF viewers where you can see the suggested redactions without the text being permanently removed. This is particularly useful for reviewing redactions before finalising them.
-- **'...ocr_results.csv'** files contain the line-by-line text outputs from the entire document. This file can be useful for later searching through for any terms of interest in the document (e.g. using Excel or a similar program).
-- **'...review_file.csv'** files are the review files that contain details and locations of all of the suggested redactions in the document. This file is key to the [review process](#reviewing-and-modifying-suggested-redactions), and should be downloaded to use later for this.
+- **'...redacted.pdf'** – The original PDF with suggested redactions applied (text removed and replaced by a black box).
+- **'...redactions_for_review.pdf'** – The original PDF with redaction boxes overlaid but text still visible. Use this in Adobe Acrobat or other PDF viewers to review suggested redactions before finalising.
+- **'...ocr_results.csv'** – Line-by-line extracted text from the document (useful for searching in Excel or similar).
+- **'...review_file.csv'** – Details and locations of all suggested redactions; required for the [review process](#reviewing-and-modifying-suggested-redactions).
 
 ### Additional AWS Textract / local OCR outputs
 
-If you have used the AWS Textract option for extracting text, you may also see a '..._textract.json' file. This file contains all the relevant extracted text information that comes from the AWS Textract service. You can keep this file and upload it at a later date alongside your input document, which will enable you to skip calling AWS Textract every single time you want to do a redaction task, as follows:
+If you used **AWS Textract** for text extraction, you may also see a **'..._textract.json'** file. You can keep this and upload it later with your input document to skip calling Textract again for the same document:
 
 ![Document upload alongside Textract](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/document_upload_with_textract.PNG)
 
-#### Additional outputs in the log file outputs
+Similarly, if you used local OCR you may see a **'..._ocr_results_with_words... .json'** file, which can be uploaded with the input document to save time on future runs.
 
-On the Redaction settings tab, near the bottom of the pagethere is a section called 'Log file outputs'. This section contains the following files:
+#### Log file outputs and other optional outputs
 
-You may see a '..._ocr_results_with_words... .json' file. This file works in the same way as the AWS Textract .json results described above, and can be uploaded alongside an input document to save time on text extraction in future in the same way.
-
-Also you will see a 'decision_process_table.csv' file. This file contains a table of the decisions made by the app for each page of the document. This can be useful for debugging and understanding the decisions made by the app.
-
-Additionally, if the option is enabled by your system administrator, on this tab you may see an image of the output from the OCR model used to extract the text from the document, an image ending with page number and '_visualisations.jpg'. A separate image will be created for each page of the document like the one below. This can be useful for seeing at a glance whether the text extraction process for a page was successful, and whether word-level bounding boxes are correctly positioned.
+On the **Settings** tab, open the **'Log file outputs'** accordion to access log and optional output files. You may see a **'decision_process_table.csv'** (decisions made per page) and, if enabled by your administrator, **'..._visualisations.jpg'** images showing OCR bounding boxes per page:
 
 ![Text analysis output](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/example_complaint_letter_1_textract_visualisations.jpg)
 
 ### Downloading output files from previous redaction tasks
 
-If you are logged in via AWS Cognito and you lose your app page for some reason (e.g. from a crash, reloading), it is possible recover your previous output files, provided the server has not been shut down since you redacted the document. If enabled, this feature can be found at the bottom of the front tab, called 'View and download all output files from this session'. If you open this and click on 'Refresh files in output folder' you should see a file directory of all files. If you click on the box next to a given file, it should appear below for you to download.
+If you are logged in via AWS Cognito and lose the app page (e.g. after a crash or reload), you may still recover output files if the server has not been restarted. When enabled, open the **Settings** tab and use **'View and download all output files from this session'** at the bottom. Click **'Refresh files in output folder'**, then tick the box next to a file to display and download it.
 
 ![View all output files](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/view_all_output_files.PNG)
 
 ### Basic redaction summary
 
-We have covered redacting documents with the default redaction options. The '...redacted.pdf' file output may be enough for your purposes. But it is very likely that you will need to customise your redaction options, which we will cover below. 
+You can redact documents using the options on the **'Redact PDFs/images'** tab. The **'...redacted.pdf'** output may be sufficient, or you may want to [customise redaction options](#customising-redaction-options) (allow/deny lists, entity types, page range, etc.) as described below. 
 
 ## Customising redaction options
 
-On the 'Redaction settings' page, there are a number of options that you can tweak to better match your use case and needs.
+Most options are on the **'Redact PDFs/images'** tab inside the **'Redaction settings'** accordion. A few options (loading allow/deny/page lists from files, page range, efficient OCR, language, API keys) are on the **Settings** tab.
 
 ### Custom allow, deny, and page redaction lists
 
-The app allows you to specify terms that should never be redacted (an allow list), terms that should always be redacted (a deny list), and also to provide a list of page numbers for pages that should be fully redacted.
+**On the 'Redact PDFs/images' tab:** Inside **'Redaction settings'**, the accordion **'Terms to always include or exclude in redactions, and whole page redaction'** contains the **Allow list**, **Deny list**, and **Fully redact these pages** controls. You can add or remove terms directly there. There is also **'Maximum spelling mistakes for matching deny list terms'** for fuzzy matching.
+
+**To load many terms from a file:** Go to the **Settings** tab and open **'Custom allow, deny, and full page redaction lists'**. Use **'Import allow list file'**, **'Import custom deny list'**, or **'Import fully redacted pages list'** to load a CSV (one column, no header). After loading, return to the **'Redact PDFs/images'** tab and click **'Extract text and redact document'**; the loaded terms apply to the next run.
 
 ![Custom allow, deny, and page redaction lists](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/allow_deny_full_page_list.PNG)
 
 #### Allow list example
 
-It may be the case that specific terms that are frequently redacted are not interesting to 
-
-In the redacted outputs of the 'Example of files sent to a professor before applying' PDF, you can see that it is frequently redacting references to Dr Hyde's lab in the main body of the text. Let's say that references to Dr Hyde were not considered personal information in this context. You can exclude this term from redaction (and others) by providing an 'allow list' file. This is simply a csv that contains the case sensitive terms to exclude in the first column, in our example, 'Hyde' and 'Muller glia'. The example file is provided [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/allow_list.csv). 
-
-To import this to use with your redaction tasks, go to the 'Redaction settings' tab, click on the 'Import allow list file' button halfway down, and select the csv file you have created. It should be loaded for next time you hit the redact button. Go back to the first tab and do this.
+In the redacted outputs of the 'Example of files sent to a professor before applying' PDF, the app may redact references to Dr Hyde's lab. If those are not personal information in your context, add them to the allow list.You can exclude these terms from redaction in one of two ways:
+1. On the Redact PDFs/images tab, go to 'Allow list'. Type in 'Hyde' in the box and press enter. The next redaction task should will exclude this term from redaction. You can add other terms here. 
+2. Create a CSV with one term per row in the first column (e.g. 'Hyde', 'Muller glia'); an example is [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/allow_list.csv). On the **Settings** tab, open **'Custom allow, deny, and full page redaction lists'**, click **'Import allow list file'**, and select your CSV. Then go back to the **'Redact PDFs/images'** tab and click **'Extract text and redact document'**. This will then apply the loaded list to the allow list on the Redact PDFs/images tab
 
 #### Deny list example
 
-Say you wanted to remove specific terms from a document. In this app you can do this by providing a custom deny list as a csv. Like for the allow list described above, this should be a one-column csv without a column header. The app will suggest each individual term in the list with exact spelling as whole words. So it won't select text from within words. To enable this feature, the 'CUSTOM' tag needs to be chosen as a redaction entity [(the process for adding/removing entity types to redact is described below)](#redacting-additional-types-of-personal-information).
+Say you wanted to remove specific terms from a document. In this app you can do this by providing a custom deny list as a csv. Like for the allow list described above, this should be a one-column csv without a column header. The app will suggest each individual term in the list with exact spelling as whole words. So it won't select text from within words. You must have **'CUSTOM'** (or equivalent) included in **'Select entity types to redact'** on the **'Redact PDFs/images'** tab; see [Redacting additional types of personal information](#redacting-additional-types-of-personal-information). As for the allow list above, you can add new deny list terms in one of two ways. Either 1. type them manually into the Deny list box on the Redact PDFs/images tab, or 2. load in a custom deny list csv file on the **Settings** tab (see above for Allow list). NOTE: You can also provide deny list terms in your csv file as regex patterns.
 
 Here is an example using the [Partnership Agreement Toolkit file](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf). This is an [example of a custom deny list file](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_custom_deny_list.csv). 'Sister', 'Sister City'
 'Sister Cities', 'Friendship City' have been listed as specific terms to redact. You can see the outputs of this redaction process on the review page:
@@ -440,49 +460,37 @@ You can see that the app has highlighted all instances of these terms on the pag
 
 #### Full page redaction list example
 
-There may be full pages in a document that you want to redact. The app also provides the capability of redacting pages completely based on a list of input page numbers in a csv. The format of the input file is the same as that for the allow and deny lists described above - a one-column csv without a column header. An [example of this is here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_some_pages.csv). You can see an example of the redacted page on the review page:
+To fully redact specific pages, provide a one-column CSV of page numbers (no header), e.g. [this example](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_some_pages.csv). On the **Settings** tab, open **'Custom allow, deny, and full page redaction lists'** and use **'Import fully redacted pages list'**. Alternatively, add page numbers in the **'Fully redact these pages'** box on the **'Redact PDFs/images'** tab.
 
 ![Whole page partnership redaction](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/whole_page_partnership_example.PNG).
 
 Using the above approaches to allow, deny, and full page redaction lists will give you an output [like this](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/Partnership-Agreement-Toolkit_0_0_redacted.pdf).
 
-#### Adding to the loaded allow, deny, and whole page lists in-app
-
-If you open the accordion below the allow list options called 'Manually modify custom allow...', you should be able to see a few tables with options to add new rows:
-
-![Manually modify allow or deny list](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/manually_modify.PNG)
-
-If the table is empty, you can add a new entry, you can add a new row by clicking on the '+' item below each table header. If there is existing data, you may need to click on the three dots to the right and select 'Add row below'. Type the item you wish to keep/remove in the cell, and then (important) press enter to add this new item to the allow/deny/whole page list. Your output tables should look something like below.
-
-![Manually modify allow or deny list filled](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/manually_modify_filled.PNG)
-
 ### Redacting additional types of personal information
 
-You may want to redact additional types of information beyond the defaults, or you may not be interested in default suggested entity types. There are dates in the example complaint letter. Say we wanted to redact those dates also?
+On the **'Redact PDFs/images'** tab, open **'Redaction settings'** and then **'Change default redaction settings'**. Under **'Change PII identification method'**, open **'Select entity types to redact'**. The dropdown shown depends on your PII method (Local, AWS Comprehend, or LLM); its label may be **'Local PII identification model (click empty space in box for full list)'**, **'AWS Comprehend PII identification model...'**, or similar. Click in the empty box or near the dropdown arrow to see the full list of entity types (e.g. DATE_TIME, NAME, EMAIL). Select the types you want to redact; they appear in the list. Click the **'x'** next to an item to remove it.
 
-Under the 'Redaction settings' tab, go to 'Entities to redact (click close to down arrow for full list)'. Different dropdowns are provided according to whether you are using the Local service to redact PII, or the AWS Comprehend service. Click within the empty box close to the dropdown arrow and you should see a list of possible 'entities' to redact. Select 'DATE_TIME' and it should appear in the main list. To remove items, click on the 'x' next to their name.
+Example: to also redact dates in the example complaint letter, add **'DATE_TIME'** here, then click **'Extract text and redact document'**. You should get a redacted version of 'Example complaint letter' with dates and times removed. To start with different files or a clean slate, refresh the browser to begin a new session.
 
 ![Redacting additional types of information dropdown](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/additional_entities/additional_entities_select.PNG)
 
-Now, go back to the main screen and click 'Redact Document' again. You should now get a redacted version of 'Example complaint letter' that has the dates and times removed.
+### Redacting only specific pages
 
-If you want to redact different files, I suggest you refresh your browser page to start a new session and unload all previous data.
-
-## Redacting only specific pages
-
-Say also we are only interested in redacting page 1 of the loaded documents. On the Redaction settings tab, select 'Lowest page to redact' as 1, and 'Highest page to redact' also as 1. When you next redact your documents, only the first page will be modified. The output files should now have a suffix similar to '..._1_1.pdf', indicating the lowest and highest page numbers that were redacted.
+To redact only a subset of pages (e.g. only page 1), go to the **Settings** tab and open the **'Redact only selected pages'** accordion. Set **'Lowest page to redact (set to 0 to redact from the first page)'** and **'Highest page to redact (set to 0 to redact to the last page)'** (e.g. both 1 for only page 1). The next redaction run will only process that range; output filenames will include a suffix like **'..._1_1.pdf'**.
 
 ![Selecting specific pages to redact](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/select_pages.PNG)
 
-## Handwriting and signature redaction
+### Handwriting and signature redaction
 
-The file [Partnership Agreement Toolkit (for signatures and more advanced usage)](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf) is provided as an example document to test AWS Textract + redaction with a document that has signatures in. If you have access to AWS Textract in the app, try removing all entity types from redaction on the Redaction settings and clicking the big X to the right of 'Entities to redact'. 
+The [Partnership Agreement Toolkit](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf) is a good example for testing AWS Textract with signatures. On the **'Redact PDFs/images'** tab, follow the steps below. 
 
-To ensure that handwriting and signatures are enabled (enabled by default), on the front screen go the 'AWS Textract signature detection' to enable/disable the following options :
+1. In **'Redaction settings'** → **'Change default redaction settings'**, set the text extraction method to **'AWS Textract service - all PDF types'**.
+2. An accordion **'Enable AWS Textract signature detection (default is off)'** will appear. Open it and enable handwriting and/or signatures as needed.
+3. If you only want signatures/handwriting redacted, under **'Select entity types to redact'** you can clear other entity types (click the **'x'** next to each) so that only the signature/handwriting options apply.
 
 ![Handwriting and signatures](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/textract_handwriting_signatures.PNG)
 
-The outputs should show handwriting/signatures redacted (see pages 5 - 7), which you can inspect and modify on the 'Review redactions' tab.
+Run **'Extract text and redact document'**. Handwriting and signatures (e.g. on pages 5–7) will be redacted and can be reviewed on the **'Review redactions'** tab.
 
 ![Handwriting and signatures redacted example](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/refs/heads/main/review_redactions/Signatures%20and%20handwriting%20found.PNG)
 
@@ -490,7 +498,7 @@ The outputs should show handwriting/signatures redacted (see pages 5 - 7), which
 
 Sometimes the app will suggest redactions that are incorrect, or will miss personal information entirely. The app allows you to review and modify suggested redactions to compensate for this. You can do this on the 'Review redactions' tab.
 
-We will go through ways to review suggested redactions with an example.On the first tab 'PDFs/images' upload the ['Example of files sent to a professor before applying.pdf'](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf) file. Let's stick with the 'Local model - selectable text' option, and click 'Redact document'. Once the outputs are created, go to the 'Review redactions' tab.
+We will go through ways to review suggested redactions with an example. On the **'Redact PDFs/images'** tab, upload the ['Example of files sent to a professor before applying.pdf'](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf) file. Keep the default 'Local model - selectable text' option and click **'Extract text and redact document'**. Once the outputs are created, go to the **'Review redactions'** tab.
 
 On the 'Review redactions' tab you have a visual interface that allows you to inspect and modify redactions suggested by the app. There are quite a few options to look at, so we'll go from top to bottom.
 
@@ -604,7 +612,7 @@ The workflow is designed to be simple: **Search → Select → Redact**.
 
 1.  Navigate to the **"Search text and redact"** tab.
 2.  The main table will initially be populated with all the text extracted from the document for a page, broken down by word.
-3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below (Note this will only be able to search for patterns in text within each cell).
+3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below.
 4.  Click the **"Search"** button or press Enter.
 5.  The table below will update to show only the rows containing text that matches your search query.
 
@@ -687,7 +695,7 @@ If you were instead to upload an xlsx file, you would see also a list of all the
 
 ![xlsx upload](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/file_upload_xlsx_columns.PNG)
 
-Once you have chosen your input file and sheets/columns to redact, you can choose the redaction method. 'Local' will use the same local model as used for documents on the first tab. 'AWS Comprehend' will give better results, at a slight cost.
+Once you have chosen your input file and sheets/columns to redact, you can choose the redaction method. 'Local' will use the same local model as used for documents on the **'Redact PDFs/images'** tab. 'AWS Comprehend' will give better results, at a slight cost.
 
 When you click Redact text/data files, you will see the progress of the redaction task by file and sheet, and you will receive a csv output with the redacted data.
 
@@ -705,7 +713,7 @@ You can also write open text into an input box and redact that using the same me
 ![Text analysis output](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/text_anonymisation_outputs.PNG)
 
 ### Redaction log outputs
-A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the Redaction settings page under 'Log file outputs'.
+A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the **Settings** tab under **'Log file outputs'**.
 
 
 ## Identifying and redacting duplicate pages
@@ -721,23 +729,23 @@ This section covers finding duplicate pages across PDF documents using OCR outpu
 ![Example duplicate page inputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_input_interface_new.PNG)
 
 **Step 1: Upload and Configure the Analysis**
-First, navigate to the "Identify duplicate pages" tab. Upload all the ocr_output.csv files you wish to compare into the file area. These files are generated every time you run a redaction task and contain the text for each page of a document.
+First, navigate to the **'Identify duplicate pages'** tab. In **'Step 1: Configure and run analysis'**, upload all the ocr_output.csv files you wish to compare. These files are generated every time you run a redaction task and contain the text for each page of a document.
 
-For our example, you can upload the four 'ocr_output.csv' files provided in the example folder into the file area. Click 'Identify duplicate pages' and you will see a number of files returned. In case you want to see the original PDFs, they are available [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/input_pdfs/).
+For our example, you can upload the four 'ocr_output.csv' files provided in the example folder. Open the **'Duplicate matching parameters'** accordion to set:
 
-The default options will search for matching subdocuments of any length. Before running the analysis, you can configure these matching parameters to tell the tool what you're looking for:
+- **Similarity threshold:** A score from 0 to 1. Pages or sequences with text similarity above this value are considered a match (default 0.95).
+- **Minimum word count:** Pages or lines with fewer words than this are ignored (default 10).
+- **Duplicate matching mode:** **'Find duplicates by page'** compares full-page text; **'Find duplicates by text line'** compares individual lines.
+
+**Matching strategy** (below the parameters):
+- **'Combine consecutive matches into a single match (subdocument match)'** (default: checked): Finds the longest possible sequence of matching pages (subdocuments). Uncheck to use the next option.
+- **Minimum consecutive matches** (slider, shown when subdocument matching is unchecked): Only report sequences of at least this many consecutive matches (e.g. 3 for at least 3-page runs). Set to 1 for single-page matching.
+
+Once your parameters are set, click **'Identify duplicate pages/subdocuments'**.
+
+In case you want to see the original PDFs for the example, they are available [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/duplicate_page_find_in_app/input_pdfs/).
 
 ![Duplicate matching parameters](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_matching_parameters.PNG)
-
-*Matching Parameters*
-- **Similarity Threshold:** A score from 0 to 1. Pages or sequences of pages with a calculated text similarity above this value will be considered a match. The default of 0.9 (90%) is a good starting point for finding near-identical pages.
-- **Min Word Count:** Pages with fewer words than this value will be completely ignored during the comparison. This is extremely useful for filtering out blank pages, title pages, or boilerplate pages that might otherwise create noise in the results. The default is 10.
-- **Choosing a Matching Strategy:** You have three main options to find duplicate content.
-    - *'Subdocument' matching (default):* Use this to find the longest possible sequence of matching pages. The tool will find an initial match and then automatically expand it forward page-by-page until the consecutive match breaks. This is the best method for identifying complete copied chapters or sections of unknown length. This is enabled by default by ticking the "Enable 'subdocument' matching" box. This setting overrides the described below.
-    - *Minimum length subdocument matching:* Use this to find sequences of consecutively matching pages with a minimum page lenght. For example, setting the slider to 3 will only return sections that are at least 3 pages long. How to enable: Untick the "Enable 'subdocument' matching" box and set the "Minimum consecutive pages" slider to a value greater than 1.
-    - *Single Page Matching:* Use this to find all individual page pairs that are similar to each other. Leave the "Enable 'subdocument' matching" box unchecked and keep the "Minimum consecutive pages" slider at 1.
-
-Once your parameters are set, click the "Identify duplicate pages/subdocuments" button.
 
 **Step 2: Review Results in the Interface**
 After the analysis is complete, the results will be displayed directly in the interface.
@@ -761,6 +769,10 @@ The analysis also generates a set of downloadable files for your records and for
 ![Example duplicate page redaction list](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_output_interface_new.PNG)
 
 If you want to combine the results from this redaction process with previous redaction tasks for the same PDF, you could merge review file outputs following the steps described in [Merging existing redaction review files](#merging-existing-redaction-review-files) above.
+
+**Redact duplicate pages on the Redact PDFs/images tab**
+
+On the **'Redact PDFs/images'** tab, in the **'Redaction settings'** area (accordion **'Terms to always include or exclude in redactions, and whole page redaction'**), there is a **'Redact duplicate pages'** checkbox. When this is enabled, the app will identify duplicate pages and apply whole-page redaction to them as part of the same redaction run. This option is shown when PII identification options are enabled. You can use it instead of (or in addition to) running duplicate detection on the **'Identify duplicate pages'** tab and then applying the output to a document on **'Review redactions'**.
 
 ### Duplicate detection in tabular data
 
@@ -800,17 +812,17 @@ The files for this section are stored [here](https://github.com/seanpedrick-case
 
 Sometimes you may be searching for terms that are slightly mispelled throughout a document, for example names. The document redaction app gives the option for searching for long phrases that may contain spelling mistakes, a method called 'fuzzy matching'.
 
-To do this, go to the Redaction Settings, and the 'Select entity types to redact' area. In the box below relevant to your chosen redaction method (local or AWS Comprehend), select 'CUSTOM_FUZZY' from the list. Next, we can select the maximum number of spelling mistakes allowed in the search (up to nine). Here, you can either type in a number or use the small arrows to the right of the box. Change this option to 3. This will allow for a maximum of three 'changes' in text needed to match to the desired search terms.
+To do this, go to the **'Redact PDFs/images'** tab and open the **'Redaction settings'** area. In the section **'Terms to always include or exclude in redactions, and whole page redaction'**, first ensure your chosen PII method (Local or AWS Comprehend) is selected, then in the entity list for that method select **'CUSTOM_FUZZY'**. In the same section you will see **'Maximum spelling mistakes for matching deny list terms'** (0–9): type a number or use the arrows (e.g. set to 3) to allow up to that many changes in text for a match.
 
-The other option we can leave as is (should fuzzy search match on entire phrases in deny list) - this option would allow you to fuzzy search on each individual word in the search phrase (apart from stop words).
+If shown in your deployment, the option to match on entire phrases in the deny list (as opposed to each word individually) can be left as is.
 
-Next, we can upload a deny list on the same page to do the fuzzy search. A relevant deny list file can be found [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv) - you can upload it following [these steps](#deny-list-example). You will notice that the suggested deny list has spelling mistakes compared to phrases found in the example document.
+To load a deny list from a file for the fuzzy search, use the **Settings** tab under **'Redaction settings'** and the **'Import allow list file'** / **'Import custom deny list'** / **'Import fully redacted pages list'** area, or add terms directly in the deny list box on the **'Redact PDFs/images'** tab. A relevant deny list file can be found [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/fuzzy_search/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv) — you can upload it following [these steps](#deny-list-example). You will notice that the suggested deny list has spelling mistakes compared to phrases found in the example document.
 
 ![Deny list example with spelling mistakes](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/fuzzy_search/img/fuzzy_deny_list_example.PNG)
 
-Upload the [Partnership-Agreement-Toolkit file](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf) into the 'Redact document' area on the first tab. Now, press the 'Redact document' button.
+Upload the [Partnership-Agreement-Toolkit file](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf) on the **'Redact PDFs/images'** tab (in the **'Redaction settings'** area). Then click **'Extract text and redact document'**.
 
-Using these deny list with spelling mistakes, the app fuzzy match these terms to the correct text in the document. After redaction is complete, go to the Review Redactions tab to check the first tabs. You should see that the phrases in the deny list have been successfully matched.
+Using these deny list with spelling mistakes, the app fuzzy match these terms to the correct text in the document. After redaction is complete, go to the **'Review redactions'** tab to check the outputs. You should see that the phrases in the deny list have been successfully matched.
 
 ![Fuzzy match review outputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/fuzzy_search/img/fuzzy_search_review.PNG)
 
@@ -857,11 +869,11 @@ When you click the 'convert .xfdf comment file to review_file.csv' button, the a
 
 ## Using the AWS Textract document API
 
-This option can be enabled by your system admin, in the config file ('SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS' environment variable, and subsequent variables). Using this, you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the 'Redact document' process described here).
+This option can be enabled by your system admin, in the config file ('SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS' environment variable, and subsequent variables). Using this, you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the **'Extract text and redact document'** process described here).
 
 ### Starting a new Textract API job
 
-To use this feature, first upload a document file in the file input box [in the usual way](#upload-files-to-the-app) on the first tab of the app. Under AWS Textract signature detection you can select whether or not you would like to analyse signatures or not (with a [cost implication](#optional---select-signature-extraction)).
+To use this feature, first upload a document file [in the usual way](#upload-files-to-the-app) on the **'Redact PDFs/images'** tab. Under **'Enable AWS Textract signature detection'** (inside **'Change default redaction settings'**) you can choose whether to analyse signatures or not (with a [cost implication](#enable-aws-textract-signature-extraction)).
 
 Then, open the section under the heading 'Submit whole document to AWS Textract API...'.
 
@@ -949,6 +961,7 @@ The app supports advanced OCR options that combine multiple OCR engines for impr
 - **Hybrid-paddle**: Combines Tesseract and PaddleOCR - uses Tesseract for initial extraction, then PaddleOCR for re-extraction of low-confidence text regions.
 - **Hybrid-vlm**: Combines Tesseract with Vision Language Models (VLM) - uses Tesseract for initial extraction, then a VLM model (default: Dots.OCR) for re-extraction of low-confidence text.
 - **Hybrid-paddle-vlm**: Combines PaddleOCR with Vision Language Models - uses PaddleOCR first, then a VLM model for low-confidence regions.
+- **AWS Bedrock VLM**: Cloud-based Vision Language Model OCR via AWS Bedrock. Extracts text (and optionally detects people and signatures) from PDFs and images without running models locally. Requires AWS credentials and is subject to Bedrock quotas and pricing.
 
 ### Enabling advanced OCR options
 
@@ -969,7 +982,12 @@ SHOW_PADDLE_MODEL_OPTIONS = "True"
 SHOW_VLM_MODEL_OPTIONS = "True"
 ```
 
-Once enabled, users will see a "Change default local OCR model" section in the redaction settings where they can choose between the available models based on what has been enabled.
+**To enable AWS Bedrock VLM OCR (cloud-based VLM text extraction):**
+```
+SHOW_BEDROCK_VLM_MODELS = "True"
+```
+
+Once enabled, users will see a "Change default local OCR model" (or text extraction method) section in the redaction settings where they can choose between the available models based on what has been enabled, including Bedrock VLM analysis when configured.
 
 ### OCR configuration parameters
 
@@ -1021,13 +1039,14 @@ When VLM options are enabled, the following settings are available:
 
 ### Using an alternative OCR model
 
-If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_VLM_OPTIONS are set to 'True' in your app_config.env file, you should see the following options available under 'Change default redaction settings...' on the front tab. The different OCR options can be used in different contexts.
+If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_VLM_OPTIONS are set to 'True' in your app_config.env file, you should see the following options available under **'Change default redaction settings'** on the **'Redact PDFs/images'** tab. The different OCR options can be used in different contexts.
 
 - **Tesseract (option 'tesseract')**: Best for documents with clear, well-formatted text, providing a good balance of speed and accuracy with precise word-level bounding boxes. But struggles a lot with handwriting or 'noisy' documents (e.g. scanned documents).
 - **PaddleOCR (option 'paddle')**: More powerful than Tesseract, but slower. Does a decent job with unclear typed text on scanned documents. Also, bounding boxes may not all be accurate as they will be calculated from the line-level bounding boxes produced by Paddle after analysis.
 - **VLM (option 'vlm')**: Recommended for use with the Qwen-3-VL 8B model (can set this with the SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL environment variable in config.py). This model is extremely good at identifying difficult to read handwriting and noisy documents. However, it is much slower than the above options.
 Other models are available as you can see in the tools/run_vlm.py code file. This will conduct inference with the transformers package, and quantise with bitsandbytes if the QUANTISE_VLM_MODELS environment variable is set to True. Inference with this package is *much* slower than with e.g. llama.cpp or vllm servers, which can be used with the inference-server options described below.
 - **Inference server (option 'inference-server')**: This can be used with OpenAI compatible API endpoints, for example [llama-cpp using llama-server](https://github.com/ggml-org/llama.cpp), or [vllm](https://docs.vllm.ai/en/stable). Both of these options will be much faster for inference than the VLM 'in-app' model calls described above, and produce results of a similar quality, but you will need to be able to set up the server separately.
+- **AWS Bedrock VLM (option 'AWS Bedrock VLM OCR - all PDF types')**: When SHOW_BEDROCK_VLM_MODELS is True, this option appears in the text extraction method list. It uses a Bedrock vision model (e.g. Qwen VL) to perform OCR and optional person/signature detection in the cloud. No local GPU is required; AWS credentials and Bedrock model access are needed. Useful for PDFs and images when you prefer not to run VLMs locally.
 
 #### Hybrid options
 
@@ -1068,18 +1087,60 @@ SHOW_INFERENCE_SERVER_VLM_OPTIONS=True
 INFERENCE_SERVER_API_URL=http://localhost:7862
 ```
 
-The above setup with host = 0.0.0.0 allows you to access this server from other computers in your home network. Find your internal ip for the computer hosting llama server (e.g. using ipconfig in Windows), and then replace 'localhost' in the above variable with this value.
-
 ### Identifying people and signatures with VLMs
 
 If VLM or inference server options are enabled, you can also use the VLM to identify photos of people's faces and signatures in the document, and redact them accordingly.
 
 On the 'Redaction Settings' tab, select the CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people's faces and signatures in the document, and redact them accordingly if a redaction option is selected.
 
+### PII identification with LLMs
+
+In addition to rule-based (Local) and AWS Comprehend PII detection, the app can use **Large Language Models (LLMs)** to identify and label personal information. This is useful for entity types that are context-dependent (e.g. job titles, organisation names) or when you want custom instructions (e.g. "do not redact the name of the university"). LLM-based PII can be run via **AWS Bedrock**, a **local transformers** model, or an **inference server** (e.g. llama.cpp, vLLM).
+
+**Options (when enabled by your administrator):**
+
+- **LLM (AWS Bedrock)**: Uses a Bedrock model (e.g. Claude, Nova) for PII detection. Requires AWS credentials and Bedrock model access. No local GPU needed.
+- **Local transformers LLM**: Runs a Hugging Face transformers model on your machine for PII detection. Requires sufficient RAM/VRAM and model download.
+- **Local inference server**: Sends text to an OpenAI-compatible API (e.g. llama.cpp, vLLM) for PII detection. You run the server separately; the app only calls the API.
+
+**Enabling LLM PII options**
+
+Visibility of these methods is controlled by config (e.g. `app_config.env`):
+
+- **SHOW_AWS_BEDROCK_LLM_MODELS** / **SHOW_AWS_PII_DETECTION_OPTIONS**: Show "LLM (AWS Bedrock)" in the PII identification dropdown.
+- **SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS**: Show "Local transformers LLM".
+- **SHOW_INFERENCE_SERVER_PII_OPTIONS**: Show "Local inference server".
+
+On the **'Redact PDFs/images'** tab, under **'Redaction settings'**, choose the desired **PII identification** method (e.g. "LLM (AWS Bedrock)"). You can then:
+
+- Select which **LLM entities** to detect (e.g. NAME, EMAIL_ADDRESS, PHONE_NUMBER, ADDRESS, CUSTOM).
+- Optionally add **custom instructions** (e.g. "Do not redact company names" or "Redact all organisation names with the label ORGANISATION").
+
+Model choice (Bedrock model ID, inference server URL, or local model name) and parameters (temperature, max tokens) are typically set in **Settings** or via environment variables; see the App settings / config documentation for your deployment.
+
+## Document summarisation tab
+
+When summarisation is enabled (e.g. **SHOW_SUMMARISATION** and at least one LLM option available), a **Document summarisation** tab is shown in the app. It lets you generate LLM-based summaries from OCR output CSVs (e.g. from a previous redaction run).
+
+**How to use the Document summarisation tab**
+
+1. **Upload OCR output files**: In the summarisation tab, use "Upload one or multiple 'ocr_output.csv' files to summarise" to attach one or more `*_ocr_output.csv` files (produced by the redaction pipeline when you extract text from PDFs/images).
+2. **Summarisation settings** (accordion):
+   - **Choose LLM inference method for summarisation**: e.g. "LLM (AWS Bedrock)", "Local transformers LLM", or "Local inference server", depending on what is enabled.
+   - **Temperature**: Controls randomness (lower is more deterministic).
+   - **Max pages per page-group summary**: Limits how many pages are summarised together before recursive summarisation.
+   - **API Key (if required)**: For providers that need an API key.
+   - **Additional context (optional)**: Short description of the document type (e.g. "This is a partnership agreement").
+   - **Summary format**: **Concise** (key themes only) or **Detailed** (as much detail as possible).
+   - **Additional summary instructions (optional)**: e.g. "Focus on key obligations and termination clauses".
+3. **Generate summary**: Click **"Generate summary"** to run the summarisation. The app groups pages, calls the LLM, and optionally recurses if the combined summary is long.
+4. **Outputs**: When finished, you can download summary files and view the summary in the tab.
+
+Summarisation uses the same LLM/inference settings as configured for the app (AWS region, inference server URL, etc.). For batch or scripted summarisation, use the CLI `--task summarise` (see Command Line Interface).
 
 ## Command Line Interface (CLI)
 
-The app includes a comprehensive command-line interface (`cli_redact.py`) that allows you to perform redaction, deduplication, and AWS Textract operations directly from the terminal. This is particularly useful for batch processing, automation, and integration with other systems.
+The app includes a comprehensive command-line interface (`cli_redact.py`) that allows you to perform redaction, deduplication, AWS Textract batch operations, and document summarisation directly from the terminal. This is particularly useful for batch processing, automation, and integration with other systems.
 
 ### Getting started with the CLI
 
@@ -1093,8 +1154,10 @@ To use the CLI, you need to:
 ### Basic CLI syntax
 
 ```bash
-python cli_redact.py --task [redact|deduplicate|textract] --input_file [file_path] [additional_options]
+python cli_redact.py --task [redact|deduplicate|textract|summarise] --input_file [file_path] [additional_options]
 ```
+
+Default task is `redact` if `--task` is omitted.
 
 ### Redaction examples
 
@@ -1126,6 +1189,12 @@ python cli_redact.py --input_file example_data/example_of_emails_sent_to_a_profe
 **Redact specific pages with signature extraction:**
 ```bash
 python cli_redact.py --input_file example_data/Partnership-Agreement-Toolkit_0_0.pdf --page_min 6 --page_max 7 --ocr_method "AWS Textract" --handwrite_signature_extraction "Extract handwriting" "Extract signatures"
+```
+
+**Redact with LLM PII (entity subset and custom instructions):**  
+When your deployment uses an LLM-based PII method (e.g. via config/defaults), you can pass LLM entities and instructions:
+```bash
+python cli_redact.py --input_file example_data/example_of_emails_sent_to_a_professor_before_applying.pdf --llm_redact_entities NAME EMAIL_ADDRESS PHONE_NUMBER ADDRESS CUSTOM --custom_llm_instructions "Do not redact the name of the university."
 ```
 
 ### Tabular data redaction
@@ -1184,48 +1253,107 @@ python cli_redact.py --task textract --textract_action retrieve --job_id 1234567
 python cli_redact.py --task textract --textract_action list
 ```
 
+### Document summarisation
+
+**Summarise OCR output CSV(s) with AWS Bedrock:**
+```bash
+python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv --summarisation_inference_method "LLM (AWS Bedrock)"
+```
+
+**Summarise with local LLM and detailed format:**
+```bash
+python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv --summarisation_inference_method "Local transformers LLM" --summarisation_format detailed
+```
+
+**Summarise with context and extra instructions (concise format):**
+```bash
+python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv --summarisation_context "This is a partnership agreement" --summarisation_additional_instructions "Focus on key obligations and termination clauses" --summarisation_format concise
+```
+
+**Summarise multiple OCR CSV files:**
+```bash
+python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv example_data/example_outputs/example_of_emails_sent_to_a_professor_before_applying_ocr_output_textract.csv --summarisation_inference_method "LLM (AWS Bedrock)"
+```
+
 ### Common CLI options
 
 #### General options
 
-- `--task`: Choose between "redact", "deduplicate", or "textract"
-- `--input_file`: Path to input file(s) - can specify multiple files separated by spaces
+- `--task`: Task to perform: "redact", "deduplicate", "textract", or "summarise" (default: redact)
+- `--input_file`: Path to input file(s); multiple files separated by spaces
 - `--output_dir`: Directory for output files (default: output/)
 - `--input_dir`: Directory for input files (default: input/)
-- `--language`: Language of document content (e.g., "en", "es", "fr")
+- `--language`: Language of document content (e.g. "en", "es", "fr")
 - `--username`: Username for session tracking
-- `--pii_detector`: Choose PII detection method ("Local", "AWS Comprehend", or "None")
-- `--local_redact_entities`: Specify local entities to redact (space-separated list)
-- `--aws_redact_entities`: Specify AWS Comprehend entities to redact (space-separated list)
+- `--save_to_user_folders`: Save outputs under username-based subfolders (True/False)
+- `--allow_list`: Path to CSV of terms to exclude from redaction (default from config)
+- `--pii_detector`: PII detection method: "Local", "AWS Comprehend", or "None"
+- `--local_redact_entities`: Local entities to redact (space-separated list)
+- `--aws_redact_entities`: AWS Comprehend entities to redact (space-separated list)
 - `--aws_access_key` / `--aws_secret_key`: AWS credentials for cloud services
 - `--aws_region`: AWS region for cloud services
 - `--s3_bucket`: S3 bucket name for cloud operations
 - `--cost_code`: Cost code for tracking usage
+- `--save_outputs_to_s3`: Upload output files to S3 after processing (True/False)
+- `--s3_outputs_folder`: S3 key prefix for output files
+- `--s3_outputs_bucket`: S3 bucket for outputs (defaults to --s3_bucket if not set)
+- `--do_initial_clean`: Perform initial text cleaning for tabular data (True/False)
+- `--save_logs_to_csv`: Save processing logs to CSV (True/False)
+- `--save_logs_to_dynamodb`: Save processing logs to DynamoDB (True/False)
+- `--display_file_names_in_logs`: Include file names in log output (True/False)
+- `--upload_logs_to_s3`: Upload log files to S3 after processing (True/False)
+- `--s3_logs_prefix`: S3 prefix for usage log files
+- `--feedback_logs_folder`: Directory for feedback log files
+- `--access_logs_folder`: Directory for access log files
+- `--usage_logs_folder`: Directory for usage log files
+- `--paddle_model_path`: Directory for PaddleOCR model storage
+- `--spacy_model_path`: Directory for spaCy model storage
 
 #### PDF/Image redaction options
 
-- `--ocr_method`: Choose text extraction method ("AWS Textract", "Local OCR", or "Local text")
-- `--chosen_local_ocr_model`: Local OCR model to use (e.g., "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm")
-- `--page_min` / `--page_max`: Process only specific page range (0 for max means all pages)
+- `--ocr_method`: Text extraction method: "AWS Textract", "Local OCR", or "Local text"
+- `--chosen_local_ocr_model`: Local OCR model (e.g. "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "inference-server")
+- `--page_min` / `--page_max`: Page range to process (0 for page_max means all pages)
 - `--images_dpi`: DPI for image processing (default: 300.0)
 - `--preprocess_local_ocr_images`: Preprocess images before OCR (True/False)
 - `--compress_redacted_pdf`: Compress the final redacted PDF (True/False)
-- `--return_pdf_end_of_redaction`: Return PDF at end of redaction process (True/False)
+- `--return_pdf_end_of_redaction`: Return PDF at end of redaction (True/False)
 - `--allow_list_file` / `--deny_list_file`: Paths to custom allow/deny list CSV files
-- `--redact_whole_page_file`: Path to CSV file listing pages to redact completely
-- `--handwrite_signature_extraction`: Handwriting and signature extraction options for Textract ("Extract handwriting", "Extract signatures")
+- `--redact_whole_page_file`: Path to CSV listing pages to redact completely
+- `--handwrite_signature_extraction`: Textract options ("Extract handwriting", "Extract signatures")
 - `--extract_forms`: Extract forms during Textract analysis (flag)
 - `--extract_tables`: Extract tables during Textract analysis (flag)
 - `--extract_layout`: Extract layout during Textract analysis (flag)
+- `--vlm_model_choice`: VLM model for OCR (e.g. Bedrock model ID when using cloud VLM)
+- `--inference_server_vlm_model`: Inference server VLM model name for OCR
+- `--inference_server_api_url`: Inference server API URL for VLM OCR
+- `--gemini_api_key`: Google Gemini API key for VLM OCR
+- `--azure_openai_api_key`: Azure OpenAI API key for VLM OCR
+- `--azure_openai_endpoint`: Azure OpenAI endpoint URL for VLM OCR
+- `--efficient_ocr`: Use efficient OCR: try selectable text first per page, run OCR only when needed (flag)
+- `--no_efficient_ocr`: Disable efficient OCR (flag)
+- `--efficient_ocr_min_words`: Min words on page to use text-only route; below this use OCR (default from config)
+
+#### LLM PII detection options
+
+Used when the PII method is LLM-based (e.g. via config/defaults). Model used depends on inference method.
+
+- `--llm_model_choice`: LLM model for PII (e.g. Bedrock model ID); defaults to config CLOUD_LLM_PII_MODEL_CHOICE for Bedrock
+- `--llm_inference_method`: "aws-bedrock", "local", "inference-server", "azure-openai", or "gemini"
+- `--inference_server_pii_model`: Inference server PII detection model name
+- `--llm_temperature`: Temperature for LLM PII (lower = more deterministic)
+- `--llm_max_tokens`: Max tokens in LLM response for PII detection
+- `--llm_redact_entities`: LLM entities to detect (space-separated, e.g. NAME, EMAIL_ADDRESS, PHONE_NUMBER, ADDRESS, CUSTOM)
+- `--custom_llm_instructions`: Custom instructions for LLM entity detection (e.g. "Do not redact company names")
 
 #### Tabular/Word anonymization options
 
-- `--anon_strategy`: Anonymization strategy (e.g., "redact", "redact completely", "replace_redacted", "encrypt", "hash")
-- `--text_columns`: List of column names to anonymize (space-separated)
-- `--excel_sheets`: Specific Excel sheet names to process (space-separated)
-- `--fuzzy_mistakes`: Number of spelling mistakes allowed in fuzzy matching (default: 1)
+- `--anon_strategy`: One of "redact", "redact completely", "replace_redacted", "entity_type", "encrypt", "hash", "replace with 'REDACTED'", "replace with <ENTITY_NAME>", "mask", "fake_first_name"
+- `--text_columns`: Column names to anonymise or use for deduplication (space-separated)
+- `--excel_sheets`: Excel sheet names to process (space-separated)
+- `--fuzzy_mistakes`: Allowed spelling mistakes for fuzzy matching (default: 0)
 - `--match_fuzzy_whole_phrase_bool`: Match fuzzy whole phrase (True/False)
-- `--do_initial_clean`: Perform initial text cleaning for tabular data (True/False)
+- `--do_initial_clean`: Initial text cleaning for tabular data (True/False)
 
 #### Duplicate detection options
 
@@ -1237,14 +1365,28 @@ python cli_redact.py --task textract --textract_action list
 - `--combine_pages`: Combine text from same page number within a file (True/False)
 - `--remove_duplicate_rows`: Remove duplicate rows from output (True/False)
 
+#### Document summarisation options
+
+- `--summarisation_inference_method`: "LLM (AWS Bedrock)", "Local transformers LLM", or "Local inference server"
+- `--summarisation_temperature`: Temperature for summarisation (0.0–2.0; default: 0.6)
+- `--summarisation_max_pages_per_group`: Max pages per page-group summary (default: 30)
+- `--summarisation_api_key`: API key if required by the chosen LLM
+- `--summarisation_context`: Additional context (e.g. "This is a consultation response document")
+- `--summarisation_format`: "concise" (key themes) or "detailed" (default)
+- `--summarisation_additional_instructions`: Extra instructions (e.g. "Focus on key decisions and recommendations")
+
 #### Textract batch operations options
 
-- `--textract_action`: Action to perform ("submit", "retrieve", or "list")
+- `--textract_action`: "submit", "retrieve", or "list"
 - `--job_id`: Textract job ID for retrieve action
 - `--extract_signatures`: Extract signatures during Textract analysis (flag)
-- `--textract_bucket`: S3 bucket name for Textract operations
+- `--textract_bucket`: S3 bucket for Textract operations
+- `--textract_input_prefix`: S3 prefix for input files in Textract operations
+- `--textract_output_prefix`: S3 prefix for output files in Textract operations
+- `--s3_textract_document_logs_subfolder`: S3 prefix for Textract job logs
+- `--local_textract_document_logs_subfolder`: Local path for Textract job logs
 - `--poll_interval`: Polling interval in seconds for job status (default: 30)
-- `--max_poll_attempts`: Maximum polling attempts before timeout (default: 120)
+- `--max_poll_attempts`: Max polling attempts before timeout (default: 120)
 
 ### Output files
 

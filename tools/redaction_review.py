@@ -384,23 +384,37 @@ def undo_last_removal(
 
 def update_annotator_page_from_review_df(
     review_df: pd.DataFrame,
-    image_file_paths: List[
-        str
-    ],  # Note: This input doesn't seem used in the original logic flow after the first line was removed
+    image_file_paths: List[str],
     page_sizes: List[dict],
-    current_image_annotations_state: List[
-        str
-    ],  # This should ideally be List[dict] based on its usage
-    current_page_annotator: object,  # Should be dict or a custom annotation object for one page
+    current_image_annotations_state: List[dict],
+    current_page_annotator: object,
     selected_recogniser_entity_df_row: pd.DataFrame,
     input_folder: str,
     doc_full_file_name_textbox: str,
-) -> Tuple[
-    object, List[dict], int, List[dict], pd.DataFrame, int
-]:  # Correcting return types based on usage
+) -> Tuple[object, List[dict], int, List[dict], pd.DataFrame, int]:
     """
     Update the visible annotation object and related objects with the latest review file information,
     optimising by processing only the current page's data.
+
+    Args:
+        review_df (pd.DataFrame): The DataFrame containing review information for all annotations.
+        image_file_paths (List[str]): List of image file paths, one per document page.
+        page_sizes (List[dict]): List of dictionaries holding page size metadata (width/height etc) for each page.
+        current_image_annotations_state (List[dict]): Annotation state for all pages; typically a list of dicts, one per page.
+        current_page_annotator (object): The annotation object for the currently visible page, usually a dict or a custom annotation object.
+        selected_recogniser_entity_df_row (pd.DataFrame): DataFrame row of the currently selected recogniser/entity, used to extract current page info.
+        input_folder (str): Folder containing input source data.
+        doc_full_file_name_textbox (str): The full filename of the document as displayed in the textbox/UI.
+
+    Returns:
+        Tuple[object, List[dict], int, List[dict], pd.DataFrame, int]:
+            A tuple containing:
+                - The updated annotation object for the current page.
+                - The updated annotation state for all pages.
+                - The current page number being displayed (1-based).
+                - The annotation state for all pages after any updates.
+                - The possibly updated recogniser/entity DataFrame row.
+                - The previous page number to annotate (for navigation/state logic).
     """
     # Assume current_image_annotations_state is List[dict] and current_page_annotator is dict
     out_image_annotations_state: List[dict] = list(
@@ -1234,6 +1248,35 @@ def update_annotator_object_and_filter_df(
     """
     Update a gradio_image_annotation object with new annotation data for the current page
     and update filter dataframes, optimizing by processing only the current page's data for display.
+
+    Args:
+        all_image_annotations (List[AnnotatedImageData]): All image annotation objects to process.
+        gradio_annotator_current_page_number (int): The current page number as selected in the annotator.
+        recogniser_entities_dropdown_value (str, optional): Value for the recogniser dropdown filter. Defaults to "ALL".
+        page_dropdown_value (str, optional): Value for the page dropdown filter. Defaults to "ALL".
+        page_dropdown_redaction_value (str, optional): Value for the redaction page dropdown filter. Defaults to "1".
+        text_dropdown_value (str, optional): Value for the text dropdown filter. Defaults to "ALL".
+        recogniser_dataframe_base (pd.DataFrame, optional): The base recogniser dataframe. Defaults to None.
+        zoom (int, optional): Zoom level for display in the annotator. Defaults to 100.
+        review_df (pd.DataFrame, optional): Review DataFrame containing annotation boxes. Defaults to None.
+        page_sizes (List[dict], optional): List of dictionaries containing page size information. Defaults to empty list.
+        doc_full_file_name_textbox (str, optional): Full file name shown in the textbox. Defaults to empty string.
+        input_folder (str, optional): Path to the input folder. Defaults to INPUT_FOLDER.
+
+    Returns:
+        Tuple[
+            image_annotator,
+            gr.Number,
+            gr.Number,
+            int,
+            str,
+            gr.Dataframe,
+            pd.DataFrame,
+            List[str],
+            List[str],
+            List[dict],
+            List[AnnotatedImageData],
+        ]: Updated Gradio components and relevant page annotations.
     """
 
     zoom_str = str(zoom) + "%"
@@ -1447,8 +1490,6 @@ def update_annotator_object_and_filter_df(
         }
 
     # --- Update Dropdowns and Review DataFrame ---
-    # This external function still operates on potentially large DataFrames.
-    # It receives all_image_annotations and a copy of review_df.
     try:
         (
             recogniser_entities_list,
@@ -1697,6 +1738,40 @@ def apply_redactions_to_review_df_and_files(
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
+        # If the UI passed only a review CSV (e.g. after duplicate-pages flow),
+        # resolve the corresponding PDF so we can save the redacted output.
+        if (
+            save_pdf is True
+            and file_extension == ".csv"
+            and "_review_file" in (file_name_without_ext or "")
+        ):
+            pdf_basename = file_name_with_ext.replace("_review_file.csv", "")
+            review_dir = os.path.dirname(file_path)
+            if not review_dir:
+                review_dir = output_folder or "."
+            candidates = [
+                os.path.join(review_dir, pdf_basename),
+            ]
+            if output_folder:
+                candidates.append(
+                    (output_folder + pdf_basename)
+                    if output_folder.endswith(("/", os.sep))
+                    else os.path.join(output_folder, pdf_basename)
+                )
+            if input_folder:
+                candidates.append(
+                    (input_folder + pdf_basename)
+                    if input_folder.endswith(("/", os.sep))
+                    else os.path.join(input_folder, pdf_basename)
+                )
+            for candidate in candidates:
+                if candidate and os.path.isfile(candidate):
+                    file_path = candidate
+                    file_name_without_ext = get_file_name_without_type(file_path)
+                    file_name_with_ext = os.path.basename(file_path)
+                    file_extension = os.path.splitext(file_path)[1].lower()
+                    break
+
         if save_pdf is True:
             # If working with image docs
             if (is_pdf(file_path) is False) & (file_extension not in ".csv"):
@@ -1811,9 +1886,12 @@ def apply_redactions_to_review_df_and_files(
                         image = image_loc
                     elif isinstance(image_loc, str):
                         if not os.path.exists(image_loc):
-                            image = page_sizes_df.loc[
-                                page_sizes_df["page"] == i, "image_path"
+                            # page_sizes uses 1-based page numbers; loop index i is 0-based
+                            path_series = page_sizes_df.loc[
+                                page_sizes_df["page"] == (i + 1), "image_path"
                             ]
+                            if not path_series.empty:
+                                image_loc = path_series.iloc[0]
                         try:
                             image = Image.open(image_loc)
                         except Exception:
@@ -1867,13 +1945,13 @@ def apply_redactions_to_review_df_and_files(
                 output_files.append(out_pdf_file_path)
 
                 # Save review PDF if RETURN_PDF_FOR_REVIEW is True
+
                 if RETURN_PDF_FOR_REVIEW and review_pdf_doc:
-                    out_review_pdf_file_path = (
-                        output_folder
-                        + file_name_without_ext
-                        + "_redactions_for_review.pdf"
+                    output_file_name = (
+                        file_name_without_ext + "_redactions_for_review.pdf"
                     )
-                    print("Saving PDF file for review:", out_review_pdf_file_path)
+                    out_review_pdf_file_path = output_folder + output_file_name
+                    print("Saving PDF file for review:", output_file_name)
                     save_pdf_with_or_without_compression(
                         review_pdf_doc, out_review_pdf_file_path, COMPRESS_REDACTED_PDF
                     )

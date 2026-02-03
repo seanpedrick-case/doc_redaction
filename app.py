@@ -201,7 +201,11 @@ from tools.config import (
 )
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.data_anonymise import anonymise_files_with_open_text
-from tools.file_conversion import get_input_file_names, prepare_image_or_pdf
+from tools.file_conversion import (
+    get_document_file_names,
+    get_input_file_names,
+    prepare_image_or_pdf,
+)
 from tools.file_redaction import choose_and_run_redactor
 from tools.find_duplicate_pages import (
     apply_whole_page_redactions_from_list,
@@ -3973,15 +3977,19 @@ with blocks:
             with gr.Accordion("Log file outputs", open=False):
                 log_files_output = gr.File(label="Log file output", interactive=False)
 
-            with gr.Accordion("S3 output settings", open=False):
+            with gr.Accordion(
+                "S3 output settings", open=False, visible=SAVE_OUTPUTS_TO_S3
+            ):
                 save_outputs_to_s3_checkbox = gr.Checkbox(
-                    label="Save redaction outputs to S3 (requires RUN_AWS_FUNCTIONS=True and S3_OUTPUTS_FOLDER set)",
+                    label="Save redaction outputs to S3",
                     value=SAVE_OUTPUTS_TO_S3,
+                    visible=SAVE_OUTPUTS_TO_S3,
                 )
                 s3_output_folder_display = gr.Textbox(
-                    label="Resolved S3 outputs folder",
+                    label="S3 outputs folder",
                     value="",
                     interactive=False,
+                    visible=SAVE_OUTPUTS_TO_S3,
                 )
 
             with gr.Accordion("Combine multiple review files", open=False):
@@ -4358,8 +4366,23 @@ with blocks:
         }
     }"""
 
+    def check_duplicate_pages_checkbox(redact_duplicate_pages_checkbox_value: bool):
+        if not redact_duplicate_pages_checkbox_value:
+            # Silently raise an error to avoid showing a popup
+            return
+        if redact_duplicate_pages_checkbox_value:
+            print("Redact duplicate pages checkbox is enabled, identifying duplicates")
+            sys.tracebacklimit = 0  # Suppress traceback
+            raise ProcessStop(
+                "Redact duplicate pages checkbox is enabled, identifying duplicates."
+            )
+
+    def restore_sys_tracebacklimit():
+        sys.tracebacklimit = 1000  # Restore traceback limit
+        return
+
     in_doc_files.upload(
-        fn=get_input_file_names,
+        fn=get_document_file_names,
         inputs=[in_doc_files],
         outputs=[
             doc_file_name_no_extension_textbox,
@@ -4372,6 +4395,75 @@ with blocks:
         fn=prepare_image_or_pdf,
         inputs=[
             in_doc_files,
+            text_extract_method_radio,
+            all_page_line_level_ocr_results_df_base,
+            all_page_line_level_ocr_results_with_words_df_base,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            first_loop_state,
+            annotate_max_pages,
+            all_image_annotations_state,
+            prepare_for_review_bool_false,
+            in_fully_redacted_list_state,
+            output_folder_textbox,
+            input_folder_textbox,
+            prepare_images_bool_false,
+            page_sizes,
+            pdf_doc_state,
+            page_min,
+            page_max,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            prepared_pdf_state,
+            images_pdf_state,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            pdf_doc_state,
+            all_image_annotations_state,
+            review_file_df,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            all_img_details_state,
+            all_page_line_level_ocr_results_df_base,
+            relevant_ocr_output_with_words_found_checkbox,
+            all_page_line_level_ocr_results_with_words_df_base,
+        ],
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=check_for_existing_textract_file,
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            output_folder_textbox,
+            handwrite_signature_checkbox,
+        ],
+        outputs=[textract_output_found_checkbox],
+    ).success(
+        fn=check_for_relevant_ocr_output_with_words,
+        inputs=[
+            doc_file_name_no_extension_textbox,
+            text_extract_method_radio,
+            output_folder_textbox,
+        ],
+        outputs=[relevant_ocr_output_with_words_found_checkbox],
+    )
+
+    # Same process as above for walkthrough file input
+    walkthrough_file_input.upload(
+        fn=get_document_file_names,
+        inputs=[walkthrough_file_input],
+        outputs=[
+            doc_file_name_no_extension_textbox,
+            doc_file_name_with_extension_textbox,
+            doc_full_file_name_textbox,
+            doc_file_name_textbox_list,
+            total_pdf_page_count,
+        ],
+    ).success(
+        fn=prepare_image_or_pdf,
+        inputs=[
+            walkthrough_file_input,
             text_extract_method_radio,
             all_page_line_level_ocr_results_df_base,
             all_page_line_level_ocr_results_with_words_df_base,
@@ -4555,6 +4647,7 @@ with blocks:
             llm_model_name_textbox,
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
+            total_pdf_page_count,
         ],
         api_name="redact_doc",
         show_progress_on=[redaction_output_summary_textbox],
@@ -4599,21 +4692,16 @@ with blocks:
         ],
         show_progress_on=[annotator],
     )
-
-    def check_duplicate_pages_checkbox(redact_duplicate_pages_checkbox_value: bool):
-        if not redact_duplicate_pages_checkbox_value:
-            # Silently raise an error to avoid showing a popup
-            return
-        if redact_duplicate_pages_checkbox_value:
-            print("Redact duplicate pages checkbox is enabled, identifying duplicates")
-            sys.tracebacklimit = 0  # Suppress traceback
-            raise ProcessStop(
-                "Redact duplicate pages checkbox is enabled, identifying duplicates."
-            )
-
-    def restore_sys_tracebacklimit():
-        sys.tracebacklimit = 1000  # Restore traceback limit
-        return
+    # ).success(
+    #     fn=check_duplicate_pages_checkbox,
+    #     inputs=[redact_duplicate_pages_checkbox],
+    #     outputs=None,
+    # ).failure(
+    #     fn=lambda: None, js=TRIGGER_DUPLICATE_DETECTION_BUTTON
+    # ).then(
+    #     fn=restore_sys_tracebacklimit,
+    #     outputs=None,
+    # )
 
     # If a file has been completed, the function will continue onto the next document
     latest_file_completed_num.change(
@@ -4715,6 +4803,7 @@ with blocks:
             llm_model_name_textbox,
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
+            total_pdf_page_count,
         ],
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
@@ -5098,6 +5187,7 @@ with blocks:
             llm_model_name_textbox,
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
+            total_pdf_page_count,
         ],
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
@@ -5159,7 +5249,7 @@ with blocks:
         inputs=None,
         outputs=[recogniser_entity_dataframe, recogniser_entity_dataframe_base],
     ).success(
-        fn=get_input_file_names,
+        fn=get_document_file_names,
         inputs=[input_pdf_for_review],
         outputs=[
             doc_file_name_no_extension_textbox,
@@ -7097,7 +7187,7 @@ with blocks:
 
     # Convert review file to xfdf Adobe format
     convert_review_file_to_adobe_btn.click(
-        fn=get_input_file_names,
+        fn=get_document_file_names,
         inputs=[input_pdf_for_review],
         outputs=[
             doc_file_name_no_extension_textbox,
@@ -7170,7 +7260,7 @@ with blocks:
 
     # Convert xfdf Adobe file back to review_file.csv
     convert_adobe_to_review_file_btn.click(
-        fn=get_input_file_names,
+        fn=get_document_file_names,
         inputs=[adobe_review_files_out],
         outputs=[
             doc_file_name_no_extension_textbox,
