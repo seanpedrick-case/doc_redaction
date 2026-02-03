@@ -48,7 +48,7 @@ dependencies = [
     "presidio-image-redactor==0.0.57",
     "pikepdf==10.3.0",
     "pandas==2.3.3",
-    "scikit-learn==1.8.0",
+    "scikit-learn<=1.8.0",
     "spacy==3.8.11",
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
     "gradio==5.49.1",
