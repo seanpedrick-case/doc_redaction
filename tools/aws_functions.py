@@ -5,8 +5,11 @@ import boto3
 import pandas as pd
 
 from tools.config import (
+    AWS_ACCESS_KEY,
     AWS_REGION,
+    AWS_SECRET_KEY,
     DOCUMENT_REDACTION_BUCKET,
+    PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RUN_AWS_FUNCTIONS,
     S3_OUTPUTS_BUCKET,
     SAVE_LOGS_TO_CSV,
@@ -14,6 +17,55 @@ from tools.config import (
 from tools.secure_path_utils import secure_join
 
 PandasDataFrame = Type[pd.DataFrame]
+
+
+def connect_to_bedrock_runtime(
+    model_name_map: dict,
+    model_choice: str,
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
+):
+    # If running an anthropic model, assume that running an AWS Bedrock model, load in Bedrock
+    model_source = model_name_map[model_choice]["source"]
+
+    # Use aws_region_textbox if provided, otherwise fall back to AWS_REGION from config
+    region = aws_region_textbox if aws_region_textbox else AWS_REGION
+
+    if "AWS" in model_source:
+        if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=region)
+        elif aws_access_key_textbox and aws_secret_key_textbox:
+            print(
+                "Connecting to Bedrock using AWS access key and secret keys from user input."
+            )
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=aws_access_key_textbox,
+                aws_secret_access_key=aws_secret_key_textbox,
+                region_name=region,
+            )
+        elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+            print("Getting Bedrock credentials from environment variables")
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=AWS_ACCESS_KEY,
+                aws_secret_access_key=AWS_SECRET_KEY,
+                region_name=region,
+            )
+        elif RUN_AWS_FUNCTIONS == "1":
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=region)
+        else:
+            bedrock_runtime = ""
+            out_message = "Cannot connect to AWS Bedrock service. Please provide access keys under LLM settings, or choose another model type."
+            print(out_message)
+            raise Exception(out_message)
+    else:
+        bedrock_runtime = None
+
+    return bedrock_runtime
 
 
 def get_assumed_role_info():

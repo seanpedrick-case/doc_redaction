@@ -11,6 +11,8 @@ defusedxml==0.7.1
 Faker==37.8.0
 python-levenshtein==0.27.1
 rapidfuzz==3.14.1
+markdown>=3.7
+tabulate>=0.9.0
 
 # --- Machine learning / NLP ---
 scikit-learn==1.7.2
@@ -42,3 +44,7 @@ python-docx==1.2.0
 # --- Testing ---
 pytest>=7.0.0
 pytest-cov>=4.0.0
+
+# --- LLM libraries ---
+google-genai>=1.52.0
+openai>=2.8.1

@@ -266,6 +266,12 @@ def log_redaction_usage(
     save_to_s3: bool = None,
     s3_bucket: str = None,
     s3_key_prefix: str = None,
+    vlm_model_name: str = "",
+    vlm_total_input_tokens: int = 0,
+    vlm_total_output_tokens: int = 0,
+    llm_model_name: str = "",
+    llm_total_input_tokens: int = 0,
+    llm_total_output_tokens: int = 0,
 ):
     """
     Log redaction usage data using the provided logger.
@@ -289,6 +295,12 @@ def log_redaction_usage(
         save_to_s3: Whether to save to S3 (overrides config default)
         s3_bucket: S3 bucket name (overrides config default)
         s3_key_prefix: S3 key prefix (overrides config default)
+        vlm_model_name: VLM model name used for OCR
+        vlm_total_input_tokens: Total VLM input tokens used
+        vlm_total_output_tokens: Total VLM output tokens used
+        llm_model_name: LLM model name used for PII detection
+        llm_total_input_tokens: Total LLM input tokens used
+        llm_total_output_tokens: Total LLM output tokens used
     """
     # Use placeholder names if not displaying file names in logs
     if DISPLAY_FILE_NAMES_IN_LOGS != "True":
@@ -319,6 +331,12 @@ def log_redaction_usage(
         text_extraction_method,
         is_textract_call,
         task,
+        vlm_model_name,
+        vlm_total_input_tokens,
+        vlm_total_output_tokens,
+        llm_model_name,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
     ]
 
     logger.log_usage(

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "1.6.7"
+version = "1.7.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 authors = [
@@ -67,6 +67,9 @@ dependencies = [
     "defusedxml==0.7.1",
     "numpy==2.2.6",
     "spaces==0.42.1",
+    "google-genai>=1.52.0",
+    "openai>=2.8.1",
+    "markdown>=3.7"
 ]
 
 [project.optional-dependencies]
@@ -75,18 +78,18 @@ dependencies = [
 dev = ["pytest"]
 test = ["pytest", "pytest-cov"]
 
-# To install the app with paddle and vlm support with pip, example command (in base folder and correct python environment): pip install .[paddle,vlm], or uv pip install .[ocr,vlm] if using uv. Note need to GPU version of Torch below
+# To install the app with paddle and vlm support with pip, example command (in base folder and correct python environment): pip install .[paddle,vlm], or uv pip install .[paddle,vlm] if using uv. Note need to GPU version of Torch below
 
 # Extra dependencies for PaddleOCR
-# The following installs the CPU version of paddleOCR. If you want the GPU-accelerated version, run manually pip install paddlepaddle-gpu<=3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
+# The following installs the CPU version of paddleOCR. If you want the GPU-accelerated version, run manually pip install paddlepaddle-gpu --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
 paddle = [
-    "paddlepaddle>=3.0.0,<=3.2.1", 
+    "paddlepaddle>=3.0.0,<=3.3.0", 
     "paddleocr==3.3.0",
     "pycocotools==2.0.10",
 ]
 
 # Extra dependencies for VLM models
-# The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install --index-url https://download.pytorch.org/whl/cu129 after installation
+# The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install torch torchvision --index-url https://download.pytorch.org/whl/cu129 after installation
 vlm = [
     "torch>=2.5.1,<=2.8.0", 
     "torchvision>=0.20.1",

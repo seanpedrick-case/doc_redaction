@@ -7,19 +7,34 @@ from dotenv import load_dotenv
 # Import the main function from your CLI script
 from cli_redact import main as cli_main
 from tools.config import (
+    AWS_LLM_PII_OPTION,
     AWS_REGION,
+    AZURE_OPENAI_API_KEY,
+    AZURE_OPENAI_INFERENCE_ENDPOINT,
+    CHOSEN_LLM_ENTITIES,
+    CHOSEN_LLM_PII_INFERENCE_METHOD,
+    CLOUD_LLM_PII_MODEL_CHOICE,
+    CLOUD_VLM_MODEL_CHOICE,
     DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
     DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+    DEFAULT_INFERENCE_SERVER_PII_MODEL,
+    DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_MIN_CONSECUTIVE_PAGES,
     DEFAULT_MIN_WORD_COUNT,
     DEFAULT_PAGE_MAX,
     DEFAULT_PAGE_MIN,
+    GEMINI_API_KEY,
     IMAGES_DPI,
+    INFERENCE_SERVER_API_URL,
     LAMBDA_DEFAULT_USERNAME,
     LAMBDA_EXTRACT_SIGNATURES,
     LAMBDA_MAX_POLL_ATTEMPTS,
     LAMBDA_POLL_INTERVAL,
     LAMBDA_PREPARE_IMAGES,
+    LLM_PII_MAX_TOKENS,
+    LLM_PII_TEMPERATURE,
+    OCR_FIRST_PASS_MAX_WORKERS,
+    SUMMARY_PAGE_GROUP_MAX_WORKERS,
 )
 
 
@@ -426,6 +441,121 @@ def lambda_handler(event, context):
                 "extract_layout",
                 os.getenv("INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION", "False"),
             )
+        ),
+        # VLM OCR Arguments
+        "vlm_model_choice": arguments.get(
+            "vlm_model_choice",
+            os.getenv("CLOUD_VLM_MODEL_CHOICE", CLOUD_VLM_MODEL_CHOICE),
+        ),
+        "inference_server_vlm_model": arguments.get(
+            "inference_server_vlm_model",
+            os.getenv(
+                "DEFAULT_INFERENCE_SERVER_VLM_MODEL", DEFAULT_INFERENCE_SERVER_VLM_MODEL
+            ),
+        ),
+        "inference_server_api_url": arguments.get(
+            "inference_server_api_url",
+            os.getenv("INFERENCE_SERVER_API_URL", INFERENCE_SERVER_API_URL),
+        ),
+        "gemini_api_key": arguments.get(
+            "gemini_api_key", os.getenv("GEMINI_API_KEY", GEMINI_API_KEY)
+        ),
+        "azure_openai_api_key": arguments.get(
+            "azure_openai_api_key",
+            os.getenv("AZURE_OPENAI_API_KEY", AZURE_OPENAI_API_KEY),
+        ),
+        "azure_openai_endpoint": arguments.get(
+            "azure_openai_endpoint",
+            os.getenv(
+                "AZURE_OPENAI_INFERENCE_ENDPOINT", AZURE_OPENAI_INFERENCE_ENDPOINT
+            ),
+        ),
+        "ocr_first_pass_max_workers": int(
+            arguments.get(
+                "ocr_first_pass_max_workers",
+                os.getenv(
+                    "OCR_FIRST_PASS_MAX_WORKERS", str(OCR_FIRST_PASS_MAX_WORKERS)
+                ),
+            )
+        ),
+        # LLM PII Detection Arguments
+        # Note: The actual model used is determined by pii_identification_method in the downstream code
+        # This is just the default - it will be overridden based on the selected PII method
+        "llm_model_choice": arguments.get(
+            "llm_model_choice",
+            os.getenv("CLOUD_LLM_PII_MODEL_CHOICE", CLOUD_LLM_PII_MODEL_CHOICE),
+        ),
+        "llm_inference_method": arguments.get(
+            "llm_inference_method",
+            os.getenv(
+                "CHOSEN_LLM_PII_INFERENCE_METHOD", CHOSEN_LLM_PII_INFERENCE_METHOD
+            ),
+        ),
+        "inference_server_pii_model": arguments.get(
+            "inference_server_pii_model",
+            os.getenv(
+                "DEFAULT_INFERENCE_SERVER_PII_MODEL", DEFAULT_INFERENCE_SERVER_PII_MODEL
+            ),
+        ),
+        "llm_temperature": float(
+            arguments.get(
+                "llm_temperature",
+                os.getenv("LLM_PII_TEMPERATURE", LLM_PII_TEMPERATURE),
+            )
+        ),
+        "llm_max_tokens": int(
+            arguments.get(
+                "llm_max_tokens",
+                os.getenv("LLM_PII_MAX_TOKENS", LLM_PII_MAX_TOKENS),
+            )
+        ),
+        "llm_redact_entities": _get_env_list(
+            arguments.get(
+                "llm_redact_entities",
+                os.getenv("CHOSEN_LLM_ENTITIES", CHOSEN_LLM_ENTITIES),
+            )
+        ),
+        "custom_llm_instructions": arguments.get(
+            "custom_llm_instructions", os.getenv("CUSTOM_LLM_INSTRUCTIONS", "")
+        ),
+        # Document Summarisation Arguments (used when task is summarise)
+        "summarisation_inference_method": arguments.get(
+            "summarisation_inference_method",
+            os.getenv("SUMMARISATION_INFERENCE_METHOD", AWS_LLM_PII_OPTION),
+        ),
+        "summarisation_temperature": float(
+            arguments.get(
+                "summarisation_temperature",
+                os.getenv("SUMMARISATION_TEMPERATURE", "0.6"),
+            )
+        ),
+        "summarisation_max_pages_per_group": int(
+            arguments.get(
+                "summarisation_max_pages_per_group",
+                os.getenv("SUMMARISATION_MAX_PAGES_PER_GROUP", "30"),
+            )
+        ),
+        "summary_page_group_max_workers": int(
+            arguments.get(
+                "summary_page_group_max_workers",
+                os.getenv(
+                    "SUMMARY_PAGE_GROUP_MAX_WORKERS",
+                    str(SUMMARY_PAGE_GROUP_MAX_WORKERS),
+                ),
+            )
+        ),
+        "summarisation_api_key": arguments.get(
+            "summarisation_api_key", os.getenv("SUMMARISATION_API_KEY", "")
+        ),
+        "summarisation_context": arguments.get(
+            "summarisation_context", os.getenv("SUMMARISATION_CONTEXT", "")
+        ),
+        "summarisation_format": arguments.get(
+            "summarisation_format", os.getenv("SUMMARISATION_FORMAT", "detailed")
+        ),
+        "summarisation_additional_instructions": arguments.get(
+            "summarisation_additional_instructions",
+            os.getenv("SUMMARISATION_ADDITIONAL_INSTRUCTIONS", ""),
         ),
         # Word/Tabular Anonymisation Arguments
         "anon_strategy": arguments.get(

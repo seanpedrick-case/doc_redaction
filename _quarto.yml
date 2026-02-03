@@ -1,12 +1,12 @@
 project:
   type: website
-  output-dir: docs # Common for GitHub Pages
+  output-dir: docs
   render:
     - "*.qmd"
 
 website:
   title: "Document Redaction App"
-  page-navigation: true # Often enabled for floating TOC to highlight current section
+  page-navigation: true
   back-to-top-navigation: true
   search: true
   navbar:
