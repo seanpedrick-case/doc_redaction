@@ -1710,8 +1710,6 @@ def apply_redactions_to_review_df_and_files(
     pdf_doc = list()
     review_df = review_file_state
 
-    print("file_paths:", file_paths)
-
     # Always use the provided input_folder parameter
     # This ensures images are created in the specified input folder, not in example_data
 
