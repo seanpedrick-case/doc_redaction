@@ -79,7 +79,7 @@ def reset_state_vars():
         0,
         [],
         [],
-        0,
+        0,  # latest_file_completed_num: reset to 0 at start of document redaction
     )
 
 
@@ -930,9 +930,9 @@ def calculate_time_taken(
     textract_output_found_checkbox: bool,
     only_extract_text_radio: bool,
     local_ocr_output_found_checkbox: bool,
-    convert_page_time: float = 0.5,
-    textract_page_time: float = 1.2,
-    comprehend_page_time: float = 1.2,
+    convert_page_time: float = 0.3,
+    textract_page_time: float = 0.6,
+    comprehend_page_time: float = 0.6,
     local_text_extraction_page_time: float = 0.3,
     local_pii_redaction_page_time: float = 0.5,
     local_ocr_extraction_page_time: float = 1.5,

@@ -5,7 +5,7 @@ import os
 import re
 import time
 from collections import defaultdict  # For efficient grouping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -624,6 +624,8 @@ def choose_and_run_redactor(
 
         page_break_return = True
 
+        # No files to process: total page count stays 0 for usage logging
+        total_pages_for_ui = len(page_sizes) if page_sizes else 0
         return (
             combined_out_message,
             out_file_paths,
@@ -665,6 +667,7 @@ def choose_and_run_redactor(
             llm_model_name,
             llm_total_input_tokens,
             llm_total_output_tokens,
+            total_pages_for_ui,
         )
     else:
         # ocr_review_files will be replaced by latest file output
@@ -849,6 +852,7 @@ def choose_and_run_redactor(
             llm_model_name,
             llm_total_input_tokens,
             llm_total_output_tokens,
+            number_of_pages,
         )
 
     ### Load/create allow list, deny list, and whole page redaction list
@@ -1244,7 +1248,7 @@ def choose_and_run_redactor(
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    progress(0.5, desc="Extracting text and redacting document")
+    progress(0.2, desc="Extracting text and redacting document")
 
     all_pages_decision_process_table = pd.DataFrame(
         columns=[
@@ -1376,17 +1380,27 @@ def choose_and_run_redactor(
             page_range = range(start_page_0, end_page_0)
 
             # Parallel: determine which pages have extractable text (read-only, safe)
+            progress(
+                0.4,
+                desc="Efficient OCR: Checking for pages suitable for efficient text extraction method",
+            )
             max_workers = min(len(page_range), 8)
+            num_pages = len(page_range)
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 page_has_text_list = list(
-                    executor.map(
-                        lambda p: (
-                            p,
-                            page_has_extractable_text(
-                                file_path, p, efficient_ocr_min_words
+                    tqdm(
+                        executor.map(
+                            lambda p: (
+                                p,
+                                page_has_extractable_text(
+                                    file_path, p, efficient_ocr_min_words
+                                ),
                             ),
+                            page_range,
                         ),
-                        page_range,
+                        total=num_pages,
+                        unit="pages",
+                        desc="Efficient OCR: Checking for pages suitable for simple text extraction method",
                     )
                 )
             # Keep page order for sequential redaction
@@ -1403,6 +1417,11 @@ def choose_and_run_redactor(
             efficient_ocr_ocr_pages = len(pages_needing_ocr_1based)
 
             if pages_with_text_1based:
+                progress(
+                    0.5,
+                    desc="Processing pages with selectable text extraction (no OCR)",
+                )
+
                 print(
                     f"EFFICIENT_OCR: Processing {len(pages_with_text_1based)} page(s) with selectable text extraction (no OCR)."
                 )
@@ -1458,6 +1477,7 @@ def choose_and_run_redactor(
                     llm_model_name = llm_model_name_text
 
             if pages_needing_ocr_1based:
+                progress(0.6, desc="Processing pages with OCR")
                 ocr_method_label = (
                     "Tesseract (local OCR)"
                     if ocr_fallback_method == TESSERACT_TEXT_EXTRACT_OPTION
@@ -2408,6 +2428,7 @@ def choose_and_run_redactor(
         llm_model_name,
         llm_total_input_tokens,
         llm_total_output_tokens,
+        number_of_pages,
     )
 
 
@@ -3283,47 +3304,59 @@ def redact_page_with_pymupdf(
                 annot = fill_missing_box_ids(annot)
                 img_annotation_box = annot
 
-                box_coordinates = (
-                    img_annotation_box["xmin"],
-                    img_annotation_box["ymin"],
-                    img_annotation_box["xmax"],
-                    img_annotation_box["ymax"],
-                )
+                # Whole page redactions: always use full-page rect so they are reliably
+                # included when applying from Review tab (e.g. redactions_for_review.pdf)
+                whole_page_border = 5
+                if img_annotation_box.get("label") == "Whole page":
+                    pymupdf_x1 = 0 + whole_page_border
+                    pymupdf_y1 = 0 + whole_page_border
+                    pymupdf_x2 = rect_width - whole_page_border
+                    pymupdf_y2 = rect_height - whole_page_border
+                    rect = Rect(pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2)
+                else:
+                    box_coordinates = (
+                        img_annotation_box["xmin"],
+                        img_annotation_box["ymin"],
+                        img_annotation_box["xmax"],
+                        img_annotation_box["ymax"],
+                    )
 
-                # Check if all coordinates are equal to or less than 1
-                are_coordinates_relative = all(coord <= 1 for coord in box_coordinates)
+                    # Check if all coordinates are equal to or less than 1
+                    are_coordinates_relative = all(
+                        coord <= 1 for coord in box_coordinates
+                    )
 
-                if are_coordinates_relative is True:
-                    # Check if coordinates are relative, if so then multiply by mediabox size
-                    pymupdf_x1 = img_annotation_box["xmin"] * mediabox_width
-                    pymupdf_y1 = img_annotation_box["ymin"] * mediabox_height
-                    pymupdf_x2 = img_annotation_box["xmax"] * mediabox_width
-                    pymupdf_y2 = img_annotation_box["ymax"] * mediabox_height
+                    if are_coordinates_relative is True:
+                        # Check if coordinates are relative, if so then multiply by mediabox size
+                        pymupdf_x1 = img_annotation_box["xmin"] * mediabox_width
+                        pymupdf_y1 = img_annotation_box["ymin"] * mediabox_height
+                        pymupdf_x2 = img_annotation_box["xmax"] * mediabox_width
+                        pymupdf_y2 = img_annotation_box["ymax"] * mediabox_height
 
-                elif image_dimensions or image:
-                    pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = (
-                        convert_gradio_image_annotator_object_coords_to_pymupdf(
-                            page, img_annotation_box, image, image_dimensions
+                    elif image_dimensions or image:
+                        pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = (
+                            convert_gradio_image_annotator_object_coords_to_pymupdf(
+                                page, img_annotation_box, image, image_dimensions
+                            )
                         )
-                    )
-                else:
-                    print(
-                        "Could not convert image annotator coordinates in redact_page_with_pymupdf"
-                    )
-                    print("img_annotation_box", img_annotation_box)
-                    pymupdf_x1 = img_annotation_box["xmin"]
-                    pymupdf_y1 = img_annotation_box["ymin"]
-                    pymupdf_x2 = img_annotation_box["xmax"]
-                    pymupdf_y2 = img_annotation_box["ymax"]
+                    else:
+                        print(
+                            "Could not convert image annotator coordinates in redact_page_with_pymupdf"
+                        )
+                        print("img_annotation_box", img_annotation_box)
+                        pymupdf_x1 = img_annotation_box["xmin"]
+                        pymupdf_y1 = img_annotation_box["ymin"]
+                        pymupdf_x2 = img_annotation_box["xmax"]
+                        pymupdf_y2 = img_annotation_box["ymax"]
 
-                if "text" in annot and annot["text"]:
-                    img_annotation_box["text"] = str(annot["text"])
-                else:
-                    img_annotation_box["text"] = ""
+                    if "text" in annot and annot["text"]:
+                        img_annotation_box["text"] = str(annot["text"])
+                    else:
+                        img_annotation_box["text"] = ""
 
-                rect = Rect(
-                    pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2
-                )  # Create the PyMuPDF Rect
+                    rect = Rect(
+                        pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2
+                    )  # Create the PyMuPDF Rect
 
             # Else should be CustomImageRecognizerResult
             elif isinstance(annot, CustomImageRecognizerResult):
@@ -4017,19 +4050,19 @@ def redact_image_pdf(
         ocr_progress_bar = tqdm(
             page_loop_pages,
             unit="pages",
-            desc="OCR pass",
+            desc="Performing image-based OCR",
         )
     else:
         ocr_progress_bar = tqdm(
             range(page_loop_start, page_loop_end),
             unit="pages",
-            desc="OCR pass",
+            desc="Performing image-based OCR",
         )
 
     for page_no in ocr_progress_bar:
 
         reported_page_number = str(page_no + 1)
-        print(f"OCR - Current page: {reported_page_number}")
+        # print(f"OCR preparation - Current page: {reported_page_number}")
 
         handwriting_or_signature_boxes = list()
         page_signature_recogniser_results = list()
@@ -5400,6 +5433,17 @@ def redact_image_pdf(
 
     # Parallel Textract first pass: run analyse_page_with_textract in worker threads, then merge in page order
     if use_ocr_parallel_textract and ocr_parallel_jobs_textract:
+        num_textract_pages = len(ocr_parallel_jobs_textract)
+        print(
+            f"First pass: Running AWS Textract on {num_textract_pages} pages (parallel), then processing results..."
+        )
+        try:
+            progress(
+                0.45,
+                desc=f"Running AWS Textract on {num_textract_pages} pages (parallel)",
+            )
+        except Exception:
+            pass
 
         def _textract_first_pass_worker(job):
             if job.get("cached_text_blocks") is not None:
@@ -5442,10 +5486,21 @@ def redact_image_pdf(
             )
 
         max_workers = min(_ocr_first_pass_max_workers, len(ocr_parallel_jobs_textract))
+        results = [None] * len(ocr_parallel_jobs_textract)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = list(
-                executor.map(_textract_first_pass_worker, ocr_parallel_jobs_textract)
-            )
+            future_to_index = {
+                executor.submit(_textract_first_pass_worker, job): idx
+                for idx, job in enumerate(ocr_parallel_jobs_textract)
+            }
+            with tqdm(
+                as_completed(future_to_index),
+                total=len(future_to_index),
+                unit="pages",
+                desc="AWS Textract OCR calls",
+            ) as textract_pbar:
+                for future in textract_pbar:
+                    idx = future_to_index[future]
+                    results[idx] = future.result()
 
         textract_data = {"pages": [r[0] for r in results]}
         textract_request_metadata.extend(r[1] for r in results)
@@ -5458,7 +5513,18 @@ def redact_image_pdf(
         if all_page_line_level_ocr_results_with_words is None:
             all_page_line_level_ocr_results_with_words = list()
 
-        for job, result in zip(ocr_parallel_jobs_textract, results):
+        print("First pass: Processing Textract results per page...")
+        try:
+            progress(0.5, desc="Processing Textract results per page")
+        except Exception:
+            pass
+        post_process_pbar = tqdm(
+            zip(ocr_parallel_jobs_textract, results),
+            total=len(results),
+            unit="pages",
+            desc="Processing OCR results",
+        )
+        for job, result in post_process_pbar:
             (
                 _text_blocks,
                 _metadata,
@@ -5472,6 +5538,7 @@ def redact_image_pdf(
             ) = result
             page_no = job["page_no"]
             reported_page_number = job["reported_page_number"]
+            post_process_pbar.set_postfix_str(f"page {reported_page_number}")
             image_path = job["image_path"]
             image = job["image"]
             page_width = job["page_width"]
@@ -5775,13 +5842,17 @@ def redact_image_pdf(
 
     # SECOND PASS: Perform PII detection on all pages using stored OCR results
     print("Second pass: Performing PII detection on all pages...")
-    if efficient_ocr:
-        pii_progress_bar = range(page_loop_start, page_loop_end)
+    if page_loop_pages is not None:
+        pii_progress_bar = tqdm(
+            page_loop_pages,
+            unit="pages",
+            desc="Detecting PII (following image-based OCR)",
+        )
     else:
         pii_progress_bar = tqdm(
             range(page_loop_start, page_loop_end),
             unit="pages remaining",
-            desc="PII detection pass",
+            desc="Detecting PII (following image-based OCR)",
         )
 
     # Initialize redacted_image - will be updated inside loop for image files
@@ -5790,7 +5861,7 @@ def redact_image_pdf(
     for page_no in pii_progress_bar:
 
         reported_page_number = str(page_no + 1)
-        print(f"PII Detection - Current page: {reported_page_number}")
+        # print(f"PII Detection - Current page: {reported_page_number}")
 
         # Retrieve stored OCR results and page metadata
         if page_no not in ocr_results_by_page:
@@ -6997,6 +7068,104 @@ def process_page_to_structured_ocr(
     return page_data, line_level_ocr_results_list, lines_char_groups
 
 
+def _extract_text_from_single_page(file_path: str, page_no: int) -> Tuple[
+    int,
+    List,
+    List,
+    pd.DataFrame,
+    List[Dict[str, Any]],
+]:
+    """
+    Extract selectable text and structured OCR-style results for a single PDF page.
+    Used by redact_text_pdf for parallel text extraction (ThreadPoolExecutor).
+    Only reads file_path; safe to call from multiple threads.
+
+    Returns:
+        Tuple of (page_no, all_page_line_level_text_extraction_results_list,
+                  all_page_line_text_extraction_characters, page_text_ocr_outputs,
+                  page_ocr_results_with_words).
+    """
+    reported_page_number = page_no + 1
+    all_page_line_level_text_extraction_results_list = list()
+    all_page_line_text_extraction_characters = list()
+    page_ocr_results_with_words = list()
+    page_text_ocr_outputs_list = list()
+
+    empty_ocr_df = pd.DataFrame(
+        columns=[
+            "page",
+            "text",
+            "left",
+            "top",
+            "width",
+            "height",
+            "line",
+            "conf",
+        ]
+    )
+
+    text_line_no = 1
+    for page_layout in extract_pages(file_path, page_numbers=[page_no], maxpages=1):
+        for text_container in page_layout:
+            characters = list()
+            if isinstance(text_container, LTTextContainer) or isinstance(
+                text_container, LTAnno
+            ):
+                characters = get_text_container_characters(text_container)
+
+            (
+                line_level_ocr_results_with_words,
+                line_level_text_results_list,
+                line_characters,
+            ) = process_page_to_structured_ocr(
+                characters,
+                page_number=int(reported_page_number),
+                text_line_number=text_line_no,
+            )
+
+            text_line_no += len(line_level_text_results_list)
+
+            if line_level_text_results_list:
+                line_level_text_results_df = pd.DataFrame(
+                    [
+                        {
+                            "page": page_no + 1,
+                            "text": (result.text).strip(),
+                            "left": result.left,
+                            "top": result.top,
+                            "width": result.width,
+                            "height": result.height,
+                            "line": result.line,
+                            "conf": 100.0,
+                        }
+                        for result in line_level_text_results_list
+                    ]
+                )
+                page_text_ocr_outputs_list.append(line_level_text_results_df)
+
+            all_page_line_level_text_extraction_results_list.extend(
+                line_level_text_results_list
+            )
+            all_page_line_text_extraction_characters.extend(line_characters)
+            page_ocr_results_with_words.append(line_level_ocr_results_with_words)
+
+    if page_text_ocr_outputs_list:
+        non_empty = [df for df in page_text_ocr_outputs_list if not df.empty]
+        page_text_ocr_outputs = (
+            pd.concat(non_empty, ignore_index=True) if non_empty else empty_ocr_df
+        )
+    else:
+        page_text_ocr_outputs = empty_ocr_df.copy()
+
+    return (
+        page_no,
+        all_page_line_level_text_extraction_results_list,
+        all_page_line_text_extraction_characters,
+        page_text_ocr_outputs,
+        page_ocr_results_with_words,
+    )
+
+
 def page_has_extractable_text(
     file_path: str, page_no: int, min_words: int = EFFICIENT_OCR_MIN_WORDS
 ) -> bool:
@@ -7291,27 +7460,41 @@ def redact_text_pdf(
 
     print("Page range is", str(page_loop_start + 1), "to", str(page_loop_end))
 
-    # Run through each page in document to 1. Extract text and then 2. Create redaction boxes
+    # First pass: parallel text extraction (read-only per page, thread-safe)
     if page_loop_pages is not None:
-        progress_bar = (
-            page_loop_pages
-            if efficient_ocr
-            else tqdm(
-                page_loop_pages,
-                unit="pages remaining",
-                desc="Redacting pages",
+        pages_to_iterate = list(page_loop_pages)
+    else:
+        pages_to_iterate = list(range(page_loop_start, page_loop_end))
+
+    max_workers = min(len(pages_to_iterate), 8)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        extraction_results = list(
+            tqdm(
+                executor.map(
+                    lambda p: _extract_text_from_single_page(file_path, p),
+                    pages_to_iterate,
+                ),
+                total=len(pages_to_iterate),
+                unit="pages",
+                desc="Extracting text (simple text extraction)",
             )
         )
-    elif efficient_ocr:
-        progress_bar = range(page_loop_start, page_loop_end)
-    else:
-        progress_bar = tqdm(
-            range(page_loop_start, page_loop_end),
-            unit="pages remaining",
-            desc="Redacting pages",
-        )
+    extraction_results.sort(key=lambda r: r[0])
 
-    for page_no in progress_bar:
+    progress_bar_redact = tqdm(
+        extraction_results,
+        unit="pages",
+        desc="Detecting PII (following simple text extraction)",
+    )
+
+    for extraction_result in progress_bar_redact:
+        (
+            page_no,
+            all_page_line_level_text_extraction_results_list,
+            all_page_line_text_extraction_characters,
+            page_text_ocr_outputs,
+            page_ocr_results_with_words,
+        ) = extraction_result
         reported_page_number = str(page_no + 1)
         # Create annotations for every page, even if blank.
 
@@ -7444,33 +7627,220 @@ def redact_text_pdf(
                 )
         pymupdf_page.set_cropbox(pymupdf_page.mediabox)  # Set CropBox to MediaBox
 
-        if page_min <= page_no < page_max:
-            # Go page by page
-            for page_layout in extract_pages(
-                file_path, page_numbers=[page_no], maxpages=1
-            ):
+        page_analyser_results = list()
+        page_redaction_bounding_boxes = list()
+        page_decision_process_table = pd.DataFrame(
+            columns=[
+                "image_path",
+                "page",
+                "label",
+                "xmin",
+                "xmax",
+                "ymin",
+                "ymax",
+                "text",
+                "id",
+            ]
+        )
+        pikepdf_redaction_annotations_on_page = list()
+        all_page_line_level_ocr_results_with_words.extend(page_ocr_results_with_words)
 
-                all_page_line_text_extraction_characters = list()
-                all_page_line_level_text_extraction_results_list = list()
-                page_analyser_results = list()
-                page_redaction_bounding_boxes = list()
+        ### REDACTION
+        if pii_identification_method != NO_REDACTION_PII_OPTION:
+            if chosen_redact_entities or chosen_redact_comprehend_entities:
+                (
+                    page_redaction_bounding_boxes,
+                    llm_model_name_page,
+                    llm_input_tokens_page,
+                    llm_output_tokens_page,
+                ) = run_page_text_redaction(
+                    language,
+                    chosen_redact_entities,
+                    chosen_redact_comprehend_entities,
+                    all_page_line_level_text_extraction_results_list,
+                    all_page_line_text_extraction_characters,
+                    page_analyser_results,
+                    page_redaction_bounding_boxes,
+                    comprehend_client,
+                    allow_list,
+                    pii_identification_method,
+                    nlp_analyser,
+                    score_threshold,
+                    custom_entities,
+                    comprehend_query_number,
+                    bedrock_runtime=bedrock_runtime,
+                    model_choice=model_choice,
+                    custom_llm_instructions=custom_llm_instructions,
+                    chosen_llm_entities=chosen_llm_entities,
+                    output_folder=output_folder,
+                    file_name=file_name,
+                    page_number=int(reported_page_number),
+                )
 
-                characters = list()
+                # Accumulate LLM token usage across pages
+                llm_total_input_tokens += llm_input_tokens_page
+                llm_total_output_tokens += llm_output_tokens_page
+                if llm_model_name_page and not llm_model_name:
+                    llm_model_name = llm_model_name_page
+
+                # Annotate redactions on page
+                pikepdf_redaction_annotations_on_page = (
+                    create_pikepdf_annotations_for_bounding_boxes(
+                        page_redaction_bounding_boxes
+                    )
+                )
+
+            else:
                 pikepdf_redaction_annotations_on_page = list()
-                page_decision_process_table = pd.DataFrame(
+
+            # Make pymupdf page redactions
+            if redact_whole_page_list:
+                int_reported_page_number = int(reported_page_number)
+                if int_reported_page_number in redact_whole_page_list:
+                    redact_whole_page = True
+                else:
+                    redact_whole_page = False
+            else:
+                redact_whole_page = False
+
+            redact_result = redact_page_with_pymupdf(
+                pymupdf_page,
+                pikepdf_redaction_annotations_on_page,
+                image_path,
+                redact_whole_page=redact_whole_page,
+                convert_pikepdf_to_pymupdf_coords=True,
+                original_cropbox=original_cropboxes[page_no],
+                page_sizes_df=page_sizes_df,
+                input_folder=input_folder,
+            )
+
+            # Handle dual page objects if returned
+            if isinstance(redact_result[0], tuple):
+                (
+                    pymupdf_page,
+                    pymupdf_applied_redaction_page,
+                ), page_image_annotations = redact_result
+                # Store the final page with its original page number for later use
+                if not hasattr(redact_text_pdf, "_applied_redaction_pages"):
+                    redact_text_pdf._applied_redaction_pages = list()
+                redact_text_pdf._applied_redaction_pages.append(
+                    (pymupdf_applied_redaction_page, page_no)
+                )
+            else:
+                pymupdf_page, page_image_annotations = redact_result
+                # When dual output is requested but this page had no redaction boxes,
+                # we still need an "applied" page entry so the final PDF replace loop
+                # replaces every page (same fix as in redact_image_pdf).
+                if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
+                    if not hasattr(redact_text_pdf, "_applied_redaction_pages"):
+                        redact_text_pdf._applied_redaction_pages = list()
+                    applied_doc = pymupdf.open()
+                    applied_doc.insert_pdf(
+                        pymupdf_page.parent,
+                        from_page=page_no,
+                        to_page=page_no,
+                    )
+                    applied_page_copy = applied_doc[0]
+                    redact_text_pdf._applied_redaction_pages.append(
+                        (applied_page_copy, page_no)
+                    )
+
+            # Create decision process table
+            page_decision_process_table = create_text_redaction_process_results(
+                page_analyser_results,
+                page_redaction_bounding_boxes,
+                current_loop_page,
+            )
+
+            if not page_decision_process_table.empty:
+                all_pages_decision_process_list.append(page_decision_process_table)
+
+        # Else, user chose not to run redaction
+        else:
+            pass
+
+        # Join extracted text outputs for all lines together
+        if not page_text_ocr_outputs.empty:
+            page_text_ocr_outputs = page_text_ocr_outputs.sort_values(
+                ["line"]
+            ).reset_index(drop=True)
+            page_text_ocr_outputs = page_text_ocr_outputs.loc[
+                :,
+                [
+                    "page",
+                    "text",
+                    "left",
+                    "top",
+                    "width",
+                    "height",
+                    "line",
+                    "conf",
+                ],
+            ]
+            all_line_level_ocr_results_list.append(page_text_ocr_outputs)
+
+        toc = time.perf_counter()
+
+        time_taken = toc - tic
+
+        # Break if time taken is greater than max_time seconds
+        if time_taken > max_time:
+            print("Processing for", max_time, "seconds, breaking.")
+            page_break_return = True
+            progress.close(_tqdm=progress_bar_redact)
+            tqdm._instances.clear()
+
+            # Check if the image already exists in annotations_all_pages
+            existing_index = next(
+                (
+                    index
+                    for index, ann in enumerate(annotations_all_pages)
+                    if ann["image"] == page_image_annotations["image"]
+                ),
+                None,
+            )
+            if existing_index is not None:
+                # Replace the existing annotation
+                annotations_all_pages[existing_index] = page_image_annotations
+            else:
+                # Append new annotation if it doesn't exist
+                annotations_all_pages.append(page_image_annotations)
+
+            # Write logs
+            # Filter out empty DataFrames before concatenation to avoid FutureWarning
+            non_empty_decision_process = [
+                df for df in all_pages_decision_process_list if not df.empty
+            ]
+            if non_empty_decision_process:
+                all_pages_decision_process_table = pd.concat(
+                    non_empty_decision_process, ignore_index=True
+                )
+            else:
+                all_pages_decision_process_table = pd.DataFrame(
                     columns=[
-                        "image_path",
-                        "page",
-                        "label",
-                        "xmin",
-                        "xmax",
-                        "ymin",
-                        "ymax",
                         "text",
+                        "xmin",
+                        "ymin",
+                        "xmax",
+                        "ymax",
+                        "label",
+                        "start",
+                        "end",
+                        "score",
+                        "page",
                         "id",
                     ]
                 )
-                page_text_ocr_outputs = pd.DataFrame(
+
+            non_empty_ocr_results = [
+                df for df in all_line_level_ocr_results_list if not df.empty
+            ]
+            if non_empty_ocr_results:
+                all_line_level_ocr_results_df = pd.concat(
+                    non_empty_ocr_results, ignore_index=True
+                )
+            else:
+                all_line_level_ocr_results_df = pd.DataFrame(
                     columns=[
                         "page",
                         "text",
@@ -7482,309 +7852,19 @@ def redact_text_pdf(
                         "conf",
                     ]
                 )
-                page_text_ocr_outputs_list = list()
 
-                text_line_no = 1
-                for n, text_container in enumerate(page_layout):
-                    characters = list()
+            current_loop_page += 1
 
-                    if isinstance(text_container, LTTextContainer) or isinstance(
-                        text_container, LTAnno
-                    ):
-                        characters = get_text_container_characters(text_container)
-                        # text_line_no += 1
-
-                    # Create dataframe for all the text on the page
-                    # line_level_text_results_list, line_characters = create_line_level_ocr_results_from_characters(characters)
-
-                    # line_level_ocr_results_with_words = generate_word_level_ocr(characters, page_number=int(reported_page_number), text_line_number=text_line_no)
-
-                    (
-                        line_level_ocr_results_with_words,
-                        line_level_text_results_list,
-                        line_characters,
-                    ) = process_page_to_structured_ocr(
-                        characters,
-                        page_number=int(reported_page_number),
-                        text_line_number=text_line_no,
-                    )
-
-                    text_line_no += len(line_level_text_results_list)
-
-                    ### Create page_text_ocr_outputs (OCR format outputs)
-                    if line_level_text_results_list:
-                        # Convert to DataFrame and add to ongoing logging table
-                        line_level_text_results_df = pd.DataFrame(
-                            [
-                                {
-                                    "page": page_no + 1,
-                                    "text": (result.text).strip(),
-                                    "left": result.left,
-                                    "top": result.top,
-                                    "width": result.width,
-                                    "height": result.height,
-                                    "line": result.line,
-                                    "conf": 100.0,
-                                }
-                                for result in line_level_text_results_list
-                            ]
-                        )
-
-                        page_text_ocr_outputs_list.append(line_level_text_results_df)
-
-                    all_page_line_level_text_extraction_results_list.extend(
-                        line_level_text_results_list
-                    )
-                    all_page_line_text_extraction_characters.extend(line_characters)
-                    all_page_line_level_ocr_results_with_words.append(
-                        line_level_ocr_results_with_words
-                    )
-
-                if page_text_ocr_outputs_list:
-                    # Filter out empty DataFrames before concatenation to avoid FutureWarning
-                    non_empty_ocr_outputs = [
-                        df for df in page_text_ocr_outputs_list if not df.empty
-                    ]
-                    if non_empty_ocr_outputs:
-                        page_text_ocr_outputs = pd.concat(
-                            non_empty_ocr_outputs, ignore_index=True
-                        )
-                    else:
-                        page_text_ocr_outputs = pd.DataFrame(
-                            columns=[
-                                "page",
-                                "text",
-                                "left",
-                                "top",
-                                "width",
-                                "height",
-                                "line",
-                                "conf",
-                            ]
-                        )
-
-                ### REDACTION
-                if pii_identification_method != NO_REDACTION_PII_OPTION:
-                    if chosen_redact_entities or chosen_redact_comprehend_entities:
-                        (
-                            page_redaction_bounding_boxes,
-                            llm_model_name_page,
-                            llm_input_tokens_page,
-                            llm_output_tokens_page,
-                        ) = run_page_text_redaction(
-                            language,
-                            chosen_redact_entities,
-                            chosen_redact_comprehend_entities,
-                            all_page_line_level_text_extraction_results_list,
-                            all_page_line_text_extraction_characters,
-                            page_analyser_results,
-                            page_redaction_bounding_boxes,
-                            comprehend_client,
-                            allow_list,
-                            pii_identification_method,
-                            nlp_analyser,
-                            score_threshold,
-                            custom_entities,
-                            comprehend_query_number,
-                            bedrock_runtime=bedrock_runtime,
-                            model_choice=model_choice,
-                            custom_llm_instructions=custom_llm_instructions,
-                            chosen_llm_entities=chosen_llm_entities,
-                            output_folder=output_folder,
-                            file_name=file_name,
-                            page_number=int(reported_page_number),
-                        )
-
-                        # Accumulate LLM token usage across pages
-                        llm_total_input_tokens += llm_input_tokens_page
-                        llm_total_output_tokens += llm_output_tokens_page
-                        if llm_model_name_page and not llm_model_name:
-                            llm_model_name = llm_model_name_page
-
-                        # Annotate redactions on page
-                        pikepdf_redaction_annotations_on_page = (
-                            create_pikepdf_annotations_for_bounding_boxes(
-                                page_redaction_bounding_boxes
-                            )
-                        )
-
-                    else:
-                        pikepdf_redaction_annotations_on_page = list()
-
-                    # Make pymupdf page redactions
-                    if redact_whole_page_list:
-                        int_reported_page_number = int(reported_page_number)
-                        if int_reported_page_number in redact_whole_page_list:
-                            redact_whole_page = True
-                        else:
-                            redact_whole_page = False
-                    else:
-                        redact_whole_page = False
-
-                    redact_result = redact_page_with_pymupdf(
-                        pymupdf_page,
-                        pikepdf_redaction_annotations_on_page,
-                        image_path,
-                        redact_whole_page=redact_whole_page,
-                        convert_pikepdf_to_pymupdf_coords=True,
-                        original_cropbox=original_cropboxes[page_no],
-                        page_sizes_df=page_sizes_df,
-                        input_folder=input_folder,
-                    )
-
-                    # Handle dual page objects if returned
-                    if isinstance(redact_result[0], tuple):
-                        (
-                            pymupdf_page,
-                            pymupdf_applied_redaction_page,
-                        ), page_image_annotations = redact_result
-                        # Store the final page with its original page number for later use
-                        if not hasattr(redact_text_pdf, "_applied_redaction_pages"):
-                            redact_text_pdf._applied_redaction_pages = list()
-                        redact_text_pdf._applied_redaction_pages.append(
-                            (pymupdf_applied_redaction_page, page_no)
-                        )
-                    else:
-                        pymupdf_page, page_image_annotations = redact_result
-                        # When dual output is requested but this page had no redaction boxes,
-                        # we still need an "applied" page entry so the final PDF replace loop
-                        # replaces every page (same fix as in redact_image_pdf).
-                        if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
-                            if not hasattr(redact_text_pdf, "_applied_redaction_pages"):
-                                redact_text_pdf._applied_redaction_pages = list()
-                            applied_doc = pymupdf.open()
-                            applied_doc.insert_pdf(
-                                pymupdf_page.parent,
-                                from_page=page_no,
-                                to_page=page_no,
-                            )
-                            applied_page_copy = applied_doc[0]
-                            redact_text_pdf._applied_redaction_pages.append(
-                                (applied_page_copy, page_no)
-                            )
-
-                    # Create decision process table
-                    page_decision_process_table = create_text_redaction_process_results(
-                        page_analyser_results,
-                        page_redaction_bounding_boxes,
-                        current_loop_page,
-                    )
-
-                    if not page_decision_process_table.empty:
-                        all_pages_decision_process_list.append(
-                            page_decision_process_table
-                        )
-
-                # Else, user chose not to run redaction
-                else:
-                    pass
-
-                # Join extracted text outputs for all lines together
-                if not page_text_ocr_outputs.empty:
-                    page_text_ocr_outputs = page_text_ocr_outputs.sort_values(
-                        ["line"]
-                    ).reset_index(drop=True)
-                    page_text_ocr_outputs = page_text_ocr_outputs.loc[
-                        :,
-                        [
-                            "page",
-                            "text",
-                            "left",
-                            "top",
-                            "width",
-                            "height",
-                            "line",
-                            "conf",
-                        ],
-                    ]
-                    all_line_level_ocr_results_list.append(page_text_ocr_outputs)
-
-                toc = time.perf_counter()
-
-                time_taken = toc - tic
-
-                # Break if time taken is greater than max_time seconds
-                if time_taken > max_time:
-                    print("Processing for", max_time, "seconds, breaking.")
-                    page_break_return = True
-                    progress.close(_tqdm=progress_bar)
-                    tqdm._instances.clear()
-
-                    # Check if the image already exists in annotations_all_pages
-                    existing_index = next(
-                        (
-                            index
-                            for index, ann in enumerate(annotations_all_pages)
-                            if ann["image"] == page_image_annotations["image"]
-                        ),
-                        None,
-                    )
-                    if existing_index is not None:
-                        # Replace the existing annotation
-                        annotations_all_pages[existing_index] = page_image_annotations
-                    else:
-                        # Append new annotation if it doesn't exist
-                        annotations_all_pages.append(page_image_annotations)
-
-                    # Write logs
-                    # Filter out empty DataFrames before concatenation to avoid FutureWarning
-                    non_empty_decision_process = [
-                        df for df in all_pages_decision_process_list if not df.empty
-                    ]
-                    if non_empty_decision_process:
-                        all_pages_decision_process_table = pd.concat(
-                            non_empty_decision_process, ignore_index=True
-                        )
-                    else:
-                        all_pages_decision_process_table = pd.DataFrame(
-                            columns=[
-                                "text",
-                                "xmin",
-                                "ymin",
-                                "xmax",
-                                "ymax",
-                                "label",
-                                "start",
-                                "end",
-                                "score",
-                                "page",
-                                "id",
-                            ]
-                        )
-
-                    non_empty_ocr_results = [
-                        df for df in all_line_level_ocr_results_list if not df.empty
-                    ]
-                    if non_empty_ocr_results:
-                        all_line_level_ocr_results_df = pd.concat(
-                            non_empty_ocr_results, ignore_index=True
-                        )
-                    else:
-                        all_line_level_ocr_results_df = pd.DataFrame(
-                            columns=[
-                                "page",
-                                "text",
-                                "left",
-                                "top",
-                                "width",
-                                "height",
-                                "line",
-                                "conf",
-                            ]
-                        )
-
-                    current_loop_page += 1
-
-                    return (
-                        pymupdf_doc,
-                        all_pages_decision_process_table,
-                        all_line_level_ocr_results_df,
-                        annotations_all_pages,
-                        current_loop_page,
-                        page_break_return,
-                        comprehend_query_number,
-                        all_page_line_level_ocr_results_with_words,
-                    )
+            return (
+                pymupdf_doc,
+                all_pages_decision_process_table,
+                all_line_level_ocr_results_df,
+                annotations_all_pages,
+                current_loop_page,
+                page_break_return,
+                comprehend_query_number,
+                all_page_line_level_ocr_results_with_words,
+            )
 
         # Check if the image already exists in annotations_all_pages
         existing_index = next(
@@ -7807,7 +7887,7 @@ def redact_text_pdf(
         # Break if new page is a multiple of page_break_val
         if current_loop_page % page_break_val == 0:
             page_break_return = True
-            progress.close(_tqdm=progress_bar)
+            progress.close(_tqdm=progress_bar_redact)
 
             # Write logs
             # Filter out empty DataFrames before concatenation to avoid FutureWarning

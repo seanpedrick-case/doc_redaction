@@ -1228,6 +1228,7 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                     llm_model_name,
                     llm_total_input_tokens,
                     llm_total_output_tokens,
+                    _,
                 ) = choose_and_run_redactor(
                     file_paths=args.input_file,
                     prepared_pdf_file_paths=prepared_pdf_paths,

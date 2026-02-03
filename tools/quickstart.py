@@ -443,8 +443,8 @@ def handle_step_3_next(
         anon_strategy_update,  # anon_strategy
         do_initial_clean_update,  # do_initial_clean
         redact_duplicate_pages_update,  # redact_duplicate_pages_checkbox
-        max_fuzzy_spelling_mistakes_num_update,  # max_fuzzy_spelling_mistakes_num_number
         gr.Walkthrough(selected=4),  # walkthrough
+        max_fuzzy_spelling_mistakes_num_update,  # max_fuzzy_spelling_mistakes_num
     )
 
 

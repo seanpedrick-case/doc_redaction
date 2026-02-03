@@ -3,7 +3,7 @@ import re
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import gradio as gr
 import pandas as pd
@@ -30,6 +30,36 @@ number_of_zeros_to_add_to_index = 7  # Number of zeroes to add between page numb
 ID_MULTIPLIER = 100000
 # Define the set of punctuation characters for efficient lookup
 PUNCTUATION_TO_STRIP = {".", ",", "?", "!", ":", ";"}
+
+
+def _normalize_page_to_int(page: Any) -> Optional[int]:
+    """
+    Convert a page identifier to an integer page number.
+    Handles: int, numeric string, 'PageN_...' labels, and path/filenames.
+    Returns None if no page number can be determined.
+    """
+    if page is None:
+        return None
+    try:
+        return int(page)
+    except (ValueError, TypeError):
+        pass
+    s = str(page).strip()
+    # "Page1_File" style label
+    m = re.search(r"Page(\d+)_", s, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    # Path/filename with _N.png
+    from tools.secure_regex_utils import safe_extract_page_number_from_path
+
+    n = safe_extract_page_number_from_path(s)
+    if n is not None:
+        return n
+    # First contiguous digit sequence (e.g. "A17_FlightPlan_..." -> 17)
+    m = re.search(r"(\d{1,10})", s)
+    if m:
+        return int(m.group(1))
+    return None
 
 
 def split_text_with_punctuation(text: str) -> List[str]:
@@ -754,10 +784,9 @@ def save_results_and_redaction_lists(
         for redact_file, group in final_df.groupby(grouping_col):
             # Sanitize the filename to prevent path injection
             output_file_name_stem = Path(redact_file).stem
+            output_file_name = output_file_name_stem + "_pages_to_redact.csv"
             # Use secure path operations for the output file
-            output_file_path = secure_path_join(
-                output_folder_path, f"{output_file_name_stem}_pages_to_redact.csv"
-            )
+            output_file_path = secure_path_join(output_folder_path, output_file_name)
 
             all_pages_to_redact = set()
             is_subdocument_match = "Page2_Start_Page" in group.columns
@@ -779,7 +808,7 @@ def save_results_and_redaction_lists(
                 redaction_df.to_csv(output_file_path, header=False, index=False)
 
                 output_paths.append(str(output_file_path))
-                print(f"Redaction list for {redact_file} saved to {output_file_path}")
+                print(f"Redaction list for {redact_file} saved to {output_file_name}")
 
     return output_paths
 
@@ -1513,9 +1542,38 @@ def apply_whole_page_redactions_from_list(
         # Handle both DataFrame (legacy) and list (new Dropdown format)
         if isinstance(duplicate_page_numbers_df_or_list, pd.DataFrame):
             if not duplicate_page_numbers_df_or_list.empty:
-                list_whole_pages_to_redact = duplicate_page_numbers_df_or_list.iloc[
-                    :, 0
-                ].tolist()
+                df = duplicate_page_numbers_df_or_list
+                # Only redact Page2 (duplicate) pages, not Page1 (original)
+                page_cols = [
+                    c
+                    for c in (
+                        "Page2_Start_Page",
+                        "Page2_End_Page",
+                    )
+                    if c in df.columns
+                ]
+                if page_cols:
+                    list_whole_pages_to_redact = []
+                    if (
+                        "Page2_Start_Page" in df.columns
+                        and "Page2_End_Page" in df.columns
+                    ):
+                        for _, row in df.iterrows():
+                            try:
+                                start_p = int(row["Page2_Start_Page"])
+                                end_p = int(row["Page2_End_Page"])
+                                list_whole_pages_to_redact.extend(
+                                    range(start_p, end_p + 1)
+                                )
+                            except (ValueError, TypeError):
+                                pass
+                    else:
+                        for col in page_cols:
+                            list_whole_pages_to_redact.extend(
+                                df[col].dropna().astype(int).tolist()
+                            )
+                else:
+                    list_whole_pages_to_redact = df.iloc[:, 0].tolist()
         elif (
             isinstance(duplicate_page_numbers_df_or_list, list)
             and len(duplicate_page_numbers_df_or_list) > 0
@@ -1543,29 +1601,79 @@ def apply_whole_page_redactions_from_list(
             )
 
             whole_pages_list = pd.DataFrame()  # Initialize empty DataFrame
+            chosen_output_file = None
 
+            # Prefer *_pages_to_redact.csv (only Page2/duplicate pages); avoid using
+            # page_similarity_results.csv as first match, which would otherwise add
+            # both Page1 and Page2 and redact the wrong pages.
+            PAGES_TO_REDACT_SUFFIX = "_pages_to_redact"
             for output_file in duplicate_output_paths:
-                # Note: output_file.name might not be available if output_file is just a string path
-                # If it's a Path object or similar, .name is fine. Otherwise, parse from string.
-                # Use os.path for cross-platform path handling (e.g. Windows backslashes).
                 if isinstance(output_file, str):
                     file_name_from_path = os.path.basename(output_file)
                 else:
                     file_name_from_path = getattr(
                         output_file, "name", str(output_file).split(os.sep)[-1]
                     )
-
-                # Substitute out '_for_review' from the expected filename to successfully modify existing redactions files
                 file_name_from_path = file_name_from_path.replace(
                     "_redactions_for_review", ""
                 )
                 if expected_duplicate_pages_to_redact_name in file_name_from_path:
-                    whole_pages_list = pd.read_csv(
-                        output_file, header=None
-                    )  # Use output_file directly if it's a path
-                    break
+                    if PAGES_TO_REDACT_SUFFIX in file_name_from_path:
+                        whole_pages_list = pd.read_csv(output_file, header=None)
+                        chosen_output_file = output_file
+                        break
+                    if chosen_output_file is None:
+                        chosen_output_file = output_file
+            if whole_pages_list.empty and chosen_output_file is not None:
+                whole_pages_list = pd.read_csv(chosen_output_file, header=None)
+
             if not whole_pages_list.empty:
-                list_whole_pages_to_redact = whole_pages_list.iloc[:, 0].tolist()
+                output_file = chosen_output_file
+                # Support both formats:
+                # 1) page_similarity_results.csv: has header row. Only Page2_* columns
+                #    are the duplicate pages to redact; Page1_* is the "original" and
+                #    must not be redacted (same semantics as _pages_to_redact.csv).
+                # 2) *_pages_to_redact.csv: no header, first column is page numbers
+                first_col = whole_pages_list.iloc[:, 0]
+                if (
+                    len(whole_pages_list.columns) >= 6
+                    and first_col.iloc[0] == "Page1_File"
+                ):
+                    # Likely page_similarity_results.csv with header in first row
+                    df_with_header = pd.read_csv(output_file, header=0)
+                    # Only use Page2 columns (duplicate side); do not redact Page1 (original)
+                    page_cols = [
+                        c
+                        for c in (
+                            "Page2_Start_Page",
+                            "Page2_End_Page",
+                        )
+                        if c in df_with_header.columns
+                    ]
+                    if page_cols:
+                        list_whole_pages_to_redact = []
+                        if (
+                            "Page2_Start_Page" in df_with_header.columns
+                            and "Page2_End_Page" in df_with_header.columns
+                        ):
+                            for _, row in df_with_header.iterrows():
+                                try:
+                                    start_p = int(row["Page2_Start_Page"])
+                                    end_p = int(row["Page2_End_Page"])
+                                    list_whole_pages_to_redact.extend(
+                                        range(start_p, end_p + 1)
+                                    )
+                                except (ValueError, TypeError):
+                                    pass
+                        else:
+                            for col in page_cols:
+                                list_whole_pages_to_redact.extend(
+                                    df_with_header[col].dropna().astype(int).tolist()
+                                )
+                    else:
+                        list_whole_pages_to_redact = first_col.tolist()
+                else:
+                    list_whole_pages_to_redact = whole_pages_list.iloc[:, 0].tolist()
         else:
             message = "No relevant list of whole pages to redact found."
             print(message)
@@ -1611,10 +1719,13 @@ def apply_whole_page_redactions_from_list(
         list_whole_pages_to_redact = list(set(list_whole_pages_to_redact))
 
     new_annotations = list()
-    # Process each page for redaction
+    # Process each page for redaction (page may be int or string label/filename)
     for page in list_whole_pages_to_redact:
         try:
-            page_num = int(page)
+            page_num = _normalize_page_to_int(page)
+            if page_num is None:
+                print(f"Warning: Could not parse page number from {page!r}, skipping.")
+                continue
             page_index = page_num - 1
             if not (0 <= page_index < len(pymupdf_doc)):
                 print(f"Page {page_num} is out of bounds, skipping.")
@@ -1726,7 +1837,9 @@ def apply_whole_page_redactions_from_list(
         subset=["page", "label", "text", "id"], keep="first"
     )
 
-    out_message = "Successfully created duplicate text redactions."
+    out_message = (
+        f"Successfully created {whole_page_review_file.shape[0]} whole page redactions."
+    )
     print(out_message)
     gr.Info(out_message)
 
