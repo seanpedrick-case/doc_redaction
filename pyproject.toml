@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "1.7.0"
+version = "1.7.1"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 authors = [
@@ -38,21 +38,21 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "pdfminer.six==20251107",
+    "pdfminer.six==20260107",
     "pdf2image==1.17.0",
-    "pymupdf==1.26.6",
+    "pymupdf==1.26.7",
     "bleach==6.3.0",
-    "opencv-python==4.12.0.88",
+    "opencv-python==4.13.0.90",
     "presidio_analyzer==2.2.360",
     "presidio_anonymizer==2.2.360",
     "presidio-image-redactor==0.0.57",
-    "pikepdf==9.11.0",
+    "pikepdf==10.3.0",
     "pandas==2.3.3",
-    "scikit-learn==1.7.2",
-    "spacy==3.8.8",
+    "scikit-learn==1.8.0",
+    "spacy==3.8.11",
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
     "gradio==5.49.1",
-    "boto3==1.40.72",
+    "boto3==1.42.40",
     "pyarrow==21.0.0",
     "openpyxl==3.1.5",
     "Faker==37.8.0",
@@ -66,7 +66,7 @@ dependencies = [
     "polars==1.35.2",
     "defusedxml==0.7.1",
     "numpy==2.2.6",
-    "spaces==0.42.1",
+    "spaces==0.47.0",
     "google-genai>=1.52.0",
     "openai>=2.8.1",
     "markdown>=3.7"
@@ -93,10 +93,10 @@ paddle = [
 vlm = [
     "torch>=2.5.1,<=2.8.0", 
     "torchvision>=0.20.1",
-    "transformers==4.57.2",
-    "accelerate==1.11.0",
-    "bitsandbytes==0.48.2",
-    "sentencepiece==0.2.1", # Needed for PaddleOCRVL
+    "transformers==4.57.6",
+    "accelerate>=1.11.0",
+    "bitsandbytes>=0.48.2",
+    "sentencepiece>=0.2.1", # Needed for PaddleOCRVL
 ]
 
 # Run Gradio as an mcp server

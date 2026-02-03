@@ -40,3 +40,5 @@ test/usage/*
 model_cache/*
 sanitized_file/*
 src/doc_redaction.egg-info/*
+
+**/*.quarto_ipynb

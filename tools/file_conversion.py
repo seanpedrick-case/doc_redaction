@@ -285,6 +285,7 @@ def convert_pdf_to_images(
         page_max = page_count
 
     results = list()
+    total_pages = page_max - page_min
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = list()
         for page_num in range(page_min, page_max):
@@ -299,6 +300,9 @@ def convert_pdf_to_images(
                 )
             )
 
+        completed = 0
+        # Throttle Gradio updates to ~every 2% or every 10 pages so UI stays responsive
+        update_interval = max(1, min(total_pages // 50, 10))
         for future in tqdm(
             as_completed(futures),
             total=len(futures),
@@ -306,6 +310,13 @@ def convert_pdf_to_images(
             desc="Converting pages to image",
         ):
             page_num, img_path, width, height = future.result()
+            completed += 1
+            # Report progress to Gradio so the upload component shows page-by-page progress
+            if completed % update_interval == 0 or completed == total_pages:
+                progress(
+                    0.1 + 0.8 * (completed / total_pages),
+                    desc="Converting pages to image",
+                )
             if img_path:
                 results.append((page_num, img_path, width, height))
             else:
@@ -320,6 +331,7 @@ def convert_pdf_to_images(
                 )
 
     # Sort results by page number
+    progress(0.95, desc="Loading images")
     results.sort(key=lambda x: x[0])
     images = [result[1] for result in results]
     widths = [result[2] for result in results]
@@ -337,6 +349,7 @@ def process_file_for_image_creation(
     create_images: bool = True,
     page_min: int = 0,
     page_max: int = 0,
+    progress: Progress = Progress(track_tqdm=True),
 ):
     """
     Processes a given file path, determining if it's an image or a PDF,
@@ -351,6 +364,7 @@ def process_file_for_image_creation(
                                         If False, only metadata will be extracted. Defaults to True.
         page_min (int, optional): The minimum page number to process (0-indexed). If 0, uses the first page. Defaults to 0.
         page_max (int, optional): The maximum page number to process (0-indexed). If 0, uses the last page of the document. Defaults to 0.
+        progress (Progress, optional): The progress object to update. Defaults to a Progress object with track_tqdm=True.
     """
     # Get the file extension
     file_extension = os.path.splitext(file_path)[1].lower()
@@ -358,6 +372,7 @@ def process_file_for_image_creation(
     # Check if the file is an image type
     if file_extension in [".jpg", ".jpeg", ".png"]:
         print(f"{file_path} is an image file.")
+        progress(0.1, desc="Processing image file")
         # Perform image processing here
         img_object = [file_path]  # [Image.open(file_path)]
 
@@ -385,6 +400,7 @@ def process_file_for_image_creation(
                 page_max=page_max,
                 input_folder=input_folder,
                 create_images=create_images,
+                progress=progress,
             )
         )
 
@@ -398,15 +414,26 @@ def process_file_for_image_creation(
     return img_path, image_sizes_width, image_sizes_height, all_img_details
 
 
-def get_input_file_names(file_input: List[str]):
+def get_input_file_names(
+    file_input: List[str],
+    source_document_only: bool = False,
+):
     """
     Get list of input files to report to logs.
+
+    When source_document_only is True (e.g. for document redaction / review tab),
+    full_file_name is only set for source documents (PDF, image, or Word), never
+    for outputs like review CSVs or OCR CSVs. This keeps doc_full_file_name_textbox
+    referring to the document being redacted (PDF or image).
     """
 
     all_relevant_files = list()
     file_name_with_extension = ""
     full_file_name = ""
     total_pdf_page_count = 0
+
+    # Only treat these as "source document" for full_file_name when source_document_only
+    source_document_extensions = (".pdf", ".jpg", ".jpeg", ".png", ".docx")
 
     if isinstance(file_input, dict):
         file_input = os.path.abspath(file_input["name"])
@@ -423,31 +450,37 @@ def get_input_file_names(file_input: List[str]):
             file_path = file.name
 
         file_path_without_ext = get_file_name_without_type(file_path)
+        file_path_without_ext_lower = (file_path_without_ext or "").lower()
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
+        # Exclude review/OCR output files (case-insensitive)
+        is_excluded_name = (
+            "review_file" in file_path_without_ext_lower
+            or "ocr_output" in file_path_without_ext_lower
+            or "ocr_results_with_words" in file_path_without_ext_lower
+        )
+
         # Check if the file is in acceptable types
         if (
-            (
-                file_extension
-                in [
-                    ".jpg",
-                    ".jpeg",
-                    ".png",
-                    ".pdf",
-                    ".xlsx",
-                    ".csv",
-                    ".parquet",
-                    ".docx",
-                ]
-            )
-            & ("review_file" not in file_path_without_ext)
-            & ("ocr_output" not in file_path_without_ext)
-            & ("ocr_results_with_words" not in file_path_without_ext)
-        ):
+            file_extension
+            in [
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".pdf",
+                ".xlsx",
+                ".csv",
+                ".parquet",
+                ".docx",
+            ]
+        ) and not is_excluded_name:
             all_relevant_files.append(file_path_without_ext)
             file_name_with_extension = file_path_without_ext + file_extension
-            full_file_name = file_path
+            # Only set full_file_name for source documents (PDF/image/docx) when
+            # source_document_only, so doc_full_file_name_textbox never refers to a CSV
+            if not source_document_only or file_extension in source_document_extensions:
+                full_file_name = file_path
 
         # If PDF, get number of pages
         if file_extension in [".pdf"]:
@@ -472,6 +505,16 @@ def get_input_file_names(file_input: List[str]):
         all_relevant_files,
         total_pdf_page_count,
     )
+
+
+def get_document_file_names(file_input: List[str]):
+    """
+    Same as get_input_file_names but with source_document_only=True, so the
+    returned full_file_name is only ever a PDF, image, or Word doc (the document
+    being redacted), never a review CSV or OCR output. Use this for flows that
+    update doc_full_file_name_textbox.
+    """
+    return get_input_file_names(file_input, source_document_only=True)
 
 
 def convert_pymupdf_to_image_coords(
@@ -854,17 +897,23 @@ def extract_redactions(
                     has_valid_image_dims = False
 
                 if not has_valid_image_dims:
-                    raise ValueError(
-                        f"extract_redactions: page {page_num + 1} has no valid image dimensions "
-                        "(image_width/image_height). Create images for all pages before loading redactions."
-                    )
-
-                scale_x = w / mediabox_width
-                scale_y = h / mediabox_height
-                rel_x0 = x0 * scale_x
-                rel_y0 = y0 * scale_y
-                rel_x1 = x1 * scale_x
-                rel_y1 = y1 * scale_y
+                    scale_x = 1
+                    scale_y = 1
+                    rel_x0 = x0
+                    rel_y0 = y0
+                    rel_x1 = x1
+                    rel_y1 = y1
+                    # raise ValueError(
+                    #     f"extract_redactions: page {page_num + 1} has no valid image dimensions "
+                    #     "(image_width/image_height). Create images for all pages before loading redactions."
+                    # )
+                else:
+                    scale_x = w / mediabox_width
+                    scale_y = h / mediabox_height
+                    rel_x0 = x0 * scale_x
+                    rel_y0 = y0 * scale_y
+                    rel_x1 = x1 * scale_x
+                    rel_y1 = y1 * scale_y
 
                 # Get color and convert from 0-1 range to 0-255 range
                 fill_color = annot_colors.get(
@@ -939,7 +988,24 @@ def extract_redactions(
     total_redactions = sum(len(boxes) for boxes in redactions_by_page.values())
     print(f"Found {total_redactions} redactions in the document")
 
-    return json_data
+    # Convert the gradio annotation boxes to relative coordinates
+    page_sizes_df = pd.DataFrame(page_sizes)
+    page_sizes_df.loc[:, "page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+
+    all_image_annotations_df = convert_annotation_data_to_dataframe(json_data)
+    all_image_annotations_df = divide_coordinates_by_page_sizes(
+        all_image_annotations_df,
+        page_sizes_df,
+        xmin="xmin",
+        xmax="xmax",
+        ymin="ymin",
+        ymax="ymax",
+    )
+    annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(
+        all_image_annotations_df, page_sizes
+    )
+
+    return annotations_all_pages_divide
 
 
 def prepare_image_or_pdf(
@@ -1126,6 +1192,7 @@ def prepare_image_or_pdf(
                     create_images=True,
                     page_min=page_min,
                     page_max=page_max,
+                    progress=progress,
                 )
             else:
                 (
@@ -1140,6 +1207,7 @@ def prepare_image_or_pdf(
                     create_images=False,
                     page_min=page_min,
                     page_max=page_max,
+                    progress=progress,
                 )
 
             page_sizes, original_cropboxes = create_page_size_objects(
@@ -1165,43 +1233,44 @@ def prepare_image_or_pdf(
             # If we are loading redactions from the pdf, extract the redactions
             if LOAD_REDACTION_ANNOTATIONS_FROM_PDF and prepare_for_review is True:
                 # Ensure every page has a real image so coordinates can be scaled by image size
-                for ps in page_sizes:
-                    try:
-                        w = (
-                            float(ps.get("image_width"))
-                            if ps.get("image_width") is not None
-                            else 0
-                        )
-                        h = (
-                            float(ps.get("image_height"))
-                            if ps.get("image_height") is not None
-                            else 0
-                        )
-                        has_valid_dims = w > 0 and h > 0
-                    except (TypeError, ValueError):
-                        has_valid_dims = False
-                    if not has_valid_dims:
-                        page_num_0 = int(ps["page"]) - 1
-                        _pnum, img_path, width, height = (
-                            process_single_page_for_image_conversion(
-                                file_path,
-                                page_num_0,
-                                create_images=True,
-                                input_folder=input_folder,
-                            )
-                        )
-                        try:
-                            if (
-                                width is not None
-                                and height is not None
-                                and float(width) > 0
-                                and float(height) > 0
-                            ):
-                                ps["image_path"] = img_path
-                                ps["image_width"] = width
-                                ps["image_height"] = height
-                        except (TypeError, ValueError):
-                            pass
+                # print("Loading redactions from PDF")
+                # for ps in tqdm(page_sizes, unit="pages", desc="Loading redactions from PDF"):
+                #     try:
+                #         w = (
+                #             float(ps.get("image_width"))
+                #             if ps.get("image_width") is not None
+                #             else 0
+                #         )
+                #         h = (
+                #             float(ps.get("image_height"))
+                #             if ps.get("image_height") is not None
+                #             else 0
+                #         )
+                #         has_valid_dims = w > 0 and h > 0
+                #     except (TypeError, ValueError):
+                #         has_valid_dims = False
+                #     if not has_valid_dims:
+                #         page_num_0 = int(ps["page"]) - 1
+                #         _pnum, img_path, width, height = (
+                #             process_single_page_for_image_conversion(
+                #                 file_path,
+                #                 page_num_0,
+                #                 create_images=True,
+                #                 input_folder=input_folder,
+                #             )
+                #         )
+                #         try:
+                #             if (
+                #                 width is not None
+                #                 and height is not None
+                #                 and float(width) > 0
+                #                 and float(height) > 0
+                #             ):
+                #                 ps["image_path"] = img_path
+                #                 ps["image_width"] = width
+                #                 ps["image_height"] = height
+                #         except (TypeError, ValueError):
+                #             pass
 
                 redactions_list = extract_redactions(pymupdf_doc, page_sizes)
                 all_annotations_object = redactions_list
@@ -1234,7 +1303,11 @@ def prepare_image_or_pdf(
 
             image_file_paths, image_sizes_width, image_sizes_height, all_img_details = (
                 process_file_for_image_creation(
-                    file_path_str, prepare_for_review, input_folder, create_images=True
+                    file_path_str,
+                    prepare_for_review,
+                    input_folder,
+                    create_images=True,
+                    progress=progress,
                 )
             )
 
@@ -1458,35 +1531,6 @@ def prepare_image_or_pdf(
 
                         all_annotations_object[i] = annotation
 
-                # Does not redact whole pages on load as user may not expect this behaviour
-                # if isinstance(in_fully_redacted_list, list):
-                #     in_fully_redacted_list = pd.DataFrame(
-                #         data={"fully_redacted_pages_list": in_fully_redacted_list}
-                #     )
-
-                # # Get list of pages that are to be fully redacted and redact them
-                # if not in_fully_redacted_list.empty:
-                #     print("Redacting whole pages")
-
-                #     for i, image in enumerate(image_file_paths):
-                #         page = pymupdf_doc.load_page(i)
-                #         rect_height = page.rect.height
-                #         rect_width = page.rect.width
-                #         whole_page_img_annotation_box = redact_whole_pymupdf_page(
-                #             rect_height,
-                #             rect_width,
-                #             image,
-                #             page,
-                #             custom_colours=False,
-                #             border=5,
-                #             image_dimensions={
-                #                 "image_width": image_sizes_width[i],
-                #                 "image_height": image_sizes_height[i],
-                #             },
-                #         )
-
-                #         all_annotations_object.append(whole_page_img_annotation_box)
-
                 # Write the response to a JSON file in output folder
                 out_folder = output_folder + file_path_without_ext + ".json"
                 # with open(out_folder, 'w') as json_file:
@@ -1534,7 +1578,12 @@ def prepare_image_or_pdf(
 
         print(out_time)
 
+        if not out_message:
+            out_message = list()
+
         out_message.append(out_time)
+        if not combined_out_message:
+            combined_out_message = ""
         combined_out_message = "\n".join(out_message)
 
     if not page_sizes:
@@ -1608,7 +1657,7 @@ def load_and_convert_ocr_results_with_words_json(
 
     else:
         print("Invalid OCR result JSON format: 'page' or 'results' key missing.")
-        # print("OCR results with words data:", ocr_results_with_words_data)
+
         return (
             [],
             True,
@@ -1624,11 +1673,6 @@ def convert_text_pdf_to_img_pdf(
     input_folder: str = INPUT_FOLDER,
 ):
     file_path_without_ext = get_file_name_without_type(in_file_path)
-
-    print(
-        "In convert_text_pdf_to_img_pdf function, file_path_without_ext:",
-        file_path_without_ext,
-    )
 
     out_file_paths = out_text_file_path
 
@@ -1779,18 +1823,26 @@ def divide_coordinates_by_page_sizes(
                 )
                 return review_file_df
 
+    # If any coordinate is less than 0, set it to 0
+    temp_df[xmin] = temp_df[xmin].apply(lambda x: 0 if x < 0 else x)
+    temp_df[xmax] = temp_df[xmax].apply(lambda x: 0 if x < 0 else x)
+    temp_df[ymin] = temp_df[ymin].apply(lambda x: 0 if x < 0 else x)
+    temp_df[ymax] = temp_df[ymax].apply(lambda x: 0 if x < 0 else x)
+
+    # Round all coordinates to 6 decimal places
+    temp_df[xmin] = temp_df[xmin].round(6)
+    temp_df[xmax] = temp_df[xmax].round(6)
+    temp_df[ymin] = temp_df[ymin].round(6)
+    temp_df[ymax] = temp_df[ymax].round(6)
+
     # --- Identify Absolute Coordinates ---
     # Create mask for rows where *all* coordinates are potentially absolute (> 1)
     # Handle potential NaNs introduced by to_numeric - treat NaN as not absolute.
     is_absolute_mask = (
-        (temp_df[xmin] > 1)
-        & (temp_df[xmin].notna())
-        & (temp_df[xmax] > 1)
-        & (temp_df[xmax].notna())
-        & (temp_df[ymin] > 1)
-        & (temp_df[ymin].notna())
-        & (temp_df[ymax] > 1)
-        & (temp_df[ymax].notna())
+        ((temp_df[xmin] > 1) & (temp_df[xmin].notna()))
+        | ((temp_df[xmax] > 1) & (temp_df[xmax].notna()))
+        | ((temp_df[ymin] > 1) & (temp_df[ymin].notna()))
+        | ((temp_df[ymax] > 1) & (temp_df[ymax].notna()))
     )
 
     # --- Separate DataFrames ---
@@ -1920,6 +1972,12 @@ def divide_coordinates_by_page_sizes(
     cols_to_drop = ["image_width", "image_height", "mediabox_width", "mediabox_height"]
     final_df = final_df.drop(columns=cols_to_drop, errors="ignore")
 
+    # If ymin and xmin are less than 0, or xmax and ymax are greater than 1, set them to 0 or 1 respectively
+    final_df[ymin] = final_df[ymin].apply(lambda x: 0 if x < 0 else x)
+    final_df[xmin] = final_df[xmin].apply(lambda x: 0 if x < 0 else x)
+    final_df[xmax] = final_df[xmax].apply(lambda x: 1 if x > 1 else x)
+    final_df[ymax] = final_df[ymax].apply(lambda x: 1 if x > 1 else x)
+
     return final_df
 
 
@@ -1997,9 +2055,6 @@ def multiply_coordinates_by_page_sizes(
         has_size_mask = df_rel["image_width"].notna() & df_rel["image_height"].notna()
 
         # Apply multiplication using .loc and the mask (vectorized and efficient)
-        # Ensure columns are numeric before multiplication (might be redundant if types are good)
-        # df_rel.loc[has_size_mask, coord_cols + ['image_width', 'image_height']] = df_rel.loc[has_size_mask, coord_cols + ['image_width', 'image_height']].apply(pd.to_numeric, errors='coerce')
-
         df_rel.loc[has_size_mask, xmin] *= df_rel.loc[has_size_mask, "image_width"]
         df_rel.loc[has_size_mask, xmax] *= df_rel.loc[has_size_mask, "image_width"]
         df_rel.loc[has_size_mask, ymin] *= df_rel.loc[has_size_mask, "image_height"]
@@ -2012,15 +2067,25 @@ def multiply_coordinates_by_page_sizes(
     if not dfs_to_concat:
         return pd.DataFrame()  # Return empty if both are empty
 
-    final_df = pd.concat(
-        dfs_to_concat, ignore_index=True
-    )  # ignore_index is good practice after filtering/concat
+    final_df = pd.concat(dfs_to_concat, ignore_index=True)
 
     # --- Final Sort ---
     required_sort_columns = {"page", xmin, ymin}
     if not final_df.empty and required_sort_columns.issubset(final_df.columns):
         # Handle potential NaNs in sort columns gracefully
         final_df.sort_values(["page", xmin, ymin], inplace=True, na_position="last")
+
+    # Round coordinates to 6 decimal places
+    final_df[xmin] = final_df[xmin].round(6)
+    final_df[xmax] = final_df[xmax].round(6)
+    final_df[ymin] = final_df[ymin].round(6)
+    final_df[ymax] = final_df[ymax].round(6)
+
+    # Convert any negative coordinates to 0
+    final_df[xmin] = final_df[xmin].apply(lambda x: 0 if x < 0 else x)
+    final_df[xmax] = final_df[xmax].apply(lambda x: 0 if x < 0 else x)
+    final_df[ymin] = final_df[ymin].apply(lambda x: 0 if x < 0 else x)
+    final_df[ymax] = final_df[ymax].apply(lambda x: 0 if x < 0 else x)
 
     return final_df
 
