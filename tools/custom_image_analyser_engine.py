@@ -8,6 +8,7 @@ import re
 import time
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import botocore
@@ -23,18 +24,28 @@ from PIL import Image, ImageDraw, ImageFont
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
 
 from tools.config import (
+    AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
+    CLOUD_LLM_PII_MODEL_CHOICE,
     CONVERT_LINE_TO_WORD_LEVEL,
+    DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
+    FULL_COMPREHEND_ENTITY_LIST,
     HYBRID_OCR_CONFIDENCE_THRESHOLD,
     HYBRID_OCR_MAX_NEW_TOKENS,
     HYBRID_OCR_PADDING,
     INFERENCE_SERVER_API_URL,
+    INFERENCE_SERVER_LLM_PII_MODEL_CHOICE,
     INFERENCE_SERVER_MODEL_NAME,
+    INFERENCE_SERVER_PII_OPTION,
     INFERENCE_SERVER_TIMEOUT,
+    LLM_PII_MAX_TOKENS,
+    LLM_PII_TEMPERATURE,
     LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_SPACES_GPU_RUN_TIME,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
@@ -47,10 +58,11 @@ from tools.config import (
     SAVE_PAGE_OCR_VISUALISATIONS,
     SAVE_PREPROCESS_IMAGES,
     SAVE_VLM_INPUT_IMAGES,
-    SELECTED_MODEL,
+    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     TESSERACT_SEGMENTATION_LEVEL,
     TESSERACT_WORD_LEVEL_OCR,
-    VLM_MAX_DPI,
+    USE_LLAMA_SWAP,
+    USE_TRANFORMERS_VLM_MODEL_AS_LLM,
     VLM_MAX_IMAGE_SIZE,
 )
 from tools.helper_functions import clean_unicode_text, get_system_font_path
@@ -75,6 +87,27 @@ from tools.run_vlm import (
 from tools.secure_path_utils import validate_folder_containment
 from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
+
+# Batch limits for AWS Comprehend and LLM entity detection. Batches are cut at the nearest
+# phrase-ending punctuation (PHRASE_ENDING_PUNCTUATION), newline, or end of page so text
+# is never cut mid-sentence.
+DEFAULT_NEW_BATCH_CHAR_COUNT = 1000
+DEFAULT_NEW_BATCH_WORD_COUNT = 200
+
+# AWS Comprehend billing: 1 unit = 100 characters (entity recognition, PII, etc.)
+COMPREHEND_CHARACTERS_PER_UNIT = 100
+
+# Phrase-ending punctuation marks (batch boundaries)
+PHRASE_ENDING_PUNCTUATION = {".", "!", "?", ";", ":"}
+
+
+def ends_with_phrase_punctuation(word: str) -> bool:
+    """Check if a word ends with phrase-ending punctuation."""
+    if not word:
+        return False
+    # Check if the word ends with any phrase-ending punctuation
+    return any(word.rstrip().endswith(punct) for punct in PHRASE_ENDING_PUNCTUATION)
+
 
 if LOAD_PADDLE_AT_STARTUP:
     # Set PaddleOCR font path BEFORE importing to prevent font downloads during import
@@ -452,7 +485,7 @@ class ContrastSegmentedImageEnhancer(ImagePreprocessor):
         if abs(angle) < 0.1:
             return image_np
 
-        (h, w) = image_np.shape[:2]
+        h, w = image_np.shape[:2]
         center = (w // 2, h // 2)
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
 
@@ -601,18 +634,138 @@ def _get_tesseract_psm(segmentation_level: str) -> int:
         return 11
 
 
-def _prepare_image_for_vlm(image: Image.Image) -> Image.Image:
+def save_vlm_prompt_response(
+    prompt: str,
+    response_text: str,
+    output_folder: str,
+    model_choice: str,
+    image_name: Optional[str] = None,
+    page_number: Optional[int] = None,
+    temperature: Optional[float] = None,
+    max_new_tokens: Optional[int] = None,
+    top_p: Optional[float] = None,
+    model_type: str = "VLM",
+    task_suffix: Optional[str] = None,
+) -> str:
+    """
+    Save VLM prompt and response to a text file for traceability.
+
+    Args:
+        prompt: Prompt sent to VLM
+        response_text: Response text from VLM
+        output_folder: Output folder path
+        model_choice: Model used
+        image_name: Optional image name (without extension) for the filename
+        page_number: Optional page number for the filename
+        temperature: Temperature used (if applicable)
+        max_new_tokens: Max tokens used (if applicable)
+        top_p: Top-p parameter used (if applicable)
+        model_type: Type of model (e.g., "VLM", "Bedrock", "Inference Server", "Gemini", "Azure/OpenAI")
+        task_suffix: Optional suffix to add to filename (e.g., "_person", "_sig") to distinguish task types
+
+    Returns:
+        Path to the saved file
+    """
+    # Create VLM logs subfolder
+    vlm_logs_folder = os.path.join(output_folder, "vlm_prompts_responses")
+    os.makedirs(vlm_logs_folder, exist_ok=True)
+
+    # Add task suffix to filename if provided
+    suffix_str = f"_{task_suffix}" if task_suffix else ""
+
+    # Create filename with image name and page number if available, otherwise use timestamp
+    if image_name and page_number is not None:
+        # Sanitize image name for use in filename (remove invalid characters)
+        safe_image_name = "".join(
+            c for c in image_name if c.isalnum() or c in (" ", "-", "_", ".")
+        ).strip()
+        safe_image_name = safe_image_name.replace(" ", "_")
+        # Remove file extension if present
+        safe_image_name = safe_image_name.rsplit(".", 1)[0]
+        filename = f"vlm_{safe_image_name}_page_{page_number:04d}{suffix_str}_{model_type.lower().replace(' ', '_')}.txt"
+    elif image_name:
+        safe_image_name = "".join(
+            c for c in image_name if c.isalnum() or c in (" ", "-", "_", ".")
+        ).strip()
+        safe_image_name = safe_image_name.replace(" ", "_")
+        safe_image_name = safe_image_name.rsplit(".", 1)[0]
+        filename = f"vlm_{safe_image_name}{suffix_str}_{model_type.lower().replace(' ', '_')}.txt"
+    else:
+        # Fallback to timestamp if image info not available
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = (
+            f"vlm_{model_type.lower().replace(' ', '_')}{suffix_str}_{timestamp}.txt"
+        )
+    filepath = os.path.join(vlm_logs_folder, filename)
+
+    # Write prompt and response to file
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write("=" * 80 + "\n")
+        f.write("VLM OCR - PROMPT AND RESPONSE LOG\n")
+        f.write("=" * 80 + "\n\n")
+
+        f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        if image_name:
+            f.write(f"Image: {image_name}\n")
+        if page_number is not None:
+            f.write(f"Page: {page_number}\n")
+        f.write(f"Model: {model_choice}\n")
+        f.write(f"Model Type: {model_type}\n")
+        if temperature is not None:
+            f.write(f"Temperature: {temperature}\n")
+        if max_new_tokens is not None:
+            f.write(f"Max New Tokens: {max_new_tokens}\n")
+        if top_p is not None:
+            f.write(f"Top-p: {top_p}\n")
+        f.write("\n" + "=" * 80 + "\n")
+        f.write("PROMPT\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(prompt)
+        f.write("\n\n" + "=" * 80 + "\n")
+        f.write("VLM RESPONSE\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(response_text)
+        f.write("\n\n" + "=" * 80 + "\n")
+        f.write("END OF LOG\n")
+        f.write("=" * 80 + "\n")
+
+    return filepath
+
+
+def _prepare_image_for_vlm(
+    image: Image.Image,
+    ocr_method: Optional[str] = None,
+    max_image_size: Optional[int] = VLM_MAX_IMAGE_SIZE,
+) -> Image.Image:
     """
     Prepare image for VLM by ensuring it doesn't exceed maximum size and DPI limits.
 
     Args:
         image: PIL Image to prepare
-
+        ocr_method: Optional OCR method name. If "AWS Bedrock VLM OCR" or contains "Bedrock",
+                    the image will not be resized.
+        max_image_size: Optional maximum image size in pixels. If not provided, the default VLM_MAX_IMAGE_SIZE will be used.
     Returns:
         PIL Image that has been resized if necessary to meet size and DPI constraints
+        (unless OCR method is AWS Bedrock VLM OCR)
     """
     if image is None:
         return image
+
+    # Check if OCR method is AWS Bedrock VLM OCR - if so, skip resizing. NOTE: abandoned as images were exceeding bedrock limits
+    # from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
+    # if ocr_method and (
+    #     ocr_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+    #     or "Bedrock" in ocr_method
+    #     or ocr_method == "bedrock-vlm"
+    # ):
+    #     # Skip resizing for AWS Bedrock VLM OCR
+    #     return image
+
+    # Override VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR. This is a multiple of 32*32 for Qwen3-VL.
+    if ocr_method and "bedrock" in ocr_method.lower():
+        max_image_size = 33554432  # 32*32*32*1024 = 33554432
+        # print("Overriding VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR to 33554432")
 
     width, height = image.size
 
@@ -631,20 +784,22 @@ def _prepare_image_for_vlm(image: Image.Image) -> Image.Image:
 
     # Check if total pixels exceed maximum
     total_pixels = width * height
-    if total_pixels > VLM_MAX_IMAGE_SIZE:
+    if total_pixels > max_image_size:
         # Calculate scale factor to reduce total pixels to maximum
         # Since area scales with scale^2, we need sqrt of the ratio
-        size_scale = (VLM_MAX_IMAGE_SIZE / total_pixels) ** 0.5
+        size_scale = (max_image_size / total_pixels) ** 0.5
         print(
-            f"VLM image size check: Image has {total_pixels:,} pixels ({width}x{height}), exceeds maximum {VLM_MAX_IMAGE_SIZE:,} pixels. Will resize by factor {size_scale:.3f}"
+            f"VLM image size check: Image has {total_pixels:,} pixels ({width}x{height}), exceeds maximum {max_image_size:,} pixels. Will resize by factor {size_scale:.3f}"
         )
 
-    # Check if DPI exceeds maximum
-    if current_dpi > VLM_MAX_DPI:
-        dpi_scale = VLM_MAX_DPI / current_dpi
-        # print(
-        #     f"VLM DPI check: Image DPI {current_dpi:.1f} exceeds maximum {VLM_MAX_DPI:.1f} DPI. Will resize by factor {dpi_scale:.3f}"
-        # )
+    # Check if DPI exceeds maximum (Not currently utilised)
+    # if current_dpi > VLM_MAX_DPI:
+    #     dpi_scale = VLM_MAX_DPI / current_dpi
+    # print(
+    #     f"VLM DPI check: Image DPI {current_dpi:.1f} exceeds maximum {VLM_MAX_DPI:.1f} DPI. Will resize by factor {dpi_scale:.3f}"
+    # )
+
+    dpi_scale = 1.0
 
     # Use the smaller scale factor to ensure both constraints are met
     final_scale = min(size_scale, dpi_scale)
@@ -695,7 +850,8 @@ def _call_inference_server_vlm_api(
     do_sample: bool = None,
     min_p: float = None,
     presence_penalty: float = None,
-) -> str:
+    use_llama_swap: bool = USE_LLAMA_SWAP,
+) -> Tuple[str, int, int]:
     """
     Calls a inference-server API endpoint with an image and text prompt.
 
@@ -719,8 +875,10 @@ def _call_inference_server_vlm_api(
             If False, use greedy decoding (do_sample=False).
         min_p: Minimum probability threshold for token sampling.
         presence_penalty: Penalty for token presence.
+        use_llama_swap: Whether to use llama-swap for the model (defaults to USE_LLAMA_SWAP from config).
+            If True and model_name is provided, the model name will be included in the payload.
     Returns:
-        str: The generated text response from the model
+        Tuple[str, int, int]: The generated text response, input tokens, output tokens
 
     Raises:
         ConnectionError: If the API request fails
@@ -760,8 +918,8 @@ def _call_inference_server_vlm_api(
         "stream": stream,
     }
 
-    # Add optional parameters if provided
-    if model_name:
+    # Add model name if specified and use llama-swap
+    if model_name and use_llama_swap:
         payload["model"] = model_name
     if do_sample is not None:
         payload["do_sample"] = do_sample
@@ -806,100 +964,443 @@ def _call_inference_server_vlm_api(
 
     endpoint = f"{api_url}/v1/chat/completions"
 
-    try:
-        if stream:
-            # Handle streaming response
-            response = requests.post(
-                endpoint,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                stream=True,
-                timeout=timeout,
-            )
-            response.raise_for_status()
+    # Retry logic: try up to 3 times for connection errors
+    max_retries = 3
+    retry_delay = 2  # seconds between retries
 
-            final_tokens = []
+    for attempt in range(max_retries):
+        try:
+            if stream:
+                # Handle streaming response
+                response = requests.post(
+                    endpoint,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    stream=True,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
 
-            for line in response.iter_lines():
-                if not line:  # Skip empty lines
-                    continue
+                final_tokens = []
+                output_tokens = 0
+                final_chunk = None
 
-                line = line.decode("utf-8")
-                if line.startswith("data: "):
-                    data = line[6:]  # Remove 'data: ' prefix
-                    if data.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        if "choices" in chunk and len(chunk["choices"]) > 0:
-                            delta = chunk["choices"][0].get("delta", {})
-                            token = delta.get("content", "")
-                            if token:
-                                print(token, end="", flush=True)
-                                final_tokens.append(token)
-                                # output_tokens += 1
-                    except json.JSONDecodeError:
+                for line in response.iter_lines():
+                    if not line:  # Skip empty lines
                         continue
 
-            print()  # newline after stream finishes
+                    line = line.decode("utf-8")
+                    if line.startswith("data: "):
+                        data = line[6:]  # Remove 'data: ' prefix
+                        if data.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            # Store the last chunk in case it contains usage info
+                            final_chunk = chunk
 
-            text = "".join(final_tokens)
+                            if "choices" in chunk and len(chunk["choices"]) > 0:
+                                delta = chunk["choices"][0].get("delta", {})
+                                token = delta.get("content", "")
+                                if token:
+                                    print(token, end="", flush=True)
+                                    final_tokens.append(token)
+                                    output_tokens += 1  # Count tokens as they stream in
+                        except json.JSONDecodeError:
+                            continue
 
-            # Estimate input tokens (rough approximation)
-            # input_tokens = len(prompt.split())
+                print()  # newline after stream finishes
 
-            # return {
-            #     "choices": [
-            #         {
-            #             "index": 0,
-            #             "finish_reason": "stop",
-            #             "message": {"role": "assistant", "content": text},
-            #         }
-            #     ],
-            #     "usage": {
-            #         "prompt_tokens": input_tokens,
-            #         "completion_tokens": output_tokens,
-            #         "total_tokens": input_tokens + output_tokens,
-            #     },
-            # }
-            return text
+                text = "".join(final_tokens)
 
-        else:
-            # Handle non-streaming response
-            response = requests.post(
-                endpoint,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=timeout,
-            )
-            response.raise_for_status()
+                # Try to extract token usage from final chunk if available
+                input_tokens = 0
+                if final_chunk and "usage" in final_chunk:
+                    usage = final_chunk["usage"]
+                    input_tokens = usage.get("prompt_tokens", 0)
+                    # Use the actual output tokens from usage if available, otherwise use our count
+                    output_tokens_from_usage = usage.get("completion_tokens", 0)
+                    if output_tokens_from_usage > 0:
+                        output_tokens = output_tokens_from_usage
+                else:
+                    # Estimate input tokens based on prompt length and image
+                    # Rough approximation: prompt tokens + image tokens (estimate based on image size)
+                    prompt_word_count = len(prompt.split())
+                    # Estimate image tokens: roughly 1 token per 100 pixels (very rough approximation)
+                    image_tokens_estimate = max(
+                        100, (image.size[0] * image.size[1]) // 100
+                    )
+                    input_tokens = prompt_word_count + image_tokens_estimate
 
-            result = response.json()
+                return text, input_tokens, output_tokens
 
-            # Ensure the response has the expected format
-            if "choices" not in result or len(result["choices"]) == 0:
-                raise ValueError(
-                    "Invalid response format from inference-server: no choices found"
+            else:
+                # Handle non-streaming response
+                response = requests.post(
+                    endpoint,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=timeout,
                 )
+                response.raise_for_status()
 
-            message = result["choices"][0].get("message", {})
-            content = message.get("content", "")
+                result = response.json()
 
-            if not content:
-                raise ValueError(
-                    "Invalid response format from inference-server: no content in message"
+                # Ensure the response has the expected format
+                if "choices" not in result or len(result["choices"]) == 0:
+                    raise ValueError(
+                        "Invalid response format from inference-server: no choices found"
+                    )
+
+                message = result["choices"][0].get("message", {})
+                content = message.get("content", "")
+
+                if not content:
+                    raise ValueError(
+                        "Invalid response format from inference-server: no content in message"
+                    )
+
+                # Extract token usage from response
+                input_tokens = 0
+                output_tokens = 0
+                if "usage" in result:
+                    usage = result["usage"]
+                    input_tokens = usage.get("prompt_tokens", 0)
+                    output_tokens = usage.get("completion_tokens", 0)
+
+                return content, input_tokens, output_tokens
+
+        except (
+            requests.exceptions.RequestException,
+            requests.exceptions.HTTPError,
+        ) as e:
+            # Retry on connection errors or HTTP errors (like 500 Server Error)
+            if attempt < max_retries - 1:
+                print(
+                    f"Inference-server VLM API call failed (attempt {attempt + 1}/{max_retries}): {str(e)}"
                 )
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+                continue
+            else:
+                # Final attempt failed, raise the error
+                raise ConnectionError(
+                    f"Failed to connect to inference-server at {api_url} after {max_retries} attempts: {str(e)}"
+                )
+        except json.JSONDecodeError as e:
+            # Don't retry on JSON decode errors - these are likely permanent issues
+            raise ValueError(f"Invalid JSON response from inference-server: {str(e)}")
+        except Exception as e:
+            # Don't retry on other exceptions - these are likely permanent issues
+            raise RuntimeError(f"Error calling inference-server API: {str(e)}")
 
-            return content
 
-    except requests.exceptions.RequestException as e:
-        raise ConnectionError(
-            f"Failed to connect to inference-server at {api_url}: {str(e)}"
+def _call_bedrock_vlm_api(
+    image: Image.Image,
+    prompt: str,
+    model_choice: str = None,
+    bedrock_runtime=None,
+    max_new_tokens: int = None,
+    temperature: float = None,
+    top_p: float = None,
+    timeout: int = 60,
+) -> Tuple[str, int, int]:
+    """
+    Calls AWS Bedrock API with an image and text prompt for vision models.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        model_choice: Bedrock model ID (e.g., "anthropic.claude-3-5-sonnet-20241022-v2:0")
+        bedrock_runtime: boto3 Bedrock runtime client
+        max_new_tokens: Maximum number of tokens to generate
+        temperature: Sampling temperature
+        top_p: Nucleus sampling parameter
+        timeout: Request timeout in seconds
+
+    Returns:
+        Tuple[str, int, int]: The generated text response, input tokens, output tokens
+
+    Raises:
+        ConnectionError: If the API request fails
+        ValueError: If the response format is invalid
+    """
+    if bedrock_runtime is None:
+        raise ValueError("bedrock_runtime client is required for Bedrock VLM calls")
+    if model_choice is None:
+        raise ValueError("model_choice is required for Bedrock VLM calls")
+
+    # Convert PIL Image to base64
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    image_bytes = buffer.getvalue()
+    base64.b64encode(image_bytes).decode("utf-8")
+
+    # Prepare messages for Bedrock converse API
+    # Bedrock supports images in the content array
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"image": {"format": "png", "source": {"bytes": image_bytes}}},
+                {"text": prompt},
+            ],
+        }
+    ]
+
+    # Build inference config
+    inference_config = {
+        "maxTokens": max_new_tokens if max_new_tokens is not None else 4096,
+    }
+    if temperature is not None:
+        inference_config["temperature"] = temperature
+    if top_p is not None:
+        inference_config["topP"] = top_p
+
+    try:
+        # Call Bedrock converse API
+        api_response = bedrock_runtime.converse(
+            modelId=model_choice,
+            messages=messages,
+            inferenceConfig=inference_config,
         )
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON response from inference-server: {str(e)}")
+
+        # Extract response text
+        output_message = api_response["output"]["message"]
+        if "content" in output_message and len(output_message["content"]) > 0:
+            # Handle reasoning content if present
+            if "reasoningContent" in output_message["content"][0]:
+                # Extract the output text (skip reasoning)
+                if len(output_message["content"]) > 1:
+                    text = output_message["content"][1]["text"]
+                else:
+                    text = ""
+            else:
+                text = output_message["content"][0]["text"]
+        else:
+            raise ValueError("No content in Bedrock response")
+
+        # Extract token usage from API response
+        input_tokens = 0
+        output_tokens = 0
+        if "usage" in api_response:
+            usage = api_response["usage"]
+            input_tokens = usage.get("inputTokens", 0)
+            output_tokens = usage.get("outputTokens", 0)
+
+        return text, input_tokens, output_tokens
+
     except Exception as e:
-        raise RuntimeError(f"Error calling inference-server API: {str(e)}")
+        raise ConnectionError(f"Failed to call Bedrock API: {str(e)}")
+
+
+def _call_gemini_vlm_api(
+    image: Image.Image,
+    prompt: str,
+    client=None,
+    config=None,
+    model_choice: str = None,
+    max_new_tokens: int = None,
+    temperature: float = None,
+    timeout: int = 60,
+) -> Tuple[str, int, int]:
+    """
+    Calls Gemini API with an image and text prompt for vision models.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        client: Gemini ai.Client instance
+        config: Gemini types.GenerateContentConfig instance
+        model_choice: Gemini model name (e.g., "gemini-1.5-pro")
+        max_new_tokens: Maximum number of tokens to generate
+        temperature: Sampling temperature
+        timeout: Request timeout in seconds
+
+    Returns:
+        Tuple[str, int, int]: The generated text response, input tokens, output tokens
+
+    Raises:
+        ConnectionError: If the API request fails
+        ValueError: If the response format is invalid
+    """
+    if client is None:
+        raise ValueError("Gemini client is required for Gemini VLM calls")
+    if model_choice is None:
+        raise ValueError("model_choice is required for Gemini VLM calls")
+
+    # Convert PIL Image to base64
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    image_bytes = buffer.getvalue()
+    base64.b64encode(image_bytes).decode("utf-8")
+
+    # Prepare content for Gemini API
+    # Gemini expects content as a list with parts containing image and text
+    try:
+        # Use the client to generate content with image
+        # Gemini API expects the image as part of the content
+        try:
+            import google.genai.types as types
+        except ImportError:
+            raise ImportError(
+                "Google GenAI types not available. Please install google-genai package."
+            )
+
+        # Create content with image and text
+        # For Gemini, we can pass image bytes directly or use inline_data
+        parts = [
+            types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+            types.Part.from_text(text=prompt),
+        ]
+
+        # Update config if needed
+        if config is None:
+            config = types.GenerateContentConfig(
+                temperature=temperature if temperature is not None else 0.7,
+                max_output_tokens=(
+                    max_new_tokens if max_new_tokens is not None else 4096
+                ),
+            )
+        else:
+            # Update existing config
+            if temperature is not None:
+                config.temperature = temperature
+            if max_new_tokens is not None:
+                config.max_output_tokens = max_new_tokens
+
+        response = client.models.generate_content(
+            model=model_choice, contents=parts, config=config
+        )
+
+        # Extract text from response
+        text = ""
+        if hasattr(response, "text"):
+            text = response.text
+        elif hasattr(response, "candidates") and len(response.candidates) > 0:
+            if hasattr(response.candidates[0], "content"):
+                if hasattr(response.candidates[0].content, "parts"):
+                    text_parts = []
+                    for part in response.candidates[0].content.parts:
+                        if hasattr(part, "text"):
+                            text_parts.append(part.text)
+                    text = "".join(text_parts)
+
+        if not text:
+            raise ValueError("No text content in Gemini response")
+
+        # Extract token usage from response
+        input_tokens = 0
+        output_tokens = 0
+        try:
+            if hasattr(response, "usage_metadata"):
+                usage = response.usage_metadata
+                if hasattr(usage, "prompt_token_count"):
+                    input_tokens = usage.prompt_token_count
+                if hasattr(usage, "candidates_token_count"):
+                    output_tokens = usage.candidates_token_count
+        except Exception:
+            pass  # Token usage not available, return 0
+
+        return text, input_tokens, output_tokens
+
+    except Exception as e:
+        raise ConnectionError(f"Failed to call Gemini API: {str(e)}")
+
+
+def _call_azure_openai_vlm_api(
+    image: Image.Image,
+    prompt: str,
+    client=None,
+    model_choice: str = None,
+    max_new_tokens: int = None,
+    temperature: float = None,
+    timeout: int = 60,
+) -> Tuple[str, int, int]:
+    """
+    Calls Azure/OpenAI API with an image and text prompt for vision models.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        client: OpenAI client instance
+        model_choice: Model name (e.g., "gpt-4o", "gpt-4-vision-preview")
+        max_new_tokens: Maximum number of tokens to generate
+        temperature: Sampling temperature
+        timeout: Request timeout in seconds
+
+    Returns:
+        Tuple[str, int, int]: The generated text response, input tokens, output tokens
+
+    Raises:
+        ConnectionError: If the API request fails
+        ValueError: If the response format is invalid
+    """
+    if client is None:
+        raise ValueError("OpenAI client is required for Azure/OpenAI VLM calls")
+    if model_choice is None:
+        raise ValueError("model_choice is required for Azure/OpenAI VLM calls")
+
+    # Convert PIL Image to base64
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    image_bytes = buffer.getvalue()
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    # Prepare messages in OpenAI format
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{image_base64}"},
+                },
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+
+    try:
+        # Call OpenAI chat completions API
+        response = client.chat.completions.create(
+            model=model_choice,
+            messages=messages,
+            temperature=temperature if temperature is not None else 0.7,
+            max_completion_tokens=(
+                max_new_tokens if max_new_tokens is not None else 4096
+            ),
+        )
+
+        # Extract text from response
+        text = ""
+        if response.choices and len(response.choices) > 0:
+            message = response.choices[0].message
+            if hasattr(message, "content") and message.content:
+                text = message.content
+            else:
+                raise ValueError("No content in OpenAI response")
+        else:
+            raise ValueError("No choices in OpenAI response")
+
+        # Extract token usage from response
+        input_tokens = 0
+        output_tokens = 0
+        try:
+            if hasattr(response, "usage"):
+                usage = response.usage
+                if hasattr(usage, "prompt_tokens"):
+                    input_tokens = usage.prompt_tokens
+                if hasattr(usage, "completion_tokens"):
+                    output_tokens = usage.completion_tokens
+        except Exception:
+            pass  # Token usage not available, return 0
+
+        return text, input_tokens, output_tokens
+
+    except Exception as e:
+        raise ConnectionError(f"Failed to call Azure/OpenAI API: {str(e)}")
 
 
 def _vlm_ocr_predict(
@@ -957,7 +1458,7 @@ def _vlm_ocr_predict(
         # Pass None for parameters to prioritize model-specific defaults from run_vlm.py
         # If model defaults are not available, general defaults will be used (matching current values)
         # print(f"Calling extract_text_from_image_vlm with image size: {width}x{height}")
-        extracted_text = extract_text_from_image_vlm(
+        extracted_text, _, _ = extract_text_from_image_vlm(
             text=prompt,
             image=image,
             max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
@@ -1012,10 +1513,395 @@ def _vlm_ocr_predict(
         return {"rec_texts": [], "rec_scores": []}
 
 
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
+def _process_page_result_with_hybrid_vlm_ocr(
+    page_results: list,
+    image: Image.Image,
+    img_width: int,
+    img_height: int,
+    input_image_width: int,
+    input_image_height: int,
+    confidence_threshold: float,
+    image_name: str,
+    output_folder: str,
+    padding: int = 0,
+):
+    """
+    Processes OCR page results using a hybrid system that combines PaddleOCR for initial recognition
+    and VLM for low-confidence lines. When PaddleOCR's recognition confidence for a detected line is
+    below the specified threshold, the line is re-processed using a higher-quality (but slower) VLM
+    model and the result is used to replace the low-confidence recognition. Results are kept in
+    PaddleOCR's standard output format for downstream compatibility.
+
+    Args:
+        page_results (list): The list of page result dicts from PaddleOCR to process. Each dict should
+            contain keys like 'rec_texts', 'rec_scores', 'rec_polys', and optionally 'image_width',
+            'image_height', and 'rec_models'.
+        image (PIL.Image.Image): The PIL Image object of the full page to allow line cropping.
+        img_width (int): The width of the (possibly preprocessed) image in pixels.
+        img_height (int): The height of the (possibly preprocessed) image in pixels.
+        input_image_width (int): The original image width (before any resizing/preprocessing).
+        input_image_height (int): The original image height (before any resizing/preprocessing).
+        confidence_threshold (float): Lines recognized by PaddleOCR with confidence lower than this
+            threshold will be replaced using the VLM.
+        image_name (str): The name of the source image, used for logging/debugging.
+        output_folder (str): The output folder path for saving example images.
+        padding (int): Padding to add around line crops.
+
+    Returns:
+        Modified page_results with VLM replacements for low-confidence lines.
+    """
+
+    def _normalize_paddle_result_lists(rec_texts, rec_scores, rec_polys):
+        """
+        Normalizes PaddleOCR result lists to ensure they all have the same length.
+        Pads missing entries with appropriate defaults:
+        - rec_texts: empty string ""
+        - rec_scores: 0.0 (low confidence)
+        - rec_polys: empty list []
+
+        Args:
+            rec_texts: List of recognized text strings
+            rec_scores: List of confidence scores
+            rec_polys: List of bounding box polygons
+
+        Returns:
+            Tuple of (normalized_rec_texts, normalized_rec_scores, normalized_rec_polys, max_length)
+        """
+        len_texts = len(rec_texts)
+        len_scores = len(rec_scores)
+        len_polys = len(rec_polys)
+        max_length = max(len_texts, len_scores, len_polys)
+
+        # Only normalize if there's a mismatch
+        if max_length > 0 and (
+            len_texts != max_length
+            or len_scores != max_length
+            or len_polys != max_length
+        ):
+            print(
+                f"Warning: List length mismatch detected - rec_texts: {len_texts}, "
+                f"rec_scores: {len_scores}, rec_polys: {len_polys}. "
+                f"Padding to length {max_length}."
+            )
+
+            # Pad rec_texts
+            if len_texts < max_length:
+                rec_texts = list(rec_texts) + [""] * (max_length - len_texts)
+
+            # Pad rec_scores
+            if len_scores < max_length:
+                rec_scores = list(rec_scores) + [0.0] * (max_length - len_scores)
+
+            # Pad rec_polys
+            if len_polys < max_length:
+                rec_polys = list(rec_polys) + [[]] * (max_length - len_polys)
+
+        return rec_texts, rec_scores, rec_polys, max_length
+
+    # Helper function to create safe filename (inlined to avoid needing instance_self)
+    def _create_safe_filename_with_confidence(
+        original_text: str,
+        new_text: str,
+        conf: int,
+        new_conf: int,
+        ocr_type: str = "OCR",
+    ) -> str:
+        """Creates a safe filename using confidence values when text sanitization fails."""
+
+        # Helper to sanitize text similar to _sanitize_filename
+        def _sanitize_text_for_filename(
+            text: str,
+            max_length: int = 20,
+            fallback_prefix: str = "unknown_text",
+        ) -> str:
+            """Sanitizes text for use in filenames."""
+            sanitized = safe_sanitize_text(text)
+            # Remove leading/trailing underscores and spaces
+            sanitized = sanitized.strip("_ ")
+            # If empty after sanitization, use a default value
+            if not sanitized:
+                sanitized = fallback_prefix
+            # Limit to max_length characters
+            if len(sanitized) > max_length:
+                sanitized = sanitized[:max_length]
+                sanitized = sanitized.rstrip("_")
+            # Final check: if still empty or too short, use fallback
+            if not sanitized or len(sanitized) < 3:
+                sanitized = fallback_prefix
+            return sanitized
+
+        # Try to sanitize both texts
+        safe_original = _sanitize_text_for_filename(
+            original_text, max_length=15, fallback_prefix=f"orig_conf_{conf}"
+        )
+        safe_new = _sanitize_text_for_filename(
+            new_text, max_length=15, fallback_prefix=f"new_conf_{new_conf}"
+        )
+
+        # If both sanitizations resulted in fallback names, create a confidence-based name
+        if safe_original.startswith("orig_conf") and safe_new.startswith("new_conf"):
+            return f"{ocr_type}_conf_{conf}_to_conf_{new_conf}"
+
+        return f"{safe_original}_conf_{conf}_to_{safe_new}_conf_{new_conf}"
+
+    # Process each page result in paddle_results
+    for page_result in page_results:
+        # Extract text recognition results from the paddle format
+        rec_texts = page_result.get("rec_texts", list())
+        rec_scores = page_result.get("rec_scores", list())
+        rec_polys = page_result.get("rec_polys", list())
+
+        # Normalize lists to ensure they all have the same length
+        rec_texts, rec_scores, rec_polys, num_lines = _normalize_paddle_result_lists(
+            rec_texts, rec_scores, rec_polys
+        )
+
+        # Update page_result with normalized lists
+        page_result["rec_texts"] = rec_texts
+        page_result["rec_scores"] = rec_scores
+        page_result["rec_polys"] = rec_polys
+
+        # Initialize rec_models list with "Paddle" as default for all lines
+        if (
+            "rec_models" not in page_result
+            or len(page_result.get("rec_models", [])) != num_lines
+        ):
+            rec_models = ["Paddle"] * num_lines
+            page_result["rec_models"] = rec_models
+        else:
+            rec_models = page_result["rec_models"]
+
+        # Since we're using the exact image PaddleOCR processed, coordinates are directly in image space
+        # No coordinate conversion needed - coordinates match the image dimensions exactly
+
+        # Process each line
+        # print(f"Processing {num_lines} lines from PaddleOCR results...")
+
+        for i in range(num_lines):
+            line_text = rec_texts[i]
+            line_conf = float(rec_scores[i]) * 100  # Convert to percentage
+            bounding_box = rec_polys[i]
+
+            # Skip if bounding box is empty (from padding)
+            # Handle numpy arrays, lists, and None values safely
+            if bounding_box is None:
+                continue
+
+            # Convert to list first to handle numpy arrays safely
+            if hasattr(bounding_box, "tolist"):
+                box = bounding_box.tolist()
+            else:
+                box = bounding_box
+
+            # Check if box is empty (handles both list and numpy array cases)
+            if not box or (isinstance(box, list) and len(box) == 0):
+                continue
+
+            # Skip empty lines
+            if not line_text.strip():
+                continue
+
+            # Convert polygon to bounding box
+            x_coords = [p[0] for p in box]
+            y_coords = [p[1] for p in box]
+            line_left_paddle = float(min(x_coords))
+            line_top_paddle = float(min(y_coords))
+            line_right_paddle = float(max(x_coords))
+            line_bottom_paddle = float(max(y_coords))
+            line_width_paddle = line_right_paddle - line_left_paddle
+            line_height_paddle = line_bottom_paddle - line_top_paddle
+
+            # Since we're using the exact image PaddleOCR processed, coordinates are already in image space
+            # No conversion needed - use coordinates directly
+            line_left = line_left_paddle
+            line_top = line_top_paddle
+            line_width = line_width_paddle
+            line_height = line_height_paddle
+
+            # Initialize model as PaddleOCR (default)
+
+            # Count words in PaddleOCR output
+            paddle_words = line_text.split()
+            paddle_word_count = len(paddle_words)
+
+            # If confidence is low, use VLM for a second opinion
+            if line_conf <= confidence_threshold:
+
+                # Ensure minimum line height for VLM processing
+                # If line_height is too small, use a minimum height based on typical text line height
+                min_line_height = max(
+                    line_height, 20
+                )  # Minimum 20 pixels for text line
+
+                # Calculate crop coordinates with padding
+                # Convert floats to integers and apply padding, clamping to image bounds
+                crop_left = max(0, int(round(line_left - padding)))
+                crop_top = max(0, int(round(line_top - padding)))
+                crop_right = min(
+                    img_width, int(round(line_left + line_width + padding))
+                )
+                crop_bottom = min(
+                    img_height, int(round(line_top + min_line_height + padding))
+                )
+
+                # Ensure crop dimensions are valid
+                if crop_right <= crop_left or crop_bottom <= crop_top:
+                    # Invalid crop, keep original PaddleOCR result
+                    continue
+
+                # Crop the line image
+                cropped_image = image.crop(
+                    (crop_left, crop_top, crop_right, crop_bottom)
+                )
+
+                # Check if cropped image is too small for VLM processing
+                crop_width = crop_right - crop_left
+                crop_height = crop_bottom - crop_top
+                if crop_width < 10 or crop_height < 10:
+                    continue
+
+                # Ensure cropped image is in RGB mode before passing to VLM
+                if cropped_image.mode != "RGB":
+                    cropped_image = cropped_image.convert("RGB")
+
+                # Save input image for debugging if environment variable is set
+                if SAVE_VLM_INPUT_IMAGES:
+                    try:
+                        vlm_debug_dir = os.path.join(
+                            output_folder,
+                            "hybrid_paddle_vlm_visualisations/hybrid_analysis_input_images",
+                        )
+                        os.makedirs(vlm_debug_dir, exist_ok=True)
+                        line_text_safe = safe_sanitize_text(line_text)
+                        line_text_shortened = line_text_safe[:20]
+                        image_name_safe = safe_sanitize_text(image_name)
+                        image_name_shortened = image_name_safe[:20]
+                        filename = f"{image_name_shortened}_{line_text_shortened}_hybrid_analysis_input_image.png"
+                        filepath = os.path.join(vlm_debug_dir, filename)
+                        cropped_image.save(filepath)
+                        # print(f"Saved VLM input image to: {filepath}")
+                    except Exception as save_error:
+                        print(f"Warning: Could not save VLM input image: {save_error}")
+
+                # Use VLM for OCR on this line with error handling
+                vlm_result = None
+                vlm_rec_texts = []
+                vlm_rec_scores = []
+
+                try:
+                    vlm_result = _vlm_ocr_predict(cropped_image)
+                    vlm_rec_texts = (
+                        vlm_result.get("rec_texts", []) if vlm_result else []
+                    )
+                    vlm_rec_scores = (
+                        vlm_result.get("rec_scores", []) if vlm_result else []
+                    )
+                except Exception:
+                    # Ensure we keep original PaddleOCR result on error
+                    vlm_rec_texts = []
+                    vlm_rec_scores = []
+
+                if vlm_rec_texts and vlm_rec_scores:
+                    # Combine VLM words into a single text string
+                    vlm_text = " ".join(vlm_rec_texts)
+                    vlm_word_count = len(vlm_rec_texts)
+                    vlm_conf = float(
+                        np.median(vlm_rec_scores)
+                    )  # Keep as 0-1 range for paddle format
+
+                    # Only replace if word counts match
+                    word_count_allowed_difference = 4
+                    if (
+                        vlm_word_count - paddle_word_count
+                        <= word_count_allowed_difference
+                        and vlm_word_count - paddle_word_count
+                        >= -word_count_allowed_difference
+                    ):
+                        text_output = f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
+                        text_output += f"-> '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) [VLM]"
+                        print(text_output)
+
+                        if REPORT_VLM_OUTPUTS_TO_GUI:
+                            try:
+                                gr.Info(text_output, duration=2)
+                            except Exception:
+                                # gr.Info may not be available in worker process, ignore
+                                pass
+
+                        # For exporting example image comparisons
+                        safe_filename = _create_safe_filename_with_confidence(
+                            line_text,
+                            vlm_text,
+                            int(line_conf),
+                            int(vlm_conf * 100),
+                            "VLM",
+                        )
+
+                        if SAVE_EXAMPLE_HYBRID_IMAGES:
+                            # Normalize and validate image_name to prevent path traversal attacks
+                            normalized_image_name = os.path.normpath(
+                                image_name + "_hybrid_paddle_vlm"
+                            )
+                            if (
+                                ".." in normalized_image_name
+                                or "/" in normalized_image_name
+                                or "\\" in normalized_image_name
+                            ):
+                                normalized_image_name = "safe_image"
+
+                            hybrid_ocr_examples_folder = (
+                                output_folder
+                                + f"/hybrid_ocr_examples/{normalized_image_name}"
+                            )
+                            # Validate the constructed path is safe
+                            if not validate_folder_containment(
+                                hybrid_ocr_examples_folder, OUTPUT_FOLDER
+                            ):
+                                raise ValueError(
+                                    f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
+                                )
+
+                            if not os.path.exists(hybrid_ocr_examples_folder):
+                                os.makedirs(hybrid_ocr_examples_folder)
+                            output_image_path = (
+                                hybrid_ocr_examples_folder + f"/{safe_filename}.png"
+                            )
+                            # print(f"Saving example image to {output_image_path}")
+                            cropped_image.save(output_image_path)
+
+                        # Replace with VLM result in paddle_results format
+                        # Update rec_texts, rec_scores, and rec_models for this line
+                        rec_texts[i] = vlm_text
+                        rec_scores[i] = vlm_conf
+                        rec_models[i] = "VLM"
+                        # Ensure page_result is updated with the modified rec_models list
+                        page_result["rec_models"] = rec_models
+                    else:
+                        print(
+                            f"  Line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) -> "
+                            f"VLM result '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) "
+                            f"word count mismatch. Keeping PaddleOCR result."
+                        )
+                else:
+                    # VLM returned empty or no results - keep original PaddleOCR result
+                    if line_conf <= confidence_threshold:
+                        pass
+
+    # Debug: Print summary of model labels before returning
+    for page_idx, page_result in enumerate(page_results):
+        rec_models = page_result.get("rec_models", [])
+        sum(1 for m in rec_models if m == "VLM")
+        sum(1 for m in rec_models if m == "Paddle")
+
+    return page_results
+
+
 def _inference_server_ocr_predict(
     image: Image.Image,
     prompt: str = model_default_prompt,
     max_retries: int = 5,
+    model_name: str = None,
 ) -> Dict[str, Any]:
     """
     Inference-server OCR prediction function that mimics PaddleOCR's interface.
@@ -1076,9 +1962,25 @@ def _inference_server_ocr_predict(
 
         for attempt in range(1, max_retries + 1):
             try:
+                # Determine model_name: use provided parameter, then DEFAULT_INFERENCE_SERVER_VLM_MODEL, then INFERENCE_SERVER_MODEL_NAME
+                final_model_name = model_name
+                if final_model_name is None or final_model_name == "":
+                    final_model_name = (
+                        DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                        if DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                        else None
+                    )
+                if final_model_name is None or final_model_name == "":
+                    final_model_name = (
+                        INFERENCE_SERVER_MODEL_NAME
+                        if INFERENCE_SERVER_MODEL_NAME
+                        else None
+                    )
+
                 extracted_text = _call_inference_server_vlm_api(
                     image=image,
                     prompt=prompt,
+                    model_name=final_model_name,
                     max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
                     temperature=model_default_temperature,
                     top_p=model_default_top_p,
@@ -1092,6 +1994,7 @@ def _inference_server_ocr_predict(
                     do_sample=model_default_do_sample,
                     min_p=model_default_min_p,
                     presence_penalty=model_default_presence_penalty,
+                    use_llama_swap=USE_LLAMA_SWAP,
                 )
                 # If we get here, the API call succeeded
                 break
@@ -1148,6 +2051,385 @@ def _inference_server_ocr_predict(
         import traceback
 
         print(f"Inference-server OCR error traceback: {traceback.format_exc()}")
+        return {"rec_texts": [], "rec_scores": []}
+
+
+def _bedrock_vlm_ocr_predict(
+    image: Image.Image,
+    prompt: str = model_default_prompt,
+    model_choice: str = None,
+    bedrock_runtime=None,
+    max_retries: int = 5,
+) -> Dict[str, Any]:
+    """
+    Bedrock VLM OCR prediction function that mimics PaddleOCR's interface.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        model_choice: Bedrock model ID
+        bedrock_runtime: boto3 Bedrock runtime client
+        max_retries: Maximum number of retry attempts for API calls (default: 5)
+
+    Returns:
+        Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
+    """
+    try:
+        # Validate image exists and is not None
+        if image is None:
+            print("Bedrock VLM OCR error: Image is None")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Bedrock VLM OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+        except Exception as size_error:
+            print(f"Bedrock VLM OCR error: Could not get image size: {size_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+                width, height = image.size
+        except Exception as convert_error:
+            print(
+                f"Bedrock VLM OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        # Skip resizing for AWS Bedrock VLM OCR
+        try:
+            from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
+
+            image = _prepare_image_for_vlm(
+                image, ocr_method=BEDROCK_VLM_TEXT_EXTRACT_OPTION
+            )
+            width, height = image.size
+        except Exception as prep_error:
+            print(
+                f"Bedrock VLM OCR error: Could not prepare image for VLM: {prep_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Use the Bedrock API to extract text with retry logic
+        extracted_text = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                extracted_text = _call_bedrock_vlm_api(
+                    image=image,
+                    prompt=prompt,
+                    model_choice=model_choice,
+                    bedrock_runtime=bedrock_runtime,
+                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    temperature=model_default_temperature,
+                    top_p=model_default_top_p,
+                )
+                # If we get here, the API call succeeded
+                break
+            except Exception as api_error:
+                print(
+                    f"Bedrock VLM OCR retry attempt {attempt}/{max_retries} failed: {api_error}"
+                )
+                if attempt == max_retries:
+                    raise Exception(
+                        f"Bedrock VLM OCR failed after {max_retries} attempts. Last error: {str(api_error)}"
+                    ) from api_error
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None:
+            return {"rec_texts": [], "rec_scores": []}
+
+        if not isinstance(extracted_text, str):
+            return {"rec_texts": [], "rec_scores": []}
+
+        if extracted_text.strip():
+            # Clean the text
+            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
+            cleaned_text = cleaned_text.strip()
+
+            # Split into words for compatibility with PaddleOCR format
+            words = cleaned_text.split()
+
+            # If text has more than 30 words, assume something went wrong and skip it
+            if len(words) > 30:
+                print(
+                    f"Bedrock VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+
+            # Create PaddleOCR-compatible result
+            result = {
+                "rec_texts": words,
+                "rec_scores": [1.0] * len(words),  # High confidence for Bedrock results
+            }
+
+            return result
+        else:
+            return {"rec_texts": [], "rec_scores": []}
+
+    except Exception as e:
+        print(f"Bedrock VLM OCR error: {e}")
+        import traceback
+
+        print(f"Bedrock VLM OCR error traceback: {traceback.format_exc()}")
+        return {"rec_texts": [], "rec_scores": []}
+
+
+def _gemini_vlm_ocr_predict(
+    image: Image.Image,
+    prompt: str = model_default_prompt,
+    model_choice: str = None,
+    client=None,
+    config=None,
+    max_retries: int = 5,
+) -> Dict[str, Any]:
+    """
+    Gemini VLM OCR prediction function that mimics PaddleOCR's interface.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        model_choice: Gemini model name
+        client: Gemini ai.Client instance
+        config: Gemini types.GenerateContentConfig instance
+        max_retries: Maximum number of retry attempts for API calls (default: 5)
+
+    Returns:
+        Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
+    """
+    try:
+        # Validate image exists and is not None
+        if image is None:
+            print("Gemini VLM OCR error: Image is None")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Gemini VLM OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+        except Exception as size_error:
+            print(f"Gemini VLM OCR error: Could not get image size: {size_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+                width, height = image.size
+        except Exception as convert_error:
+            print(
+                f"Gemini VLM OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        try:
+            image = _prepare_image_for_vlm(image)
+            width, height = image.size
+        except Exception as prep_error:
+            print(
+                f"Gemini VLM OCR error: Could not prepare image for VLM: {prep_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Use the Gemini API to extract text with retry logic
+        extracted_text = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                extracted_text, _, _ = _call_gemini_vlm_api(
+                    image=image,
+                    prompt=prompt,
+                    client=client,
+                    config=config,
+                    model_choice=model_choice,
+                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    temperature=model_default_temperature,
+                )
+                # If we get here, the API call succeeded
+                break
+            except Exception as api_error:
+                print(
+                    f"Gemini VLM OCR retry attempt {attempt}/{max_retries} failed: {api_error}"
+                )
+                if attempt == max_retries:
+                    raise Exception(
+                        f"Gemini VLM OCR failed after {max_retries} attempts. Last error: {str(api_error)}"
+                    ) from api_error
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None:
+            return {"rec_texts": [], "rec_scores": []}
+
+        if not isinstance(extracted_text, str):
+            return {"rec_texts": [], "rec_scores": []}
+
+        if extracted_text.strip():
+            # Clean the text
+            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
+            cleaned_text = cleaned_text.strip()
+
+            # Split into words for compatibility with PaddleOCR format
+            words = cleaned_text.split()
+
+            # If text has more than 30 words, assume something went wrong and skip it
+            if len(words) > 30:
+                print(
+                    f"Gemini VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+
+            # Create PaddleOCR-compatible result
+            result = {
+                "rec_texts": words,
+                "rec_scores": [1.0] * len(words),  # High confidence for Gemini results
+            }
+
+            return result
+        else:
+            return {"rec_texts": [], "rec_scores": []}
+
+    except Exception as e:
+        print(f"Gemini VLM OCR error: {e}")
+        import traceback
+
+        print(f"Gemini VLM OCR error traceback: {traceback.format_exc()}")
+        return {"rec_texts": [], "rec_scores": []}
+
+
+def _azure_openai_vlm_ocr_predict(
+    image: Image.Image,
+    prompt: str = model_default_prompt,
+    model_choice: str = None,
+    client=None,
+    max_retries: int = 5,
+) -> Dict[str, Any]:
+    """
+    Azure/OpenAI VLM OCR prediction function that mimics PaddleOCR's interface.
+
+    Args:
+        image: PIL Image to process
+        prompt: Text prompt for the VLM
+        model_choice: Model name (e.g., "gpt-4o", "gpt-4-vision-preview")
+        client: OpenAI client instance
+        max_retries: Maximum number of retry attempts for API calls (default: 5)
+
+    Returns:
+        Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
+    """
+    try:
+        # Validate image exists and is not None
+        if image is None:
+            print("Azure/OpenAI VLM OCR error: Image is None")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Validate image has valid size (at least 10x10 pixels)
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Azure/OpenAI VLM OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+        except Exception as size_error:
+            print(f"Azure/OpenAI VLM OCR error: Could not get image size: {size_error}")
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Ensure image is in RGB mode (convert if needed)
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+                width, height = image.size
+        except Exception as convert_error:
+            print(
+                f"Azure/OpenAI VLM OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Check and resize image if it exceeds maximum size or DPI limits
+        try:
+            image = _prepare_image_for_vlm(image)
+            width, height = image.size
+        except Exception as prep_error:
+            print(
+                f"Azure/OpenAI VLM OCR error: Could not prepare image for VLM: {prep_error}"
+            )
+            return {"rec_texts": [], "rec_scores": []}
+
+        # Use the Azure/OpenAI API to extract text with retry logic
+        extracted_text = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                extracted_text, _, _ = _call_azure_openai_vlm_api(
+                    image=image,
+                    prompt=prompt,
+                    client=client,
+                    model_choice=model_choice,
+                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    temperature=model_default_temperature,
+                )
+                # If we get here, the API call succeeded
+                break
+            except Exception as api_error:
+                print(
+                    f"Azure/OpenAI VLM OCR retry attempt {attempt}/{max_retries} failed: {api_error}"
+                )
+                if attempt == max_retries:
+                    raise Exception(
+                        f"Azure/OpenAI VLM OCR failed after {max_retries} attempts. Last error: {str(api_error)}"
+                    ) from api_error
+
+        # Check if extracted_text is None or empty
+        if extracted_text is None:
+            return {"rec_texts": [], "rec_scores": []}
+
+        if not isinstance(extracted_text, str):
+            return {"rec_texts": [], "rec_scores": []}
+
+        if extracted_text.strip():
+            # Clean the text
+            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
+            cleaned_text = cleaned_text.strip()
+
+            # Split into words for compatibility with PaddleOCR format
+            words = cleaned_text.split()
+
+            # If text has more than 30 words, assume something went wrong and skip it
+            if len(words) > 30:
+                print(
+                    f"Azure/OpenAI VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                )
+                return {"rec_texts": [], "rec_scores": []}
+
+            # Create PaddleOCR-compatible result
+            result = {
+                "rec_texts": words,
+                "rec_scores": [1.0]
+                * len(words),  # High confidence for Azure/OpenAI results
+            }
+
+            return result
+        else:
+            return {"rec_texts": [], "rec_scores": []}
+
+    except Exception as e:
+        print(f"Azure/OpenAI VLM OCR error: {e}")
+        import traceback
+
+        print(f"Azure/OpenAI VLM OCR error traceback: {traceback.format_exc()}")
         return {"rec_texts": [], "rec_scores": []}
 
 
@@ -1425,7 +2707,7 @@ def _vlm_page_ocr_predict(
     detect_people_only: bool = False,
     detect_signatures_only: bool = False,
     progress: Optional[gr.Progress] = gr.Progress(),
-) -> Dict[str, List]:
+) -> Tuple[Dict[str, List], int, int, str]:
     """
     VLM page-level OCR prediction that returns structured line-level results with bounding boxes.
 
@@ -1576,10 +2858,12 @@ def _vlm_page_ocr_predict(
         # Create prompt that requests structured JSON output with bounding boxes
         if detect_people_only:
             progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
             prompt = full_page_ocr_people_vlm_prompt
             task_type = "person"
         elif detect_signatures_only:
             progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
             task_type = "signature"
         else:
@@ -1588,34 +2872,93 @@ def _vlm_page_ocr_predict(
 
         # Use the VLM to extract structured text
         # Pass explicit model_default_* values for consistency with _inference_server_page_ocr_predict
-        extracted_text = extract_text_from_image_vlm(
-            text=prompt,
-            image=processed_image,
-            max_new_tokens=model_default_max_new_tokens,
-            temperature=model_default_temperature,
-            top_p=model_default_top_p,
-            min_p=model_default_min_p,
-            top_k=model_default_top_k,
-            repetition_penalty=model_default_repetition_penalty,
-            presence_penalty=model_default_presence_penalty,
-            seed=model_default_seed,
-            do_sample=model_default_do_sample,
+        extracted_text, vlm_input_tokens, vlm_output_tokens = (
+            extract_text_from_image_vlm(
+                text=prompt,
+                image=processed_image,
+                max_new_tokens=model_default_max_new_tokens,
+                temperature=model_default_temperature,
+                top_p=model_default_top_p,
+                min_p=model_default_min_p,
+                top_k=model_default_top_k,
+                repetition_penalty=model_default_repetition_penalty,
+                presence_penalty=model_default_presence_penalty,
+                seed=model_default_seed,
+                do_sample=model_default_do_sample,
+            )
         )
+
+        # Save prompt and response to file
+        if extracted_text and isinstance(extracted_text, str) and output_folder:
+            try:
+                # Extract page number from image_name if present
+                page_number = None
+                if image_name:
+                    page_patterns = [
+                        r"_page_(\d+)\.png$",
+                        r"_(\d+)\.png$",
+                        r"page_(\d+)\.png$",
+                    ]
+                    for pattern in page_patterns:
+                        match = re.search(pattern, image_name, re.IGNORECASE)
+                        if match:
+                            page_number = int(match.group(1))
+                            break
+
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
+                # Get model name for logging
+                vlm_model_name = (
+                    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    else "VLM"
+                )
+
+                saved_file = save_vlm_prompt_response(
+                    prompt=prompt,
+                    response_text=extracted_text,
+                    output_folder=output_folder,
+                    model_choice=vlm_model_name,
+                    image_name=image_name,
+                    page_number=page_number,
+                    temperature=model_default_temperature,
+                    max_new_tokens=model_default_max_new_tokens,
+                    top_p=model_default_top_p,
+                    model_type="VLM",
+                    task_suffix=task_suffix,
+                )
+                print(f"Saved VLM prompt/response to: {saved_file}")
+            except Exception as save_error:
+                print(f"Warning: Could not save VLM prompt/response: {save_error}")
 
         # Check if extracted_text is None or empty
         if extracted_text is None or not isinstance(extracted_text, str):
             print(
                 "VLM page OCR warning: extract_text_from_image_vlm returned None or invalid type"
             )
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                (
+                    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    else "VLM"
+                ),
+            )
 
         # Try to parse JSON from the response
         # The VLM might return JSON wrapped in markdown code blocks or with extra text
@@ -1886,22 +3229,34 @@ def _vlm_page_ocr_predict(
             result["conf"].append(int(round(confidence)))
             result["model"].append("VLM")
 
-        return result
+        # Get model name for tracking
+        vlm_model_name = (
+            SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+            if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+            else "VLM"
+        )
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
 
     except Exception as e:
         print(f"VLM page OCR error: {e}")
         import traceback
 
         print(f"VLM page OCR error traceback: {traceback.format_exc()}")
-        return {
-            "text": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "conf": [],
-            "model": [],
-        }
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            "VLM",
+        )
 
 
 def _inference_server_page_ocr_predict(
@@ -1912,7 +3267,8 @@ def _inference_server_page_ocr_predict(
     detect_people_only: bool = False,
     detect_signatures_only: bool = False,
     progress: Optional[gr.Progress] = gr.Progress(),
-) -> Dict[str, List]:
+    model_name: str = None,
+) -> Tuple[Dict[str, List], int, int, str]:
     """
     Inference-server page-level OCR prediction that returns structured line-level results with bounding boxes.
     Calls an external inference-server API instead of a local model.
@@ -2062,7 +3418,7 @@ def _inference_server_page_ocr_predict(
                     f"{image_name_shortened}_inference_server_page_input_image.png"
                 )
                 filepath = os.path.join(vlm_debug_dir, filename)
-                print(f"Saving inference-server input image to: {filepath}")
+                print(f"Saving inference-server input image to: {filename}")
                 processed_image.save(filepath)
                 # print(f"Saved VLM input image to: {filepath}")
             except Exception as save_error:
@@ -2071,10 +3427,12 @@ def _inference_server_page_ocr_predict(
         # Create prompt that requests structured JSON output with bounding boxes
         if detect_people_only:
             progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
             prompt = full_page_ocr_people_vlm_prompt
             task_type = "person"
         elif detect_signatures_only:
             progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
             task_type = "signature"
         else:
@@ -2084,34 +3442,99 @@ def _inference_server_page_ocr_predict(
         # Use the inference-server API to extract structured text
         # Note: processed_width and processed_height were already captured on line 1921
         # after _prepare_image_for_vlm, so we use those values for normalization
-        extracted_text = _call_inference_server_vlm_api(
-            image=processed_image,
-            prompt=prompt,
-            max_new_tokens=model_default_max_new_tokens,
-            temperature=model_default_temperature,
-            top_p=model_default_top_p,
-            top_k=model_default_top_k,
-            repetition_penalty=model_default_repetition_penalty,
-            seed=model_default_seed,
-            do_sample=model_default_do_sample,
-            min_p=model_default_min_p,
-            presence_penalty=model_default_presence_penalty,
+        # Determine model_name: use provided parameter, then DEFAULT_INFERENCE_SERVER_VLM_MODEL, then INFERENCE_SERVER_MODEL_NAME
+        final_model_name = model_name
+        if final_model_name is None or final_model_name == "":
+            final_model_name = (
+                DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                if DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                else None
+            )
+        if final_model_name is None or final_model_name == "":
+            final_model_name = (
+                INFERENCE_SERVER_MODEL_NAME if INFERENCE_SERVER_MODEL_NAME else None
+            )
+
+        extracted_text, vlm_input_tokens, vlm_output_tokens = (
+            _call_inference_server_vlm_api(
+                image=processed_image,
+                prompt=prompt,
+                model_name=final_model_name,
+                max_new_tokens=model_default_max_new_tokens,
+                temperature=model_default_temperature,
+                top_p=model_default_top_p,
+                top_k=model_default_top_k,
+                repetition_penalty=model_default_repetition_penalty,
+                seed=model_default_seed,
+                do_sample=model_default_do_sample,
+                min_p=model_default_min_p,
+                presence_penalty=model_default_presence_penalty,
+                use_llama_swap=USE_LLAMA_SWAP,
+            )
         )
+
+        # Save prompt and response to file
+        if extracted_text and isinstance(extracted_text, str) and output_folder:
+            try:
+                # Extract page number from image_name if present
+                page_number = None
+                if image_name:
+                    page_patterns = [
+                        r"_page_(\d+)\.png$",
+                        r"_(\d+)\.png$",
+                        r"page_(\d+)\.png$",
+                    ]
+                    for pattern in page_patterns:
+                        match = re.search(pattern, image_name, re.IGNORECASE)
+                        if match:
+                            page_number = int(match.group(1))
+                            break
+
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
+                saved_file = save_vlm_prompt_response(
+                    prompt=prompt,
+                    response_text=extracted_text,
+                    output_folder=output_folder,
+                    model_choice=final_model_name or "unknown",
+                    image_name=image_name,
+                    page_number=page_number,
+                    temperature=model_default_temperature,
+                    max_new_tokens=model_default_max_new_tokens,
+                    top_p=model_default_top_p,
+                    model_type="Inference Server",
+                    task_suffix=task_suffix,
+                )
+                print(f"Saved inference-server VLM prompt/response to: {saved_file}")
+            except Exception as save_error:
+                print(
+                    f"Warning: Could not save inference-server VLM prompt/response: {save_error}"
+                )
 
         # Check if extracted_text is None or empty
         if extracted_text is None or not isinstance(extracted_text, str):
             print(
                 "Inference-server page OCR warning: API returned None or invalid type"
             )
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                final_model_name or "Inference Server",
+            )
 
         # Try to parse JSON from the response
         # The API might return JSON wrapped in markdown code blocks or with extra text
@@ -2381,13 +3804,126 @@ def _inference_server_page_ocr_predict(
             result["conf"].append(int(round(confidence)))
             result["model"].append("Inference server")
 
-        return result
+        # Get model name for tracking
+        vlm_model_name = final_model_name or "Inference Server"
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
 
     except Exception as e:
         print(f"Inference-server page OCR error: {e}")
         import traceback
 
         print(f"Inference-server page OCR error traceback: {traceback.format_exc()}")
+        # Determine model name for error case
+        error_model_name = (
+            model_name
+            or DEFAULT_INFERENCE_SERVER_VLM_MODEL
+            or INFERENCE_SERVER_MODEL_NAME
+            or "Inference Server"
+        )
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            error_model_name,
+        )
+
+
+def _parse_vlm_page_ocr_response(
+    extracted_text: str,
+    processed_image: Image.Image,
+    processed_width: int,
+    processed_height: int,
+    scale_x: float,
+    scale_y: float,
+    normalised_coords_range: Optional[int],
+    model_name: str = "Cloud VLM",
+) -> Dict[str, List]:
+    """
+    Helper function to parse VLM page OCR response and convert to expected format.
+    Shared by all cloud VLM page OCR functions.
+
+    Args:
+        extracted_text: Raw text response from VLM
+        processed_image: The processed image that was sent to the VLM
+        processed_width: Width of processed image
+        processed_height: Height of processed image
+        scale_x: Scale factor for x coordinates (original/processed)
+        scale_y: Scale factor for y coordinates (original/processed)
+        normalised_coords_range: If set, bounding boxes are in normalized coordinates (0 to this value)
+        model_name: Name of the model for the 'model' field in results
+
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+    """
+    # Use actual image dimensions to ensure consistency (in case image was modified)
+    actual_width, actual_height = processed_image.size
+    if actual_width != processed_width or actual_height != processed_height:
+        print(
+            f"{model_name} page OCR warning: Image dimensions mismatch. "
+            f"Expected {processed_width}x{processed_height}, got {actual_width}x{actual_height}. "
+            f"Using actual dimensions."
+        )
+        processed_width = actual_width
+        processed_height = actual_height
+
+    # Fix malformed bounding box values in the JSON string before parsing
+    extracted_text = _fix_malformed_bbox_in_json_string(extracted_text.strip())
+
+    lines_data = None
+
+    # Try various JSON parsing strategies (same as _vlm_page_ocr_predict)
+    try:
+        lines_data = json.loads(extracted_text)
+    except json.JSONDecodeError:
+        pass
+
+    if lines_data is None:
+        json_match = re.search(r"```(?:json)?\s*(\[.*?\])", extracted_text, re.DOTALL)
+        if json_match:
+            try:
+                lines_data = json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+    if lines_data is None:
+        start_idx = extracted_text.find("[")
+        if start_idx >= 0:
+            bracket_count = 0
+            end_idx = start_idx
+            for i in range(start_idx, len(extracted_text)):
+                if extracted_text[i] == "[":
+                    bracket_count += 1
+                elif extracted_text[i] == "]":
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        end_idx = i
+                        break
+            if end_idx > start_idx:
+                try:
+                    lines_data = json.loads(extracted_text[start_idx : end_idx + 1])
+                except json.JSONDecodeError:
+                    pass
+
+    if lines_data is None:
+        try:
+            python_data = ast.literal_eval(extracted_text)
+            if isinstance(python_data, list):
+                lines_data = python_data
+        except Exception:
+            pass
+
+    if lines_data is None:
+        print(f"{model_name} page OCR error: Could not parse JSON response")
+        print(f"Response text: {extracted_text[:500]}")
         return {
             "text": [],
             "left": [],
@@ -2397,6 +3933,908 @@ def _inference_server_page_ocr_predict(
             "conf": [],
             "model": [],
         }
+
+    if not isinstance(lines_data, list):
+        print(f"{model_name} page OCR error: Expected list, got {type(lines_data)}")
+        return {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+
+    # Convert VLM results to expected format
+    result = {
+        "text": [],
+        "left": [],
+        "top": [],
+        "width": [],
+        "height": [],
+        "conf": [],
+        "model": [],
+    }
+
+    for line_item in lines_data:
+        if not isinstance(line_item, dict):
+            continue
+
+        text = line_item.get("text_content") or line_item.get("text", "").strip()
+        if not text:
+            continue
+
+        bbox = (
+            line_item.get("bbox_2d")
+            or line_item.get("bbox", [])
+            or line_item.get("bb", [])
+        )
+        confidence = line_item.get("confidence", 100)
+
+        fixed_bbox = _fix_malformed_bbox(bbox)
+        if fixed_bbox is not None:
+            bbox = fixed_bbox
+        elif not isinstance(bbox, list) or len(bbox) != 4:
+            print(
+                f"{model_name} page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}"
+            )
+            continue
+
+        x1, y1, x2, y2 = bbox
+
+        try:
+            x1 = float(x1)
+            y1 = float(y1)
+            x2 = float(x2)
+            y2 = float(y2)
+        except (ValueError, TypeError):
+            print(
+                f"{model_name} page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}"
+            )
+            continue
+
+        if x2 <= x1 or y2 <= y1:
+            print(
+                f"{model_name} page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}"
+            )
+            continue
+
+        if normalised_coords_range is not None and normalised_coords_range > 0:
+            x1 = (x1 / float(normalised_coords_range)) * processed_width
+            y1 = (y1 / float(normalised_coords_range)) * processed_height
+            x2 = (x2 / float(normalised_coords_range)) * processed_width
+            y2 = (y2 / float(normalised_coords_range)) * processed_height
+
+        if scale_x != 1.0 or scale_y != 1.0:
+            x1 = x1 * scale_x
+            y1 = y1 * scale_y
+            x2 = x2 * scale_x
+            y2 = y2 * scale_y
+
+        left = int(round(x1))
+        top = int(round(y1))
+        width = int(round(x2 - x1))
+        height = int(round(y2 - y1))
+
+        try:
+            confidence = float(confidence)
+            confidence = max(0, min(100, confidence))
+        except (ValueError, TypeError):
+            confidence = 100
+
+        result["text"].append(clean_unicode_text(text))
+        result["left"].append(left)
+        result["top"].append(top)
+        result["width"].append(width)
+        result["height"].append(height)
+        result["conf"].append(int(round(confidence)))
+        result["model"].append(model_name)
+
+    return result
+
+
+def _bedrock_page_ocr_predict(
+    image: Image.Image,
+    image_name: str = "bedrock_page_ocr_input_image.png",
+    normalised_coords_range: Optional[int] = None,
+    output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
+    model_choice: str = None,
+    bedrock_runtime=None,
+) -> Tuple[Dict[str, List], int, int, str]:
+    """
+    Bedrock page-level OCR prediction that returns structured line-level results with bounding boxes.
+
+    Args:
+        image: PIL Image to process (full page)
+        image_name: Name of the image for debugging
+        normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
+            from 0 to this value (e.g., 999 for Qwen3-VL models). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
+        output_folder: The folder where output images will be saved
+        detect_people_only: If True, only detect people in images
+        detect_signatures_only: If True, only detect signatures in images
+        progress: Gradio progress tracker
+        model_choice: Bedrock model ID
+        bedrock_runtime: boto3 Bedrock runtime client
+
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+    """
+    try:
+        if image is None:
+            print("Bedrock page OCR error: Image is None")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Bedrock page OCR error: Image is too small ({width}x{height} pixels)."
+                )
+                return {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                }
+        except Exception as size_error:
+            print(f"Bedrock page OCR error: Could not get image size: {size_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+        except Exception as convert_error:
+            print(
+                f"Bedrock page OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        scale_x = 1.0
+        scale_y = 1.0
+        try:
+            original_width, original_height = image.size
+            # Skip resizing for AWS Bedrock VLM OCR
+            from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
+
+            processed_image = _prepare_image_for_vlm(
+                image, ocr_method=BEDROCK_VLM_TEXT_EXTRACT_OPTION
+            )
+            processed_width, processed_height = processed_image.size
+
+            scale_x = (
+                float(original_width) / float(processed_width)
+                if processed_width > 0
+                else 1.0
+            )
+            scale_y = (
+                float(original_height) / float(processed_height)
+                if processed_height > 0
+                else 1.0
+            )
+        except Exception as prep_error:
+            print(f"Bedrock page OCR error: Could not prepare image: {prep_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Create prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+        else:
+            prompt = full_page_ocr_vlm_prompt
+
+        # Save input image for debugging if environment variable is set
+        if SAVE_VLM_INPUT_IMAGES:
+            try:
+                vlm_debug_dir = os.path.join(
+                    output_folder,
+                    "bedrock_visualisations/vlm_input_images",
+                )
+                os.makedirs(vlm_debug_dir, exist_ok=True)
+                # Increment the number at the end of image_name before .png
+                # This converts zero-indexed input to one-indexed output
+                incremented_image_name = image_name
+                if image_name.endswith(".png"):
+                    # Find the number pattern at the end before .png
+                    # Matches patterns like: _0.png, _00.png, 0.png, 00.png, etc.
+                    pattern = r"(\d+)(\.png)$"
+                    match = re.search(pattern, image_name)
+                    if match:
+                        number_str = match.group(1)
+                        number = int(number_str)
+                        incremented_number = number + 1
+                        # Preserve the same number of digits (padding with zeros if needed)
+                        incremented_str = str(incremented_number).zfill(len(number_str))
+                        incremented_image_name = re.sub(
+                            pattern, lambda m: incremented_str + m.group(2), image_name
+                        )
+                image_name_safe = safe_sanitize_text(incremented_image_name)
+
+                # Extract page number from image_name if present (e.g., "file_1.png" -> "1")
+                # Look for patterns like "_1.png", "_01.png", "_page_1.png", etc.
+                page_number = None
+                page_patterns = [
+                    r"_page_(\d+)\.png$",  # _page_1.png
+                    r"_(\d+)\.png$",  # _1.png, _01.png
+                    r"page_(\d+)\.png$",  # page_1.png
+                ]
+                for pattern in page_patterns:
+                    match = re.search(pattern, incremented_image_name, re.IGNORECASE)
+                    if match:
+                        page_number = match.group(1)
+                        break
+
+                # Use longer name limit to preserve page numbers, but still truncate if very long
+                # Remove .png extension before truncating to preserve more of the name
+                image_name_no_ext = image_name_safe.replace(".png", "").replace(
+                    ".PNG", ""
+                )
+                if len(image_name_no_ext) > 100:
+                    image_name_shortened = image_name_no_ext[:100]
+                else:
+                    image_name_shortened = image_name_no_ext
+
+                # Construct filename with page number if found
+                if page_number:
+                    filename = (
+                        f"{image_name_shortened}_page_{page_number}_bedrock_input.png"
+                    )
+                else:
+                    filename = f"{image_name_shortened}_bedrock_page_input_image.png"
+
+                filepath = os.path.join(vlm_debug_dir, filename)
+                print(f"Saving Bedrock VLM input image to: {filename}")
+                processed_image.save(filepath)
+                # print(f"Saved Bedrock VLM input image to: {filepath}")
+            except Exception as save_error:
+                print(f"Warning: Could not save Bedrock VLM input image: {save_error}")
+
+        # Call Bedrock API
+        extracted_text, vlm_input_tokens, vlm_output_tokens = _call_bedrock_vlm_api(
+            image=processed_image,
+            prompt=prompt,
+            model_choice=model_choice,
+            bedrock_runtime=bedrock_runtime,
+            max_new_tokens=model_default_max_new_tokens,
+            temperature=model_default_temperature,
+            top_p=model_default_top_p,
+        )
+
+        # Save prompt and response to file
+        if extracted_text and isinstance(extracted_text, str) and output_folder:
+            try:
+                # Extract page number from image_name if present
+                page_number = None
+                if image_name:
+                    page_patterns = [
+                        r"_page_(\d+)\.png$",
+                        r"_(\d+)\.png$",
+                        r"page_(\d+)\.png$",
+                    ]
+                    for pattern in page_patterns:
+                        match = re.search(pattern, image_name, re.IGNORECASE)
+                        if match:
+                            page_number = int(match.group(1))
+                            break
+
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
+                saved_file = save_vlm_prompt_response(
+                    prompt=prompt,
+                    response_text=extracted_text,
+                    output_folder=output_folder,
+                    model_choice=model_choice or "unknown",
+                    image_name=image_name,
+                    page_number=page_number,
+                    temperature=model_default_temperature,
+                    max_new_tokens=model_default_max_new_tokens,
+                    top_p=model_default_top_p,
+                    model_type="Bedrock",
+                    task_suffix=task_suffix,
+                )
+                print(f"Saved Bedrock VLM prompt/response to: {saved_file}")
+            except Exception as save_error:
+                print(
+                    f"Warning: Could not save Bedrock VLM prompt/response: {save_error}"
+                )
+
+        if extracted_text is None or not isinstance(extracted_text, str):
+            print("Bedrock page OCR warning: No valid response")
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                model_choice or "Bedrock",
+            )
+
+        # Plot bounding boxes from VLM response if enabled
+        if SAVE_VLM_INPUT_IMAGES:
+            try:
+                # Determine task type based on prompt
+                task_type = "ocr"
+                if detect_people_only:
+                    task_type = "person"
+                elif detect_signatures_only:
+                    task_type = "signature"
+
+                plot_text_bounding_boxes(
+                    processed_image,
+                    extracted_text,
+                    image_name=image_name,
+                    image_folder="bedrock_visualisations",
+                    output_folder=output_folder,
+                    task_type=task_type,
+                )
+            except Exception as plot_error:
+                print(
+                    f"Warning: Could not plot Bedrock VLM bounding boxes: {plot_error}"
+                )
+
+        # Parse response using shared helper
+        result = _parse_vlm_page_ocr_response(
+            extracted_text=extracted_text,
+            processed_image=processed_image,
+            processed_width=processed_width,
+            processed_height=processed_height,
+            scale_x=scale_x,
+            scale_y=scale_y,
+            normalised_coords_range=normalised_coords_range,
+            model_name="Bedrock",
+        )
+
+        # Get model name for tracking
+        vlm_model_name = model_choice or "Bedrock"
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
+
+    except Exception as e:
+        print(f"Bedrock page OCR error: {e}")
+        import traceback
+
+        print(f"Bedrock page OCR error traceback: {traceback.format_exc()}")
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            model_choice or "Bedrock",
+        )
+
+
+def _gemini_page_ocr_predict(
+    image: Image.Image,
+    image_name: str = "gemini_page_ocr_input_image.png",
+    normalised_coords_range: Optional[int] = None,
+    output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
+    model_choice: str = None,
+    client=None,
+    config=None,
+) -> Tuple[Dict[str, List], int, int, str]:
+    """
+    Gemini page-level OCR prediction that returns structured line-level results with bounding boxes.
+
+    Args:
+        image: PIL Image to process (full page)
+        image_name: Name of the image for debugging
+        normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
+        output_folder: The folder where output images will be saved
+        detect_people_only: If True, only detect people in images
+        detect_signatures_only: If True, only detect signatures in images
+        progress: Gradio progress tracker
+        model_choice: Gemini model name
+        client: Gemini ai.Client instance
+        config: Gemini types.GenerateContentConfig instance
+
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+    """
+    try:
+        if image is None:
+            print("Gemini page OCR error: Image is None")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Gemini page OCR error: Image is too small ({width}x{height} pixels)."
+                )
+                return {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                }
+        except Exception as size_error:
+            print(f"Gemini page OCR error: Could not get image size: {size_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+        except Exception as convert_error:
+            print(
+                f"Gemini page OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        scale_x = 1.0
+        scale_y = 1.0
+        try:
+            original_width, original_height = image.size
+            processed_image = _prepare_image_for_vlm(image)
+            processed_width, processed_height = processed_image.size
+
+            scale_x = (
+                float(original_width) / float(processed_width)
+                if processed_width > 0
+                else 1.0
+            )
+            scale_y = (
+                float(original_height) / float(processed_height)
+                if processed_height > 0
+                else 1.0
+            )
+        except Exception as prep_error:
+            print(f"Gemini page OCR error: Could not prepare image: {prep_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Create prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+        else:
+            prompt = full_page_ocr_vlm_prompt
+
+        # Call Gemini API
+        extracted_text, vlm_input_tokens, vlm_output_tokens = _call_gemini_vlm_api(
+            image=processed_image,
+            prompt=prompt,
+            client=client,
+            config=config,
+            model_choice=model_choice,
+            max_new_tokens=model_default_max_new_tokens,
+            temperature=model_default_temperature,
+        )
+
+        # Save prompt and response to file
+        if extracted_text and isinstance(extracted_text, str) and output_folder:
+            try:
+                # Extract page number from image_name if present
+                page_number = None
+                if image_name:
+                    page_patterns = [
+                        r"_page_(\d+)\.png$",
+                        r"_(\d+)\.png$",
+                        r"page_(\d+)\.png$",
+                    ]
+                    for pattern in page_patterns:
+                        match = re.search(pattern, image_name, re.IGNORECASE)
+                        if match:
+                            page_number = int(match.group(1))
+                            break
+
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
+                saved_file = save_vlm_prompt_response(
+                    prompt=prompt,
+                    response_text=extracted_text,
+                    output_folder=output_folder,
+                    model_choice=model_choice or "unknown",
+                    image_name=image_name,
+                    page_number=page_number,
+                    temperature=model_default_temperature,
+                    max_new_tokens=model_default_max_new_tokens,
+                    model_type="Gemini",
+                    task_suffix=task_suffix,
+                )
+                print(f"Saved Gemini VLM prompt/response to: {saved_file}")
+            except Exception as save_error:
+                print(
+                    f"Warning: Could not save Gemini VLM prompt/response: {save_error}"
+                )
+
+        if extracted_text is None or not isinstance(extracted_text, str):
+            print("Gemini page OCR warning: No valid response")
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                model_choice or "Gemini",
+            )
+
+        # Parse response using shared helper
+        result = _parse_vlm_page_ocr_response(
+            extracted_text=extracted_text,
+            processed_image=processed_image,
+            processed_width=processed_width,
+            processed_height=processed_height,
+            scale_x=scale_x,
+            scale_y=scale_y,
+            normalised_coords_range=normalised_coords_range,
+            model_name="Gemini",
+        )
+
+        # Get model name for tracking
+        vlm_model_name = model_choice or "Gemini"
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
+
+    except Exception as e:
+        print(f"Gemini page OCR error: {e}")
+        import traceback
+
+        print(f"Gemini page OCR error traceback: {traceback.format_exc()}")
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            model_choice or "Gemini",
+        )
+
+
+def _azure_openai_page_ocr_predict(
+    image: Image.Image,
+    image_name: str = "azure_openai_page_ocr_input_image.png",
+    normalised_coords_range: Optional[int] = None,
+    output_folder: str = OUTPUT_FOLDER,
+    detect_people_only: bool = False,
+    detect_signatures_only: bool = False,
+    progress: Optional[gr.Progress] = gr.Progress(),
+    model_choice: str = None,
+    client=None,
+) -> Tuple[Dict[str, List], int, int, str]:
+    """
+    Azure/OpenAI page-level OCR prediction that returns structured line-level results with bounding boxes.
+
+    Args:
+        image: PIL Image to process (full page)
+        image_name: Name of the image for debugging
+        normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
+        output_folder: The folder where output images will be saved
+        detect_people_only: If True, only detect people in images
+        detect_signatures_only: If True, only detect signatures in images
+        progress: Gradio progress tracker
+        model_choice: Model name (e.g., "gpt-4o", "gpt-4-vision-preview")
+        client: OpenAI client instance
+
+    Returns:
+        Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
+    """
+    try:
+        if image is None:
+            print("Azure/OpenAI page OCR error: Image is None")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            width, height = image.size
+            if width < 10 or height < 10:
+                print(
+                    f"Azure/OpenAI page OCR error: Image is too small ({width}x{height} pixels)."
+                )
+                return {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                }
+        except Exception as size_error:
+            print(
+                f"Azure/OpenAI page OCR error: Could not get image size: {size_error}"
+            )
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+        except Exception as convert_error:
+            print(
+                f"Azure/OpenAI page OCR error: Could not convert image to RGB: {convert_error}"
+            )
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        scale_x = 1.0
+        scale_y = 1.0
+        try:
+            original_width, original_height = image.size
+            processed_image = _prepare_image_for_vlm(image)
+            processed_width, processed_height = processed_image.size
+
+            scale_x = (
+                float(original_width) / float(processed_width)
+                if processed_width > 0
+                else 1.0
+            )
+            scale_y = (
+                float(original_height) / float(processed_height)
+                if processed_height > 0
+                else 1.0
+            )
+        except Exception as prep_error:
+            print(f"Azure/OpenAI page OCR error: Could not prepare image: {prep_error}")
+            return {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            }
+
+        # Create prompt
+        if detect_people_only:
+            progress(0.5, "Detecting people on page...")
+            print("Detecting people on page...")
+            prompt = full_page_ocr_people_vlm_prompt
+        elif detect_signatures_only:
+            progress(0.5, "Detecting signatures on page...")
+            print("Detecting signatures on page...")
+            prompt = full_page_ocr_signature_vlm_prompt
+        else:
+            prompt = full_page_ocr_vlm_prompt
+
+        # Call Azure/OpenAI API
+        extracted_text, vlm_input_tokens, vlm_output_tokens = (
+            _call_azure_openai_vlm_api(
+                image=processed_image,
+                prompt=prompt,
+                client=client,
+                model_choice=model_choice,
+                max_new_tokens=model_default_max_new_tokens,
+                temperature=model_default_temperature,
+            )
+        )
+
+        # Save prompt and response to file
+        if extracted_text and isinstance(extracted_text, str) and output_folder:
+            try:
+                # Extract page number from image_name if present
+                page_number = None
+                if image_name:
+                    page_patterns = [
+                        r"_page_(\d+)\.png$",
+                        r"_(\d+)\.png$",
+                        r"page_(\d+)\.png$",
+                    ]
+                    for pattern in page_patterns:
+                        match = re.search(pattern, image_name, re.IGNORECASE)
+                        if match:
+                            page_number = int(match.group(1))
+                            break
+
+                # Determine task suffix based on detection type
+                task_suffix = None
+                if detect_people_only:
+                    task_suffix = "person"
+                elif detect_signatures_only:
+                    task_suffix = "sig"
+
+                saved_file = save_vlm_prompt_response(
+                    prompt=prompt,
+                    response_text=extracted_text,
+                    output_folder=output_folder,
+                    model_choice=model_choice or "unknown",
+                    image_name=image_name,
+                    page_number=page_number,
+                    temperature=model_default_temperature,
+                    max_new_tokens=model_default_max_new_tokens,
+                    model_type="Azure/OpenAI",
+                    task_suffix=task_suffix,
+                )
+                print(f"Saved Azure/OpenAI VLM prompt/response to: {saved_file}")
+            except Exception as save_error:
+                print(
+                    f"Warning: Could not save Azure/OpenAI VLM prompt/response: {save_error}"
+                )
+
+        if extracted_text is None or not isinstance(extracted_text, str):
+            print("Azure/OpenAI page OCR warning: No valid response")
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                model_choice or "Azure/OpenAI",
+            )
+
+        # Parse response using shared helper
+        result = _parse_vlm_page_ocr_response(
+            extracted_text=extracted_text,
+            processed_image=processed_image,
+            processed_width=processed_width,
+            processed_height=processed_height,
+            scale_x=scale_x,
+            scale_y=scale_y,
+            normalised_coords_range=normalised_coords_range,
+            model_name="Azure/OpenAI",
+        )
+
+        # Get model name for tracking
+        vlm_model_name = model_choice or "Azure/OpenAI"
+
+        return result, vlm_input_tokens, vlm_output_tokens, vlm_model_name
+
+    except Exception as e:
+        print(f"Azure/OpenAI page OCR error: {e}")
+        import traceback
+
+        print(f"Azure/OpenAI page OCR error traceback: {traceback.format_exc()}")
+        return (
+            {
+                "text": [],
+                "left": [],
+                "top": [],
+                "width": [],
+                "height": [],
+                "conf": [],
+                "model": [],
+            },
+            0,
+            0,
+            model_choice or "Azure/OpenAI",
+        )
 
 
 class CustomImageAnalyzerEngine:
@@ -2529,20 +4967,24 @@ class CustomImageAnalyzerEngine:
         elif self.ocr_engine == "hybrid-vlm":
             # VLM-based hybrid OCR - no additional initialization needed
             # The VLM model is loaded when run_vlm.py is imported
-            print(f"Initializing hybrid VLM OCR with model: {SELECTED_MODEL}")
+            print(
+                f"Initializing hybrid VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
+            )
             self.paddle_ocr = None  # Not using PaddleOCR
 
         elif self.ocr_engine == "vlm":
             # VLM page-level OCR - no additional initialization needed
             # The VLM model is loaded when run_vlm.py is imported
-            print(f"Initializing VLM OCR with model: {SELECTED_MODEL}")
+            print(
+                f"Initializing VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
+            )
             self.paddle_ocr = None  # Not using PaddleOCR
 
         if self.ocr_engine == "hybrid-paddle-vlm":
             # Hybrid PaddleOCR + VLM - requires both PaddleOCR and VLM
             # The VLM model is loaded when run_vlm.py is imported
             print(
-                f"Initializing hybrid PaddleOCR + VLM OCR with model: {SELECTED_MODEL}"
+                f"Initializing hybrid PaddleOCR + VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
             )
 
         if self.ocr_engine == "hybrid-paddle-inference-server":
@@ -2930,6 +5372,13 @@ class CustomImageAnalyzerEngine:
         }
 
         if not line_data or not line_data.get("text"):
+            return output
+
+        # Validate that image is not None before processing
+        if image is None:
+            print(
+                "Warning: Image is None in _convert_line_to_word_level. Returning empty output."
+            )
             return output
 
         # Convert PIL Image to numpy array (BGR format for OpenCV)
@@ -3607,390 +6056,6 @@ class CustomImageAnalyzerEngine:
         # Create a deep copy of paddle_results to modify
         copied_paddle_results = copy.deepcopy(paddle_results)
 
-        def _normalize_paddle_result_lists(rec_texts, rec_scores, rec_polys):
-            """
-            Normalizes PaddleOCR result lists to ensure they all have the same length.
-            Pads missing entries with appropriate defaults:
-            - rec_texts: empty string ""
-            - rec_scores: 0.0 (low confidence)
-            - rec_polys: empty list []
-
-            Args:
-                rec_texts: List of recognized text strings
-                rec_scores: List of confidence scores
-                rec_polys: List of bounding box polygons
-
-            Returns:
-                Tuple of (normalized_rec_texts, normalized_rec_scores, normalized_rec_polys, max_length)
-            """
-            len_texts = len(rec_texts)
-            len_scores = len(rec_scores)
-            len_polys = len(rec_polys)
-            max_length = max(len_texts, len_scores, len_polys)
-
-            # Only normalize if there's a mismatch
-            if max_length > 0 and (
-                len_texts != max_length
-                or len_scores != max_length
-                or len_polys != max_length
-            ):
-                print(
-                    f"Warning: List length mismatch detected - rec_texts: {len_texts}, "
-                    f"rec_scores: {len_scores}, rec_polys: {len_polys}. "
-                    f"Padding to length {max_length}."
-                )
-
-                # Pad rec_texts
-                if len_texts < max_length:
-                    rec_texts = list(rec_texts) + [""] * (max_length - len_texts)
-
-                # Pad rec_scores
-                if len_scores < max_length:
-                    rec_scores = list(rec_scores) + [0.0] * (max_length - len_scores)
-
-                # Pad rec_polys
-                if len_polys < max_length:
-                    rec_polys = list(rec_polys) + [[]] * (max_length - len_polys)
-
-            return rec_texts, rec_scores, rec_polys, max_length
-
-        @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
-        def _process_page_result_with_hybrid_vlm_ocr(
-            page_results: list,
-            image: Image.Image,
-            img_width: int,
-            img_height: int,
-            input_image_width: int,
-            input_image_height: int,
-            confidence_threshold: float,
-            image_name: str,
-            output_folder: str,
-            padding: int = 0,
-        ):
-            """
-            Processes OCR page results using a hybrid system that combines PaddleOCR for initial recognition
-            and VLM for low-confidence lines. When PaddleOCR's recognition confidence for a detected line is
-            below the specified threshold, the line is re-processed using a higher-quality (but slower) VLM
-            model and the result is used to replace the low-confidence recognition. Results are kept in
-            PaddleOCR's standard output format for downstream compatibility.
-
-            Args:
-                page_results (list): The list of page result dicts from PaddleOCR to process. Each dict should
-                    contain keys like 'rec_texts', 'rec_scores', 'rec_polys', and optionally 'image_width',
-                    'image_height', and 'rec_models'.
-                image (PIL.Image.Image): The PIL Image object of the full page to allow line cropping.
-                img_width (int): The width of the (possibly preprocessed) image in pixels.
-                img_height (int): The height of the (possibly preprocessed) image in pixels.
-                input_image_width (int): The original image width (before any resizing/preprocessing).
-                input_image_height (int): The original image height (before any resizing/preprocessing).
-                confidence_threshold (float): Lines recognized by PaddleOCR with confidence lower than this
-                    threshold will be replaced using the VLM.
-                image_name (str): The name of the source image, used for logging/debugging.
-                output_folder (str): The output folder path for saving example images.
-                padding (int): Padding to add around line crops.
-
-            Returns:
-                Modified page_results with VLM replacements for low-confidence lines.
-            """
-
-            # Helper function to create safe filename (inlined to avoid needing instance_self)
-            def _create_safe_filename_with_confidence(
-                original_text: str,
-                new_text: str,
-                conf: int,
-                new_conf: int,
-                ocr_type: str = "OCR",
-            ) -> str:
-                """Creates a safe filename using confidence values when text sanitization fails."""
-
-                # Helper to sanitize text similar to _sanitize_filename
-                def _sanitize_text_for_filename(
-                    text: str,
-                    max_length: int = 20,
-                    fallback_prefix: str = "unknown_text",
-                ) -> str:
-                    """Sanitizes text for use in filenames."""
-                    sanitized = safe_sanitize_text(text)
-                    # Remove leading/trailing underscores and spaces
-                    sanitized = sanitized.strip("_ ")
-                    # If empty after sanitization, use a default value
-                    if not sanitized:
-                        sanitized = fallback_prefix
-                    # Limit to max_length characters
-                    if len(sanitized) > max_length:
-                        sanitized = sanitized[:max_length]
-                        sanitized = sanitized.rstrip("_")
-                    # Final check: if still empty or too short, use fallback
-                    if not sanitized or len(sanitized) < 3:
-                        sanitized = fallback_prefix
-                    return sanitized
-
-                # Try to sanitize both texts
-                safe_original = _sanitize_text_for_filename(
-                    original_text, max_length=15, fallback_prefix=f"orig_conf_{conf}"
-                )
-                safe_new = _sanitize_text_for_filename(
-                    new_text, max_length=15, fallback_prefix=f"new_conf_{new_conf}"
-                )
-
-                # If both sanitizations resulted in fallback names, create a confidence-based name
-                if safe_original.startswith("orig_conf") and safe_new.startswith(
-                    "new_conf"
-                ):
-                    return f"{ocr_type}_conf_{conf}_to_conf_{new_conf}"
-
-                return f"{safe_original}_conf_{conf}_to_{safe_new}_conf_{new_conf}"
-
-            # Process each page result in paddle_results
-            for page_result in page_results:
-                # Extract text recognition results from the paddle format
-                rec_texts = page_result.get("rec_texts", list())
-                rec_scores = page_result.get("rec_scores", list())
-                rec_polys = page_result.get("rec_polys", list())
-
-                # Normalize lists to ensure they all have the same length
-                rec_texts, rec_scores, rec_polys, num_lines = (
-                    _normalize_paddle_result_lists(rec_texts, rec_scores, rec_polys)
-                )
-
-                # Update page_result with normalized lists
-                page_result["rec_texts"] = rec_texts
-                page_result["rec_scores"] = rec_scores
-                page_result["rec_polys"] = rec_polys
-
-                # Initialize rec_models list with "Paddle" as default for all lines
-                if (
-                    "rec_models" not in page_result
-                    or len(page_result.get("rec_models", [])) != num_lines
-                ):
-                    rec_models = ["Paddle"] * num_lines
-                    page_result["rec_models"] = rec_models
-                else:
-                    rec_models = page_result["rec_models"]
-
-                # Since we're using the exact image PaddleOCR processed, coordinates are directly in image space
-                # No coordinate conversion needed - coordinates match the image dimensions exactly
-
-                # Process each line
-                # print(f"Processing {num_lines} lines from PaddleOCR results...")
-
-                for i in range(num_lines):
-                    line_text = rec_texts[i]
-                    line_conf = float(rec_scores[i]) * 100  # Convert to percentage
-                    bounding_box = rec_polys[i]
-
-                    # Skip if bounding box is empty (from padding)
-                    # Handle numpy arrays, lists, and None values safely
-                    if bounding_box is None:
-                        continue
-
-                    # Convert to list first to handle numpy arrays safely
-                    if hasattr(bounding_box, "tolist"):
-                        box = bounding_box.tolist()
-                    else:
-                        box = bounding_box
-
-                    # Check if box is empty (handles both list and numpy array cases)
-                    if not box or (isinstance(box, list) and len(box) == 0):
-                        continue
-
-                    # Skip empty lines
-                    if not line_text.strip():
-                        continue
-
-                    # Convert polygon to bounding box
-                    x_coords = [p[0] for p in box]
-                    y_coords = [p[1] for p in box]
-                    line_left_paddle = float(min(x_coords))
-                    line_top_paddle = float(min(y_coords))
-                    line_right_paddle = float(max(x_coords))
-                    line_bottom_paddle = float(max(y_coords))
-                    line_width_paddle = line_right_paddle - line_left_paddle
-                    line_height_paddle = line_bottom_paddle - line_top_paddle
-
-                    # Since we're using the exact image PaddleOCR processed, coordinates are already in image space
-                    # No conversion needed - use coordinates directly
-                    line_left = line_left_paddle
-                    line_top = line_top_paddle
-                    line_width = line_width_paddle
-                    line_height = line_height_paddle
-
-                    # Initialize model as PaddleOCR (default)
-
-                    # Count words in PaddleOCR output
-                    paddle_words = line_text.split()
-                    paddle_word_count = len(paddle_words)
-
-                    # If confidence is low, use VLM for a second opinion
-                    if line_conf <= confidence_threshold:
-
-                        # Ensure minimum line height for VLM processing
-                        # If line_height is too small, use a minimum height based on typical text line height
-                        min_line_height = max(
-                            line_height, 20
-                        )  # Minimum 20 pixels for text line
-
-                        # Calculate crop coordinates with padding
-                        # Convert floats to integers and apply padding, clamping to image bounds
-                        crop_left = max(0, int(round(line_left - padding)))
-                        crop_top = max(0, int(round(line_top - padding)))
-                        crop_right = min(
-                            img_width, int(round(line_left + line_width + padding))
-                        )
-                        crop_bottom = min(
-                            img_height, int(round(line_top + min_line_height + padding))
-                        )
-
-                        # Ensure crop dimensions are valid
-                        if crop_right <= crop_left or crop_bottom <= crop_top:
-                            # Invalid crop, keep original PaddleOCR result
-                            continue
-
-                        # Crop the line image
-                        cropped_image = image.crop(
-                            (crop_left, crop_top, crop_right, crop_bottom)
-                        )
-
-                        # Check if cropped image is too small for VLM processing
-                        crop_width = crop_right - crop_left
-                        crop_height = crop_bottom - crop_top
-                        if crop_width < 10 or crop_height < 10:
-                            continue
-
-                        # Ensure cropped image is in RGB mode before passing to VLM
-                        if cropped_image.mode != "RGB":
-                            cropped_image = cropped_image.convert("RGB")
-
-                        # Save input image for debugging if environment variable is set
-                        if SAVE_VLM_INPUT_IMAGES:
-                            try:
-                                vlm_debug_dir = os.path.join(
-                                    output_folder,
-                                    "hybrid_paddle_vlm_visualisations/hybrid_analysis_input_images",
-                                )
-                                os.makedirs(vlm_debug_dir, exist_ok=True)
-                                line_text_safe = safe_sanitize_text(line_text)
-                                line_text_shortened = line_text_safe[:20]
-                                image_name_safe = safe_sanitize_text(image_name)
-                                image_name_shortened = image_name_safe[:20]
-                                filename = f"{image_name_shortened}_{line_text_shortened}_hybrid_analysis_input_image.png"
-                                filepath = os.path.join(vlm_debug_dir, filename)
-                                cropped_image.save(filepath)
-                                # print(f"Saved VLM input image to: {filepath}")
-                            except Exception as save_error:
-                                print(
-                                    f"Warning: Could not save VLM input image: {save_error}"
-                                )
-
-                        # Use VLM for OCR on this line with error handling
-                        vlm_result = None
-                        vlm_rec_texts = []
-                        vlm_rec_scores = []
-
-                        try:
-                            vlm_result = _vlm_ocr_predict(cropped_image)
-                            vlm_rec_texts = (
-                                vlm_result.get("rec_texts", []) if vlm_result else []
-                            )
-                            vlm_rec_scores = (
-                                vlm_result.get("rec_scores", []) if vlm_result else []
-                            )
-                        except Exception:
-                            # Ensure we keep original PaddleOCR result on error
-                            vlm_rec_texts = []
-                            vlm_rec_scores = []
-
-                        if vlm_rec_texts and vlm_rec_scores:
-                            # Combine VLM words into a single text string
-                            vlm_text = " ".join(vlm_rec_texts)
-                            vlm_word_count = len(vlm_rec_texts)
-                            vlm_conf = float(
-                                np.median(vlm_rec_scores)
-                            )  # Keep as 0-1 range for paddle format
-
-                            # Only replace if word counts match
-                            word_count_allowed_difference = 4
-                            if (
-                                vlm_word_count - paddle_word_count
-                                <= word_count_allowed_difference
-                                and vlm_word_count - paddle_word_count
-                                >= -word_count_allowed_difference
-                            ):
-                                text_output = f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
-                                text_output += f"-> '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) [VLM]"
-                                print(text_output)
-
-                                if REPORT_VLM_OUTPUTS_TO_GUI:
-                                    gr.Info(text_output, duration=2)
-
-                                # For exporting example image comparisons
-                                safe_filename = _create_safe_filename_with_confidence(
-                                    line_text,
-                                    vlm_text,
-                                    int(line_conf),
-                                    int(vlm_conf * 100),
-                                    "VLM",
-                                )
-
-                                if SAVE_EXAMPLE_HYBRID_IMAGES:
-                                    # Normalize and validate image_name to prevent path traversal attacks
-                                    normalized_image_name = os.path.normpath(
-                                        image_name + "_hybrid_paddle_vlm"
-                                    )
-                                    if (
-                                        ".." in normalized_image_name
-                                        or "/" in normalized_image_name
-                                        or "\\" in normalized_image_name
-                                    ):
-                                        normalized_image_name = "safe_image"
-
-                                    hybrid_ocr_examples_folder = (
-                                        output_folder
-                                        + f"/hybrid_ocr_examples/{normalized_image_name}"
-                                    )
-                                    # Validate the constructed path is safe
-                                    if not validate_folder_containment(
-                                        hybrid_ocr_examples_folder, OUTPUT_FOLDER
-                                    ):
-                                        raise ValueError(
-                                            f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
-                                        )
-
-                                    if not os.path.exists(hybrid_ocr_examples_folder):
-                                        os.makedirs(hybrid_ocr_examples_folder)
-                                    output_image_path = (
-                                        hybrid_ocr_examples_folder
-                                        + f"/{safe_filename}.png"
-                                    )
-                                    # print(f"Saving example image to {output_image_path}")
-                                    cropped_image.save(output_image_path)
-
-                                # Replace with VLM result in paddle_results format
-                                # Update rec_texts, rec_scores, and rec_models for this line
-                                rec_texts[i] = vlm_text
-                                rec_scores[i] = vlm_conf
-                                rec_models[i] = "VLM"
-                                # Ensure page_result is updated with the modified rec_models list
-                                page_result["rec_models"] = rec_models
-                            else:
-                                print(
-                                    f"  Line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) -> "
-                                    f"VLM result '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) "
-                                    f"word count mismatch. Keeping PaddleOCR result."
-                                )
-                        else:
-                            # VLM returned empty or no results - keep original PaddleOCR result
-                            if line_conf <= confidence_threshold:
-                                pass
-
-            # Debug: Print summary of model labels before returning
-            for page_idx, page_result in enumerate(page_results):
-                rec_models = page_result.get("rec_models", [])
-                sum(1 for m in rec_models if m == "VLM")
-                sum(1 for m in rec_models if m == "Paddle")
-
-            return page_results
-
         modified_paddle_results = _process_page_result_with_hybrid_vlm_ocr(
             copied_paddle_results,
             image,
@@ -4016,6 +6081,7 @@ class CustomImageAnalyzerEngine:
         image_name: str = "unknown_image_name",
         input_image_width: int = None,
         input_image_height: int = None,
+        model_name: str = None,
     ) -> List[Any]:
         """
         Performs OCR using PaddleOCR at line level, then inference-server API for low-confidence lines.
@@ -4302,7 +6368,8 @@ class CustomImageAnalyzerEngine:
 
                         try:
                             inference_server_result = _inference_server_ocr_predict(
-                                cropped_image
+                                cropped_image,
+                                model_name=model_name,
                             )
                             inference_server_rec_texts = (
                                 inference_server_result.get("rec_texts", [])
@@ -4425,8 +6492,16 @@ class CustomImageAnalyzerEngine:
         return modified_paddle_results
 
     def perform_ocr(
-        self, image: Union[str, Image.Image, np.ndarray], ocr: Optional[Any] = None
-    ) -> List[OCRResult]:
+        self,
+        image: Union[str, Image.Image, np.ndarray],
+        ocr: Optional[Any] = None,
+        bedrock_runtime=None,
+        gemini_client=None,
+        gemini_config=None,
+        azure_openai_client=None,
+        vlm_model_choice: str = None,
+        inference_server_model_name: str = None,
+    ) -> Tuple[List[OCRResult], int, int, str]:
         """
         Performs OCR on the given image using the configured engine.
         """
@@ -4495,7 +6570,12 @@ class CustomImageAnalyzerEngine:
             # Try hybrid VLM with original image for cropping:
             ocr_data = self._perform_hybrid_ocr(image, image_name=image_name)
 
-        elif self.ocr_engine == "vlm":
+        # Initialize VLM token tracking variables
+        vlm_total_input_tokens = 0
+        vlm_total_output_tokens = 0
+        vlm_model_name = ""
+
+        if self.ocr_engine == "vlm":
             # VLM page-level OCR - sends whole page to VLM and gets structured line-level results
             # Use original image (before preprocessing) for VLM since coordinates should be in original space
             vlm_image = (
@@ -4503,9 +6583,13 @@ class CustomImageAnalyzerEngine:
                 if original_image_for_visualization is not None
                 else image
             )
-            ocr_data = _vlm_page_ocr_predict(
-                vlm_image, image_name=image_name, output_folder=self.output_folder
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _vlm_page_ocr_predict(
+                    vlm_image, image_name=image_name, output_folder=self.output_folder
+                )
             )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
             # VLM returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "inference-server":
@@ -4516,13 +6600,110 @@ class CustomImageAnalyzerEngine:
                 if original_image_for_visualization is not None
                 else image
             )
-            ocr_data = _inference_server_page_ocr_predict(
-                inference_server_image,
-                image_name=image_name,
-                normalised_coords_range=999,
-                output_folder=self.output_folder,
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _inference_server_page_ocr_predict(
+                    inference_server_image,
+                    image_name=image_name,
+                    normalised_coords_range=999,
+                    output_folder=self.output_folder,
+                    model_name=inference_server_model_name,
+                )
             )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
             # Inference-server returns data already in the expected format, so no conversion needed
+
+        elif self.ocr_engine == "bedrock-vlm":
+            # Bedrock page-level OCR - sends whole page to Bedrock API and gets structured line-level results
+            # Use original image (before preprocessing) for Bedrock since coordinates should be in original space
+            bedrock_image = (
+                original_image_for_visualization
+                if original_image_for_visualization is not None
+                else image
+            )
+            # Get model choice from parameter or config
+            from tools.config import CLOUD_VLM_MODEL_CHOICE
+
+            model_choice = (
+                vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
+            )
+
+            # Qwen 3-VL models on Bedrock return normalized coordinates (0-999 range)
+            # Other Bedrock models typically return absolute pixel coordinates
+            normalised_coords_range = None
+            if model_choice and "qwen" in model_choice.lower():
+                normalised_coords_range = 999
+
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _bedrock_page_ocr_predict(
+                    bedrock_image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=self.output_folder,
+                    model_choice=model_choice,
+                    bedrock_runtime=bedrock_runtime,
+                )
+            )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
+            # Bedrock returns data already in the expected format, so no conversion needed
+
+        elif self.ocr_engine == "gemini-vlm":
+            # Gemini page-level OCR - sends whole page to Gemini API and gets structured line-level results
+            # Use original image (before preprocessing) for Gemini since coordinates should be in original space
+            gemini_image = (
+                original_image_for_visualization
+                if original_image_for_visualization is not None
+                else image
+            )
+            # Get model choice from parameter or config
+            from tools.config import CLOUD_VLM_MODEL_CHOICE
+
+            model_choice = (
+                vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
+            )
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _gemini_page_ocr_predict(
+                    gemini_image,
+                    image_name=image_name,
+                    normalised_coords_range=None,  # Gemini typically returns absolute coordinates
+                    output_folder=self.output_folder,
+                    model_choice=model_choice,
+                    client=gemini_client,
+                    config=gemini_config,
+                )
+            )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
+            # Gemini returns data already in the expected format, so no conversion needed
+
+        elif self.ocr_engine == "azure-openai-vlm":
+            # Azure/OpenAI page-level OCR - sends whole page to Azure/OpenAI API and gets structured line-level results
+            # Use original image (before preprocessing) for Azure/OpenAI since coordinates should be in original space
+            azure_image = (
+                original_image_for_visualization
+                if original_image_for_visualization is not None
+                else image
+            )
+            # Get model choice from parameter or config
+            from tools.config import CLOUD_VLM_MODEL_CHOICE
+
+            model_choice = (
+                vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
+            )
+            ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
+                _azure_openai_page_ocr_predict(
+                    azure_image,
+                    image_name=image_name,
+                    normalised_coords_range=None,  # Azure/OpenAI typically returns absolute coordinates
+                    output_folder=self.output_folder,
+                    model_choice=model_choice,
+                    client=azure_openai_client,
+                )
+            )
+            vlm_total_input_tokens = vlm_input_tokens
+            vlm_total_output_tokens = vlm_output_tokens
+            # Azure/OpenAI returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "tesseract":
 
@@ -4655,6 +6836,7 @@ class CustomImageAnalyzerEngine:
                     image_name=image_name,
                     input_image_width=original_image_width,
                     input_image_height=original_image_height,
+                    model_name=inference_server_model_name,
                 )
             else:
                 modified_paddle_results = copy.deepcopy(paddle_results)
@@ -4769,6 +6951,9 @@ class CustomImageAnalyzerEngine:
                 or self.ocr_engine == "hybrid-paddle-inference-server"
                 or self.ocr_engine == "vlm"
                 or self.ocr_engine == "inference-server"
+                or self.ocr_engine == "bedrock-vlm"
+                or self.ocr_engine == "gemini-vlm"
+                or self.ocr_engine == "azure-openai-vlm"
             ):
                 pass
                 # print(f"Skipping rescale_ocr_data for PaddleOCR/VLM (already scaled to original dimensions)")
@@ -4815,8 +7000,14 @@ class CustomImageAnalyzerEngine:
                     else:
                         # PaddleOCR processed the preprocessed image, so scale coordinates to preprocessed space
                         needs_scaling = True
-                elif self.ocr_engine == "vlm" or self.ocr_engine == "inference-server":
-                    # VLM returns coordinates in original image space (since we pass original image to VLM)
+                elif (
+                    self.ocr_engine == "vlm"
+                    or self.ocr_engine == "inference-server"
+                    or self.ocr_engine == "bedrock-vlm"
+                    or self.ocr_engine == "gemini-vlm"
+                    or self.ocr_engine == "azure-openai-vlm"
+                ):
+                    # VLM/Cloud VLM returns coordinates in original image space (since we pass original image to VLM)
                     # So we need to crop from the original image, not the preprocessed image
                     if original_image_for_visualization is not None:
                         # Coordinates are in original space, so crop from original image
@@ -4896,7 +7087,7 @@ class CustomImageAnalyzerEngine:
         # Determine default model based on OCR engine if model field is not present
         if "model" in ocr_result:
             # Model field exists and has correct length - use it
-            def get_model(idx):
+            def get_model_name(idx):
                 return ocr_result["model"][idx]
 
         else:
@@ -4926,7 +7117,20 @@ class CustomImageAnalyzerEngine:
                                         else (
                                             "Inference Server"
                                             if self.ocr_engine == "inference-server"
-                                            else None
+                                            else (
+                                                "Bedrock"
+                                                if self.ocr_engine == "bedrock-vlm"
+                                                else (
+                                                    "Gemini"
+                                                    if self.ocr_engine == "gemini-vlm"
+                                                    else (
+                                                        "Azure/OpenAI"
+                                                        if self.ocr_engine
+                                                        == "azure-openai-vlm"
+                                                        else None
+                                                    )
+                                                )
+                                            )
                                         )
                                     )
                                 )
@@ -4936,7 +7140,7 @@ class CustomImageAnalyzerEngine:
                 )
             )
 
-            def get_model(idx):
+            def get_model_name(idx):
                 return default_model
 
         output = [
@@ -4947,12 +7151,12 @@ class CustomImageAnalyzerEngine:
                 width=ocr_result["width"][i],
                 height=ocr_result["height"][i],
                 conf=round(float(ocr_result["conf"][i]), 0),
-                model=get_model(i),
+                model=get_model_name(i),
             )
             for i in valid_indices
         ]
 
-        return output
+        return output, vlm_total_input_tokens, vlm_total_output_tokens, vlm_model_name
 
     def analyze_text(
         self,
@@ -4964,6 +7168,12 @@ class CustomImageAnalyzerEngine:
         custom_entities: List[str] = custom_entities,
         language: Optional[str] = DEFAULT_LANGUAGE,
         nlp_analyser: AnalyzerEngine = None,
+        bedrock_runtime=None,
+        model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
+        custom_llm_instructions: str = "",
+        chosen_llm_entities: List[str] = None,
+        file_name: Optional[str] = None,
+        page_number: Optional[int] = None,
         **text_analyzer_kwargs,
     ) -> List[CustomImageRecognizerResult]:
 
@@ -4971,6 +7181,38 @@ class CustomImageAnalyzerEngine:
         page_text_mapping = list()
         all_text_line_results = list()
         comprehend_query_number = 0
+
+        # Track LLM token usage
+        llm_total_input_tokens = 0
+        llm_total_output_tokens = 0
+        llm_model_name = ""
+
+        # Extract allow_list from text_analyzer_kwargs if provided
+        # This allows allow_list terms to "overrule" LLM PII detection results
+        allow_list = text_analyzer_kwargs.get("allow_list", [])
+        if allow_list is None:
+            allow_list = []
+
+        # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+        if chosen_llm_entities is None:
+            chosen_llm_entities = chosen_redact_comprehend_entities
+
+        # Filter out CUSTOM_VLM_* entities (these are handled separately via VLM, not LLM)
+        # and validate that we have either entities or custom instructions
+        filtered_llm_entities = [
+            entity
+            for entity in (chosen_llm_entities or [])
+            if not entity.startswith("CUSTOM_VLM_")
+        ]
+
+        # Validate: if no standard entities and no custom instructions, raise error
+        if not filtered_llm_entities and (
+            not custom_llm_instructions or not custom_llm_instructions.strip()
+        ):
+            raise ValueError(
+                "No standard entities selected for LLM PII detection and no custom instructions provided. "
+                "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions."
+            )
 
         if not nlp_analyser:
             nlp_analyser = self.analyzer_engine
@@ -5010,38 +7252,101 @@ class CustomImageAnalyzerEngine:
                 print(out_message)
                 raise Warning(out_message)
 
+            # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+            # Also exclude allow_list since we pass it explicitly
+            presidio_kwargs = {
+                k: v
+                for k, v in text_analyzer_kwargs.items()
+                if k
+                not in [
+                    "inference_method",
+                    "model_choice",
+                    "api_url",
+                    "local_model",
+                    "tokenizer",
+                    "assistant_model",
+                    "client",
+                    "client_config",
+                    "temperature",
+                    "max_tokens",
+                    "custom_instructions",
+                    "allow_list",
+                ]
+            }
+
             analyzer_result = nlp_analyser.analyze(
-                text=page_text, language=language, **text_analyzer_kwargs
+                text=page_text,
+                language=language,
+                allow_list=allow_list,
+                **presidio_kwargs,
             )
             all_text_line_results = map_back_entity_results(
-                analyzer_result, page_text_mapping, all_text_line_results
+                analyzer_result,
+                page_text_mapping,
+                all_text_line_results,
+                allow_list=allow_list,
             )
 
         elif pii_identification_method == AWS_PII_OPTION:
 
-            # Handle custom entities first
-            if custom_entities:
-                custom_redact_entities = [
-                    entity
-                    for entity in chosen_redact_comprehend_entities
-                    if entity in custom_entities
-                ]
+            # Run local detection for any custom entities (including CUSTOM/CUSTOM_FUZZY)
+            local_custom_entities = [
+                entity
+                for entity in (chosen_redact_comprehend_entities or [])
+                if entity in (custom_entities or [])
+                or entity in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
 
-                if custom_redact_entities:
-                    # Filter entities to only include those supported by the language
-                    language_supported_entities = filter_entities_for_language(
-                        custom_redact_entities, valid_language_entities, language
-                    )
+            if local_custom_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    local_custom_entities, valid_language_entities, language
+                )
 
-                    if language_supported_entities:
-                        text_analyzer_kwargs["entities"] = language_supported_entities
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
 
-                    page_analyser_result = nlp_analyser.analyze(
-                        text=page_text, language=language, **text_analyzer_kwargs
-                    )
-                    all_text_line_results = map_back_entity_results(
-                        page_analyser_result, page_text_mapping, all_text_line_results
-                    )
+                # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                presidio_kwargs = {
+                    k: v
+                    for k, v in text_analyzer_kwargs.items()
+                    if k
+                    not in [
+                        "inference_method",
+                        "model_choice",
+                        "api_url",
+                        "local_model",
+                        "tokenizer",
+                        "assistant_model",
+                        "client",
+                        "client_config",
+                        "temperature",
+                        "max_tokens",
+                        "custom_instructions",
+                        "allow_list",
+                    ]
+                }
+
+                page_analyser_result = nlp_analyser.analyze(
+                    text=page_text,
+                    language=language,
+                    allow_list=allow_list,
+                    **presidio_kwargs,
+                )
+                all_text_line_results = map_back_entity_results(
+                    page_analyser_result,
+                    page_text_mapping,
+                    all_text_line_results,
+                    allow_list=allow_list,
+                )
+
+            # Guard: only call AWS Comprehend when at least one non-custom Comprehend entity is selected.
+            aws_comprehend_entities = [
+                entity
+                for entity in (chosen_redact_comprehend_entities or [])
+                if entity in (FULL_COMPREHEND_ENTITY_LIST or [])
+                and entity not in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
 
             # Process text in batches for AWS Comprehend
             current_batch = ""
@@ -5060,30 +7365,19 @@ class CustomImageAnalyzerEngine:
                     word_start_positions.append(current_pos)
                     current_pos += len(word) + 1
 
-                for word_idx, word in enumerate(words):
+                word_idx = 0
+                while word_idx < len(words):
+                    word = words[word_idx]
                     new_batch_char_count = len(current_batch) + len(word) + 1
 
-                    if batch_word_count >= 50 or new_batch_char_count >= 200:
-                        # Process current batch
-                        all_text_line_results = do_aws_comprehend_call(
-                            current_batch,
-                            current_batch_mapping,
-                            comprehend_client,
-                            aws_language,
-                            text_analyzer_kwargs.get("allow_list", []),
-                            chosen_redact_comprehend_entities,
-                            all_text_line_results,
-                        )
-                        comprehend_query_number += 1
+                    # Check if we've hit the limit
+                    limit_reached = (
+                        batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                        or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                    )
 
-                        # Reset batch
-                        current_batch = word
-                        batch_word_count = 1
-                        batch_char_count = len(word)
-                        current_batch_mapping = [
-                            (0, i, text_line, None, word_start_positions[word_idx])
-                        ]
-                    else:
+                    if limit_reached:
+                        # Add the current word to the batch first
                         if current_batch:
                             current_batch += " "
                             batch_char_count += 1
@@ -5105,6 +7399,122 @@ class CustomImageAnalyzerEngine:
                                 )
                             )
 
+                        # Check if current word ends with phrase punctuation
+                        if ends_with_phrase_punctuation(word):
+                            # Process current batch
+                            all_text_line_results = do_aws_comprehend_call(
+                                current_batch,
+                                current_batch_mapping,
+                                comprehend_client,
+                                aws_language,
+                                text_analyzer_kwargs.get("allow_list", []),
+                                aws_comprehend_entities,
+                                all_text_line_results,
+                            )
+                            comprehend_query_number += (
+                                len(current_batch.strip())
+                                + COMPREHEND_CHARACTERS_PER_UNIT
+                                - 1
+                            ) // COMPREHEND_CHARACTERS_PER_UNIT
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx += 1
+                        else:
+                            # Look ahead in current line for phrase-ending punctuation or end of line
+                            lookahead_idx = word_idx + 1
+                            lookahead_batch = current_batch
+                            lookahead_char_count = batch_char_count
+                            lookahead_word_count = batch_word_count
+                            lookahead_mapping = list(current_batch_mapping)
+
+                            # Continue adding words until we find phrase-ending punctuation or end of line
+                            while lookahead_idx < len(words):
+                                lookahead_word = words[lookahead_idx]
+
+                                # Add the word to lookahead batch
+                                if lookahead_batch:
+                                    lookahead_batch += " "
+                                    lookahead_char_count += 1
+                                lookahead_batch += lookahead_word
+                                lookahead_char_count += len(lookahead_word)
+                                lookahead_word_count += 1
+
+                                if (
+                                    not lookahead_mapping
+                                    or lookahead_mapping[-1][1] != i
+                                ):
+                                    lookahead_mapping.append(
+                                        (
+                                            lookahead_char_count - len(lookahead_word),
+                                            i,
+                                            text_line,
+                                            None,
+                                            word_start_positions[lookahead_idx],
+                                        )
+                                    )
+
+                                # Check if this word ends with phrase punctuation
+                                if ends_with_phrase_punctuation(lookahead_word):
+                                    break
+
+                                lookahead_idx += 1
+
+                            # Use the lookahead batch (either found phrase end or reached end of line)
+                            current_batch = lookahead_batch
+                            batch_char_count = lookahead_char_count
+                            batch_word_count = lookahead_word_count
+                            current_batch_mapping = lookahead_mapping
+
+                            # Process current batch
+                            all_text_line_results = do_aws_comprehend_call(
+                                current_batch,
+                                current_batch_mapping,
+                                comprehend_client,
+                                aws_language,
+                                text_analyzer_kwargs.get("allow_list", []),
+                                aws_comprehend_entities,
+                                all_text_line_results,
+                            )
+                            comprehend_query_number += (
+                                len(current_batch.strip())
+                                + COMPREHEND_CHARACTERS_PER_UNIT
+                                - 1
+                            ) // COMPREHEND_CHARACTERS_PER_UNIT
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx = lookahead_idx + 1
+                    else:
+                        # Normal case: add word to batch
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+                        word_idx += 1
+
             # Process final batch if any
             if current_batch:
                 all_text_line_results = do_aws_comprehend_call(
@@ -5113,9 +7523,1121 @@ class CustomImageAnalyzerEngine:
                     comprehend_client,
                     aws_language,
                     text_analyzer_kwargs.get("allow_list", []),
-                    chosen_redact_comprehend_entities,
+                    aws_comprehend_entities,
                     all_text_line_results,
                 )
+                comprehend_query_number += (
+                    len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+                ) // COMPREHEND_CHARACTERS_PER_UNIT
+
+        elif pii_identification_method == AWS_LLM_PII_OPTION:
+            # LLM-based entity detection using AWS Bedrock
+            try:
+                from tools.llm_entity_detection import do_llm_entity_detection_call
+            except ImportError as e:
+                print(f"Error importing LLM entity detection: {e}")
+                raise ImportError(
+                    "LLM entity detection not available. Please ensure llm_funcs.py is accessible."
+                )
+
+            if not bedrock_runtime:
+                raise ValueError(
+                    "bedrock_runtime is required when using LLM-based PII detection"
+                )
+
+            # Set inference method to aws-bedrock if not already set
+            if text_analyzer_kwargs.get("inference_method") is None:
+                text_analyzer_kwargs["inference_method"] = "aws-bedrock"
+
+            # Update model_choice to use CLOUD_LLM_PII_MODEL_CHOICE for Bedrock, or value from text_analyzer_kwargs if set
+            if text_analyzer_kwargs.get("model_choice") is None:
+                model_choice = CLOUD_LLM_PII_MODEL_CHOICE
+            else:
+                model_choice = text_analyzer_kwargs.get(
+                    "model_choice", CLOUD_LLM_PII_MODEL_CHOICE
+                )
+
+            # Set LLM model name for tracking
+            llm_model_name = model_choice or ""
+
+            # Handle custom entities first (same as AWS Comprehend)
+            # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+            local_custom_entities = [
+                entity
+                for entity in (chosen_llm_entities or [])
+                if entity in (custom_entities or [])
+                or entity in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
+
+            if local_custom_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    local_custom_entities, valid_language_entities, language
+                )
+
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
+
+                    # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                    presidio_kwargs = {
+                        k: v
+                        for k, v in text_analyzer_kwargs.items()
+                        if k
+                        not in [
+                            "inference_method",
+                            "model_choice",
+                            "api_url",
+                            "local_model",
+                            "tokenizer",
+                            "assistant_model",
+                            "client",
+                            "client_config",
+                            "temperature",
+                            "max_tokens",
+                            "custom_instructions",
+                            "allow_list",
+                        ]
+                    }
+
+                    page_analyser_result = nlp_analyser.analyze(
+                        text=page_text,
+                        language=language,
+                        allow_list=allow_list,
+                        **presidio_kwargs,
+                    )
+                    all_text_line_results = map_back_entity_results(
+                        page_analyser_result,
+                        page_text_mapping,
+                        all_text_line_results,
+                        allow_list=allow_list,
+                    )
+
+            # Process text in batches for LLM (same batching logic as AWS Comprehend)
+            current_batch = ""
+            current_batch_mapping = list()
+            batch_char_count = 0
+            batch_word_count = 0
+
+            for i, text_line in enumerate(line_level_ocr_results):
+                words = text_line.text.split()
+                word_start_positions = list()
+                current_pos = 0
+
+                for word in words:
+                    word_start_positions.append(current_pos)
+                    current_pos += len(word) + 1
+
+                word_idx = 0
+                while word_idx < len(words):
+                    word = words[word_idx]
+                    new_batch_char_count = len(current_batch) + len(word) + 1
+
+                    # Check if we've hit the limit
+                    limit_reached = (
+                        batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                        or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                    )
+
+                    if limit_reached:
+                        # Add the current word to the batch first
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+
+                        # Check if current word ends with phrase punctuation
+                        if ends_with_phrase_punctuation(word):
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
+                            ]
+                            # Process current batch
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx += 1
+                        else:
+                            # Look ahead in current line for phrase-ending punctuation or end of line
+                            lookahead_idx = word_idx + 1
+                            lookahead_batch = current_batch
+                            lookahead_char_count = batch_char_count
+                            lookahead_word_count = batch_word_count
+                            lookahead_mapping = list(current_batch_mapping)
+
+                            # Continue adding words until we find phrase-ending punctuation or end of line
+                            while lookahead_idx < len(words):
+                                lookahead_word = words[lookahead_idx]
+
+                                # Add the word to lookahead batch
+                                if lookahead_batch:
+                                    lookahead_batch += " "
+                                    lookahead_char_count += 1
+                                lookahead_batch += lookahead_word
+                                lookahead_char_count += len(lookahead_word)
+                                lookahead_word_count += 1
+
+                                if (
+                                    not lookahead_mapping
+                                    or lookahead_mapping[-1][1] != i
+                                ):
+                                    lookahead_mapping.append(
+                                        (
+                                            lookahead_char_count - len(lookahead_word),
+                                            i,
+                                            text_line,
+                                            None,
+                                            word_start_positions[lookahead_idx],
+                                        )
+                                    )
+
+                                # Check if this word ends with phrase punctuation
+                                if ends_with_phrase_punctuation(lookahead_word):
+                                    break
+
+                                lookahead_idx += 1
+
+                            # Use the lookahead batch (either found phrase end or reached end of line)
+                            current_batch = lookahead_batch
+                            batch_char_count = lookahead_char_count
+                            batch_word_count = lookahead_word_count
+                            current_batch_mapping = lookahead_mapping
+
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
+                            ]
+                            # Process current batch
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx = lookahead_idx + 1
+                    else:
+                        # Normal case: add word to batch
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+                        word_idx += 1
+
+            # Process final batch if any
+            if current_batch:
+                # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
+                llm_chosen_redact_comprehend_entities = [
+                    entity
+                    for entity in chosen_llm_entities
+                    if entity != "CUSTOM" and not entity.startswith("CUSTOM_VLM_")
+                ]
+                all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                    do_llm_entity_detection_call(
+                        current_batch,
+                        current_batch_mapping,
+                        bedrock_runtime=bedrock_runtime,
+                        language=aws_language,
+                        allow_list=text_analyzer_kwargs.get("allow_list", []),
+                        chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                        all_text_line_results=all_text_line_results,
+                        model_choice=model_choice,
+                        temperature=text_analyzer_kwargs.get(
+                            "temperature", LLM_PII_TEMPERATURE
+                        ),
+                        max_tokens=text_analyzer_kwargs.get(
+                            "max_tokens", LLM_PII_MAX_TOKENS
+                        ),
+                        output_folder=getattr(self, "output_folder", None),
+                        batch_number=comprehend_query_number + 1,
+                        custom_instructions=custom_llm_instructions,
+                        file_name=file_name,
+                        page_number=page_number,
+                        inference_method=text_analyzer_kwargs.get("inference_method"),
+                        # local_model=text_analyzer_kwargs.get("local_model"),
+                        # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                        # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                        client=text_analyzer_kwargs.get("client"),
+                        client_config=text_analyzer_kwargs.get("client_config"),
+                        api_url=text_analyzer_kwargs.get("api_url"),
+                    )
+                )
+                # Accumulate token usage
+                llm_total_input_tokens += batch_input_tokens
+                llm_total_output_tokens += batch_output_tokens
+                comprehend_query_number += 1
+        elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+            # LLM-based entity detection using inference server
+            try:
+                from tools.llm_entity_detection import do_llm_entity_detection_call
+            except ImportError as e:
+                print(f"Error importing LLM entity detection: {e}")
+                raise ImportError(
+                    "LLM entity detection not available. Please ensure llm_funcs.py is accessible."
+                )
+
+            # Set inference method to inference-server if not already set
+            if text_analyzer_kwargs.get("inference_method") is None:
+                text_analyzer_kwargs["inference_method"] = "inference-server"
+
+            # Set API URL if not already set
+            if text_analyzer_kwargs.get("api_url") is None:
+                text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
+
+            # Set model choice if not already set - use INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
+            if text_analyzer_kwargs.get("model_choice") is None:
+                model_choice = INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
+                text_analyzer_kwargs["model_choice"] = model_choice
+            else:
+                model_choice = text_analyzer_kwargs.get("model_choice")
+
+            # Set LLM model name for tracking
+            llm_model_name = model_choice or ""
+
+            # Update model_choice to use the value from text_analyzer_kwargs
+            model_choice = text_analyzer_kwargs.get(
+                "model_choice", INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
+            )
+
+            # Handle custom entities first (same as AWS Comprehend)
+            # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+            local_custom_entities = [
+                entity
+                for entity in (chosen_llm_entities or [])
+                if entity in (custom_entities or [])
+                or entity in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
+
+            if local_custom_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    local_custom_entities, valid_language_entities, language
+                )
+
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
+
+                    # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                    presidio_kwargs = {
+                        k: v
+                        for k, v in text_analyzer_kwargs.items()
+                        if k
+                        not in [
+                            "inference_method",
+                            "model_choice",
+                            "api_url",
+                            "local_model",
+                            "tokenizer",
+                            "assistant_model",
+                            "client",
+                            "client_config",
+                            "temperature",
+                            "max_tokens",
+                            "custom_instructions",
+                            "allow_list",
+                        ]
+                    }
+
+                    page_analyser_result = nlp_analyser.analyze(
+                        text=page_text,
+                        language=language,
+                        allow_list=allow_list,
+                        **presidio_kwargs,
+                    )
+                    all_text_line_results = map_back_entity_results(
+                        page_analyser_result,
+                        page_text_mapping,
+                        all_text_line_results,
+                        allow_list=allow_list,
+                    )
+
+            # Process text in batches for LLM (same batching logic as AWS Comprehend)
+            current_batch = ""
+            current_batch_mapping = list()
+            batch_char_count = 0
+            batch_word_count = 0
+
+            for i, text_line in enumerate(line_level_ocr_results):
+                words = text_line.text.split()
+                word_start_positions = list()
+                current_pos = 0
+
+                for word in words:
+                    word_start_positions.append(current_pos)
+                    current_pos += len(word) + 1
+
+                word_idx = 0
+                while word_idx < len(words):
+                    word = words[word_idx]
+                    new_batch_char_count = len(current_batch) + len(word) + 1
+
+                    # Check if we've hit the limit
+                    limit_reached = (
+                        batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                        or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                    )
+
+                    if limit_reached:
+                        # Add the current word to the batch first
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+
+                        # Check if current word ends with phrase punctuation
+                        if ends_with_phrase_punctuation(word):
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
+                            ]
+                            # Process current batch
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx += 1
+                        else:
+                            # Look ahead in current line for phrase-ending punctuation or end of line
+                            lookahead_idx = word_idx + 1
+                            lookahead_batch = current_batch
+                            lookahead_char_count = batch_char_count
+                            lookahead_word_count = batch_word_count
+                            lookahead_mapping = list(current_batch_mapping)
+
+                            # Continue adding words until we find phrase-ending punctuation or end of line
+                            while lookahead_idx < len(words):
+                                lookahead_word = words[lookahead_idx]
+
+                                # Add the word to lookahead batch
+                                if lookahead_batch:
+                                    lookahead_batch += " "
+                                    lookahead_char_count += 1
+                                lookahead_batch += lookahead_word
+                                lookahead_char_count += len(lookahead_word)
+                                lookahead_word_count += 1
+
+                                if (
+                                    not lookahead_mapping
+                                    or lookahead_mapping[-1][1] != i
+                                ):
+                                    lookahead_mapping.append(
+                                        (
+                                            lookahead_char_count - len(lookahead_word),
+                                            i,
+                                            text_line,
+                                            None,
+                                            word_start_positions[lookahead_idx],
+                                        )
+                                    )
+
+                                # Check if this word ends with phrase punctuation
+                                if ends_with_phrase_punctuation(lookahead_word):
+                                    break
+
+                                lookahead_idx += 1
+
+                            # Use the lookahead batch (either found phrase end or reached end of line)
+                            current_batch = lookahead_batch
+                            batch_char_count = lookahead_char_count
+                            batch_word_count = lookahead_word_count
+                            current_batch_mapping = lookahead_mapping
+
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
+                            ]
+                            # Process current batch
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx = lookahead_idx + 1
+                    else:
+                        # Normal case: add word to batch
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+                        word_idx += 1
+
+            # Process final batch if any
+            if current_batch:
+                # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
+                llm_chosen_redact_comprehend_entities = [
+                    entity
+                    for entity in chosen_llm_entities
+                    if entity != "CUSTOM" and not entity.startswith("CUSTOM_VLM_")
+                ]
+                all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                    do_llm_entity_detection_call(
+                        current_batch,
+                        current_batch_mapping,
+                        bedrock_runtime=bedrock_runtime,
+                        language=aws_language,
+                        allow_list=text_analyzer_kwargs.get("allow_list", []),
+                        chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                        all_text_line_results=all_text_line_results,
+                        model_choice=model_choice,
+                        temperature=text_analyzer_kwargs.get(
+                            "temperature", LLM_PII_TEMPERATURE
+                        ),
+                        max_tokens=text_analyzer_kwargs.get(
+                            "max_tokens", LLM_PII_MAX_TOKENS
+                        ),
+                        output_folder=getattr(self, "output_folder", None),
+                        batch_number=comprehend_query_number + 1,
+                        custom_instructions=custom_llm_instructions,
+                        file_name=file_name,
+                        page_number=page_number,
+                        inference_method=text_analyzer_kwargs.get("inference_method"),
+                        # local_model=text_analyzer_kwargs.get("local_model"),
+                        # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                        # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                        client=text_analyzer_kwargs.get("client"),
+                        client_config=text_analyzer_kwargs.get("client_config"),
+                        api_url=text_analyzer_kwargs.get("api_url"),
+                    )
+                )
+                # Accumulate token usage
+                llm_total_input_tokens += batch_input_tokens
+                llm_total_output_tokens += batch_output_tokens
+                comprehend_query_number += 1
+
+        elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
+            # LLM-based entity detection using local transformers models
+            try:
+                from tools.llm_entity_detection import do_llm_entity_detection_call
+            except ImportError as e:
+                print(f"Error importing LLM entity detection: {e}")
+                raise ImportError(
+                    "LLM entity detection not available. Please ensure llm_funcs.py is accessible."
+                )
+
+            # Set inference method to local if not already set
+            if text_analyzer_kwargs.get("inference_method") is None:
+                text_analyzer_kwargs["inference_method"] = "local"
+
+            # Set model choice if not already set - use VLM model when USE_TRANFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            if text_analyzer_kwargs.get("model_choice") is None:
+                text_analyzer_kwargs["model_choice"] = (
+                    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                    else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                )
+
+            # Update model_choice to use the value from text_analyzer_kwargs
+            model_choice = text_analyzer_kwargs.get(
+                "model_choice",
+                (
+                    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                    if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                    else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                ),
+            )
+
+            # # Load PII-specific model and tokenizer if not already provided
+            # if (
+            #     text_analyzer_kwargs.get("local_model") is None
+            #     and text_analyzer_kwargs.get("inference_method") == "local"
+            # ):
+            #     from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
+
+            #     try:
+            #         text_analyzer_kwargs["local_model"] = get_pii_model()
+            #     except Exception as e:
+            #         print(
+            #             f"Warning: Failed to load PII model: {e}. "
+            #             f"Will attempt to load model on-demand."
+            #         )
+            # if (
+            #     text_analyzer_kwargs.get("tokenizer") is None
+            #     and text_analyzer_kwargs.get("inference_method") == "local"
+            #     and USE_LLAMA_CPP != "True"
+            # ):
+            #     from tools.llm_funcs import get_pii_tokenizer
+
+            #     try:
+            #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+            #     except Exception as e:
+            #         print(
+            #             f"Warning: Failed to load PII tokenizer: {e}. "
+            #             f"Will attempt to load tokenizer on-demand."
+            #         )
+
+            # Handle custom entities first (same as AWS Comprehend)
+            # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+            local_custom_entities = [
+                entity
+                for entity in (chosen_llm_entities or [])
+                if entity in (custom_entities or [])
+                or entity in ("CUSTOM", "CUSTOM_FUZZY")
+            ]
+
+            if local_custom_entities:
+                # Filter entities to only include those supported by the language
+                language_supported_entities = filter_entities_for_language(
+                    local_custom_entities, valid_language_entities, language
+                )
+
+                if language_supported_entities:
+                    text_analyzer_kwargs["entities"] = language_supported_entities
+
+                    # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                    presidio_kwargs = {
+                        k: v
+                        for k, v in text_analyzer_kwargs.items()
+                        if k
+                        not in [
+                            "inference_method",
+                            "model_choice",
+                            "api_url",
+                            "local_model",
+                            "tokenizer",
+                            "assistant_model",
+                            "client",
+                            "client_config",
+                            "temperature",
+                            "max_tokens",
+                            "custom_instructions",
+                            "allow_list",
+                        ]
+                    }
+
+                    page_analyser_result = nlp_analyser.analyze(
+                        text=page_text,
+                        language=language,
+                        allow_list=allow_list,
+                        **presidio_kwargs,
+                    )
+                    all_text_line_results = map_back_entity_results(
+                        page_analyser_result,
+                        page_text_mapping,
+                        all_text_line_results,
+                        allow_list=allow_list,
+                    )
+
+            # Process text in batches for LLM (same batching logic as AWS Comprehend)
+            current_batch = ""
+            current_batch_mapping = list()
+            batch_char_count = 0
+            batch_word_count = 0
+
+            for i, text_line in enumerate(line_level_ocr_results):
+                words = text_line.text.split()
+                word_start_positions = list()
+                current_pos = 0
+
+                for word in words:
+                    word_start_positions.append(current_pos)
+                    current_pos += len(word) + 1
+
+                word_idx = 0
+                while word_idx < len(words):
+                    word = words[word_idx]
+                    new_batch_char_count = len(current_batch) + len(word) + 1
+
+                    # Check if we've hit the limit
+                    limit_reached = (
+                        batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                        or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                    )
+
+                    if limit_reached:
+                        # Add the current word to the batch first
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+
+                        # Check if current word ends with phrase punctuation
+                        if ends_with_phrase_punctuation(word):
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
+                            ]
+                            # Process current batch
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx += 1
+                        else:
+                            # Look ahead in current line for phrase-ending punctuation or end of line
+                            lookahead_idx = word_idx + 1
+                            lookahead_batch = current_batch
+                            lookahead_char_count = batch_char_count
+                            lookahead_word_count = batch_word_count
+                            lookahead_mapping = list(current_batch_mapping)
+
+                            # Continue adding words until we find phrase-ending punctuation or end of line
+                            while lookahead_idx < len(words):
+                                lookahead_word = words[lookahead_idx]
+
+                                # Add the word to lookahead batch
+                                if lookahead_batch:
+                                    lookahead_batch += " "
+                                    lookahead_char_count += 1
+                                lookahead_batch += lookahead_word
+                                lookahead_char_count += len(lookahead_word)
+                                lookahead_word_count += 1
+
+                                if (
+                                    not lookahead_mapping
+                                    or lookahead_mapping[-1][1] != i
+                                ):
+                                    lookahead_mapping.append(
+                                        (
+                                            lookahead_char_count - len(lookahead_word),
+                                            i,
+                                            text_line,
+                                            None,
+                                            word_start_positions[lookahead_idx],
+                                        )
+                                    )
+
+                                # Check if this word ends with phrase punctuation
+                                if ends_with_phrase_punctuation(lookahead_word):
+                                    break
+
+                                lookahead_idx += 1
+
+                            # Use the lookahead batch (either found phrase end or reached end of line)
+                            current_batch = lookahead_batch
+                            batch_char_count = lookahead_char_count
+                            batch_word_count = lookahead_word_count
+                            current_batch_mapping = lookahead_mapping
+
+                            # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                            # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
+                            llm_chosen_redact_comprehend_entities = [
+                                entity
+                                for entity in chosen_llm_entities
+                                if entity != "CUSTOM"
+                                and not entity.startswith("CUSTOM_VLM_")
+                            ]
+                            # Process current batch
+                            (
+                                all_text_line_results,
+                                batch_input_tokens,
+                                batch_output_tokens,
+                            ) = do_llm_entity_detection_call(
+                                current_batch,
+                                current_batch_mapping,
+                                bedrock_runtime=bedrock_runtime,
+                                language=aws_language,
+                                allow_list=text_analyzer_kwargs.get("allow_list", []),
+                                chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                                all_text_line_results=all_text_line_results,
+                                model_choice=model_choice,
+                                temperature=text_analyzer_kwargs.get(
+                                    "temperature", LLM_PII_TEMPERATURE
+                                ),
+                                max_tokens=text_analyzer_kwargs.get(
+                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                ),
+                                output_folder=getattr(self, "output_folder", None),
+                                batch_number=comprehend_query_number + 1,
+                                custom_instructions=custom_llm_instructions,
+                                file_name=file_name,
+                                page_number=page_number,
+                                inference_method=text_analyzer_kwargs.get(
+                                    "inference_method"
+                                ),
+                                # local_model=text_analyzer_kwargs.get("local_model"),
+                                # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                                # assistant_model=text_analyzer_kwargs.get(
+                                #     "assistant_model"
+                                # ),
+                                client=text_analyzer_kwargs.get("client"),
+                                client_config=text_analyzer_kwargs.get("client_config"),
+                                api_url=text_analyzer_kwargs.get("api_url"),
+                            )
+                            # Accumulate token usage
+                            llm_total_input_tokens += batch_input_tokens
+                            llm_total_output_tokens += batch_output_tokens
+                            comprehend_query_number += 1
+
+                            # Reset batch
+                            current_batch = ""
+                            batch_word_count = 0
+                            batch_char_count = 0
+                            current_batch_mapping = list()
+                            word_idx = lookahead_idx + 1
+                    else:
+                        # Normal case: add word to batch
+                        if current_batch:
+                            current_batch += " "
+                            batch_char_count += 1
+                        current_batch += word
+                        batch_char_count += len(word)
+                        batch_word_count += 1
+
+                        if (
+                            not current_batch_mapping
+                            or current_batch_mapping[-1][1] != i
+                        ):
+                            current_batch_mapping.append(
+                                (
+                                    batch_char_count - len(word),
+                                    i,
+                                    text_line,
+                                    None,
+                                    word_start_positions[word_idx],
+                                )
+                            )
+                        word_idx += 1
+
+            # Process final batch if any
+            if current_batch:
+                # Remove 'CUSTOM' and 'CUSTOM_VLM_*' entities from the chosen_llm_entities list
+                # CUSTOM_VLM_* entities are handled separately via VLM, not LLM
+                llm_chosen_redact_comprehend_entities = [
+                    entity
+                    for entity in chosen_llm_entities
+                    if entity != "CUSTOM" and not entity.startswith("CUSTOM_VLM_")
+                ]
+                all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                    do_llm_entity_detection_call(
+                        current_batch,
+                        current_batch_mapping,
+                        bedrock_runtime=bedrock_runtime,
+                        language=aws_language,
+                        allow_list=text_analyzer_kwargs.get("allow_list", []),
+                        chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                        all_text_line_results=all_text_line_results,
+                        model_choice=model_choice,
+                        temperature=text_analyzer_kwargs.get(
+                            "temperature", LLM_PII_TEMPERATURE
+                        ),
+                        max_tokens=text_analyzer_kwargs.get(
+                            "max_tokens", LLM_PII_MAX_TOKENS
+                        ),
+                        output_folder=getattr(self, "output_folder", None),
+                        batch_number=comprehend_query_number + 1,
+                        custom_instructions=custom_llm_instructions,
+                        file_name=file_name,
+                        page_number=page_number,
+                        inference_method=text_analyzer_kwargs.get("inference_method"),
+                        # local_model=text_analyzer_kwargs.get("local_model"),
+                        # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                        # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                        client=text_analyzer_kwargs.get("client"),
+                        client_config=text_analyzer_kwargs.get("client_config"),
+                        api_url=text_analyzer_kwargs.get("api_url"),
+                    )
+                )
+                # Accumulate token usage
+                llm_total_input_tokens += batch_input_tokens
+                llm_total_output_tokens += batch_output_tokens
                 comprehend_query_number += 1
 
         # Process results and create bounding boxes
@@ -5149,7 +8671,13 @@ class CustomImageAnalyzerEngine:
                     )
                     combined_results.extend(bbox_results)
 
-        return combined_results, comprehend_query_number
+        return (
+            combined_results,
+            comprehend_query_number,
+            llm_model_name,
+            llm_total_input_tokens,
+            llm_total_output_tokens,
+        )
 
     @staticmethod
     def map_analyzer_results_to_bounding_boxes(
@@ -5168,9 +8696,20 @@ class CustomImageAnalyzerEngine:
             redaction_text = redaction_relevant_ocr_result.text
 
             for redaction_result in text_analyzer_results:
-                # Check if the redaction text is not in the allow list
+                # Check if the redaction text is not in the allow list (case-insensitive)
+                # Normalize for case-insensitive matching
+                if allow_list:
+                    allow_list_normalized = [
+                        item.strip().lower() for item in allow_list if item
+                    ]
+                    redaction_text_normalized = redaction_text.strip().lower()
+                    is_in_allow_list = (
+                        redaction_text_normalized in allow_list_normalized
+                    )
+                else:
+                    is_in_allow_list = False
 
-                if redaction_text not in allow_list:
+                if not is_in_allow_list:
 
                     # Adjust start and end to be within line bounds
                     start_in_line = max(0, redaction_result.start)
@@ -5197,10 +8736,11 @@ class CustomImageAnalyzerEngine:
                             word_length + 1
                         )  # +1 for the space after the word
 
-                        # Check if the word's bounding box is within the start and end bounds
-                        if word_start >= start_in_line and word_end <= (
-                            end_in_line + 1
-                        ):
+                        # Include words that overlap the PII range (not only fully contained).
+                        # This fixes cases where PII strips a suffix (e.g. "Hyde" from "Hyde's"):
+                        # the word "Hyde's" was excluded by the strict containment check, leading
+                        # to a too-small proportional fallback box (e.g. only covering "Hyd").
+                        if word_start < end_in_line and word_end > start_in_line:
                             matching_word_boxes.append(word_info["bounding_box"])
 
                     if matching_word_boxes:
@@ -5220,6 +8760,46 @@ class CustomImageAnalyzerEngine:
                                 top=top,
                                 width=right - left,
                                 height=bottom - top,
+                                text=matched_text,
+                            )
+                        )
+                    else:
+                        # Fallback: Use line-level bounding box when word-level boxes aren't available
+                        # This happens when OCR only provides line-level results (e.g., VLM OCR)
+                        # Calculate proportional bounding box based on character positions
+                        line_left = redaction_relevant_ocr_result.left
+                        line_top = redaction_relevant_ocr_result.top
+                        line_width = redaction_relevant_ocr_result.width
+                        line_height = redaction_relevant_ocr_result.height
+
+                        # Calculate proportional width based on text length
+                        if line_length > 0:
+                            text_proportion = len(matched_text) / line_length
+                            # Estimate left offset based on start position
+                            char_width_estimate = line_width / line_length
+                            estimated_left_offset = start_in_line * char_width_estimate
+
+                            left = line_left + estimated_left_offset
+                            top = line_top
+                            width = text_proportion * line_width
+                            height = line_height
+                        else:
+                            # If line_length is 0, use the full line box
+                            left = line_left
+                            top = line_top
+                            width = line_width
+                            height = line_height
+
+                        redaction_bboxes.append(
+                            CustomImageRecognizerResult(
+                                entity_type=redaction_result.entity_type,
+                                start=start_in_line,
+                                end=end_in_line,
+                                score=round(redaction_result.score, 2),
+                                left=left,
+                                top=top,
+                                width=width,
+                                height=height,
                                 text=matched_text,
                             )
                         )
@@ -5315,7 +8895,23 @@ def map_back_entity_results(
     page_analyser_result: dict,
     page_text_mapping: dict,
     all_text_line_results: List[Tuple],
+    allow_list: List[str] = None,
 ):
+    """
+    Map Presidio analyzer results back to line-level results.
+
+    Args:
+        page_analyser_result: Results from Presidio analyzer
+        page_text_mapping: Mapping of batch positions to line indices
+        all_text_line_results: Existing line-level results to append to
+        allow_list: List of allowed text values (to skip) - case-insensitive matching
+    """
+    # Normalize allow_list for case-insensitive matching
+    if allow_list:
+        allow_list_normalized = [item.strip().lower() for item in allow_list if item]
+    else:
+        allow_list_normalized = []
+
     for entity in page_analyser_result:
         entity_start = entity.start
         entity_end = entity.end
@@ -5337,25 +8933,37 @@ def map_back_entity_results(
                     entity_end - batch_start, len(original_line.text)
                 )  # Adjust end relative to the line
 
-                # Create a new adjusted entity
-                adjusted_entity = copy.deepcopy(entity)
-                adjusted_entity.start = relative_start
-                adjusted_entity.end = relative_end
+                # Get the text for this entity to check against allow_list
+                result_text = original_line.text[relative_start:relative_end]
 
-                # Check if this line already has an entry
-                existing_entry = next(
-                    (entry for idx, entry in all_text_line_results if idx == line_idx),
-                    None,
-                )
+                # Check if result_text is in allow_list (case-insensitive)
+                # If allow_list contains this text, skip adding it as a PII entity
+                # This allows allow_list terms to "overrule" PII detection
+                result_text_normalized = result_text.strip().lower()
+                if result_text_normalized not in allow_list_normalized:
+                    # Create a new adjusted entity
+                    adjusted_entity = copy.deepcopy(entity)
+                    adjusted_entity.start = relative_start
+                    adjusted_entity.end = relative_end
 
-                if existing_entry is None:
-                    all_text_line_results.append((line_idx, [adjusted_entity]))
-                else:
-                    existing_entry.append(
-                        adjusted_entity
-                    )  # Append to the existing list of entities
+                    # Check if this line already has an entry
+                    existing_entry = next(
+                        (
+                            entry
+                            for idx, entry in all_text_line_results
+                            if idx == line_idx
+                        ),
+                        None,
+                    )
 
-                added_to_line = True
+                    if existing_entry is None:
+                        all_text_line_results.append((line_idx, [adjusted_entity]))
+                    else:
+                        existing_entry.append(
+                            adjusted_entity
+                        )  # Append to the existing list of entities
+
+                    added_to_line = True
 
         # If the entity spans multiple lines, you may want to handle that here
         if not added_to_line:
@@ -5372,8 +8980,24 @@ def map_back_comprehend_entity_results(
     chosen_redact_comprehend_entities: List[str],
     all_text_line_results: List[Tuple],
 ):
+    """
+    Map AWS Comprehend entity results back to line-level results.
+
+    Args:
+        response: AWS Comprehend response object
+        current_batch_mapping: Mapping of batch positions to line indices
+        allow_list: List of allowed text values (to skip) - case-insensitive matching
+        chosen_redact_comprehend_entities: List of entity types to include
+        all_text_line_results: Existing line-level results to append to
+    """
     if not response or "Entities" not in response:
         return all_text_line_results
+
+    # Normalize allow_list for case-insensitive matching
+    if allow_list:
+        allow_list_normalized = [item.strip().lower() for item in allow_list if item]
+    else:
+        allow_list_normalized = []
 
     for entity in response["Entities"]:
         if entity.get("Type") not in chosen_redact_comprehend_entities:
@@ -5407,7 +9031,11 @@ def map_back_comprehend_entity_results(
 
                 result_text = original_line.text[relative_start:relative_end]
 
-                if result_text not in allow_list:
+                # Check if result_text is in allow_list (case-insensitive)
+                # If allow_list contains this text, skip adding it as a PII entity
+                # This allows allow_list terms to "overrule" AWS Comprehend PII detection
+                result_text_normalized = result_text.strip().lower()
+                if result_text_normalized not in allow_list_normalized:
                     adjusted_entity = entity.copy()
                     adjusted_entity["BeginOffset"] = (
                         relative_start  # Now relative to the full line
@@ -5451,6 +9079,10 @@ def do_aws_comprehend_call(
 ):
     if not current_batch:
         return all_text_line_results
+    # Guard: if no relevant AWS entity types are selected, skip AWS entirely.
+    # (CUSTOM/CUSTOM_FUZZY and other local-only entities are handled via Presidio.)
+    if not chosen_redact_comprehend_entities:
+        return all_text_line_results
 
     max_retries = 3
     retry_delay = 3
@@ -5493,6 +9125,14 @@ def run_page_text_redaction(
     score_threshold: float = 0.0,
     custom_entities: List[str] = None,
     comprehend_query_number: int = 0,
+    bedrock_runtime=None,
+    model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
+    custom_llm_instructions: str = "",
+    chosen_llm_entities: List[str] = None,
+    output_folder: str = None,
+    file_name: Optional[str] = None,
+    page_number: Optional[int] = None,
+    **text_analyzer_kwargs,
 ):
     """
     This function performs text redaction on a page based on the specified language and chosen entities.
@@ -5511,7 +9151,15 @@ def run_page_text_redaction(
         nlp_analyser (AnalyzerEngine, optional): The NLP analyzer engine used for local analysis. Defaults to None.
         score_threshold (float, optional): The threshold score for entity detection. Defaults to 0.0.
         custom_entities (List[str], optional): A list of custom entities for redaction. Defaults to None.
-        comprehend_query_number (int, optional): A counter for the number of Comprehend queries made. Defaults to 0.
+        comprehend_query_number (int, optional): A counter for AWS Comprehend usage in units of 100 characters (1 unit = 100 characters, per AWS billing). Defaults to 0.
+        bedrock_runtime: The AWS Bedrock runtime client for LLM-based entity detection. Defaults to None.
+        model_choice (str, optional): The LLM model choice for entity detection. Defaults to CLOUD_LLM_PII_MODEL_CHOICE.
+        custom_llm_instructions (str, optional): Custom instructions for LLM-based entity detection. Defaults to "".
+        chosen_llm_entities (List[str], optional): A list of entities for LLM-based detection. Defaults to None.
+        output_folder (str, optional): Output folder for saving LLM prompts and responses. Defaults to None.
+        file_name (str, optional): File name (without extension) for saving LLM logs. Defaults to None.
+        page_number (int, optional): Page number for saving LLM logs. Defaults to None.
+        **text_analyzer_kwargs: Additional keyword arguments for text analysis.
     """
 
     page_text = ""
@@ -5519,15 +9167,26 @@ def run_page_text_redaction(
     all_text_line_results = list()
     comprehend_query_number = 0
 
+    # Track LLM token usage
+    llm_total_input_tokens = 0
+    llm_total_output_tokens = 0
+    llm_model_name = ""
+
+    # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+    if chosen_llm_entities is None:
+        chosen_llm_entities = chosen_redact_comprehend_entities
+
     # Collect all text from the page
     for i, text_line in enumerate(line_level_text_results_list):
-        if chosen_redact_entities:
-            if page_text:
-                page_text += " "
+        if page_text:
+            page_text += " "
 
-            start_pos = len(page_text)
-            page_text += text_line.text
-            page_text_mapping.append((start_pos, i, text_line, line_characters[i]))
+        start_pos = len(page_text)
+        page_text += text_line.text
+        page_text_mapping.append((start_pos, i, text_line, line_characters[i]))
+
+    # Determine language for downstream services
+    aws_language = language or "en"
 
     valid_language_entities = nlp_analyser.registry.get_supported_entities(
         languages=[language]
@@ -5546,47 +9205,116 @@ def run_page_text_redaction(
             chosen_redact_entities, valid_language_entities, language
         )
 
+        if language_supported_entities:
+            text_analyzer_kwargs["entities"] = language_supported_entities
+        else:
+            out_message = f"No relevant entities supported for language: {language}"
+            print(out_message)
+            raise Warning(out_message)
+
+        # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+        # Also exclude allow_list since we pass it explicitly
+        presidio_kwargs = {
+            k: v
+            for k, v in text_analyzer_kwargs.items()
+            if k
+            not in [
+                "inference_method",
+                "model_choice",
+                "api_url",
+                "local_model",
+                "tokenizer",
+                "assistant_model",
+                "client",
+                "client_config",
+                "temperature",
+                "max_tokens",
+                "custom_instructions",
+                "allow_list",
+            ]
+        }
+
         page_analyser_result = nlp_analyser.analyze(
             text=page_text,
             language=language,
-            entities=language_supported_entities,
             score_threshold=score_threshold,
             return_decision_process=True,
             allow_list=allow_list,
+            **presidio_kwargs,
         )
 
         all_text_line_results = map_back_entity_results(
-            page_analyser_result, page_text_mapping, all_text_line_results
+            page_analyser_result,
+            page_text_mapping,
+            all_text_line_results,
+            allow_list=allow_list,
         )
 
     elif pii_identification_method == AWS_PII_OPTION:
 
-        # Process custom entities if any
-        if custom_entities:
-            custom_redact_entities = [
-                entity
-                for entity in chosen_redact_comprehend_entities
-                if entity in custom_entities
-            ]
+        # Run local detection for any custom entities (including CUSTOM/CUSTOM_FUZZY)
+        local_custom_entities = [
+            entity
+            for entity in (chosen_redact_comprehend_entities or [])
+            if entity in (custom_entities or []) or entity in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
 
+        if local_custom_entities:
+            # Filter entities to only include those supported by the language
             language_supported_entities = filter_entities_for_language(
-                custom_redact_entities, valid_language_entities, language
+                local_custom_entities, valid_language_entities, language
             )
 
             if language_supported_entities:
-                page_analyser_result = nlp_analyser.analyze(
-                    text=page_text,
-                    language=language,
-                    entities=language_supported_entities,
-                    score_threshold=score_threshold,
-                    return_decision_process=True,
-                    allow_list=allow_list,
-                )
+                text_analyzer_kwargs["entities"] = language_supported_entities
 
-                all_text_line_results = map_back_entity_results(
-                    page_analyser_result, page_text_mapping, all_text_line_results
-                )
+            # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+            # Also exclude allow_list since we pass it explicitly
+            presidio_kwargs = {
+                k: v
+                for k, v in text_analyzer_kwargs.items()
+                if k
+                not in [
+                    "inference_method",
+                    "model_choice",
+                    "api_url",
+                    "local_model",
+                    "tokenizer",
+                    "assistant_model",
+                    "client",
+                    "client_config",
+                    "temperature",
+                    "max_tokens",
+                    "custom_instructions",
+                    "allow_list",
+                ]
+            }
 
+            page_analyser_result = nlp_analyser.analyze(
+                text=page_text,
+                language=language,
+                score_threshold=score_threshold,
+                return_decision_process=True,
+                allow_list=allow_list,
+                **presidio_kwargs,
+            )
+
+            all_text_line_results = map_back_entity_results(
+                page_analyser_result,
+                page_text_mapping,
+                all_text_line_results,
+                allow_list=allow_list,
+            )
+
+        # Guard: only call AWS Comprehend when at least one non-custom Comprehend entity is selected.
+        aws_comprehend_entities = [
+            entity
+            for entity in (chosen_redact_comprehend_entities or [])
+            if entity in (FULL_COMPREHEND_ENTITY_LIST or [])
+            and entity not in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
+
+        # Process text in batches for AWS Comprehend
         current_batch = ""
         current_batch_mapping = list()
         batch_char_count = 0
@@ -5595,43 +9323,25 @@ def run_page_text_redaction(
         for i, text_line in enumerate(line_level_text_results_list):
             words = text_line.text.split()
             word_start_positions = list()
-
-            # Calculate word start positions within the line
             current_pos = 0
+
             for word in words:
                 word_start_positions.append(current_pos)
-                current_pos += len(word) + 1  # +1 for space
+                current_pos += len(word) + 1
 
-            for word_idx, word in enumerate(words):
+            word_idx = 0
+            while word_idx < len(words):
+                word = words[word_idx]
                 new_batch_char_count = len(current_batch) + len(word) + 1
 
-                if batch_word_count >= 50 or new_batch_char_count >= 200:
-                    # Process current batch
-                    all_text_line_results = do_aws_comprehend_call(
-                        current_batch,
-                        current_batch_mapping,
-                        comprehend_client,
-                        language,
-                        allow_list,
-                        chosen_redact_comprehend_entities,
-                        all_text_line_results,
-                    )
-                    comprehend_query_number += 1
+                # Check if we've hit the limit
+                limit_reached = (
+                    batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                    or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                )
 
-                    # Start new batch
-                    current_batch = word
-                    batch_word_count = 1
-                    batch_char_count = len(word)
-                    current_batch_mapping = [
-                        (
-                            0,
-                            i,
-                            text_line,
-                            line_characters[i],
-                            word_start_positions[word_idx],
-                        )
-                    ]
-                else:
+                if limit_reached:
+                    # Add the current word to the batch first
                     if current_batch:
                         current_batch += " "
                         batch_char_count += 1
@@ -5646,23 +9356,1172 @@ def run_page_text_redaction(
                                 i,
                                 text_line,
                                 line_characters[i],
-                                word_start_positions[
-                                    word_idx
-                                ],  # Add the word's start position within its line
+                                word_start_positions[word_idx],
                             )
                         )
 
-        # Process final batch
+                    # Check if current word ends with phrase punctuation
+                    if ends_with_phrase_punctuation(word):
+                        # Process current batch
+                        all_text_line_results = do_aws_comprehend_call(
+                            current_batch,
+                            current_batch_mapping,
+                            comprehend_client,
+                            aws_language,
+                            text_analyzer_kwargs.get("allow_list", allow_list or []),
+                            aws_comprehend_entities,
+                            all_text_line_results,
+                        )
+                        comprehend_query_number += (
+                            len(current_batch.strip())
+                            + COMPREHEND_CHARACTERS_PER_UNIT
+                            - 1
+                        ) // COMPREHEND_CHARACTERS_PER_UNIT
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx += 1
+                    else:
+                        # Look ahead in current line for phrase-ending punctuation or end of line
+                        lookahead_idx = word_idx + 1
+                        lookahead_batch = current_batch
+                        lookahead_char_count = batch_char_count
+                        lookahead_word_count = batch_word_count
+                        lookahead_mapping = list(current_batch_mapping)
+
+                        # Continue adding words until we find phrase-ending punctuation or end of line
+                        while lookahead_idx < len(words):
+                            lookahead_word = words[lookahead_idx]
+
+                            # Add the word to lookahead batch
+                            if lookahead_batch:
+                                lookahead_batch += " "
+                                lookahead_char_count += 1
+                            lookahead_batch += lookahead_word
+                            lookahead_char_count += len(lookahead_word)
+                            lookahead_word_count += 1
+
+                            if not lookahead_mapping or lookahead_mapping[-1][1] != i:
+                                lookahead_mapping.append(
+                                    (
+                                        lookahead_char_count - len(lookahead_word),
+                                        i,
+                                        text_line,
+                                        line_characters[i],
+                                        word_start_positions[lookahead_idx],
+                                    )
+                                )
+
+                            # Check if this word ends with phrase punctuation
+                            if ends_with_phrase_punctuation(lookahead_word):
+                                break
+
+                            lookahead_idx += 1
+
+                        # Use the lookahead batch (either found phrase end or reached end of line)
+                        current_batch = lookahead_batch
+                        batch_char_count = lookahead_char_count
+                        batch_word_count = lookahead_word_count
+                        current_batch_mapping = lookahead_mapping
+
+                        # Process current batch
+                        all_text_line_results = do_aws_comprehend_call(
+                            current_batch,
+                            current_batch_mapping,
+                            comprehend_client,
+                            aws_language,
+                            text_analyzer_kwargs.get("allow_list", allow_list or []),
+                            aws_comprehend_entities,
+                            all_text_line_results,
+                        )
+                        comprehend_query_number += (
+                            len(current_batch.strip())
+                            + COMPREHEND_CHARACTERS_PER_UNIT
+                            - 1
+                        ) // COMPREHEND_CHARACTERS_PER_UNIT
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx = lookahead_idx + 1
+                else:
+                    # Normal case: add word to batch
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+                    word_idx += 1
+
+        # Process final batch if any
         if current_batch:
             all_text_line_results = do_aws_comprehend_call(
                 current_batch,
                 current_batch_mapping,
                 comprehend_client,
-                language,
-                allow_list,
-                chosen_redact_comprehend_entities,
+                aws_language,
+                text_analyzer_kwargs.get("allow_list", allow_list or []),
+                aws_comprehend_entities,
                 all_text_line_results,
             )
+            comprehend_query_number += (
+                len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+            ) // COMPREHEND_CHARACTERS_PER_UNIT
+
+    elif pii_identification_method == AWS_LLM_PII_OPTION:
+        # LLM-based entity detection using AWS Bedrock
+        try:
+            from tools.llm_entity_detection import do_llm_entity_detection_call
+        except ImportError as e:
+            print(f"Error importing LLM entity detection: {e}")
+            raise ImportError(
+                "LLM entity detection not available. Please ensure llm_entity_detection.py is accessible."
+            )
+
+        if not bedrock_runtime:
+            raise ValueError(
+                "bedrock_runtime is required when using LLM-based PII detection"
+            )
+
+        # Set inference method to aws-bedrock if not already set
+        if text_analyzer_kwargs.get("inference_method") is None:
+            text_analyzer_kwargs["inference_method"] = "aws-bedrock"
+
+        # Update model_choice to use CLOUD_LLM_PII_MODEL_CHOICE for Bedrock, or value from text_analyzer_kwargs if set
+        if text_analyzer_kwargs.get("model_choice") is None:
+            model_choice = CLOUD_LLM_PII_MODEL_CHOICE
+        else:
+            model_choice = text_analyzer_kwargs.get(
+                "model_choice", CLOUD_LLM_PII_MODEL_CHOICE
+            )
+
+        # Set LLM model name for tracking
+        llm_model_name = model_choice or ""
+
+        # Handle custom entities first (same as AWS Comprehend)
+        # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+        local_custom_entities = [
+            entity
+            for entity in (chosen_llm_entities or [])
+            if entity in (custom_entities or []) or entity in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
+
+        if local_custom_entities:
+            # Filter entities to only include those supported by the language
+            language_supported_entities = filter_entities_for_language(
+                local_custom_entities, valid_language_entities, language
+            )
+
+            if language_supported_entities:
+                text_analyzer_kwargs["entities"] = language_supported_entities
+
+                # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                # Also exclude allow_list since we pass it explicitly
+                presidio_kwargs = {
+                    k: v
+                    for k, v in text_analyzer_kwargs.items()
+                    if k
+                    not in [
+                        "inference_method",
+                        "model_choice",
+                        "api_url",
+                        "local_model",
+                        "tokenizer",
+                        "assistant_model",
+                        "client",
+                        "client_config",
+                        "temperature",
+                        "max_tokens",
+                        "custom_instructions",
+                        "allow_list",
+                    ]
+                }
+
+                page_analyser_result = nlp_analyser.analyze(
+                    text=page_text,
+                    language=language,
+                    score_threshold=score_threshold,
+                    return_decision_process=True,
+                    allow_list=allow_list,
+                    **presidio_kwargs,
+                )
+                all_text_line_results = map_back_entity_results(
+                    page_analyser_result, page_text_mapping, all_text_line_results
+                )
+
+        # Process text in batches for LLM (same batching logic as AWS Comprehend)
+        current_batch = ""
+        current_batch_mapping = list()
+        batch_char_count = 0
+        batch_word_count = 0
+
+        for i, text_line in enumerate(line_level_text_results_list):
+            words = text_line.text.split()
+            word_start_positions = list()
+            current_pos = 0
+
+            for word in words:
+                word_start_positions.append(current_pos)
+                current_pos += len(word) + 1
+
+            word_idx = 0
+            while word_idx < len(words):
+                word = words[word_idx]
+                new_batch_char_count = len(current_batch) + len(word) + 1
+
+                # Check if we've hit the limit
+                limit_reached = (
+                    batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                    or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                )
+
+                if limit_reached:
+                    # Add the current word to the batch first
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+
+                    # Check if current word ends with phrase punctuation
+                    if ends_with_phrase_punctuation(word):
+                        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                        llm_chosen_redact_comprehend_entities = [
+                            entity
+                            for entity in chosen_llm_entities
+                            if entity != "CUSTOM"
+                        ]
+                        # Process current batch
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
+                            current_batch,
+                            current_batch_mapping,
+                            bedrock_runtime=bedrock_runtime,
+                            language=aws_language,
+                            allow_list=text_analyzer_kwargs.get(
+                                "allow_list", allow_list or []
+                            ),
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                            all_text_line_results=all_text_line_results,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=output_folder,
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=page_number,
+                            inference_method=text_analyzer_kwargs.get(
+                                "inference_method"
+                            ),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            client=text_analyzer_kwargs.get("client"),
+                            client_config=text_analyzer_kwargs.get("client_config"),
+                            api_url=text_analyzer_kwargs.get("api_url"),
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx += 1
+                    else:
+                        # Look ahead in current line for phrase-ending punctuation or end of line
+                        lookahead_idx = word_idx + 1
+                        lookahead_batch = current_batch
+                        lookahead_char_count = batch_char_count
+                        lookahead_word_count = batch_word_count
+                        lookahead_mapping = list(current_batch_mapping)
+
+                        # Continue adding words until we find phrase-ending punctuation or end of line
+                        while lookahead_idx < len(words):
+                            lookahead_word = words[lookahead_idx]
+
+                            # Add the word to lookahead batch
+                            if lookahead_batch:
+                                lookahead_batch += " "
+                                lookahead_char_count += 1
+                            lookahead_batch += lookahead_word
+                            lookahead_char_count += len(lookahead_word)
+                            lookahead_word_count += 1
+
+                            if not lookahead_mapping or lookahead_mapping[-1][1] != i:
+                                lookahead_mapping.append(
+                                    (
+                                        lookahead_char_count - len(lookahead_word),
+                                        i,
+                                        text_line,
+                                        line_characters[i],
+                                        word_start_positions[lookahead_idx],
+                                    )
+                                )
+
+                            # Check if this word ends with phrase punctuation
+                            if ends_with_phrase_punctuation(lookahead_word):
+                                break
+
+                            lookahead_idx += 1
+
+                        # Use the lookahead batch (either found phrase end or reached end of line)
+                        current_batch = lookahead_batch
+                        batch_char_count = lookahead_char_count
+                        batch_word_count = lookahead_word_count
+                        current_batch_mapping = lookahead_mapping
+
+                        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                        llm_chosen_redact_comprehend_entities = [
+                            entity
+                            for entity in chosen_llm_entities
+                            if entity != "CUSTOM"
+                        ]
+                        # Process current batch
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
+                            current_batch,
+                            current_batch_mapping,
+                            bedrock_runtime=bedrock_runtime,
+                            language=aws_language,
+                            allow_list=text_analyzer_kwargs.get(
+                                "allow_list", allow_list or []
+                            ),
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                            all_text_line_results=all_text_line_results,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=output_folder,
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=page_number,
+                            inference_method=text_analyzer_kwargs.get(
+                                "inference_method"
+                            ),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            client=text_analyzer_kwargs.get("client"),
+                            client_config=text_analyzer_kwargs.get("client_config"),
+                            api_url=text_analyzer_kwargs.get("api_url"),
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx = lookahead_idx + 1
+                else:
+                    # Normal case: add word to batch
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+                    word_idx += 1
+
+        # Process final batch if any
+        if current_batch:
+            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+            llm_chosen_redact_comprehend_entities = [
+                entity for entity in chosen_llm_entities if entity != "CUSTOM"
+            ]
+            all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                do_llm_entity_detection_call(
+                    current_batch,
+                    current_batch_mapping,
+                    bedrock_runtime=bedrock_runtime,
+                    language=aws_language,
+                    allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
+                    chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                    all_text_line_results=all_text_line_results,
+                    model_choice=model_choice,
+                    temperature=text_analyzer_kwargs.get(
+                        "temperature", LLM_PII_TEMPERATURE
+                    ),
+                    max_tokens=text_analyzer_kwargs.get(
+                        "max_tokens", LLM_PII_MAX_TOKENS
+                    ),
+                    output_folder=output_folder,
+                    batch_number=comprehend_query_number + 1,
+                    custom_instructions=custom_llm_instructions,
+                    file_name=file_name,
+                    page_number=page_number,
+                    inference_method=text_analyzer_kwargs.get("inference_method"),
+                    # local_model=text_analyzer_kwargs.get("local_model"),
+                    # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    client=text_analyzer_kwargs.get("client"),
+                    client_config=text_analyzer_kwargs.get("client_config"),
+                    api_url=text_analyzer_kwargs.get("api_url"),
+                )
+            )
+            # Accumulate token usage
+            llm_total_input_tokens += batch_input_tokens
+            llm_total_output_tokens += batch_output_tokens
+            comprehend_query_number += 1
+            comprehend_query_number += 1
+    elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
+        # LLM-based entity detection using inference server
+        try:
+            from tools.llm_entity_detection import do_llm_entity_detection_call
+        except ImportError as e:
+            print(f"Error importing LLM entity detection: {e}")
+            raise ImportError(
+                "LLM entity detection not available. Please ensure llm_entity_detection.py is accessible."
+            )
+
+        # Set inference method to inference-server if not already set
+        if text_analyzer_kwargs.get("inference_method") is None:
+            text_analyzer_kwargs["inference_method"] = "inference-server"
+
+        # Set API URL if not already set
+        if text_analyzer_kwargs.get("api_url") is None:
+            text_analyzer_kwargs["api_url"] = INFERENCE_SERVER_API_URL
+
+        # Set model choice if not already set - use INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
+        if text_analyzer_kwargs.get("model_choice") is None:
+            text_analyzer_kwargs["model_choice"] = INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
+
+        # Update model_choice to use the value from text_analyzer_kwargs
+        model_choice = text_analyzer_kwargs.get(
+            "model_choice", INFERENCE_SERVER_LLM_PII_MODEL_CHOICE
+        )
+
+        # Set LLM model name for tracking
+        llm_model_name = model_choice or ""
+
+        # Handle custom entities first (same as AWS Comprehend)
+        # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+        local_custom_entities = [
+            entity
+            for entity in (chosen_llm_entities or [])
+            if entity in (custom_entities or []) or entity in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
+
+        if local_custom_entities:
+            # Filter entities to only include those supported by the language
+            language_supported_entities = filter_entities_for_language(
+                local_custom_entities, valid_language_entities, language
+            )
+
+            if language_supported_entities:
+                text_analyzer_kwargs["entities"] = language_supported_entities
+
+                # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                # Also exclude allow_list since we pass it explicitly
+                presidio_kwargs = {
+                    k: v
+                    for k, v in text_analyzer_kwargs.items()
+                    if k
+                    not in [
+                        "inference_method",
+                        "model_choice",
+                        "api_url",
+                        "local_model",
+                        "tokenizer",
+                        "assistant_model",
+                        "client",
+                        "client_config",
+                        "temperature",
+                        "max_tokens",
+                        "custom_instructions",
+                        "allow_list",
+                    ]
+                }
+
+                page_analyser_result = nlp_analyser.analyze(
+                    text=page_text,
+                    language=language,
+                    score_threshold=score_threshold,
+                    return_decision_process=True,
+                    allow_list=allow_list,
+                    **presidio_kwargs,
+                )
+                all_text_line_results = map_back_entity_results(
+                    page_analyser_result, page_text_mapping, all_text_line_results
+                )
+
+        # Process text in batches for LLM (same batching logic as AWS Comprehend)
+        current_batch = ""
+        current_batch_mapping = list()
+        batch_char_count = 0
+        batch_word_count = 0
+
+        for i, text_line in enumerate(line_level_text_results_list):
+            words = text_line.text.split()
+            word_start_positions = list()
+            current_pos = 0
+
+            for word in words:
+                word_start_positions.append(current_pos)
+                current_pos += len(word) + 1
+
+            word_idx = 0
+            while word_idx < len(words):
+                word = words[word_idx]
+                new_batch_char_count = len(current_batch) + len(word) + 1
+
+                # Check if we've hit the limit
+                limit_reached = (
+                    batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                    or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                )
+
+                if limit_reached:
+                    # Add the current word to the batch first
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+
+                    # Check if current word ends with phrase punctuation
+                    if ends_with_phrase_punctuation(word):
+                        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                        llm_chosen_redact_comprehend_entities = [
+                            entity
+                            for entity in chosen_llm_entities
+                            if entity != "CUSTOM"
+                        ]
+                        # Process current batch
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
+                            current_batch,
+                            current_batch_mapping,
+                            bedrock_runtime=bedrock_runtime,
+                            language=aws_language,
+                            allow_list=text_analyzer_kwargs.get(
+                                "allow_list", allow_list or []
+                            ),
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                            all_text_line_results=all_text_line_results,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=output_folder,
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=page_number,
+                            inference_method=text_analyzer_kwargs.get(
+                                "inference_method"
+                            ),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            client=text_analyzer_kwargs.get("client"),
+                            client_config=text_analyzer_kwargs.get("client_config"),
+                            api_url=text_analyzer_kwargs.get("api_url"),
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx += 1
+                    else:
+                        # Look ahead in current line for phrase-ending punctuation or end of line
+                        lookahead_idx = word_idx + 1
+                        lookahead_batch = current_batch
+                        lookahead_char_count = batch_char_count
+                        lookahead_word_count = batch_word_count
+                        lookahead_mapping = list(current_batch_mapping)
+
+                        # Continue adding words until we find phrase-ending punctuation or end of line
+                        while lookahead_idx < len(words):
+                            lookahead_word = words[lookahead_idx]
+
+                            # Add the word to lookahead batch
+                            if lookahead_batch:
+                                lookahead_batch += " "
+                                lookahead_char_count += 1
+                            lookahead_batch += lookahead_word
+                            lookahead_char_count += len(lookahead_word)
+                            lookahead_word_count += 1
+
+                            if not lookahead_mapping or lookahead_mapping[-1][1] != i:
+                                lookahead_mapping.append(
+                                    (
+                                        lookahead_char_count - len(lookahead_word),
+                                        i,
+                                        text_line,
+                                        line_characters[i],
+                                        word_start_positions[lookahead_idx],
+                                    )
+                                )
+
+                            # Check if this word ends with phrase punctuation
+                            if ends_with_phrase_punctuation(lookahead_word):
+                                break
+
+                            lookahead_idx += 1
+
+                        # Use the lookahead batch (either found phrase end or reached end of line)
+                        current_batch = lookahead_batch
+                        batch_char_count = lookahead_char_count
+                        batch_word_count = lookahead_word_count
+                        current_batch_mapping = lookahead_mapping
+
+                        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                        llm_chosen_redact_comprehend_entities = [
+                            entity
+                            for entity in chosen_llm_entities
+                            if entity != "CUSTOM"
+                        ]
+                        # Process current batch
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
+                            current_batch,
+                            current_batch_mapping,
+                            bedrock_runtime=bedrock_runtime,
+                            language=aws_language,
+                            allow_list=text_analyzer_kwargs.get(
+                                "allow_list", allow_list or []
+                            ),
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                            all_text_line_results=all_text_line_results,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=output_folder,
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=page_number,
+                            inference_method=text_analyzer_kwargs.get(
+                                "inference_method"
+                            ),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            client=text_analyzer_kwargs.get("client"),
+                            client_config=text_analyzer_kwargs.get("client_config"),
+                            api_url=text_analyzer_kwargs.get("api_url"),
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx = lookahead_idx + 1
+                else:
+                    # Normal case: add word to batch
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+                    word_idx += 1
+
+        # Process final batch if any
+        if current_batch:
+            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+            llm_chosen_redact_comprehend_entities = [
+                entity for entity in chosen_llm_entities if entity != "CUSTOM"
+            ]
+            all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                do_llm_entity_detection_call(
+                    current_batch,
+                    current_batch_mapping,
+                    bedrock_runtime=bedrock_runtime,
+                    language=aws_language,
+                    allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
+                    chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                    all_text_line_results=all_text_line_results,
+                    model_choice=model_choice,
+                    temperature=text_analyzer_kwargs.get(
+                        "temperature", LLM_PII_TEMPERATURE
+                    ),
+                    max_tokens=text_analyzer_kwargs.get(
+                        "max_tokens", LLM_PII_MAX_TOKENS
+                    ),
+                    output_folder=output_folder,
+                    batch_number=comprehend_query_number + 1,
+                    custom_instructions=custom_llm_instructions,
+                    file_name=file_name,
+                    page_number=page_number,
+                    inference_method=text_analyzer_kwargs.get("inference_method"),
+                    # local_model=text_analyzer_kwargs.get("local_model"),
+                    # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    client=text_analyzer_kwargs.get("client"),
+                    client_config=text_analyzer_kwargs.get("client_config"),
+                    api_url=text_analyzer_kwargs.get("api_url"),
+                )
+            )
+            # Accumulate token usage
+            llm_total_input_tokens += batch_input_tokens
+            llm_total_output_tokens += batch_output_tokens
+            comprehend_query_number += 1
+
+    elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
+        # LLM-based entity detection using local transformers models
+        try:
+            from tools.llm_entity_detection import do_llm_entity_detection_call
+        except ImportError as e:
+            print(f"Error importing LLM entity detection: {e}")
+            raise ImportError(
+                "LLM entity detection not available. Please ensure llm_entity_detection.py is accessible."
+            )
+
+        # Set inference method to local if not already set
+        if text_analyzer_kwargs.get("inference_method") is None:
+            text_analyzer_kwargs["inference_method"] = "local"
+
+        # Set model choice if not already set - use VLM model when USE_TRANFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+        if text_analyzer_kwargs.get("model_choice") is None:
+            text_analyzer_kwargs["model_choice"] = (
+                SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            )
+
+        # Update model_choice to use the value from text_analyzer_kwargs
+        model_choice = text_analyzer_kwargs.get(
+            "model_choice",
+            (
+                SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            ),
+        )
+
+        # Load PII-specific model and tokenizer if not already provided
+        # if (
+        #     text_analyzer_kwargs.get("local_model") is None
+        #     and text_analyzer_kwargs.get("inference_method") == "local"
+        # ):
+        #     # from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
+
+        #     try:
+        #         text_analyzer_kwargs["local_model"] = get_pii_model()
+        #     except Exception as e:
+        #         print(
+        #             f"Warning: Failed to load PII model: {e}. "
+        #             f"Will attempt to load model on-demand."
+        #         )
+        # if (
+        #     text_analyzer_kwargs.get("tokenizer") is None
+        #     and text_analyzer_kwargs.get("inference_method") == "local"
+        #     and USE_LLAMA_CPP != "True"
+        # ):
+        #     from tools.llm_funcs import get_pii_tokenizer
+
+        #     try:
+        #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
+        #     except Exception as e:
+        #         print(
+        #             f"Warning: Failed to load PII tokenizer: {e}. "
+        #             f"Will attempt to load tokenizer on-demand."
+        #         )
+
+        # Handle custom entities first (same as AWS Comprehend)
+        # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
+        local_custom_entities = [
+            entity
+            for entity in (chosen_llm_entities or [])
+            if entity in (custom_entities or []) or entity in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
+
+        if local_custom_entities:
+            # Filter entities to only include those supported by the language
+            language_supported_entities = filter_entities_for_language(
+                local_custom_entities, valid_language_entities, language
+            )
+
+            if language_supported_entities:
+                text_analyzer_kwargs["entities"] = language_supported_entities
+
+                # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+                # Also exclude allow_list since we pass it explicitly
+                presidio_kwargs = {
+                    k: v
+                    for k, v in text_analyzer_kwargs.items()
+                    if k
+                    not in [
+                        "inference_method",
+                        "model_choice",
+                        "api_url",
+                        "local_model",
+                        "tokenizer",
+                        "assistant_model",
+                        "client",
+                        "client_config",
+                        "temperature",
+                        "max_tokens",
+                        "custom_instructions",
+                        "allow_list",
+                    ]
+                }
+
+                page_analyser_result = nlp_analyser.analyze(
+                    text=page_text,
+                    language=language,
+                    score_threshold=score_threshold,
+                    return_decision_process=True,
+                    allow_list=allow_list,
+                    **presidio_kwargs,
+                )
+                all_text_line_results = map_back_entity_results(
+                    page_analyser_result, page_text_mapping, all_text_line_results
+                )
+
+        # Process text in batches for LLM (same batching logic as AWS Comprehend)
+        current_batch = ""
+        current_batch_mapping = list()
+        batch_char_count = 0
+        batch_word_count = 0
+
+        for i, text_line in enumerate(line_level_text_results_list):
+            words = text_line.text.split()
+            word_start_positions = list()
+            current_pos = 0
+
+            for word in words:
+                word_start_positions.append(current_pos)
+                current_pos += len(word) + 1
+
+            word_idx = 0
+            while word_idx < len(words):
+                word = words[word_idx]
+                new_batch_char_count = len(current_batch) + len(word) + 1
+
+                # Check if we've hit the limit
+                limit_reached = (
+                    batch_word_count >= DEFAULT_NEW_BATCH_WORD_COUNT
+                    or new_batch_char_count >= DEFAULT_NEW_BATCH_CHAR_COUNT
+                )
+
+                if limit_reached:
+                    # Add the current word to the batch first
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+
+                    # Check if current word ends with phrase punctuation
+                    if ends_with_phrase_punctuation(word):
+                        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                        llm_chosen_redact_comprehend_entities = [
+                            entity
+                            for entity in chosen_llm_entities
+                            if entity != "CUSTOM"
+                        ]
+                        # Process current batch
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
+                            current_batch,
+                            current_batch_mapping,
+                            bedrock_runtime=bedrock_runtime,
+                            language=aws_language,
+                            allow_list=text_analyzer_kwargs.get(
+                                "allow_list", allow_list or []
+                            ),
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                            all_text_line_results=all_text_line_results,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=output_folder,
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=page_number,
+                            inference_method=text_analyzer_kwargs.get(
+                                "inference_method"
+                            ),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            client=text_analyzer_kwargs.get("client"),
+                            client_config=text_analyzer_kwargs.get("client_config"),
+                            api_url=text_analyzer_kwargs.get("api_url"),
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx += 1
+                    else:
+                        # Look ahead in current line for phrase-ending punctuation or end of line
+                        lookahead_idx = word_idx + 1
+                        lookahead_batch = current_batch
+                        lookahead_char_count = batch_char_count
+                        lookahead_word_count = batch_word_count
+                        lookahead_mapping = list(current_batch_mapping)
+
+                        # Continue adding words until we find phrase-ending punctuation or end of line
+                        while lookahead_idx < len(words):
+                            lookahead_word = words[lookahead_idx]
+
+                            # Add the word to lookahead batch
+                            if lookahead_batch:
+                                lookahead_batch += " "
+                                lookahead_char_count += 1
+                            lookahead_batch += lookahead_word
+                            lookahead_char_count += len(lookahead_word)
+                            lookahead_word_count += 1
+
+                            if not lookahead_mapping or lookahead_mapping[-1][1] != i:
+                                lookahead_mapping.append(
+                                    (
+                                        lookahead_char_count - len(lookahead_word),
+                                        i,
+                                        text_line,
+                                        line_characters[i],
+                                        word_start_positions[lookahead_idx],
+                                    )
+                                )
+
+                            # Check if this word ends with phrase punctuation
+                            if ends_with_phrase_punctuation(lookahead_word):
+                                break
+
+                            lookahead_idx += 1
+
+                        # Use the lookahead batch (either found phrase end or reached end of line)
+                        current_batch = lookahead_batch
+                        batch_char_count = lookahead_char_count
+                        batch_word_count = lookahead_word_count
+                        current_batch_mapping = lookahead_mapping
+
+                        # Remove 'CUSTOM' entities from the chosen_llm_entities list
+                        llm_chosen_redact_comprehend_entities = [
+                            entity
+                            for entity in chosen_llm_entities
+                            if entity != "CUSTOM"
+                        ]
+                        # Process current batch
+                        (
+                            all_text_line_results,
+                            batch_input_tokens,
+                            batch_output_tokens,
+                        ) = do_llm_entity_detection_call(
+                            current_batch,
+                            current_batch_mapping,
+                            bedrock_runtime=bedrock_runtime,
+                            language=aws_language,
+                            allow_list=text_analyzer_kwargs.get(
+                                "allow_list", allow_list or []
+                            ),
+                            chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                            all_text_line_results=all_text_line_results,
+                            model_choice=model_choice,
+                            temperature=text_analyzer_kwargs.get(
+                                "temperature", LLM_PII_TEMPERATURE
+                            ),
+                            max_tokens=text_analyzer_kwargs.get(
+                                "max_tokens", LLM_PII_MAX_TOKENS
+                            ),
+                            output_folder=output_folder,
+                            batch_number=comprehend_query_number + 1,
+                            custom_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=page_number,
+                            inference_method=text_analyzer_kwargs.get(
+                                "inference_method"
+                            ),
+                            # local_model=text_analyzer_kwargs.get("local_model"),
+                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                            # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                            client=text_analyzer_kwargs.get("client"),
+                            client_config=text_analyzer_kwargs.get("client_config"),
+                            api_url=text_analyzer_kwargs.get("api_url"),
+                        )
+                        comprehend_query_number += 1
+
+                        # Reset batch
+                        current_batch = ""
+                        batch_word_count = 0
+                        batch_char_count = 0
+                        current_batch_mapping = list()
+                        word_idx = lookahead_idx + 1
+                else:
+                    # Normal case: add word to batch
+                    if current_batch:
+                        current_batch += " "
+                        batch_char_count += 1
+                    current_batch += word
+                    batch_char_count += len(word)
+                    batch_word_count += 1
+
+                    if not current_batch_mapping or current_batch_mapping[-1][1] != i:
+                        current_batch_mapping.append(
+                            (
+                                batch_char_count - len(word),
+                                i,
+                                text_line,
+                                line_characters[i],
+                                word_start_positions[word_idx],
+                            )
+                        )
+                    word_idx += 1
+
+        # Process final batch if any
+        if current_batch:
+            # Remove 'CUSTOM' entities from the chosen_llm_entities list
+            llm_chosen_redact_comprehend_entities = [
+                entity for entity in chosen_llm_entities if entity != "CUSTOM"
+            ]
+            all_text_line_results, batch_input_tokens, batch_output_tokens = (
+                do_llm_entity_detection_call(
+                    current_batch,
+                    current_batch_mapping,
+                    bedrock_runtime=bedrock_runtime,
+                    language=aws_language,
+                    allow_list=text_analyzer_kwargs.get("allow_list", allow_list or []),
+                    chosen_redact_llm_entities=llm_chosen_redact_comprehend_entities,
+                    all_text_line_results=all_text_line_results,
+                    model_choice=model_choice,
+                    temperature=text_analyzer_kwargs.get(
+                        "temperature", LLM_PII_TEMPERATURE
+                    ),
+                    max_tokens=text_analyzer_kwargs.get(
+                        "max_tokens", LLM_PII_MAX_TOKENS
+                    ),
+                    output_folder=output_folder,
+                    batch_number=comprehend_query_number + 1,
+                    custom_instructions=custom_llm_instructions,
+                    file_name=file_name,
+                    page_number=page_number,
+                    inference_method=text_analyzer_kwargs.get("inference_method"),
+                    # local_model=text_analyzer_kwargs.get("local_model"),
+                    # tokenizer=text_analyzer_kwargs.get("tokenizer"),
+                    # assistant_model=text_analyzer_kwargs.get("assistant_model"),
+                    client=text_analyzer_kwargs.get("client"),
+                    client_config=text_analyzer_kwargs.get("client_config"),
+                    api_url=text_analyzer_kwargs.get("api_url"),
+                )
+            )
+            # Accumulate token usage
+            llm_total_input_tokens += batch_input_tokens
+            llm_total_output_tokens += batch_output_tokens
             comprehend_query_number += 1
 
     # Process results for each line
@@ -5679,7 +10538,12 @@ def run_page_text_redaction(
             page_analyser_results.extend(line_results)
             page_analysed_bounding_boxes.extend(text_line_bounding_boxes)
 
-    return page_analysed_bounding_boxes
+    return (
+        page_analysed_bounding_boxes,
+        llm_model_name,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
+    )
 
 
 def merge_text_bounding_boxes(

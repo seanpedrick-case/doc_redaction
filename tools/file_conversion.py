@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List
 
+import gradio as gr
 import numpy as np
 import pandas as pd
 import pymupdf
@@ -241,6 +242,7 @@ def convert_pdf_to_images(
     image_dpi: float = image_dpi,
     num_threads: int = 8,
     input_folder: str = INPUT_FOLDER,
+    progress: Progress = Progress(track_tqdm=True),
 ):
     """
     Converts a PDF document into a series of images, processing each page concurrently.
@@ -269,6 +271,7 @@ def convert_pdf_to_images(
         page_count = pdfinfo_from_path(pdf_path)["Pages"]
 
     print(f"Creating images. Number of pages in PDF: {page_count}")
+    progress(0.1, desc="Creating images")
 
     # Handle special cases for page range
     # If page_min is 0, use the first page (0-indexed)
@@ -706,6 +709,63 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def word_level_ocr_df_to_line_level_ocr_df(
+    word_level_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Convert word-level OCR results dataframe to line-level OCR results dataframe.
+
+    Word-level format has one row per word (page, line, word_text, word_x0, word_y0,
+    word_x1, word_y1, word_conf, ...). Line-level format has one row per line with
+    aggregated text and bounding box (page, text, left, top, width, height, line, conf).
+
+    Args:
+        word_level_df: DataFrame with columns including page, line, word_text,
+            word_x0, word_y0, word_x1, word_y1, and word_conf (or line_conf).
+
+    Returns:
+        DataFrame with columns page, text, left, top, width, height, line, conf.
+    """
+    required = ["page", "line", "word_text", "word_x0", "word_y0", "word_x1", "word_y1"]
+    for col in required:
+        if col not in word_level_df.columns:
+            raise ValueError(
+                f"word_level_df must contain column '{col}'. "
+                f"Found: {list(word_level_df.columns)}"
+            )
+
+    def agg_line(group: pd.DataFrame) -> pd.Series:
+        text = " ".join(group["word_text"].astype(str).dropna())
+        x0 = group["word_x0"].min()
+        y0 = group["word_y0"].min()
+        x1 = group["word_x1"].max()
+        y1 = group["word_y1"].max()
+        if "line_conf" in group.columns and group["line_conf"].notna().any():
+            conf = group["line_conf"].dropna().iloc[0]
+        else:
+            conf = group["word_conf"].mean() if "word_conf" in group.columns else 100.0
+        return pd.Series(
+            {
+                "text": text,
+                "left": x0,
+                "top": y0,
+                "width": x1 - x0,
+                "height": y1 - y0,
+                "conf": conf,
+            }
+        )
+
+    line_level = (
+        word_level_df.groupby(["page", "line"], sort=False)
+        .apply(agg_line)
+        .reset_index()
+    )
+    # Match expected column order: page, text, left, top, width, height, line, conf
+    return line_level[
+        ["page", "text", "left", "top", "width", "height", "line", "conf"]
+    ]
+
+
 def extract_redactions(
     doc: Document, page_sizes: List[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
@@ -763,34 +823,48 @@ def extract_redactions(
                 annot_info = annot.info or {}
                 annot_colors = annot.colors or {}
 
-                # Extract coordinates from the annotation rectangle
+                # Extract coordinates from the annotation rectangle (PDF space, same units as mediabox)
                 rect = annot.rect
                 x0, y0, x1, y1 = rect.x0, rect.y0, rect.x1, rect.y1
 
-                # Convert coordinates to relative (0-1 range) using mediabox dimensions
+                # Convert PDF coordinates to image pixel coordinates (always scale by image size)
+                page_size_info = None
                 if page_sizes:
-                    # Find the page size info for this page
-                    page_size_info = None
                     for ps in page_sizes:
                         if ps.get("page") == page_num + 1:
                             page_size_info = ps
                             break
 
-                    if page_size_info:
-                        mediabox_width = page_size_info.get("mediabox_width", 1)
-                        mediabox_height = page_size_info.get("mediabox_height", 1)
+                if not page_size_info:
+                    raise ValueError(
+                        f"extract_redactions: no page_sizes entry for page {page_num + 1}. "
+                        "Ensure page_sizes is built and images exist before extracting redactions."
+                    )
 
-                        # Convert to relative coordinates
-                        rel_x0 = x0 / mediabox_width
-                        rel_y0 = y0 / mediabox_height
-                        rel_x1 = x1 / mediabox_width
-                        rel_y1 = y1 / mediabox_height
-                    else:
-                        # Fallback to absolute coordinates if page size not found
-                        rel_x0, rel_y0, rel_x1, rel_y1 = x0, y0, x1, y1
-                else:
-                    # Fallback to absolute coordinates if no page_sizes provided
-                    rel_x0, rel_y0, rel_x1, rel_y1 = x0, y0, x1, y1
+                mediabox_width = page_size_info.get("mediabox_width", 1)
+                mediabox_height = page_size_info.get("mediabox_height", 1)
+                image_width = page_size_info.get("image_width")
+                image_height = page_size_info.get("image_height")
+
+                try:
+                    w = float(image_width) if image_width is not None else 0
+                    h = float(image_height) if image_height is not None else 0
+                    has_valid_image_dims = w > 0 and h > 0
+                except (TypeError, ValueError):
+                    has_valid_image_dims = False
+
+                if not has_valid_image_dims:
+                    raise ValueError(
+                        f"extract_redactions: page {page_num + 1} has no valid image dimensions "
+                        "(image_width/image_height). Create images for all pages before loading redactions."
+                    )
+
+                scale_x = w / mediabox_width
+                scale_y = h / mediabox_height
+                rel_x0 = x0 * scale_x
+                rel_y0 = y0 * scale_y
+                rel_x1 = x1 * scale_x
+                rel_y1 = y1 * scale_y
 
                 # Get color and convert from 0-1 range to 0-255 range
                 fill_color = annot_colors.get(
@@ -1030,6 +1104,8 @@ def prepare_image_or_pdf(
 
         file_extension = os.path.splitext(file_path)[1].lower()
 
+        progress(0.2, desc="Preparing file")
+
         # If a pdf, load as a pymupdf document
         if is_pdf(file_path):
             print(f"File {file_name_with_ext} is a PDF")
@@ -1087,10 +1163,45 @@ def prepare_image_or_pdf(
                     all_annotations_object.append(annotation)
 
             # If we are loading redactions from the pdf, extract the redactions
-            if (
-                LOAD_REDACTION_ANNOTATIONS_FROM_PDF is True
-                and prepare_for_review is True
-            ):
+            if LOAD_REDACTION_ANNOTATIONS_FROM_PDF and prepare_for_review is True:
+                # Ensure every page has a real image so coordinates can be scaled by image size
+                for ps in page_sizes:
+                    try:
+                        w = (
+                            float(ps.get("image_width"))
+                            if ps.get("image_width") is not None
+                            else 0
+                        )
+                        h = (
+                            float(ps.get("image_height"))
+                            if ps.get("image_height") is not None
+                            else 0
+                        )
+                        has_valid_dims = w > 0 and h > 0
+                    except (TypeError, ValueError):
+                        has_valid_dims = False
+                    if not has_valid_dims:
+                        page_num_0 = int(ps["page"]) - 1
+                        _pnum, img_path, width, height = (
+                            process_single_page_for_image_conversion(
+                                file_path,
+                                page_num_0,
+                                create_images=True,
+                                input_folder=input_folder,
+                            )
+                        )
+                        try:
+                            if (
+                                width is not None
+                                and height is not None
+                                and float(width) > 0
+                                and float(height) > 0
+                            ):
+                                ps["image_path"] = img_path
+                                ps["image_width"] = width
+                                ps["image_height"] = height
+                        except (TypeError, ValueError):
+                            pass
 
                 redactions_list = extract_redactions(pymupdf_doc, page_sizes)
                 all_annotations_object = redactions_list
@@ -1154,6 +1265,19 @@ def prepare_image_or_pdf(
             elif "_ocr_results_with_words" in file_path_without_ext:
                 all_page_line_level_ocr_results_with_words_df = read_file(file_path)
                 json_from_csv = False
+
+                # Convert word-level OCR results to line-level if line-level is empty
+                if all_line_level_ocr_results_df is None or (
+                    isinstance(all_line_level_ocr_results_df, pd.DataFrame)
+                    and all_line_level_ocr_results_df.empty
+                ):
+                    all_line_level_ocr_results_df = (
+                        word_level_ocr_df_to_line_level_ocr_df(
+                            all_page_line_level_ocr_results_with_words_df
+                        )
+                    )
+                    if "line" not in all_line_level_ocr_results_df.columns:
+                        all_line_level_ocr_results_df["line"] = ""
 
         # If the file name ends with .json, check if we are loading for review. If yes, assume it is an annotations object, overwrite the current annotations object. If false, assume this is a Textract object, load in to Textract
 
@@ -1419,6 +1543,8 @@ def prepare_image_or_pdf(
         number_of_pages = len(page_sizes)
 
     print(f"Finished loading in {file_path_number} file(s)")
+
+    gr.Info(combined_out_message)
 
     return (
         combined_out_message,
@@ -2768,7 +2894,8 @@ def fill_missing_box_ids_each_box(data_input: Dict) -> Dict:
                     break  # Move to the next box
 
     if num_filled > 0:
-        print(f"Successfully filled {num_filled} missing or invalid box IDs.")
+        pass
+        # print(f"Successfully filled {num_filled} missing or invalid box IDs.")
 
     # The input dictionary 'data_input' has been modified in place
     return data_input

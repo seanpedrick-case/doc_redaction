@@ -11,7 +11,7 @@ short_description: OCR / redact PDF documents and tabular data
 ---
 # Document redaction
 
-version: 1.6.7
+version: 1.7.0
 
 Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide](#user-guide) for a full walkthrough of all the features in the app.
     
@@ -1005,7 +1005,7 @@ The following parameters can be configured by your system administrator to fine-
 When VLM options are enabled, the following settings are available:
 
 - **SHOW_VLM_MODEL_OPTIONS** (default: False): If enabled, VLM options will be shown in the UI.
-- **SELECTED_MODEL** (default: "Dots.OCR"): The VLM model to use. Options include: "Nanonets-OCR2-3B", "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "PaddleOCR-VL". Generally, the Qwen3-VL-8B-Instruct model is the most accurate, and vlm/inference server inference is based on using this model, but is also the slowest. Qwen3-VL-4B-Instruct can also work quite well on easier documents.
+- **SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL** (default: "Dots.OCR"): The VLM model to use. Options include: "Nanonets-OCR2-3B", "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "PaddleOCR-VL". Generally, the Qwen3-VL-8B-Instruct model is the most accurate, and vlm/inference server inference is based on using this model, but is also the slowest. Qwen3-VL-4B-Instruct can also work quite well on easier documents.
 - **MAX_SPACES_GPU_RUN_TIME** (default: 60): Maximum seconds to run GPU operations on Hugging Face Spaces.
 - **MAX_NEW_TOKENS** (default: 30): Maximum number of tokens to generate for VLM responses.
 - **MAX_INPUT_TOKEN_LENGTH** (default: 4096): Maximum number of tokens that can be input to the VLM.
@@ -1021,11 +1021,11 @@ When VLM options are enabled, the following settings are available:
 
 ### Using an alternative OCR model
 
-If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_OPTIONS are set to 'True' in your app_config.env file, you should see the following options available under 'Change default redaction settings...' on the front tab. The different OCR options can be used in different contexts.
+If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_VLM_OPTIONS are set to 'True' in your app_config.env file, you should see the following options available under 'Change default redaction settings...' on the front tab. The different OCR options can be used in different contexts.
 
 - **Tesseract (option 'tesseract')**: Best for documents with clear, well-formatted text, providing a good balance of speed and accuracy with precise word-level bounding boxes. But struggles a lot with handwriting or 'noisy' documents (e.g. scanned documents).
 - **PaddleOCR (option 'paddle')**: More powerful than Tesseract, but slower. Does a decent job with unclear typed text on scanned documents. Also, bounding boxes may not all be accurate as they will be calculated from the line-level bounding boxes produced by Paddle after analysis.
-- **VLM (option 'vlm')**: Recommended for use with the Qwen-3-VL 8B model (can set this with the SELECTED_MODEL environment variable in config.py). This model is extremely good at identifying difficult to read handwriting and noisy documents. However, it is much slower than the above options.
+- **VLM (option 'vlm')**: Recommended for use with the Qwen-3-VL 8B model (can set this with the SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL environment variable in config.py). This model is extremely good at identifying difficult to read handwriting and noisy documents. However, it is much slower than the above options.
 Other models are available as you can see in the tools/run_vlm.py code file. This will conduct inference with the transformers package, and quantise with bitsandbytes if the QUANTISE_VLM_MODELS environment variable is set to True. Inference with this package is *much* slower than with e.g. llama.cpp or vllm servers, which can be used with the inference-server options described below.
 - **Inference server (option 'inference-server')**: This can be used with OpenAI compatible API endpoints, for example [llama-cpp using llama-server](https://github.com/ggml-org/llama.cpp), or [vllm](https://docs.vllm.ai/en/stable). Both of these options will be much faster for inference than the VLM 'in-app' model calls described above, and produce results of a similar quality, but you will need to be able to set up the server separately.
 
@@ -1064,7 +1064,7 @@ llama-server \
 If running llama.cpp on the same computer as the doc redaction app, you can then set the following variable in config/app_config.env to run:
 
 ```
-SHOW_INFERENCE_SERVER_OPTIONS=True
+SHOW_INFERENCE_SERVER_VLM_OPTIONS=True
 INFERENCE_SERVER_API_URL=http://localhost:7862
 ```
 

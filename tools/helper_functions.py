@@ -1,6 +1,7 @@
 import os
 import platform
 import random
+import re
 import string
 import unicodedata
 from datetime import datetime
@@ -78,6 +79,7 @@ def reset_state_vars():
         0,
         [],
         [],
+        0,
     )
 
 
@@ -95,6 +97,107 @@ def reset_data_vars():
 
 def reset_aws_call_vars():
     return 0, 0
+
+
+### functions related to summarisation ###
+
+
+def clean_column_name(
+    column_name: str, max_length: int = 20, front_characters: bool = True
+):
+    # Convert to string
+    column_name = str(column_name)
+    # Replace non-alphanumeric characters (except underscores) with underscores
+    column_name = re.sub(r"\W+", "_", column_name)
+    # Remove leading/trailing underscores
+    column_name = column_name.strip("_")
+    # Ensure the result is not empty; fall back to "column" if necessary
+    column_name = column_name if column_name else "column"
+    # Truncate to max_length
+    if front_characters is True:
+        output_text = column_name[:max_length]
+    else:
+        output_text = column_name[-max_length:]
+    return output_text
+
+
+def create_batch_file_path_details(
+    reference_data_file_name: str,
+    latest_batch_completed: int = None,
+    batch_size_number: int = None,
+    in_column: str = None,
+) -> str:
+    """
+    Creates a standardised batch file path detail string from a reference data filename.
+
+    Args:
+        reference_data_file_name (str): Name of the reference data file
+        latest_batch_completed (int, optional): Latest batch completed. Defaults to None.
+        batch_size_number (int, optional): Batch size number. Defaults to None.
+        in_column (str, optional): In column. Defaults to None.
+    Returns:
+        str: Formatted batch file path detail string
+    """
+
+    # Extract components from filename using regex
+    file_name = (
+        re.search(
+            r"(.*?)(?:_all_|_final_|_batch_|_col_)", reference_data_file_name
+        ).group(1)
+        if re.search(r"(.*?)(?:_all_|_final_|_batch_|_col_)", reference_data_file_name)
+        else reference_data_file_name
+    )
+
+    # Clean the extracted names
+    file_name_cleaned = clean_column_name(file_name, max_length=20)
+
+    return f"{file_name_cleaned}_"
+
+
+def ensure_model_in_map(model_choice: str, model_name_map_dict: dict = None) -> dict:
+    """
+    Ensures that a model_choice is registered in model_name_map.
+    If the model_choice is not found, it assumes it's an inference-server model
+    and adds it to the map with source "inference-server".
+
+    Args:
+        model_choice (str): The model name to check/register
+        model_name_map_dict (dict, optional): The model_name_map dictionary to update.
+            If None, uses the global model_name_map from config.
+
+    Returns:
+        dict: The model_name_map dictionary (updated if needed)
+    """
+    # Use provided dict or global one
+    if model_name_map_dict is None:
+        from tools.config import model_name_map
+
+        model_name_map_dict = model_name_map
+
+    # If model_choice is not in the map, assume it's an inference-server model
+    if model_choice not in model_name_map_dict:
+        model_name_map_dict[model_choice] = {
+            "short_name": model_choice,
+            "source": "inference-server",
+        }
+        print(f"Registered custom model '{model_choice}' as inference-server model")
+
+    return model_name_map_dict
+
+
+def get_file_name_no_ext(file_path: str):
+    # First, get the basename of the file (e.g., "example.txt" from "/path/to/example.txt")
+    basename = os.path.basename(file_path)
+
+    # Then, split the basename and its extension and return only the basename without the extension
+    filename_without_extension, _ = os.path.splitext(basename)
+
+    # print(filename_without_extension)
+
+    return filename_without_extension
+
+
+###
 
 
 def load_in_default_allow_list(allow_list_file_path):
@@ -175,9 +278,18 @@ def ensure_folder_exists(output_folder: str):
         print(f"The {output_folder} folder already exists.")
 
 
-def update_dataframe(df: pd.DataFrame):
-    df_copy = df.copy()
-    return df_copy
+def update_dataframe(df_or_list):
+    """
+    Update function for both DataFrame and list inputs.
+    For Dropdown components (list), return the list as-is.
+    For DataFrame components, return a copy.
+    """
+    if isinstance(df_or_list, list):
+        return df_or_list
+    elif isinstance(df_or_list, pd.DataFrame):
+        return df_or_list.copy()
+    else:
+        return df_or_list
 
 
 def get_file_name_without_type(file_path):
@@ -260,8 +372,9 @@ def ensure_output_folder_exists(output_folder: str):
 def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
     """
     When file is loaded, update the column dropdown choices and write to relevant data states.
+    Returns a list for Dropdown components (instead of DataFrame).
     """
-    custom_regex_df = pd.DataFrame()
+    custom_regex_list = list()
 
     if in_file:
         file_list = [string.name for string in in_file]
@@ -273,20 +386,23 @@ def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
                 regex_file_name, low_memory=False, header=None
             )
 
-            # Select just first columns
-            custom_regex_df = pd.DataFrame(custom_regex_df.iloc[:, [0]])
-            custom_regex_df.rename(columns={0: file_type}, inplace=True)
+            # Select just first column and convert to list for Dropdown component
+            if not custom_regex_df.empty:
+                custom_regex_list = (
+                    custom_regex_df.iloc[:, 0].dropna().astype(str).tolist()
+                )
 
-            custom_regex_df.columns = custom_regex_df.columns.astype(str)
+            # substitute underscores in file type
+            file_type_output = file_type.replace("_", " ")
 
-            output_text = file_type + " file loaded."
+            output_text = file_type_output + " file loaded."
             print(output_text)
     else:
         output_text = "No file provided."
         # print(output_text)
-        return output_text, custom_regex_df
+        return output_text, custom_regex_list
 
-    return output_text, custom_regex_df
+    return output_text, custom_regex_list
 
 
 def put_columns_in_df(in_file: List[str]):
@@ -329,13 +445,13 @@ def put_columns_in_df(in_file: List[str]):
     concat_choices = list(set(concat_choices))
 
     if number_of_excel_files > 0:
-        return gr.Dropdown(choices=concat_choices, value=concat_choices), gr.Dropdown(
-            choices=all_sheet_names, value=all_sheet_names, visible=True
-        )
+        return gr.Dropdown(
+            choices=concat_choices, value=concat_choices, visible=True
+        ), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names, visible=True)
     else:
-        return gr.Dropdown(choices=concat_choices, value=concat_choices), gr.Dropdown(
-            visible=False
-        )
+        return gr.Dropdown(
+            choices=concat_choices, value=concat_choices, visible=True
+        ), gr.Dropdown(visible=False)
 
 
 def get_textract_file_suffix(handwrite_signature_checkbox: List[str] = list()) -> str:
@@ -721,8 +837,22 @@ def update_file_explorer_object():
     return gr.FileExplorer()
 
 
+def _is_file_path(path: str) -> bool:
+    """True if path looks like a file (has a file-type suffix), not a folder."""
+    if not path or not path.strip():
+        return False
+    name = os.path.basename(path.rstrip("/\\"))
+    if not name or "." not in name:
+        return False
+    ext = name.rsplit(".", 1)[-1]
+    return bool(ext and len(ext) <= 10 and ext.isalnum())
+
+
 def all_outputs_file_download_fn(file_explorer_object: list[str]):
-    return file_explorer_object
+    """Return only paths that are files (have a suffix like .csv, .txt), not folder paths."""
+    if not file_explorer_object:
+        return file_explorer_object
+    return [p for p in file_explorer_object if _is_file_path(p)]
 
 
 def calculate_aws_costs(

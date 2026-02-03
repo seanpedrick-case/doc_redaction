@@ -15,6 +15,7 @@ from tools.config import MAX_SIMULTANEOUS_FILES
 from tools.file_conversion import (
     convert_annotation_data_to_dataframe,
     fill_missing_box_ids_each_box,
+    word_level_ocr_df_to_line_level_ocr_df,
 )
 from tools.file_redaction import redact_whole_pymupdf_page
 from tools.helper_functions import OUTPUT_FOLDER
@@ -543,9 +544,21 @@ def combine_ocr_output_text(
         file_paths_list = input_files
 
     data_to_process = list()
+    i = 0
+    first_ocr_df = pd.DataFrame()
     for file_path in file_paths_list:
         try:
             df = pd.read_csv(file_path)
+            # Convert word-level OCR to line-level if user uploaded word-level file
+            if "ocr_results_with_words" in os.path.basename(file_path) and (
+                "word_text" in df.columns and "text" not in df.columns
+            ):
+                df = word_level_ocr_df_to_line_level_ocr_df(df)
+            # Save the first OCR dataframe to save to the GUI
+            if i == 0:
+                first_ocr_df = df
+                first_ocr_df_path = file_path
+            i += 1
             # Use the base filename as the identifier
             file_identifier = os.path.basename(file_path)
             data_to_process.append((file_identifier, df))
@@ -557,14 +570,16 @@ def combine_ocr_output_text(
     if not data_to_process:
         raise ValueError("No valid CSV files could be read or processed.")
 
-    # Call the core function with the loaded data
-    return combine_ocr_dataframes(
+    df_combined, _, full_out_ocr_df = combine_ocr_dataframes(
         input_data=data_to_process,
         combine_pages=combine_pages,
         output_folder=output_folder,
         output_filename="combined_ocr_from_files.csv",  # Specific name for this path
         remake_index=remake_index,
     )
+
+    # Call the core function with the loaded data
+    return df_combined, first_ocr_df, first_ocr_df_path
 
 
 def clean_and_stem_text_series(df: pd.DataFrame, column: str):
@@ -1257,6 +1272,8 @@ def run_duplicate_analysis(
     min_words: int,
     min_consecutive: int,
     greedy_match: bool,
+    all_page_line_level_ocr_results_df_base: pd.DataFrame,
+    ocr_df_paths_list: list[str],
     combine_pages: bool = True,
     output_folder: str = OUTPUT_FOLDER,
     preview_length: int = 500,
@@ -1274,6 +1291,8 @@ def run_duplicate_analysis(
         min_consecutive (int): The minimum number of consecutive pages that must match for a sequence to be considered a duplicate.
         greedy_match (bool): If True, uses a greedy matching strategy for identifying consecutive sequences.
         combine_pages (bool, optional): If True, text from multiple pages is combined into larger segments for analysis. Defaults to True.
+        all_page_line_level_ocr_results_df_base (pd.DataFrame): The base dataframe containing the OCR results.
+        ocr_df_paths_list (list[str]): A list of file paths to the OCR results.
         output_folder (str, optional): The directory where the similarity results and redaction lists will be saved. Defaults to OUTPUT_FOLDER.
         preview_length (int, optional): The maximum number of characters to display in the text preview panes. Defaults to 500.
         progress (gr.Progress, optional): A Gradio progress tracker object to display progress in the UI.
@@ -1285,6 +1304,9 @@ def run_duplicate_analysis(
     if isinstance(files, str):
         files = [files]
 
+    if not ocr_df_paths_list:
+        ocr_df_paths_list = []
+
     if len(files) > MAX_SIMULTANEOUS_FILES:
         out_message = f"Number of files to deduplicate is greater than {MAX_SIMULTANEOUS_FILES}. Please submit a smaller number of files."
         print(out_message)
@@ -1295,9 +1317,15 @@ def run_duplicate_analysis(
     task_textbox = "deduplicate"
 
     progress(0, desc="Combining input files...")
-    df_combined, _, full_out_ocr_df = combine_ocr_output_text(
+    df_combined, first_ocr_df, first_ocr_df_path = combine_ocr_output_text(
         files, combine_pages=combine_pages, output_folder=output_folder
     )
+
+    # Replace current OCR app components if currently empty
+    if all_page_line_level_ocr_results_df_base.empty:
+        all_page_line_level_ocr_results_df_base = first_ocr_df
+        if first_ocr_df_path not in ocr_df_paths_list:
+            ocr_df_paths_list.append(first_ocr_df_path)
 
     if df_combined.empty:
         raise Warning("No data found in the uploaded files.")
@@ -1331,7 +1359,15 @@ def run_duplicate_analysis(
     end_time = time.time()
     processing_time = round(end_time - start_time, 2)
 
-    return results_df, output_paths, full_data_by_file, processing_time, task_textbox
+    return (
+        results_df,
+        output_paths,
+        full_data_by_file,
+        processing_time,
+        task_textbox,
+        all_page_line_level_ocr_results_df_base,
+        ocr_df_paths_list,
+    )
 
 
 def show_page_previews(
@@ -1433,7 +1469,7 @@ def add_new_annotations_to_existing_page_annotations(
 
 
 def apply_whole_page_redactions_from_list(
-    duplicate_page_numbers_df: pd.DataFrame,
+    duplicate_page_numbers_df_or_list: pd.DataFrame | list[str],
     doc_file_name_with_extension_textbox: str,
     review_file_state: pd.DataFrame,
     duplicate_output_paths: list[str],
@@ -1447,7 +1483,7 @@ def apply_whole_page_redactions_from_list(
     This function applies redactions to whole pages based on a provided list of duplicate page numbers. It supports two modes of operation: combining pages and not combining pages. When combining pages is enabled, it attempts to identify duplicate pages across different files and applies redactions accordingly. If combining pages is disabled, it relies on new annotations with bounding boxes to determine which pages to redact. The function utilises a PyMuPDF document object to manipulate the PDF file, and it also considers the sizes of pages to ensure accurate redaction application.
 
     Args:
-        duplicate_page_numbers_df (pd.DataFrame): A DataFrame containing page numbers identified as duplicates.
+        duplicate_page_numbers_df_or_list: A DataFrame or list containing page numbers identified as duplicates (supports both legacy DataFrame and new Dropdown list format).
         doc_file_name_with_extension_textbox (str): The name of the document file with its extension.
         review_file_state (pd.DataFrame): The current state of the review file.
         duplicate_output_paths (list[str]): A list of paths to files containing duplicate page information.
@@ -1466,44 +1502,92 @@ def apply_whole_page_redactions_from_list(
     all_annotations = all_existing_annotations.copy()
 
     if not pymupdf_doc:
-        message = "No document file currently under review"
+        message = "No document file currently under review. Please upload the relevant PDF on the Review redactions tab under the top 'Upload PDFs/images...' section to apply duplicate redactions."
         print(f"Warning: {message}")
         raise Warning(message)
 
     list_whole_pages_to_redact = list()
 
     if combine_pages is True:
-        # Get list of pages to redact from either dataframe or file
-        if not duplicate_page_numbers_df.empty:
-            list_whole_pages_to_redact = duplicate_page_numbers_df.iloc[:, 0].tolist()
+        # Get list of pages to redact from either dataframe, list, or file
+        # Handle both DataFrame (legacy) and list (new Dropdown format)
+        if isinstance(duplicate_page_numbers_df_or_list, pd.DataFrame):
+            if not duplicate_page_numbers_df_or_list.empty:
+                list_whole_pages_to_redact = duplicate_page_numbers_df_or_list.iloc[
+                    :, 0
+                ].tolist()
+        elif (
+            isinstance(duplicate_page_numbers_df_or_list, list)
+            and len(duplicate_page_numbers_df_or_list) > 0
+        ):
+            # Dropdown component returns a list directly
+            try:
+                # Try to convert to integers for page numbers
+                list_whole_pages_to_redact = [
+                    int(item) for item in duplicate_page_numbers_df_or_list if item
+                ]
+            except (ValueError, TypeError):
+                # Fall back to string list if conversion fails
+                list_whole_pages_to_redact = [
+                    str(item) for item in duplicate_page_numbers_df_or_list if item
+                ]
         elif duplicate_output_paths:
             expected_duplicate_pages_to_redact_name = (
                 f"{doc_file_name_with_extension_textbox}"
             )
+            # Substitute out '_for_review' from the expected filename to successfully modify existing redactions files
+            expected_duplicate_pages_to_redact_name = (
+                expected_duplicate_pages_to_redact_name.replace(
+                    "_redactions_for_review", ""
+                ).replace(".pdf", "")
+            )
+
             whole_pages_list = pd.DataFrame()  # Initialize empty DataFrame
 
             for output_file in duplicate_output_paths:
                 # Note: output_file.name might not be available if output_file is just a string path
                 # If it's a Path object or similar, .name is fine. Otherwise, parse from string.
-                file_name_from_path = (
-                    output_file.split("/")[-1]
-                    if isinstance(output_file, str)
-                    else output_file.name
+                # Use os.path for cross-platform path handling (e.g. Windows backslashes).
+                if isinstance(output_file, str):
+                    file_name_from_path = os.path.basename(output_file)
+                else:
+                    file_name_from_path = getattr(
+                        output_file, "name", str(output_file).split(os.sep)[-1]
+                    )
+
+                # Substitute out '_for_review' from the expected filename to successfully modify existing redactions files
+                file_name_from_path = file_name_from_path.replace(
+                    "_redactions_for_review", ""
                 )
                 if expected_duplicate_pages_to_redact_name in file_name_from_path:
                     whole_pages_list = pd.read_csv(
                         output_file, header=None
                     )  # Use output_file directly if it's a path
                     break
+            if not whole_pages_list.empty:
+                list_whole_pages_to_redact = whole_pages_list.iloc[:, 0].tolist()
         else:
             message = "No relevant list of whole pages to redact found."
             print(message)
             raise Warning(message)
 
-        if not whole_pages_list.empty:
-            list_whole_pages_to_redact = whole_pages_list.iloc[:, 0].tolist()
-
         list_whole_pages_to_redact = list(set(list_whole_pages_to_redact))
+
+        # When called from "Apply match" with combine_pages=True, the page list may come from
+        # in_fully_redacted_list_state (upload), which can be empty. Fall back to deriving
+        # pages from new_annotations_with_bounding_boxes so suggested duplicate pages are applied.
+        if not list_whole_pages_to_redact and new_annotations_with_bounding_boxes:
+            from tools.secure_regex_utils import safe_extract_page_number_from_path
+
+            list_whole_pages_to_redact = list()
+            for annotation in new_annotations_with_bounding_boxes:
+                page_num = safe_extract_page_number_from_path(annotation.get("image"))
+                if page_num is not None:
+                    list_whole_pages_to_redact.append(page_num + 1)
+                else:
+                    img = annotation.get("image", "")
+                    print(f"Warning: Could not extract page number from {img!r}")
+            list_whole_pages_to_redact = list(set(list_whole_pages_to_redact))
 
     else:
         if not new_annotations_with_bounding_boxes:
@@ -1682,7 +1766,8 @@ def create_annotation_objects_from_duplicates(
     final_output = list()
 
     if duplicates_df.empty:
-        raise Warning("No duplicates found")
+        gr.Info("No duplicates found")
+        return final_output
     if ocr_results_df.empty:
         raise Warning(
             "No OCR results found for file under review. Please upload relevant OCR_output file and original PDF document on the review tab."
@@ -1691,8 +1776,19 @@ def create_annotation_objects_from_duplicates(
     if combine_pages is False:
         page_to_image_map = {item["page"]: item["image_path"] for item in page_sizes}
 
-        # Prepare OCR Data: Add a line number column if it doesn't exist
-        if "line_number_by_page" not in ocr_results_df.columns:
+        # Prepare OCR Data: line_number_by_page must match the duplicate detection
+        # pipeline. That pipeline uses raw CSV row order (no sort) and cumcount()+1,
+        # so "line 4" = 4th row on the page in CSV order. If the OCR has a "line"
+        # column (1-based per page), use it so we redact the same line the match
+        # refers to. Otherwise fall back to (page, top, left) order + cumcount()+1.
+        if "line" in ocr_results_df.columns:
+            ocr_results_df = ocr_results_df.copy()
+            ocr_results_df["line_number_by_page"] = (
+                pd.to_numeric(ocr_results_df["line"], errors="coerce")
+                .fillna(0)
+                .astype(int)
+            )
+        else:
             ocr_results_df = ocr_results_df.sort_values(
                 by=["page", "top", "left"]
             ).reset_index(drop=True)
@@ -1702,27 +1798,43 @@ def create_annotation_objects_from_duplicates(
 
         annotations_by_page = defaultdict(list)
 
-        # Iterate through each duplicate range (this logic is unchanged)
-        for _, row in duplicates_df.iterrows():
-            start_page, start_line = _parse_page_line_id(row["Page2_Start_Page"])
-            end_page, end_line = _parse_page_line_id(row["Page2_End_Page"])
+        # Detect format: subdocument (Page2_Start_Page / Page2_End_Page) vs single-page (Page2_Page)
+        is_subdocument_format = (
+            "Page2_Start_Page" in duplicates_df.columns
+            and "Page2_End_Page" in duplicates_df.columns
+        )
 
-            # Select OCR Lines based on the range (this logic is unchanged)
-            if start_page == end_page:
-                condition = (ocr_results_df["page"] == start_page) & (
-                    ocr_results_df["line_number_by_page"].between(start_line, end_line)
-                )
+        for _, row in duplicates_df.iterrows():
+            if is_subdocument_format:
+                start_page, start_line = _parse_page_line_id(row["Page2_Start_Page"])
+                end_page, end_line = _parse_page_line_id(row["Page2_End_Page"])
+
+                if start_page == end_page:
+                    condition = (ocr_results_df["page"] == start_page) & (
+                        ocr_results_df["line_number_by_page"].between(
+                            start_line, end_line
+                        )
+                    )
+                else:
+                    cond_start = (ocr_results_df["page"] == start_page) & (
+                        ocr_results_df["line_number_by_page"] >= start_line
+                    )
+                    cond_middle = ocr_results_df["page"].between(
+                        start_page + 1, end_page - 1
+                    )
+                    cond_end = (ocr_results_df["page"] == end_page) & (
+                        ocr_results_df["line_number_by_page"] <= end_line
+                    )
+                    condition = cond_start | cond_middle | cond_end
             else:
-                cond_start = (ocr_results_df["page"] == start_page) & (
-                    ocr_results_df["line_number_by_page"] >= start_line
-                )
-                cond_middle = ocr_results_df["page"].between(
-                    start_page + 1, end_page - 1
-                )
-                cond_end = (ocr_results_df["page"] == end_page) & (
-                    ocr_results_df["line_number_by_page"] <= end_line
-                )
-                condition = cond_start | cond_middle | cond_end
+                # Single-page format (min_consecutive_pages=1, not greedy): Page2_Page only
+                if "Page2_Page" not in row.index:
+                    print(
+                        "Warning: duplicates_df has neither Page2_Start_Page/Page2_End_Page nor Page2_Page; skipping row."
+                    )
+                    continue
+                page_num = int(row["Page2_Page"])
+                condition = ocr_results_df["page"] == page_num
 
             lines_to_annotate = ocr_results_df[condition]
 
@@ -1743,7 +1855,7 @@ def create_annotation_objects_from_duplicates(
                 annotations_by_page[page_number].append(box)
 
         # --- Format the final output list using the page-to-image map ---
-        final_output = list()
+
         # Sort by page number for a predictable order
         for page_num, boxes in sorted(annotations_by_page.items()):
             # Look up the image path using the page number

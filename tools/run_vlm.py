@@ -112,6 +112,10 @@ if LOAD_PADDLE_AT_STARTUP is True:
         )
 
 
+# Module-level refs to loaded VLM model/processor (set when SHOW_VLM_MODEL_OPTIONS and model is loaded). Used by LLM entity detection when USE_TRANFORMERS_VLM_MODEL_AS_LLM.
+_loaded_vlm_model = None
+_loaded_vlm_processor = None
+
 # Define module-level defaults for model parameters (always available for import)
 # These will be overridden inside the SHOW_VLM_MODEL_OPTIONS block if enabled
 model_default_prompt = """Read all the text in the image."""
@@ -150,7 +154,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         MAX_NEW_TOKENS,
         MODEL_CACHE_PATH,
         QUANTISE_VLM_MODELS,
-        SELECTED_MODEL,
+        SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
         USE_FLASH_ATTENTION,
         VLM_DEFAULT_DO_SAMPLE,
         VLM_DEFAULT_MIN_P,
@@ -165,14 +169,14 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     print("torch.__version__ =", torch.__version__)
-    print("torch.version.cuda =", torch.version.cuda)
+    # print("torch.version.cuda =", torch.version.cuda)
     print("cuda available:", torch.cuda.is_available())
-    print("cuda device count:", torch.cuda.device_count())
+    # print("cuda device count:", torch.cuda.device_count())
     if torch.cuda.is_available():
-        print("current device:", torch.cuda.current_device())
+        # print("current device:", torch.cuda.current_device())
         print("device name:", torch.cuda.get_device_name(torch.cuda.current_device()))
 
-    print("Using device:", device)
+    # print("Using device:", device)
 
     CACHE_PATH = MODEL_CACHE_PATH
     if not os.path.exists(CACHE_PATH):
@@ -233,10 +237,10 @@ if SHOW_VLM_MODEL_OPTIONS is True:
                 print("Falling back to loading models without quantization")
                 quantization_config = None
 
-    print(f"Loading vision model: {SELECTED_MODEL}")
+    print(f"Loading vision model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
 
     # Load only the selected model based on configuration
-    if SELECTED_MODEL == "Nanonets-OCR2-3B":
+    if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Nanonets-OCR2-3B":
         MODEL_ID = "nanonets/Nanonets-OCR2-3B"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
@@ -255,7 +259,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
         model_default_prompt = """Extract the text from the above document as if you were reading it naturally."""
 
-    elif SELECTED_MODEL == "Dots.OCR":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Dots.OCR":
         # Download and patch Dots.OCR model
         model_path_d_local = snapshot_download(
             repo_id="rednote-hilab/dots.ocr",
@@ -304,7 +308,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_default_prompt = """Extract the text content from this image."""
         model_default_max_new_tokens = MAX_NEW_TOKENS
 
-    elif SELECTED_MODEL == "Qwen3-VL-2B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-2B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
@@ -332,7 +336,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_MODEL == "Qwen3-VL-4B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-4B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
@@ -360,7 +364,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_supports_presence_penalty = (
             False  # I found that this doesn't work when using transformers
         )
-    elif SELECTED_MODEL == "Qwen3-VL-8B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-8B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
@@ -389,7 +393,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_MODEL == "Qwen3-VL-30B-A3B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-30B-A3B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
         from transformers import Qwen3VLMoeForConditionalGeneration
 
@@ -421,7 +425,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_MODEL == "Qwen3-VL-235B-A22B-Instruct":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-235B-A22B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-235B-A22B-Instruct"
         from transformers import Qwen3VLMoeForConditionalGeneration
 
@@ -453,7 +457,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_MODEL == "PaddleOCR-VL":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "PaddleOCR-VL":
         MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
         load_kwargs = {
             "trust_remote_code": True,
@@ -471,13 +475,13 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_default_prompt = """OCR:"""
         model_default_max_new_tokens = MAX_NEW_TOKENS
 
-    elif SELECTED_MODEL == "None":
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "None":
         model = None
         processor = None
 
     else:
         raise ValueError(
-            f"Invalid model selected: {SELECTED_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, PaddleOCR-VL"
+            f"Invalid model selected: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, PaddleOCR-VL, or None"
         )
 
     # Override model defaults with user-provided config values if they are set
@@ -499,7 +503,23 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     if VLM_SEED is not None:
         model_default_seed = VLM_SEED
 
-    print(f"Successfully loaded {SELECTED_MODEL}")
+    # Store at module level for USE_TRANFORMERS_VLM_MODEL_AS_LLM (no global needed at module level)
+    _loaded_vlm_model = model
+    _loaded_vlm_processor = processor
+
+    print(f"Successfully loaded {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
+
+
+def get_loaded_vlm_model_and_tokenizer():
+    """
+    Return the currently loaded VLM model and its tokenizer for use by LLM tasks (e.g. entity detection) when USE_TRANFORMERS_VLM_MODEL_AS_LLM is True.
+    Returns (model, tokenizer) or (None, None) if the VLM has not been loaded yet.
+    """
+    global _loaded_vlm_model, _loaded_vlm_processor
+    if _loaded_vlm_model is None or _loaded_vlm_processor is None:
+        return None, None
+    tokenizer = getattr(_loaded_vlm_processor, "tokenizer", _loaded_vlm_processor)
+    return _loaded_vlm_model, tokenizer
 
 
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
@@ -553,10 +573,10 @@ def extract_text_from_image_vlm(
             Defaults to model-specific value (None for Dots.OCR, "Read all the text in the image." for Qwen3-VL models) or "Read all the text in the image."
 
     Returns:
-        str: The complete generated text response from the model.
+        Tuple[str, int, int]: The complete generated text response, input tokens (estimated), output tokens (estimated).
     """
     if image is None:
-        return "Please upload an image."
+        return "Please upload an image.", 0, 0
 
     # Determine parameter values with priority: function args > model defaults > general defaults
     # Priority order: function argument (if not None) > model default > general default
@@ -723,8 +743,39 @@ def extract_text_from_image_vlm(
     # Print final newline after streaming is complete
     print()  # Add newline at the end
 
-    # Return the complete text only at the end
-    return buffer
+    # Estimate token usage for local models
+    # For local transformers models, we can estimate using the tokenizer if available
+    input_tokens = 0
+    output_tokens = 0
+    try:
+        if (
+            processor
+            and hasattr(processor, "tokenizer")
+            and processor.tokenizer is not None
+        ):
+            # Estimate input tokens from prompt and image
+            # Note: Vision models encode images differently, so this is an approximation
+            prompt_tokens = len(
+                processor.tokenizer.encode(actual_text, add_special_tokens=False)
+            )
+            # Rough estimate: assume image tokens are proportional to image size
+            # This is a rough approximation - actual vision tokenization is more complex
+            image_tokens_estimate = (
+                image.size[0] * image.size[1]
+            ) // 1000  # Rough estimate
+            input_tokens = prompt_tokens + image_tokens_estimate
+
+            # Estimate output tokens from generated text
+            output_tokens = len(
+                processor.tokenizer.encode(buffer, add_special_tokens=False)
+            )
+    except Exception:
+        # If token counting fails, use rough word-based estimates
+        input_tokens = len(actual_text.split()) * 2  # Rough estimate
+        output_tokens = len(buffer.split()) * 2  # Rough estimate
+
+    # Return the complete text and token estimates
+    return buffer, input_tokens, output_tokens
 
 
 full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': 'identified text'}, ...].

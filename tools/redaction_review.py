@@ -1952,6 +1952,14 @@ def update_all_entity_df_dropdowns(
     if isinstance(text_dropdown_value, str):
         text_dropdown_value = [text_dropdown_value]
 
+    # Guard against empty lists (e.g. from Gradio when nothing is selected)
+    if not label_dropdown_value:
+        label_dropdown_value = ["ALL"]
+    if not text_dropdown_value:
+        text_dropdown_value = ["ALL"]
+    if not page_dropdown_value:
+        page_dropdown_value = ["1"]
+
     filtered_df = df.copy()
 
     if not label_dropdown_value[0]:

@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -24,13 +25,21 @@ from tools.config import (
     ALLOWED_HOSTS,
     ALLOWED_ORIGINS,
     AWS_ACCESS_KEY,
+    AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
+    AZURE_OPENAI_API_KEY,
+    AZURE_OPENAI_INFERENCE_ENDPOINT,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     CHOSEN_COMPREHEND_ENTITIES,
+    CHOSEN_LLM_ENTITIES,
+    CHOSEN_LLM_PII_INFERENCE_METHOD,
     CHOSEN_LOCAL_MODEL_INTRO_TEXT,
     CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
+    CLOUD_LLM_PII_MODEL_CHOICE,
+    CLOUD_VLM_MODEL_CHOICE,
     COGNITO_AUTH,
     CONFIG_FOLDER,
     COST_CODES_PATH,
@@ -44,6 +53,8 @@ from tools.config import (
     DEFAULT_EXCEL_SHEETS,
     DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
     DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+    DEFAULT_INFERENCE_SERVER_PII_MODEL,
+    DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
     DEFAULT_LANGUAGE_FULL_NAME,
     DEFAULT_MIN_CONSECUTIVE_PAGES,
@@ -71,11 +82,11 @@ from tools.config import (
     DIRECT_MODE_IMAGES_DPI,
     DIRECT_MODE_INPUT_FILE,
     DIRECT_MODE_JOB_ID,
-    # Additional direct mode configuration options
     DIRECT_MODE_LANGUAGE,
     DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
     DIRECT_MODE_MIN_CONSECUTIVE_PAGES,
     DIRECT_MODE_MIN_WORD_COUNT,
+    DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS,
     DIRECT_MODE_OCR_METHOD,
     DIRECT_MODE_OUTPUT_DIR,
     DIRECT_MODE_PAGE_MAX,
@@ -85,6 +96,7 @@ from tools.config import (
     DIRECT_MODE_REMOVE_DUPLICATE_ROWS,
     DIRECT_MODE_RETURN_PDF_END_OF_REDACTION,
     DIRECT_MODE_SIMILARITY_THRESHOLD,
+    DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS,
     DIRECT_MODE_TASK,
     DIRECT_MODE_TEXTRACT_ACTION,
     DISPLAY_FILE_NAMES_IN_LOGS,
@@ -93,6 +105,8 @@ from tools.config import (
     DYNAMODB_ACCESS_LOG_HEADERS,
     DYNAMODB_FEEDBACK_LOG_HEADERS,
     DYNAMODB_USAGE_LOG_HEADERS,
+    EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_WORDS,
     ENFORCE_COST_CODES,
     EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
     FASTAPI_ROOT_PATH,
@@ -103,6 +117,8 @@ from tools.config import (
     FILE_INPUT_HEIGHT,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
+    FULL_LLM_ENTITY_LIST,
+    GEMINI_API_KEY,
     GET_COST_CODES,
     GET_DEFAULT_ALLOW_LIST,
     GRADIO_SERVER_NAME,
@@ -110,11 +126,17 @@ from tools.config import (
     GRADIO_TEMP_DIR,
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
     HOST_NAME,
+    INFERENCE_SERVER_API_URL,
+    INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     INTRO_TEXT,
     LANGUAGE_CHOICES,
+    LLM_PII_MAX_TOKENS,
+    LLM_PII_TEMPERATURE,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     LOG_FILE_NAME,
     MAPPED_LANGUAGE_CHOICES,
     MAX_FILE_SIZE,
@@ -128,6 +150,7 @@ from tools.config import (
     PII_DETECTION_MODELS,
     REMOVE_DUPLICATE_ROWS,
     ROOT_PATH,
+    RUN_ALL_EXAMPLES_THROUGH_AWS,
     RUN_AWS_FUNCTIONS,
     RUN_DIRECT_MODE,
     RUN_FASTAPI,
@@ -144,15 +167,24 @@ from tools.config import (
     SESSION_OUTPUT_FOLDER,
     SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
     SHOW_AWS_EXAMPLES,
+    SHOW_AWS_PII_DETECTION_OPTIONS,
     SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
     SHOW_COSTS,
     SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
+    SHOW_INFERENCE_SERVER_PII_OPTIONS,
+    SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
     SHOW_LANGUAGE_SELECTION,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
+    SHOW_OCR_GUI_OPTIONS,
+    SHOW_PII_IDENTIFICATION_OPTIONS,
+    SHOW_QUICKSTART,
+    SHOW_SUMMARISATION,
+    SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     SPACY_MODEL_PATH,
     TABULAR_PII_DETECTION_MODELS,
+    TESSERACT_TEXT_EXTRACT_OPTION,
     TEXT_EXTRACTION_MODELS,
     TEXTRACT_JOBS_LOCAL_LOC,
     TEXTRACT_JOBS_S3_INPUT_LOC,
@@ -208,10 +240,22 @@ from tools.helper_functions import (
     reset_state_vars,
     reveal_feedback_buttons,
     update_cost_code_dataframe_from_dropdown_select,
-    update_dataframe,
     update_language_dropdown,
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
+from tools.quickstart import (
+    handle_main_pii_method_selection,
+    handle_main_text_extract_method_selection,
+    handle_pii_method_selection,
+    handle_redaction_method_selection,
+    handle_step_2_next,
+    handle_step_3_next,
+    handle_text_extract_method_selection,
+    route_walkthrough_files,
+    update_step_2_on_data_file_upload,
+    update_step_3_tabular_visibility,
+    update_step_4_visibility,
+)
 from tools.redaction_review import (
     apply_redactions_to_review_df_and_files,
     convert_df_to_xfdf,
@@ -242,6 +286,11 @@ from tools.redaction_review import (
     update_redact_choice_df_from_page_dropdown,
     update_selected_review_df_row_colour,
 )
+from tools.summaries import (
+    concise_summary_format_prompt,
+    detailed_summary_format_prompt,
+    summarise_document_wrapper,
+)
 from tools.textract_batch_call import (
     analyse_document_with_textract_api,
     check_for_provided_job_id,
@@ -267,7 +316,24 @@ ensure_folder_exists(USAGE_LOGS_FOLDER)
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
+FULL_LLM_ENTITY_LIST.extend(custom_entities)
 
+
+# 1. Create a custom error class
+class ProcessStop(UserWarning):
+    pass
+
+
+# 2. Tell Python how to display it (Short and sweet)
+def silent_exception_handler(etype, value, tb):
+    print(f"etype: {etype}, value: {value}, tb: {tb}")
+    if issubclass(etype, ProcessStop):
+        print(f"INFO: {value}")  # Only print the message, no traceback
+    else:
+        sys.__excepthook__(etype, value, tb)  # Use default for real bugs
+
+
+sys.excepthook = silent_exception_handler
 ###
 # Load in FastAPI app
 ###
@@ -299,6 +365,17 @@ async def lifespan(app: FastAPI):
     pass
 
 
+def change_tab_to_tabular_or_document_redactions(is_data_file):
+    if is_data_file:
+        return gr.Tabs(selected=3)
+    else:
+        return gr.Tabs(selected=1)
+
+
+def change_tab_to_review_redactions():
+    return gr.Tabs(selected=2)
+
+
 # 3. Initialize the App with the lifespan parameter
 # Clean the ROOT_PATH for FastAPI
 # Ensure it starts with / and has no trailing /
@@ -306,13 +383,202 @@ CLEAN_ROOT = f"/{FASTAPI_ROOT_PATH.strip('/')}" if FASTAPI_ROOT_PATH.strip("/") 
 app = FastAPI(lifespan=lifespan, root_path=CLEAN_ROOT)
 
 # Added to pass lint check, no effect
-spaces.annotations
+if 0 == 1:
+    print(f"spaces.__name__: {spaces.__name__}")
 
 ###
 # Load in Gradio app components
 ###
 
+# Check which example files exist and create examples only for available files
+example_files = [
+    "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
+    "example_data/example_complaint_letter.jpg",
+    "example_data/graduate-job-example-cover-letter.pdf",
+    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+    "example_data/partnership_toolkit_redact_custom_deny_list.csv",
+    "example_data/partnership_toolkit_redact_some_pages.csv",
+]
+
+ocr_example_files = [
+    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+    "example_data/Difficult handwritten note.jpg",
+    "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
+]
+
 # Load some components outside of blocks context that are used for examples
+
+# Components for "Redact all PII" option (conditionally visible)
+# Set initial visibility based on default redaction method ("Redact all PII")
+initial_show_pii_method = SHOW_PII_IDENTIFICATION_OPTIONS  # Default is "Redact all PII"
+default_pii_method = DEFAULT_PII_DETECTION_MODEL
+initial_show_local_entities = initial_show_pii_method and (
+    default_pii_method == LOCAL_PII_OPTION
+)
+initial_show_comprehend_entities = initial_show_pii_method and (
+    default_pii_method == AWS_PII_OPTION
+)
+initial_is_llm_method = initial_show_pii_method and (
+    default_pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+    or default_pii_method == INFERENCE_SERVER_PII_OPTION
+    or default_pii_method == AWS_LLM_PII_OPTION
+)
+
+## Walkthrough / quickstart components
+walkthrough_file_input = gr.File(
+    label="Choose a PDF document, image file (PDF, JPG, PNG), tabular data file (Excel, CSV, Parquet), or Word document (DOCX)",
+    file_count="multiple",
+    file_types=[
+        ".pdf",
+        ".jpg",
+        ".png",
+        ".json",
+        ".zip",
+        ".xlsx",
+        ".xls",
+        ".csv",
+        ".parquet",
+        ".docx",
+    ],
+    height=FILE_INPUT_HEIGHT,
+)
+
+walkthrough_in_redact_entities = gr.Dropdown(
+    value=CHOSEN_REDACT_ENTITIES,
+    choices=FULL_ENTITY_LIST,
+    multiselect=True,
+    label="Local PII identification model (click empty space in box for full list)",
+    visible=initial_show_local_entities,
+)
+
+walkthrough_in_redact_comprehend_entities = gr.Dropdown(
+    value=CHOSEN_COMPREHEND_ENTITIES,
+    choices=FULL_COMPREHEND_ENTITY_LIST,
+    multiselect=True,
+    label="AWS Comprehend PII identification model (click empty space in box for full list)",
+    visible=initial_show_comprehend_entities,
+)
+
+# Set initial visibility for local OCR and AWS Textract based on default text extraction method
+initial_local_ocr_visible = (
+    DEFAULT_TEXT_EXTRACTION_MODEL == TESSERACT_TEXT_EXTRACT_OPTION
+)
+initial_aws_textract_visible = (
+    DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION
+)
+
+walkthrough_text_extract_method_radio = gr.Radio(
+    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
+    value=DEFAULT_TEXT_EXTRACTION_MODEL,
+    choices=TEXT_EXTRACTION_MODELS,
+    visible=True,
+)
+
+# Set initial value for walkthrough local OCR method based on default text extraction method
+# If Bedrock VLM is the default, set to "bedrock-vlm", otherwise use CHOSEN_LOCAL_OCR_MODEL
+initial_walkthrough_local_ocr_value = CHOSEN_LOCAL_OCR_MODEL
+if (
+    DEFAULT_TEXT_EXTRACTION_MODEL == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+    and "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS
+):
+    initial_walkthrough_local_ocr_value = "bedrock-vlm"
+
+walkthrough_local_ocr_method_radio = gr.Radio(
+    label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
+    value=initial_walkthrough_local_ocr_value,
+    choices=LOCAL_OCR_MODEL_OPTIONS,
+    interactive=True,
+    visible=initial_local_ocr_visible,
+)
+
+walkthrough_handwrite_signature_checkbox = gr.CheckboxGroup(
+    label="AWS Textract extraction settings",
+    choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
+    value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
+    visible=initial_aws_textract_visible,
+)
+
+walkthrough_pii_identification_method_drop = gr.Radio(
+    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+    value=DEFAULT_PII_DETECTION_MODEL,
+    choices=PII_DETECTION_MODELS,
+    visible=initial_show_pii_method,
+)
+
+walkthrough_deny_list_state = gr.Dropdown(
+    allow_custom_value=True,
+    label="Deny list (always redact these words)",
+    interactive=True,
+    multiselect=True,
+)
+
+walkthrough_allow_list_state = gr.Dropdown(
+    allow_custom_value=True,
+    label="Allow list (always exclude these words from redaction)",
+    interactive=True,
+    multiselect=True,
+)
+
+walkthrough_fully_redacted_list_state = gr.Dropdown(
+    allow_custom_value=True,
+    label="Fully redacted pages (fully redact these page numbers)",
+    interactive=True,
+    multiselect=True,
+)
+
+# State variable to sync the checkbox value across both locations
+redact_duplicate_pages_state = gr.State(value=False)
+
+# Checkbox for automatically redacting duplicate pages
+redact_duplicate_pages_checkbox = gr.Checkbox(
+    label="Redact duplicate pages",
+    value=False,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+    elem_id="redact_duplicate_pages_checkbox",
+)
+
+walkthrough_pii_identification_method_drop_tabular = gr.Radio(
+    label="Choose PII detection method. AWS Comprehend has a cost of approximately $0.01 per 10,000 characters.",
+    value=DEFAULT_PII_DETECTION_MODEL,
+    choices=TABULAR_PII_DETECTION_MODELS,
+    visible=False,
+)
+
+walkthrough_anon_strategy = gr.Radio(
+    choices=[
+        "replace with 'REDACTED'",
+        "replace with <ENTITY_NAME>",
+        "redact completely",
+        "hash",
+        "mask",
+    ],
+    label="Select an anonymisation method.",
+    value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
+    visible=False,
+)
+
+walkthrough_do_initial_clean = gr.Checkbox(
+    label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
+    value=DO_INITIAL_TABULAR_DATA_CLEAN,
+    visible=False,
+)
+
+walkthrough_in_redact_llm_entities = gr.Dropdown(
+    value=CHOSEN_LLM_ENTITIES,
+    choices=FULL_LLM_ENTITY_LIST,
+    multiselect=True,
+    label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
+    visible=initial_is_llm_method,
+)
+
+walkthrough_custom_llm_instructions_textbox = gr.Textbox(
+    label="Custom instructions for LLM-based entity detection",
+    placeholder="Specify new labels to redact with a description. E.g. 'Redact information related to Mark Wilson with the label MARK_WILSON' or 'redact all company names with the label COMPANY_NAME'.",
+    value="",
+    lines=3,
+    visible=initial_is_llm_method,
+)
+
 ## Redaction examples
 in_doc_files = gr.File(
     label="Choose a PDF document or image file (PDF, JPG, PNG)",
@@ -328,16 +594,34 @@ total_pdf_page_count = gr.Number(
     interactive=False,
 )
 
+# Override options if OCR GUI is not shown
+if not SHOW_OCR_GUI_OPTIONS:
+    # SHOW_AWS_TEXT_EXTRACTION_OPTIONS = False
+    SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS = False
+    SHOW_LOCAL_OCR_MODEL_OPTIONS = False
+
 text_extract_method_radio = gr.Radio(
     label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
     value=DEFAULT_TEXT_EXTRACTION_MODEL,
     choices=TEXT_EXTRACTION_MODELS,
+    visible=SHOW_OCR_GUI_OPTIONS,
 )
 
-pii_identification_method_drop = gr.Radio(
-    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
-    value=DEFAULT_PII_DETECTION_MODEL,
-    choices=PII_DETECTION_MODELS,
+# Set initial value for local OCR method based on default text extraction method
+# If Bedrock VLM is the default, set to "bedrock-vlm", otherwise use CHOSEN_LOCAL_OCR_MODEL
+initial_local_ocr_value = CHOSEN_LOCAL_OCR_MODEL
+if (
+    DEFAULT_TEXT_EXTRACTION_MODEL == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+    and "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS
+):
+    initial_local_ocr_value = "bedrock-vlm"
+
+local_ocr_method_radio = gr.Radio(
+    label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
+    value=initial_local_ocr_value,
+    choices=LOCAL_OCR_MODEL_OPTIONS,
+    interactive=True,
+    visible=SHOW_LOCAL_OCR_MODEL_OPTIONS,
 )
 
 handwrite_signature_checkbox = gr.CheckboxGroup(
@@ -347,17 +631,95 @@ handwrite_signature_checkbox = gr.CheckboxGroup(
     visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
 )
 
+inference_server_vlm_model_textbox = gr.Textbox(
+    label="Inference Server VLM Model Name",
+    placeholder="e.g., 'qwen2-vl-7b-instruct' or leave empty to use default",
+    value=(
+        DEFAULT_INFERENCE_SERVER_VLM_MODEL if DEFAULT_INFERENCE_SERVER_VLM_MODEL else ""
+    ),
+    lines=1,
+    visible=SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
+)
+
+# PII identification components
+
+# Override options if PII identification is not shown
+if not SHOW_PII_IDENTIFICATION_OPTIONS:
+    SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS = False
+
+redaction_method_radio = gr.Radio(
+    label="Choose redaction method",
+    choices=[
+        "Extract text only",
+        "Redact all PII",
+        "Redact selected terms",
+    ],
+    value="Redact all PII",
+    interactive=True,
+)
+
+pii_identification_method_drop = gr.Radio(
+    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+    value=DEFAULT_PII_DETECTION_MODEL,
+    choices=PII_DETECTION_MODELS,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+)
+
 in_redact_entities = gr.Dropdown(
     value=CHOSEN_REDACT_ENTITIES,
     choices=FULL_ENTITY_LIST,
     multiselect=True,
     label="Local PII identification model (click empty space in box for full list)",
+    visible=initial_show_local_entities,
 )
 in_redact_comprehend_entities = gr.Dropdown(
     value=CHOSEN_COMPREHEND_ENTITIES,
     choices=FULL_COMPREHEND_ENTITY_LIST,
     multiselect=True,
     label="AWS Comprehend PII identification model (click empty space in box for full list)",
+    visible=initial_show_comprehend_entities,
+)
+
+in_redact_llm_entities = gr.Dropdown(
+    value=CHOSEN_LLM_ENTITIES,
+    choices=FULL_LLM_ENTITY_LIST,
+    multiselect=True,
+    label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
+    visible=initial_is_llm_method,
+)
+
+custom_llm_instructions_textbox = gr.Textbox(
+    label="Custom instructions for LLM-based entity detection",
+    placeholder="Specify new labels to redact with a description. E.g. 'Redact information related to Mark Wilson with the label MARK_WILSON' or 'redact all company names with the label COMPANY_NAME'.",
+    value="",
+    lines=3,
+    visible=initial_is_llm_method,
+)
+
+# Allow / deny / fully redacted lists
+
+in_deny_list_state = gr.Dropdown(
+    allow_custom_value=True,
+    label="Deny list (always redact these words)",
+    interactive=True,
+    multiselect=True,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+)
+
+in_allow_list_state = gr.Dropdown(
+    allow_custom_value=True,
+    label="Allow list (always exclude these words from redaction)",
+    interactive=True,
+    multiselect=True,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+)
+
+in_fully_redacted_list_state = gr.Dropdown(
+    allow_custom_value=True,
+    label="Fully redact these pages",
+    interactive=True,
+    multiselect=True,
+    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
 )
 
 in_deny_list = gr.File(
@@ -366,35 +728,21 @@ in_deny_list = gr.File(
     height=FILE_INPUT_HEIGHT,
 )
 
-in_deny_list_state = gr.Dataframe(
-    value=pd.DataFrame(),
-    headers=["deny_list"],
-    col_count=(1, "fixed"),
-    row_count=(0, "dynamic"),
-    label="Deny list",
-    visible=True,
-    type="pandas",
-    interactive=True,
-    wrap=True,
-)
-
 in_fully_redacted_list = gr.File(
     label="Import fully redacted pages list - csv table with one column of page numbers on each row. Page numbers in this file will be fully redacted.",
     file_count="multiple",
     height=FILE_INPUT_HEIGHT,
 )
 
-in_fully_redacted_list_state = gr.Dataframe(
-    value=pd.DataFrame(),
-    headers=["fully_redacted_pages_list"],
-    col_count=(1, "fixed"),
-    row_count=(0, "dynamic"),
-    label="Fully redacted pages",
-    visible=True,
-    type="pandas",
-    interactive=True,
-    wrap=True,
+max_fuzzy_spelling_mistakes_num = gr.Number(
+    label="Maximum spelling mistakes for matching deny list terms (slows down PII detection).",
+    value=DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+    minimum=0,
+    maximum=9,
+    precision=0,
 )
+
+## Page options
 
 page_min = gr.Number(
     value=DEFAULT_PAGE_MIN,
@@ -412,16 +760,6 @@ page_max = gr.Number(
     label="Highest page to redact (set to 0 to redact to the last page)",
 )
 
-
-local_ocr_method_radio = gr.Radio(
-    label=CHOSEN_LOCAL_MODEL_INTRO_TEXT,
-    value=CHOSEN_LOCAL_OCR_MODEL,
-    choices=LOCAL_OCR_MODEL_OPTIONS,
-    interactive=True,
-    visible=SHOW_LOCAL_OCR_MODEL_OPTIONS,
-)
-
-
 ## Deduplication examples
 in_duplicate_pages = gr.File(
     label="Upload one or multiple 'ocr_output.csv' files to find duplicate pages and subdocuments",
@@ -433,18 +771,23 @@ in_duplicate_pages = gr.File(
 duplicate_threshold_input = gr.Number(
     value=DEFAULT_DUPLICATE_DETECTION_THRESHOLD,
     label="Similarity threshold",
-    info="Score (0-1) to consider pages a match.",
+    info="Score (0-1) to consider pages/text lines a match.",
 )
 
 min_word_count_input = gr.Number(
     value=DEFAULT_MIN_WORD_COUNT,
     label="Minimum word count",
-    info="Pages with fewer words than this value are ignored.",
+    info="Pages/text lines with fewer words than this value are ignored.",
 )
 
-combine_page_text_for_duplicates_bool = gr.Checkbox(
+combine_page_text_for_duplicates_bool = gr.Radio(
+    label="Duplicate matching mode",
+    choices=[
+        ("Find duplicates by page", True),
+        ("Find duplicates by text line", False),
+    ],
     value=True,
-    label="Analyse duplicate text by page (off for by line)",
+    info="By page: compare full-page text. By text line: compare individual lines.",
 )
 
 ## Tabular examples
@@ -460,6 +803,14 @@ in_colnames = gr.Dropdown(
     multiselect=True,
     allow_custom_value=True,
     label="Select columns that you want to anonymise (showing columns present across all files).",
+)
+
+in_excel_sheets = gr.Dropdown(
+    choices=["Choose Excel sheets to anonymise"],
+    multiselect=True,
+    label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).",
+    visible=False,
+    allow_custom_value=True,
 )
 
 pii_identification_method_drop_tabular = gr.Radio(
@@ -480,6 +831,11 @@ anon_strategy = gr.Radio(
     value=DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
 )  # , "encrypt", "fake_first_name" are also available, but are not currently included as not that useful in current form
 
+do_initial_clean = gr.Checkbox(
+    label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
+    value=DO_INITIAL_TABULAR_DATA_CLEAN,
+)
+
 in_tabular_duplicate_files = gr.File(
     label="Upload CSV, Excel, or Parquet files to find duplicate cells/rows. Note that the app will remove duplicates from later cells/files that are found in earlier cells/files and not vice versa.",
     file_count="multiple",
@@ -499,13 +855,47 @@ tabular_min_word_count = gr.Number(
     info="Cells with fewer words than this are ignored.",
 )
 
+### All output file components
+all_output_files_btn = gr.Button("Refresh files in output folder", variant="secondary")
+all_output_files = gr.FileExplorer(
+    root_dir=OUTPUT_FOLDER,
+    label="Choose output files for download",
+    file_count="multiple",
+    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+    interactive=True,
+    max_height=400,
+)
+
+all_outputs_file_download = gr.File(
+    label="Download output files",
+    file_count="multiple",
+    file_types=[
+        ".pdf",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".csv",
+        ".xlsx",
+        ".xls",
+        ".txt",
+        ".doc",
+        ".docx",
+        ".json",
+    ],
+    interactive=False,
+    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+    height=200,
+)
+
 clean_path = f"/{ROOT_PATH.strip('/')}"
 base_href = f"{clean_path}/" if clean_path != "/" else "/"
 
 if ROOT_PATH:
     print(f"✅ Setting HTML base href for Gradio to: '{base_href}'")
 
-head_html = f"<base href='{base_href}'>"
+head_html = f"""<base href='{base_href}'>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/iframe-resizer/4.3.1/iframeResizer.contentWindow.min.js" integrity="sha256-62pj+jS8t+leByFOFwjiY0T92YlWwowYgHnFRklgv0M=" crossorigin="anonymous"></script>"""
 
 css = """
 /* Target tab navigation buttons only - not buttons inside tab content */
@@ -524,10 +914,11 @@ div[class*="tab-nav"] button {
 }
 """
 
-# Create the gradio interface. If running in FastAPI mode, we don't need the head_html and base_href.
+# Create the gradio interface.
 if RUN_FASTAPI:
     blocks = gr.Blocks(
         theme=gr.themes.Default(primary_hue="blue"),
+        head=head_html,
         css=css,
         analytics_enabled=False,
         title="Document Redaction App",
@@ -705,6 +1096,22 @@ with blocks:
     )
     textract_query_number = gr.Number(
         label="textract_query_number", value=0, visible=False
+    )
+
+    # VLM and LLM tracking components for usage logs
+    vlm_model_name_textbox = gr.Textbox(label="vlm_model_name", value="", visible=False)
+    vlm_total_input_tokens_number = gr.Number(
+        label="vlm_total_input_tokens", value=0, visible=False
+    )
+    vlm_total_output_tokens_number = gr.Number(
+        label="vlm_total_output_tokens", value=0, visible=False
+    )
+    llm_model_name_textbox = gr.Textbox(label="llm_model_name", value="", visible=False)
+    llm_total_input_tokens_number = gr.Number(
+        label="llm_total_input_tokens", value=0, visible=False
+    )
+    llm_total_output_tokens_number = gr.Number(
+        label="llm_total_output_tokens", value=0, visible=False
     )
 
     doc_full_file_name_textbox = gr.Textbox(
@@ -1007,6 +1414,13 @@ with blocks:
         value=False, label="Page break reached", visible=False
     )
 
+    latest_file_completed_num = gr.Number(
+        value=0,
+        label="Number of documents redacted",
+        interactive=False,
+        visible=False,
+    )
+
     # Placeholders for elements that may be made visible later below depending on environment variables
     cost_code_dataframe_base = gr.Dataframe(
         value=pd.DataFrame(),
@@ -1165,321 +1579,981 @@ with blocks:
 
     gr.Markdown(INTRO_TEXT)
 
+    # Examples for PDF/image redaction
+    if SHOW_EXAMPLES:
+        gr.Markdown(
+            "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
+        )
+
+        available_examples = list()
+        example_labels = list()
+
+        # Check each example file and add to examples if it exists
+        if os.path.exists(example_files[0]):
+            available_examples.append(
+                [
+                    [example_files[0]],
+                    "Local model - selectable text",
+                    "Local",
+                    [],
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[0]],
+                    example_files[0],
+                    [],
+                    [],
+                    [],
+                    [],
+                    2,
+                ]
+            )
+            example_labels.append("PDF with selectable text redaction")
+
+        if os.path.exists(example_files[1]):
+            available_examples.append(
+                [
+                    [example_files[1]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    [],
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_COMPREHEND_ENTITIES,
+                    [example_files[1]],
+                    example_files[1],
+                    [],
+                    [],
+                    [],
+                    [],
+                    1,
+                ]
+            )
+            example_labels.append("Image redaction with local OCR")
+
+        if os.path.exists(example_files[2]):
+            available_examples.append(
+                [
+                    [example_files[2]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    [],
+                    ["TITLES", "PERSON", "DATE_TIME"],
+                    ["TITLES", "NAME", "DATE_TIME"],
+                    [example_files[2]],
+                    example_files[2],
+                    [],
+                    [],
+                    [],
+                    [],
+                    1,
+                ]
+            )
+            example_labels.append(
+                "PDF redaction with custom entities (Titles, Person, Dates)"
+            )
+
+        if os.path.exists(example_files[3]):
+            if SHOW_AWS_EXAMPLES:
+                available_examples.append(
+                    [
+                        [example_files[3]],
+                        "AWS Textract service - all PDF types",
+                        "AWS Comprehend",
+                        ["Extract handwriting", "Extract signatures"],
+                        CHOSEN_REDACT_ENTITIES,
+                        CHOSEN_COMPREHEND_ENTITIES,
+                        [example_files[3]],
+                        example_files[3],
+                        [],
+                        [],
+                        [],
+                        [],
+                        7,
+                    ]
+                )
+                example_labels.append(
+                    "PDF redaction with AWS services and signature detection"
+                )
+
+        # Add new example for custom deny list and whole page redaction
+        if (
+            os.path.exists(example_files[3])
+            and os.path.exists(example_files[4])
+            and os.path.exists(example_files[5])
+        ):
+            available_examples.append(
+                [
+                    [example_files[3]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    [],
+                    ["CUSTOM"],  # Use CUSTOM entity to enable deny list functionality
+                    ["CUSTOM"],
+                    [example_files[3]],
+                    example_files[3],
+                    [example_files[4]],
+                    [
+                        "Sister",
+                        "Sister City",
+                        "Sister Cities",
+                        "Friendship City",
+                    ],
+                    [example_files[5]],
+                    [
+                        2,
+                        5,
+                    ],  # pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
+                    7,
+                ],
+            )
+            example_labels.append(
+                "PDF redaction with custom deny list and whole page redaction"
+            )
+
+        # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace text extraction with AWS Textract and PII with AWS Comprehend (except "Only extract text")
+        if RUN_ALL_EXAMPLES_THROUGH_AWS:
+            for ex in available_examples:
+                ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
+                if ex[2] != NO_REDACTION_PII_OPTION:
+                    ex[2] = AWS_PII_OPTION
+
+        # Only create examples if we have available files
+        if available_examples:
+
+            def show_info_box_on_click(
+                in_doc_files,
+                text_extract_method_radio,
+                pii_identification_method_drop,
+                handwrite_signature_checkbox,
+                in_redact_entities,
+                in_redact_comprehend_entities,
+                prepared_pdf_state,
+                doc_full_file_name_textbox,
+                in_deny_list,
+                in_deny_list_state,
+                in_fully_redacted_list,
+                in_fully_redacted_list_state,
+                total_pdf_page_count,
+            ):
+                gr.Info(
+                    "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
+                )
+
+                # Convert deny_list_state, allow_list_state, and fully_redacted_list_state to lists if they are DataFrames
+                # Handle deny_list_state
+                deny_list_walkthrough = []
+                if isinstance(in_deny_list_state, pd.DataFrame):
+                    # Explicitly convert empty DataFrame to empty list
+                    if in_deny_list_state.empty:
+                        deny_list_walkthrough = []
+                    else:
+                        deny_list_walkthrough = (
+                            in_deny_list_state.iloc[:, 0].dropna().astype(str).tolist()
+                        )
+                elif isinstance(in_deny_list_state, list):
+                    deny_list_walkthrough = (
+                        [str(item) for item in in_deny_list_state if item]
+                        if in_deny_list_state
+                        else []
+                    )
+                else:
+                    # Default to empty list for any other type
+                    deny_list_walkthrough = []
+
+                # Handle fully_redacted_list_state
+                fully_redacted_list_walkthrough = []
+                if isinstance(in_fully_redacted_list_state, pd.DataFrame):
+                    # Explicitly convert empty DataFrame to empty list
+                    if in_fully_redacted_list_state.empty:
+                        fully_redacted_list_walkthrough = []
+                    else:
+                        fully_redacted_list_walkthrough = (
+                            in_fully_redacted_list_state.iloc[:, 0]
+                            .dropna()
+                            .astype(str)
+                            .tolist()
+                        )
+                elif isinstance(in_fully_redacted_list_state, list):
+                    fully_redacted_list_walkthrough = (
+                        [str(item) for item in in_fully_redacted_list_state if item]
+                        if in_fully_redacted_list_state
+                        else []
+                    )
+                else:
+                    # Default to empty list for any other type
+                    fully_redacted_list_walkthrough = []
+
+                # Allow list is not in examples, so always set to empty list
+                allow_list_walkthrough = []
+
+                # Use default local OCR method - examples don't set this directly
+                local_ocr_method = CHOSEN_LOCAL_OCR_MODEL
+
+                # Update visibility of main PII entity components based on selected PII method
+                # This ensures visibility is correct even when clicking examples with the same PII method
+                # Determine visibility based on PII method (same logic as handle_main_pii_method_selection)
+                is_no_redaction = (
+                    pii_identification_method_drop == NO_REDACTION_PII_OPTION
+                )
+                show_local_entities = (
+                    not is_no_redaction
+                    and pii_identification_method_drop == LOCAL_PII_OPTION
+                )
+                show_comprehend_entities = (
+                    not is_no_redaction
+                    and pii_identification_method_drop == AWS_PII_OPTION
+                )
+                is_llm_method = not is_no_redaction and (
+                    pii_identification_method_drop == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+                    or pii_identification_method_drop == INFERENCE_SERVER_PII_OPTION
+                    or pii_identification_method_drop == AWS_LLM_PII_OPTION
+                )
+
+                # Create updates with both value and visibility for main components
+                main_local_entities_update = gr.update(
+                    value=in_redact_entities,
+                    visible=show_local_entities,
+                )
+                main_comprehend_entities_update = gr.update(
+                    value=in_redact_comprehend_entities,
+                    visible=show_comprehend_entities,
+                )
+                main_llm_entities_update = gr.update(
+                    visible=is_llm_method,
+                )
+                main_llm_instructions_update = gr.update(
+                    visible=is_llm_method,
+                )
+
+                return (
+                    gr.File(value=in_doc_files),  # walkthrough_file_input
+                    gr.Dropdown(
+                        value=in_redact_entities
+                    ),  # walkthrough_in_redact_entities
+                    gr.Dropdown(
+                        value=in_redact_comprehend_entities
+                    ),  # walkthrough_in_redact_comprehend_entities
+                    gr.Radio(
+                        value=text_extract_method_radio
+                    ),  # walkthrough_text_extract_method_radio
+                    gr.Radio(
+                        value=local_ocr_method
+                    ),  # walkthrough_local_ocr_method_radio
+                    gr.CheckboxGroup(
+                        value=handwrite_signature_checkbox
+                    ),  # walkthrough_handwrite_signature_checkbox
+                    gr.Radio(
+                        value=pii_identification_method_drop
+                    ),  # walkthrough_pii_identification_method_drop
+                    gr.Dropdown(
+                        value=allow_list_walkthrough
+                    ),  # walkthrough_allow_list_state
+                    gr.Dropdown(
+                        value=deny_list_walkthrough
+                    ),  # walkthrough_deny_list_state
+                    gr.Dropdown(
+                        value=fully_redacted_list_walkthrough
+                    ),  # walkthrough_fully_redacted_list_state
+                    main_local_entities_update,  # in_redact_entities (main component)
+                    main_comprehend_entities_update,  # in_redact_comprehend_entities (main component)
+                    main_llm_entities_update,  # in_redact_llm_entities (main component)
+                    main_llm_instructions_update,  # custom_llm_instructions_textbox (main component)
+                )
+
+            redaction_examples = gr.Examples(
+                examples=available_examples,
+                inputs=[
+                    in_doc_files,
+                    text_extract_method_radio,
+                    pii_identification_method_drop,
+                    handwrite_signature_checkbox,
+                    in_redact_entities,
+                    in_redact_comprehend_entities,
+                    prepared_pdf_state,
+                    doc_full_file_name_textbox,
+                    in_deny_list,
+                    in_deny_list_state,
+                    in_fully_redacted_list,
+                    in_fully_redacted_list_state,
+                    total_pdf_page_count,
+                ],
+                outputs=[
+                    walkthrough_file_input,
+                    walkthrough_in_redact_entities,
+                    walkthrough_in_redact_comprehend_entities,
+                    walkthrough_text_extract_method_radio,
+                    walkthrough_local_ocr_method_radio,
+                    walkthrough_handwrite_signature_checkbox,
+                    walkthrough_pii_identification_method_drop,
+                    walkthrough_allow_list_state,
+                    walkthrough_deny_list_state,
+                    walkthrough_fully_redacted_list_state,
+                    in_redact_entities,  # Main component - update visibility
+                    in_redact_comprehend_entities,  # Main component - update visibility
+                    in_redact_llm_entities,  # Main component - update visibility
+                    custom_llm_instructions_textbox,  # Main component - update visibility
+                ],
+                example_labels=example_labels,
+                fn=show_info_box_on_click,
+                run_on_click=True,
+                cache_examples=False,
+            )
+    if SHOW_DIFFICULT_OCR_EXAMPLES:
+        gr.Markdown(
+            "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
+        )
+
+        available_ocr_examples = list()
+        ocr_example_labels = list()
+        if os.path.exists(ocr_example_files[0]):
+            available_ocr_examples.append(
+                [
+                    [ocr_example_files[0]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Only extract text (no redaction)",
+                    ["Extract handwriting", "Extract signatures"],
+                    [ocr_example_files[0]],
+                    ocr_example_files[0],
+                    7,
+                    1,
+                    1,
+                    "paddle",
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_LLM_ENTITIES,
+                    "",
+                ],
+            )
+            ocr_example_labels.append("Baseline 'easy' document page")
+
+            available_ocr_examples.append(
+                [
+                    [ocr_example_files[0]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    ["Extract handwriting", "Extract signatures"],
+                    [ocr_example_files[0]],
+                    ocr_example_files[0],
+                    7,
+                    6,
+                    6,
+                    "hybrid-paddle-vlm",
+                    CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
+                    CHOSEN_LLM_ENTITIES,
+                    "",
+                ],
+            )
+            ocr_example_labels.append("Scanned document page with signatures")
+
+        if os.path.exists(ocr_example_files[1]):
+            available_ocr_examples.append(
+                [
+                    [ocr_example_files[1]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Only extract text (no redaction)",
+                    ["Extract handwriting", "Extract signatures"],
+                    [ocr_example_files[1]],
+                    ocr_example_files[1],
+                    1,
+                    0,
+                    0,
+                    "vlm",
+                    CHOSEN_REDACT_ENTITIES,
+                    CHOSEN_LLM_ENTITIES,
+                    "",
+                ],
+            )
+            ocr_example_labels.append("Unclear text on handwritten note")
+
+        if os.path.exists(ocr_example_files[2]):
+            available_ocr_examples.append(
+                [
+                    [ocr_example_files[2]],
+                    "Local OCR model - PDFs without selectable text",
+                    "Local",
+                    ["Extract handwriting", "Extract signatures"],
+                    [ocr_example_files[2]],
+                    ocr_example_files[2],
+                    1,
+                    0,
+                    0,
+                    "hybrid-paddle-vlm",
+                    CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
+                    CHOSEN_LLM_ENTITIES,
+                    "",
+                ],
+            )
+            ocr_example_labels.append("CV with photo - face identification")
+
+        if os.path.exists(ocr_example_files[0]):
+            available_ocr_examples.append(
+                [
+                    [example_files[0]],
+                    "Local model - selectable text",
+                    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                    ["Extract handwriting", "Extract signatures"],
+                    [example_files[0]],
+                    example_files[0],
+                    1,
+                    0,
+                    0,
+                    "paddle",
+                    CHOSEN_REDACT_ENTITIES,
+                    [],
+                    "Redact Lauren's name, email addresses, and phone numbers with the label LAUREN. Redact university names with the label UNIVERSITY.",
+                ],
+            )
+            ocr_example_labels.append("Example email LLM PII detection")
+
+        # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace text extraction with AWS Textract and PII with AWS Comprehend (except "Only extract text")
+        if RUN_ALL_EXAMPLES_THROUGH_AWS:
+            for ex in available_ocr_examples:
+                ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
+                if ex[2] != NO_REDACTION_PII_OPTION:
+                    ex[2] = AWS_PII_OPTION
+
+        # Only create examples if we have available files
+        if available_ocr_examples:
+
+            def show_info_box_on_click(
+                in_doc_files,
+                text_extract_method_radio,
+                pii_identification_method_drop,
+                handwrite_signature_checkbox,
+                prepared_pdf_state,
+                doc_full_file_name_textbox,
+                total_pdf_page_count,
+                page_min,
+                page_max,
+                local_ocr_method_radio,
+                in_redact_entities,
+                in_redact_llm_entities,
+                custom_llm_instructions_textbox,
+            ):
+                gr.Info(
+                    "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
+                )
+
+                return (
+                    gr.File(value=in_doc_files),  # walkthrough_file_input
+                    gr.Dropdown(
+                        value=in_redact_entities
+                    ),  # walkthrough_in_redact_entities
+                    gr.Radio(
+                        value=text_extract_method_radio
+                    ),  # walkthrough_text_extract_method_radio
+                    gr.Radio(
+                        value=local_ocr_method_radio
+                    ),  # walkthrough_local_ocr_method_radio
+                    gr.CheckboxGroup(
+                        value=handwrite_signature_checkbox
+                    ),  # walkthrough_handwrite_signature_checkbox
+                    gr.Radio(
+                        value=pii_identification_method_drop
+                    ),  # walkthrough_pii_identification_method_drop
+                    gr.Dropdown(
+                        value=in_redact_llm_entities
+                    ),  # walkthrough_in_redact_llm_entities
+                    gr.Textbox(
+                        value=custom_llm_instructions_textbox
+                    ),  # walkthrough_custom_llm_instructions_textbox
+                    gr.Dropdown(
+                        value=in_redact_llm_entities
+                    ),  # in_redact_llm_entities (main component)
+                    gr.Textbox(
+                        value=custom_llm_instructions_textbox
+                    ),  # custom_llm_instructions_textbox (main component)
+                )
+
+            ocr_examples = gr.Examples(
+                examples=available_ocr_examples,
+                inputs=[
+                    in_doc_files,
+                    text_extract_method_radio,
+                    pii_identification_method_drop,
+                    handwrite_signature_checkbox,
+                    prepared_pdf_state,
+                    doc_full_file_name_textbox,
+                    total_pdf_page_count,
+                    page_min,
+                    page_max,
+                    local_ocr_method_radio,
+                    in_redact_entities,
+                    in_redact_llm_entities,
+                    custom_llm_instructions_textbox,
+                ],
+                outputs=[
+                    walkthrough_file_input,
+                    walkthrough_in_redact_entities,
+                    walkthrough_text_extract_method_radio,
+                    walkthrough_local_ocr_method_radio,
+                    walkthrough_handwrite_signature_checkbox,
+                    walkthrough_pii_identification_method_drop,
+                    walkthrough_in_redact_llm_entities,
+                    walkthrough_custom_llm_instructions_textbox,
+                    in_redact_llm_entities,  # Main component
+                    custom_llm_instructions_textbox,  # Main component
+                ],
+                example_labels=ocr_example_labels,
+                fn=show_info_box_on_click,
+                run_on_click=True,
+                cache_examples=False,
+            )
+
+    # Render walkthrough components in a hidden container when SHOW_QUICKSTART is False
+    # This ensures they exist for examples and event handlers even when Quickstart tab is hidden
+    if not SHOW_QUICKSTART:
+        with gr.Column(visible=False):
+            walkthrough_file_input.render()
+            walkthrough_in_redact_entities.render()
+            walkthrough_in_redact_comprehend_entities.render()
+            walkthrough_in_redact_llm_entities.render()
+            walkthrough_custom_llm_instructions_textbox.render()
+            walkthrough_text_extract_method_radio.render()
+            walkthrough_local_ocr_method_radio.render()
+            walkthrough_handwrite_signature_checkbox.render()
+            walkthrough_pii_identification_method_drop.render()
+            walkthrough_allow_list_state.render()
+            walkthrough_deny_list_state.render()
+            walkthrough_fully_redacted_list_state.render()
+            walkthrough_pii_identification_method_drop_tabular.render()
+            walkthrough_anon_strategy.render()
+            walkthrough_do_initial_clean.render()
+
     with gr.Tabs() as tabs:
+        ###
+        # QUICKSTART TAB
+        ###
+        if SHOW_QUICKSTART:
+            with gr.Tab("Quickstart", id=0):
+                # State to track if we're dealing with data files
+                walkthrough_is_data_file = gr.State(value=False)
+
+                with gr.Walkthrough(selected=1) as walkthrough:
+                    with gr.Step("Load document/data", id=1):
+
+                        walkthrough_file_input.render()
+                        with gr.Row():
+                            step_1_back_btn = gr.Button("Back", variant="secondary")
+                            step_1_back_btn.click(
+                                lambda: gr.Walkthrough(selected=0), outputs=walkthrough
+                            )
+                            step_1_next_btn = gr.Button("Next", variant="primary")
+                    with gr.Step("Choose text extraction (OCR) method", id=2):
+                        # Components for data files (conditionally visible)
+                        walkthrough_excel_sheets = gr.Dropdown(
+                            choices=["Choose Excel sheets to anonymise"],
+                            multiselect=True,
+                            label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).",
+                            visible=False,
+                            allow_custom_value=True,
+                        )
+                        walkthrough_colnames = gr.Dropdown(
+                            choices=["Choose columns to anonymise"],
+                            multiselect=True,
+                            allow_custom_value=True,
+                            label="Select columns that you want to anonymise (showing columns present across all files).",
+                            visible=False,
+                        )
+                        # Text extraction method radio (conditionally visible)
+                        walkthrough_text_extract_method_radio.render()
+                        # Local OCR method radio (shown only if Local OCR model is selected)
+                        walkthrough_local_ocr_method_radio.render()
+                        # AWS Textract extraction settings (shown only if AWS Textract is selected)
+                        walkthrough_handwrite_signature_checkbox.render()
+                        with gr.Row():
+                            step_2_back_btn = gr.Button("Back", variant="secondary")
+                            step_2_back_btn.click(
+                                lambda: gr.Walkthrough(selected=1), outputs=walkthrough
+                            )
+                            step_2_next_btn = gr.Button("Next", variant="primary")
+                    with gr.Step("Choose PII detection method", id=3):
+                        # Redaction method selection (at the top of Step 3)
+                        walkthrough_redaction_method_dropdown = gr.Radio(
+                            label="Choose redaction method",
+                            choices=[
+                                "Extract text only",
+                                "Redact all PII",
+                                "Redact selected terms",
+                            ],
+                            value="Redact all PII",
+                            interactive=True,
+                        )
+
+                        walkthrough_pii_identification_method_drop.render()
+
+                        walkthrough_in_redact_entities.render()
+
+                        walkthrough_in_redact_comprehend_entities.render()
+
+                        walkthrough_in_redact_llm_entities.render()
+
+                        walkthrough_custom_llm_instructions_textbox.render()
+
+                        # Components for "Redact selected terms" option (conditionally visible)
+                        # Note: Accordion removed to avoid block ID mismatches
+                        with gr.Row(equal_height=True):
+                            with gr.Column(scale=3):
+                                with gr.Row(equal_height=True):
+                                    walkthrough_deny_list_state.render()
+                                    walkthrough_allow_list_state.render()
+                                    walkthrough_fully_redacted_list_state.render()
+
+                            with gr.Column(scale=1):
+                                # Checkbox for automatically redacting duplicate pages
+                                walkthrough_redact_duplicate_pages_checkbox = gr.Checkbox(
+                                    label="Redact duplicate pages",
+                                    value=False,
+                                    visible=True,
+                                    elem_id="redact_duplicate_pages_checkbox_walkthrough",
+                                )
+
+                                walkthrough_max_fuzzy_spelling_mistakes_num = gr.Number(
+                                    label="Maximum spelling mistakes for matching deny list terms (slows down PII detection).",
+                                    value=DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
+                                    minimum=0,
+                                    maximum=9,
+                                    precision=0,
+                                    visible=True,
+                                )
+
+                        # Tabular data redaction options (conditionally visible for data files)
+
+                        walkthrough_pii_identification_method_drop_tabular.render()
+
+                        walkthrough_anon_strategy.render()
+
+                        walkthrough_do_initial_clean.render()
+
+                        with gr.Row():
+                            step_3_back_btn = gr.Button("Back", variant="secondary")
+                            step_3_back_btn.click(
+                                lambda: gr.Walkthrough(selected=2), outputs=walkthrough
+                            )
+                            step_3_next_btn = gr.Button("Next", variant="primary")
+                    with gr.Step("Redact", id=4):
+                        # Page selection (always visible)
+                        with gr.Accordion(
+                            "Redact only selected pages (default is all pages)",
+                            open=False,
+                        ):
+                            with gr.Row():
+                                walkthrough_page_min = gr.Number(
+                                    value=DEFAULT_PAGE_MIN,
+                                    precision=0,
+                                    minimum=0,
+                                    maximum=9999,
+                                    label="Lowest page to redact (set to 0 to redact from the first page)",
+                                )
+                                walkthrough_page_max = gr.Number(
+                                    value=DEFAULT_PAGE_MAX,
+                                    precision=0,
+                                    minimum=0,
+                                    maximum=9999,
+                                    label="Highest page to redact (set to 0 to redact to the last page)",
+                                )
+                        # Currently not visible as not updating correctly
+                        with gr.Accordion(
+                            "Costs and time taken estimates", open=True, visible=False
+                        ):
+                            with gr.Row():
+                                # Cost-related components (conditionally visible)
+                                walkthrough_textract_output_found_checkbox = (
+                                    gr.Checkbox(
+                                        value=False,
+                                        label="Existing Textract output file found",
+                                        interactive=False,
+                                        visible=SHOW_COSTS,
+                                    )
+                                )
+                                walkthrough_relevant_ocr_output_with_words_found_checkbox = gr.Checkbox(
+                                    value=False,
+                                    label="Existing local OCR output file found",
+                                    interactive=False,
+                                    visible=SHOW_COSTS,
+                                )
+                                walkthrough_total_pdf_page_count = gr.Number(
+                                    label="Total page count",
+                                    value=0,
+                                    visible=SHOW_COSTS,
+                                    interactive=False,
+                                )
+                                walkthrough_estimated_aws_costs_number = gr.Number(
+                                    label="Approximate AWS Textract and/or Comprehend cost (£)",
+                                    value=0.00,
+                                    precision=2,
+                                    visible=SHOW_COSTS,
+                                    interactive=False,
+                                )
+                                walkthrough_estimated_time_taken_number = gr.Number(
+                                    label="Approximate time taken to extract text/redact (minutes)",
+                                    value=0,
+                                    visible=SHOW_COSTS,
+                                    precision=2,
+                                    interactive=False,
+                                )
+
+                        show_cost_codes = GET_COST_CODES or ENFORCE_COST_CODES
+                        with gr.Accordion(
+                            "Cost code selection", open=True, visible=show_cost_codes
+                        ):
+                            with gr.Row():
+                                # Cost code components (conditionally visible)
+
+                                with gr.Column():
+                                    with gr.Accordion(
+                                        "Existing cost codes table",
+                                        open=False,
+                                        visible=show_cost_codes,
+                                    ):
+                                        walkthrough_cost_code_dataframe = gr.Dataframe(
+                                            value=pd.DataFrame(
+                                                columns=["Cost code", "Description"]
+                                            ),
+                                            row_count=(0, "dynamic"),
+                                            label="Existing cost codes",
+                                            type="pandas",
+                                            interactive=True,
+                                            show_search="filter",
+                                            visible=show_cost_codes,
+                                            wrap=True,
+                                            max_height=200,
+                                        )
+                                    walkthrough_reset_cost_code_dataframe_button = (
+                                        gr.Button(
+                                            value="Reset code code table filter",
+                                            visible=show_cost_codes,
+                                        )
+                                    )
+                                with gr.Column():
+                                    walkthrough_cost_code_choice_drop = gr.Dropdown(
+                                        value=DEFAULT_COST_CODE,
+                                        label="Choose cost code for analysis",
+                                        choices=[DEFAULT_COST_CODE],
+                                        allow_custom_value=False,
+                                        visible=show_cost_codes,
+                                    )
+
+                        TRIGGER_DOCUMENT_REDACT_BUTTON = """
+                        function triggerChatButtonClick() {
+
+                        // Find the div with id "document-redact-btn"
+                        const documentRedactButton = document.getElementById("document-redact-btn");
+
+                        if (!documentRedactButton) {
+                            console.error("Error: Could not find element with id 'document-redact-btn'");
+                            return;
+                        }
+
+                        // Trigger the click event
+                        documentRedactButton.click();
+
+                        }"""
+
+                        TRIGGER_TABULAR_REDACT_BUTTON = """
+                        function triggerTabularRedactButtonClick() {
+                            // Find the div with id "tabular-redact-btn"
+                            const tabularRedactButton = document.getElementById("tabular-redact-btn");
+                            if (!tabularRedactButton) {
+                                console.error("Error: Could not find element with id 'tabular-redact-btn'");
+                                return;
+                            }
+                            // Trigger the click event
+                            tabularRedactButton.click();
+                        }"""
+
+                        with gr.Row():
+                            step_4_back_btn = gr.Button("Back", variant="secondary")
+                            step_4_back_btn.click(
+                                lambda: gr.Walkthrough(selected=3), outputs=walkthrough
+                            )
+                            step_4_next_document_redact_btn = gr.Button(
+                                "Redact document", variant="primary", visible=True
+                            )
+                            step_4_next_tabular_redact_btn = gr.Button(
+                                "Redact data files", variant="primary", visible=False
+                            )
+                            step_4_next_document_redact_btn.click(
+                                fn=lambda: None, js=TRIGGER_DOCUMENT_REDACT_BUTTON
+                            ).then(
+                                change_tab_to_tabular_or_document_redactions,
+                                inputs=walkthrough_is_data_file,
+                                outputs=tabs,
+                            )
+                            step_4_next_tabular_redact_btn.click(
+                                fn=lambda: None, js=TRIGGER_TABULAR_REDACT_BUTTON
+                            ).then(
+                                change_tab_to_tabular_or_document_redactions,
+                                inputs=walkthrough_is_data_file,
+                                outputs=tabs,
+                            )
+            ###
+            # QUICKSTART WALKTHROUGH EVENT HANDLERS
+            ###
+            # Step 1: Route files to appropriate component when Next is clicked
+            step_1_next_btn.click(
+                fn=route_walkthrough_files,
+                inputs=[walkthrough_file_input],
+                outputs=[
+                    in_doc_files,
+                    in_data_files,
+                    walkthrough_is_data_file,
+                    walkthrough,
+                ],
+            )
+
+            # Step 2: For data files, populate dropdowns when Next is clicked
+
+            # Note: in_excel_sheets is defined in the "Word or Excel/csv files" tab (id=5)
+            # Both tabs are in the same gr.Tabs() context, so components are accessible at runtime
+            step_2_next_btn.click(
+                fn=handle_step_2_next,
+                inputs=[
+                    in_data_files,
+                    walkthrough_is_data_file,
+                    walkthrough_colnames,
+                    walkthrough_excel_sheets,
+                    walkthrough_text_extract_method_radio,
+                ],
+                outputs=[
+                    walkthrough_colnames,
+                    walkthrough_excel_sheets,
+                    in_colnames,
+                    in_excel_sheets,
+                    walkthrough_text_extract_method_radio,
+                    walkthrough,
+                ],  # type: ignore
+            )
+
+            # Update local OCR method radio and AWS Textract settings visibility when text extraction method is selected
+            walkthrough_text_extract_method_radio.change(
+                fn=handle_text_extract_method_selection,
+                inputs=[walkthrough_text_extract_method_radio],
+                outputs=[
+                    walkthrough_local_ocr_method_radio,
+                    walkthrough_handwrite_signature_checkbox,
+                ],
+            )
+
+            # When data files are uploaded in walkthrough, automatically populate dropdowns
+
+            # Update dropdowns when files are routed to in_data_files
+            in_data_files.change(
+                fn=update_step_2_on_data_file_upload,
+                inputs=[in_data_files, walkthrough_is_data_file],
+                outputs=[walkthrough_colnames, walkthrough_excel_sheets],
+            )
+
+            # Update Step 3 components visibility when redaction method is selected
+            walkthrough_redaction_method_dropdown.change(
+                fn=handle_redaction_method_selection,
+                inputs=[walkthrough_redaction_method_dropdown],
+                outputs=[
+                    walkthrough_pii_identification_method_drop,
+                    walkthrough_in_redact_entities,
+                    walkthrough_in_redact_comprehend_entities,
+                    walkthrough_in_redact_llm_entities,
+                    walkthrough_custom_llm_instructions_textbox,
+                    walkthrough_deny_list_state,
+                    walkthrough_allow_list_state,
+                    walkthrough_fully_redacted_list_state,
+                ],
+            )
+
+            # Update entity dropdowns when PII method is selected
+            walkthrough_pii_identification_method_drop.change(
+                fn=handle_pii_method_selection,
+                inputs=[walkthrough_pii_identification_method_drop],
+                outputs=[
+                    walkthrough_in_redact_entities,
+                    walkthrough_in_redact_comprehend_entities,
+                    walkthrough_in_redact_llm_entities,
+                    walkthrough_custom_llm_instructions_textbox,
+                ],
+            )
+
+            # Update Step 3 tabular component visibility based on file type
+            walkthrough_is_data_file.change(
+                fn=update_step_3_tabular_visibility,
+                inputs=[walkthrough_is_data_file],
+                outputs=[
+                    walkthrough_pii_identification_method_drop_tabular,
+                    walkthrough_anon_strategy,
+                    walkthrough_do_initial_clean,
+                ],
+            )
+
+            # Step 3: Write values to main components when Next is clicked
+            step_3_next_btn.click(
+                fn=handle_step_3_next,
+                inputs=[
+                    walkthrough_text_extract_method_radio,
+                    walkthrough_local_ocr_method_radio,
+                    walkthrough_handwrite_signature_checkbox,
+                    walkthrough_pii_identification_method_drop,
+                    walkthrough_in_redact_entities,
+                    walkthrough_in_redact_comprehend_entities,
+                    walkthrough_in_redact_llm_entities,
+                    walkthrough_custom_llm_instructions_textbox,
+                    walkthrough_deny_list_state,
+                    walkthrough_allow_list_state,
+                    walkthrough_fully_redacted_list_state,
+                    walkthrough_pii_identification_method_drop_tabular,
+                    walkthrough_anon_strategy,
+                    walkthrough_do_initial_clean,
+                    walkthrough_redact_duplicate_pages_checkbox,
+                    walkthrough_max_fuzzy_spelling_mistakes_num,
+                ],
+                outputs=[
+                    text_extract_method_radio,
+                    local_ocr_method_radio,
+                    handwrite_signature_checkbox,
+                    pii_identification_method_drop,
+                    in_redact_entities,
+                    in_redact_comprehend_entities,
+                    in_redact_llm_entities,
+                    custom_llm_instructions_textbox,
+                    in_deny_list_state,
+                    in_allow_list_state,
+                    in_fully_redacted_list_state,
+                    pii_identification_method_drop_tabular,
+                    anon_strategy,
+                    do_initial_clean,
+                    redact_duplicate_pages_checkbox,
+                    walkthrough,
+                    max_fuzzy_spelling_mistakes_num,
+                ],
+            )
+
+            # Reset cost code dataframe filter in walkthrough
+            if GET_COST_CODES or ENFORCE_COST_CODES:
+                from tools.helper_functions import reset_base_dataframe
+
+                walkthrough_reset_cost_code_dataframe_button.click(
+                    reset_base_dataframe,
+                    inputs=[cost_code_dataframe_base],
+                    outputs=[walkthrough_cost_code_dataframe],
+                )
+
+            # Update Step 4 component visibility based on file type
+            walkthrough_is_data_file.change(
+                fn=update_step_4_visibility,
+                inputs=[walkthrough_is_data_file],
+                outputs=[
+                    step_4_next_document_redact_btn,
+                    step_4_next_tabular_redact_btn,
+                ],
+            )
+
         ###
         # REDACTION PDF/IMAGES TABLE
         ###
         with gr.Tab("Redact PDFs/images", id=1):
 
-            # Examples for PDF/image redaction
-            if SHOW_EXAMPLES:
-                gr.Markdown(
-                    "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
-                )
+            if SHOW_QUICKSTART:
+                show_main_redaction_accordion = False
+            else:
+                show_main_redaction_accordion = True
 
-                # Check which example files exist and create examples only for available files
-                example_files = [
-                    "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
-                    "example_data/example_complaint_letter.jpg",
-                    "example_data/graduate-job-example-cover-letter.pdf",
-                    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-                    "example_data/partnership_toolkit_redact_custom_deny_list.csv",
-                    "example_data/partnership_toolkit_redact_some_pages.csv",
-                ]
-
-                available_examples = list()
-                example_labels = list()
-
-                # Check each example file and add to examples if it exists
-                if os.path.exists(example_files[0]):
-                    available_examples.append(
-                        [
-                            [example_files[0]],
-                            "Local model - selectable text",
-                            "Local",
-                            [],
-                            CHOSEN_REDACT_ENTITIES,
-                            CHOSEN_COMPREHEND_ENTITIES,
-                            [example_files[0]],
-                            example_files[0],
-                            [],
-                            pd.DataFrame(),
-                            [],
-                            pd.DataFrame(),
-                            2,
-                        ]
-                    )
-                    example_labels.append("PDF with selectable text redaction")
-
-                if os.path.exists(example_files[1]):
-                    available_examples.append(
-                        [
-                            [example_files[1]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            [],
-                            CHOSEN_REDACT_ENTITIES,
-                            CHOSEN_COMPREHEND_ENTITIES,
-                            [example_files[1]],
-                            example_files[1],
-                            [],
-                            pd.DataFrame(),
-                            [],
-                            pd.DataFrame(),
-                            1,
-                        ]
-                    )
-                    example_labels.append("Image redaction with local OCR")
-
-                if os.path.exists(example_files[2]):
-                    available_examples.append(
-                        [
-                            [example_files[2]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            [],
-                            ["TITLES", "PERSON", "DATE_TIME"],
-                            CHOSEN_COMPREHEND_ENTITIES,
-                            [example_files[2]],
-                            example_files[2],
-                            [],
-                            pd.DataFrame(),
-                            [],
-                            pd.DataFrame(),
-                            1,
-                        ]
-                    )
-                    example_labels.append(
-                        "PDF redaction with custom entities (Titles, Person, Dates)"
-                    )
-
-                if os.path.exists(example_files[3]):
-                    if SHOW_AWS_EXAMPLES:
-                        available_examples.append(
-                            [
-                                [example_files[3]],
-                                "AWS Textract service - all PDF types",
-                                "AWS Comprehend",
-                                ["Extract handwriting", "Extract signatures"],
-                                CHOSEN_REDACT_ENTITIES,
-                                CHOSEN_COMPREHEND_ENTITIES,
-                                [example_files[3]],
-                                example_files[3],
-                                [],
-                                pd.DataFrame(),
-                                [],
-                                pd.DataFrame(),
-                                7,
-                            ]
-                        )
-                        example_labels.append(
-                            "PDF redaction with AWS services and signature detection"
-                        )
-
-                # Add new example for custom deny list and whole page redaction
-                if (
-                    os.path.exists(example_files[3])
-                    and os.path.exists(example_files[4])
-                    and os.path.exists(example_files[5])
-                ):
-                    available_examples.append(
-                        [
-                            [example_files[3]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            [],
-                            [
-                                "CUSTOM"
-                            ],  # Use CUSTOM entity to enable deny list functionality
-                            CHOSEN_COMPREHEND_ENTITIES,
-                            [example_files[3]],
-                            example_files[3],
-                            [example_files[4]],
-                            pd.DataFrame(
-                                data={
-                                    "deny_list": [
-                                        "Sister",
-                                        "Sister City",
-                                        "Sister Cities",
-                                        "Friendship City",
-                                    ]
-                                }
-                            ),
-                            [example_files[5]],
-                            pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
-                            7,
-                        ],
-                    )
-                    example_labels.append(
-                        "PDF redaction with custom deny list and whole page redaction"
-                    )
-
-                # Only create examples if we have available files
-                if available_examples:
-
-                    def show_info_box_on_click(
-                        in_doc_files,
-                        text_extract_method_radio,
-                        pii_identification_method_drop,
-                        handwrite_signature_checkbox,
-                        in_redact_entities,
-                        in_redact_comprehend_entities,
-                        prepared_pdf_state,
-                        doc_full_file_name_textbox,
-                        in_deny_list,
-                        in_deny_list_state,
-                        in_fully_redacted_list,
-                        in_fully_redacted_list_state,
-                        total_pdf_page_count,
-                    ):
-                        gr.Info(
-                            "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
-                        )
-
-                    redaction_examples = gr.Examples(
-                        examples=available_examples,
-                        inputs=[
-                            in_doc_files,
-                            text_extract_method_radio,
-                            pii_identification_method_drop,
-                            handwrite_signature_checkbox,
-                            in_redact_entities,
-                            in_redact_comprehend_entities,
-                            prepared_pdf_state,
-                            doc_full_file_name_textbox,
-                            in_deny_list,
-                            in_deny_list_state,
-                            in_fully_redacted_list,
-                            in_fully_redacted_list_state,
-                            total_pdf_page_count,
-                        ],
-                        example_labels=example_labels,
-                        fn=show_info_box_on_click,
-                        run_on_click=True,
-                    )
-            if SHOW_DIFFICULT_OCR_EXAMPLES:
-                gr.Markdown(
-                    "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
-                )
-                ocr_example_files = [
-                    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-                    "example_data/Difficult handwritten note.jpg",
-                    "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
-                ]
-                available_ocr_examples = list()
-                ocr_example_labels = list()
-                if os.path.exists(ocr_example_files[0]):
-                    available_ocr_examples.append(
-                        [
-                            [ocr_example_files[0]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Only extract text (no redaction)",
-                            ["Extract handwriting", "Extract signatures"],
-                            [ocr_example_files[0]],
-                            ocr_example_files[0],
-                            7,
-                            1,
-                            1,
-                            "paddle",
-                            CHOSEN_REDACT_ENTITIES,
-                        ],
-                    )
-                    ocr_example_labels.append("Baseline 'easy' document page")
-
-                    available_ocr_examples.append(
-                        [
-                            [ocr_example_files[0]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            ["Extract handwriting", "Extract signatures"],
-                            [ocr_example_files[0]],
-                            ocr_example_files[0],
-                            7,
-                            6,
-                            6,
-                            "hybrid-paddle-vlm",
-                            CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
-                        ],
-                    )
-                    ocr_example_labels.append("Scanned document page with signatures")
-
-                if os.path.exists(ocr_example_files[1]):
-                    available_ocr_examples.append(
-                        [
-                            [ocr_example_files[1]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Only extract text (no redaction)",
-                            ["Extract handwriting", "Extract signatures"],
-                            [ocr_example_files[1]],
-                            ocr_example_files[1],
-                            1,
-                            0,
-                            0,
-                            "vlm",
-                            CHOSEN_REDACT_ENTITIES,
-                        ],
-                    )
-                    ocr_example_labels.append("Unclear text on handwritten note")
-
-                if os.path.exists(ocr_example_files[2]):
-                    available_ocr_examples.append(
-                        [
-                            [ocr_example_files[2]],
-                            "Local OCR model - PDFs without selectable text",
-                            "Local",
-                            ["Extract handwriting", "Extract signatures"],
-                            [ocr_example_files[2]],
-                            ocr_example_files[2],
-                            1,
-                            0,
-                            0,
-                            "hybrid-paddle-vlm",
-                            CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
-                        ],
-                    )
-                    ocr_example_labels.append("CV with photo")
-
-                # Only create examples if we have available files
-                if available_ocr_examples:
-
-                    def show_info_box_on_click(
-                        in_doc_files,
-                        text_extract_method_radio,
-                        pii_identification_method_drop,
-                        handwrite_signature_checkbox,
-                        prepared_pdf_state,
-                        doc_full_file_name_textbox,
-                        total_pdf_page_count,
-                        page_min,
-                        page_max,
-                        local_ocr_method_radio,
-                        in_redact_entities,
-                    ):
-                        gr.Info(
-                            "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
-                        )
-
-                    ocr_examples = gr.Examples(
-                        examples=available_ocr_examples,
-                        inputs=[
-                            in_doc_files,
-                            text_extract_method_radio,
-                            pii_identification_method_drop,
-                            handwrite_signature_checkbox,
-                            prepared_pdf_state,
-                            doc_full_file_name_textbox,
-                            total_pdf_page_count,
-                            page_min,
-                            page_max,
-                            local_ocr_method_radio,
-                            in_redact_entities,
-                        ],
-                        example_labels=ocr_example_labels,
-                        fn=show_info_box_on_click,
-                        run_on_click=True,
-                    )
-
-            with gr.Accordion("Extract text and redact document", open=True):
+            with gr.Accordion("Redaction settings", open=show_main_redaction_accordion):
                 in_doc_files.render()
                 open_tab_text = ""
                 default_text = ""
@@ -1506,28 +2580,103 @@ with blocks:
                     label=f"Change default redaction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
                     open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                 ):
-                    text_extract_method_radio.render()
 
-                    if SHOW_LOCAL_OCR_MODEL_OPTIONS:
-                        with gr.Accordion(
+                    with gr.Accordion(
+                        "Change default text extraction OCR method",
+                        open=True,
+                        visible=SHOW_OCR_GUI_OPTIONS,
+                    ):
+                        text_extract_method_radio.render()
+                        # Store accordion references for dynamic visibility control
+                        # Initialize visibility based on default text extraction method
+                        local_ocr_accordion = gr.Accordion(
                             label="Change default local OCR model",
                             open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
-                        ):
+                            visible=(
+                                DEFAULT_TEXT_EXTRACTION_MODEL
+                                == TESSERACT_TEXT_EXTRACT_OPTION
+                            ),
+                        )
+                        with local_ocr_accordion:
                             local_ocr_method_radio.render()
-                    else:
-                        local_ocr_method_radio.render()
 
-                    if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
-                        with gr.Accordion(
-                            "Enable AWS Textract signature detection (default is off)",
+                        inference_server_vlm_accordion = gr.Accordion(
+                            "Inference Server VLM Model (for inference-server OCR only)",
                             open=False,
-                        ):
-                            handwrite_signature_checkbox.render()
-                    else:
+                            visible=(
+                                SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS
+                                and DEFAULT_TEXT_EXTRACTION_MODEL
+                                == TESSERACT_TEXT_EXTRACT_OPTION
+                            ),
+                        )
+                        with inference_server_vlm_accordion:
+                            inference_server_vlm_model_textbox.render()
+
+                    aws_textract_signature_accordion = gr.Accordion(
+                        "Enable AWS Textract signature detection (default is off)",
+                        open=False,
+                        visible=(
+                            SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+                            and DEFAULT_TEXT_EXTRACTION_MODEL
+                            == TEXTRACT_TEXT_EXTRACT_OPTION
+                        ),
+                    )
+                    with aws_textract_signature_accordion:
                         handwrite_signature_checkbox.render()
 
+                with gr.Accordion(
+                    "Change PII identification method",
+                    open=True,
+                    visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+                ):
+                    redaction_method_radio.render()
                     with gr.Row(equal_height=True):
                         pii_identification_method_drop.render()
+
+                        entity_types_to_redact_accordion = gr.Accordion(
+                            "Select entity types to redact", open=True
+                        )
+                        with entity_types_to_redact_accordion:
+                            # Store accordion references for dynamic visibility control
+                            # Determine initial visibility based on default PII method
+                            default_pii_method = DEFAULT_PII_DETECTION_MODEL
+                            is_no_redaction_init = (
+                                default_pii_method == NO_REDACTION_PII_OPTION
+                            )
+                            show_local_entities_init = not is_no_redaction_init and (
+                                default_pii_method == LOCAL_PII_OPTION
+                            )
+                            show_comprehend_entities_init = (
+                                not is_no_redaction_init
+                                and (default_pii_method == AWS_PII_OPTION)
+                            )
+                            is_llm_method_init = not is_no_redaction_init and (
+                                default_pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+                                or default_pii_method == INFERENCE_SERVER_PII_OPTION
+                                or default_pii_method == AWS_LLM_PII_OPTION
+                            )
+
+                            in_redact_entities.render()
+                            in_redact_comprehend_entities.render()
+                            in_redact_llm_entities.render()
+
+                        custom_llm_instructions_textbox.render()
+                    with gr.Row(equal_height=True):
+                        terms_accordion = gr.Accordion(
+                            "Terms to always include or exclude in redactions, and whole page redaction. To add many terms at once, you can load in a file on the Redaction Settings tab.",
+                            open=True,
+                        )
+                        with terms_accordion:
+                            with gr.Row(equal_height=True):
+                                with gr.Column(scale=3):
+                                    with gr.Row(equal_height=True):
+                                        in_allow_list_state.render()
+                                        in_deny_list_state.render()
+                                        in_fully_redacted_list_state.render()
+                                with gr.Column(scale=1):
+                                    # Checkbox for automatically redacting duplicate pages
+                                    redact_duplicate_pages_checkbox.render()
+                                    max_fuzzy_spelling_mistakes_num.render()
 
                 if SHOW_COSTS:
                     with gr.Accordion(
@@ -1674,31 +2823,27 @@ with blocks:
                                     visible=True,
                                 )
 
-                gr.Markdown(
-                    """If you only want to redact certain pages, or certain entities (e.g. just email addresses, or a custom list of terms), please go to the Redaction Settings tab."""
-                )
+            with gr.Accordion(label="Extract text and redact document", open=True):
+
                 document_redact_btn = gr.Button(
-                    "Extract text and redact document", variant="primary", scale=4
+                    "Extract text and redact document",
+                    variant="secondary",
+                    scale=4,
+                    elem_id="document-redact-btn",
                 )
 
-            with gr.Row():
-                with gr.Column(scale=1):
-                    redaction_output_summary_textbox = gr.Textbox(
-                        label="Output summary", scale=1, lines=4
-                    )
-                    go_to_review_redactions_tab_btn = gr.Button(
-                        "Go to review redactions tab", variant="secondary", scale=1
-                    )
-                with gr.Column(scale=2):
-                    output_file = gr.File(
-                        label="Output files", scale=2
-                    )  # , height=FILE_INPUT_HEIGHT)
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=1):
+                        redaction_output_summary_textbox = gr.Textbox(
+                            label="Output summary", scale=1, lines=4
+                        )
+                    with gr.Column(scale=2):
+                        output_file = gr.File(
+                            label="Output files", scale=2
+                        )  # , height=FILE_INPUT_HEIGHT)
 
-                latest_file_completed_num = gr.Number(
-                    value=0,
-                    label="Number of documents redacted",
-                    interactive=False,
-                    visible=False,
+                go_to_review_redactions_tab_btn = gr.Button(
+                    "Review and modify redactions", variant="primary", scale=1
                 )
 
             # Feedback elements are invisible until revealed by redaction action
@@ -1716,90 +2861,6 @@ with blocks:
             )
             pdf_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
-            # Feedback elements are invisible until revealed by redaction action
-            # all_outputs_in_output_folder_title = gr.Markdown(value="## All outputs in output folder", visible=False)
-            # all_outputs_in_output_folder_dataframe = gr.FileExplorer(
-            #     root_dir=OUTPUT_FOLDER,
-            #     label="All outputs in output folder",
-            #     file_count="multiple",
-            #     visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-            #     interactive=True,
-            # )
-
-            if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
-                with gr.Accordion(
-                    "View all and download all output files from this session",
-                    open=False,
-                ):
-                    all_output_files_btn = gr.Button(
-                        "Refresh files in output folder", variant="secondary"
-                    )
-                    all_output_files = gr.FileExplorer(
-                        root_dir=OUTPUT_FOLDER,
-                        label="Choose output files for download",
-                        file_count="multiple",
-                        visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                        interactive=True,
-                        max_height=400,
-                    )
-
-                    all_outputs_file_download = gr.File(
-                        label="Download output files",
-                        file_count="multiple",
-                        file_types=[
-                            ".pdf",
-                            ".jpg",
-                            ".jpeg",
-                            ".png",
-                            ".csv",
-                            ".xlsx",
-                            ".xls",
-                            ".txt",
-                            ".doc",
-                            ".docx",
-                            ".json",
-                        ],
-                        interactive=False,
-                        visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                        height=200,
-                    )
-            else:
-                all_output_files_btn = gr.Button(
-                    "Update files in output folder",
-                    variant="secondary",
-                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                )
-
-                all_output_files = gr.FileExplorer(
-                    root_dir=OUTPUT_FOLDER,
-                    label="Choose output files for download",
-                    file_count="multiple",
-                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                    interactive=True,
-                    max_height=400,
-                )
-
-                all_outputs_file_download = gr.File(
-                    label="Download output files",
-                    file_count="multiple",
-                    file_types=[
-                        ".pdf",
-                        ".jpg",
-                        ".jpeg",
-                        ".png",
-                        ".csv",
-                        ".xlsx",
-                        ".xls",
-                        ".txt",
-                        ".doc",
-                        ".docx",
-                        ".json",
-                    ],
-                    interactive=False,
-                    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
-                    height=200,
-                )
-
         ###
         # REVIEW REDACTIONS TAB
         ###
@@ -1813,26 +2874,31 @@ with blocks:
                 visible=False,
             )
 
-            with gr.Accordion(label="Review PDF redactions", open=True):
+            with gr.Accordion(
+                label="Upload PDFs/images and OCR results for review", open=True
+            ):
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=2):
                         input_pdf_for_review = gr.File(
-                            label="Upload original or '..._for_review.pdf' PDF to begin review process.",
+                            label="1. Upload original or previously redacted '..._for_review.pdf' document to review redactions.",
                             file_count="multiple",
                             height=FILE_INPUT_HEIGHT,
                         )
                         upload_pdf_for_review_btn = gr.Button(
                             "1. Load in original PDF or review PDF with redactions",
                             variant="secondary",
+                            visible=False,
                         )
                     with gr.Column(scale=1):
                         input_review_files = gr.File(
-                            label="Upload review files here to review suggested redactions. 'review_file' csv The 'ocr_results with words' file can also be provided for searching text and making new redactions.",
+                            label="2. An '...ocr_results_with_words' file can be uploaded here for searching text and making new redactions.",
                             file_count="multiple",
                             height=FILE_INPUT_HEIGHT,
                         )
                         upload_review_files_btn = gr.Button(
-                            "2. Upload review or OCR csv files", variant="secondary"
+                            "2. Upload review or OCR csv files",
+                            variant="secondary",
+                            visible=False,
                         )
             with gr.Row():
                 annotate_zoom_in = gr.Button("Zoom in", visible=False)
@@ -2234,6 +3300,7 @@ with blocks:
                         ],
                         fn=show_duplicate_info_box_on_click,
                         run_on_click=True,
+                        cache_examples=False,
                     )
 
             with gr.Accordion("Step 1: Configure and run analysis", open=True):
@@ -2249,21 +3316,24 @@ with blocks:
 
                     gr.Markdown("#### Matching Strategy")
                     greedy_match_input = gr.Checkbox(
-                        label="Enable 'subdocument' matching",
+                        label="Combine consecutive matches into a single match (subdocument match)",
                         value=USE_GREEDY_DUPLICATE_DETECTION,
-                        info="If checked, finds the longest possible sequence of matching pages (subdocuments), minimum length one page. Overrides the slider below.",
+                        info="If checked, combines the longest possible sequence of consecutive matching pages into a single match.",
                     )
                     min_consecutive_pages_input = gr.Slider(
                         minimum=1,
                         maximum=20,
                         value=DEFAULT_MIN_CONSECUTIVE_PAGES,
                         step=1,
-                        label="Minimum consecutive pages (modified subdocument match)",
-                        info="If greedy matching option above is unticked, use this to find only subdocuments of a minimum number of consecutive pages.",
+                        label="Minimum consecutive matches to be considered a match",
+                        info="A text match will need to have this minimum number of consecutive matches to be considered a match. E.g. if set to 3 for page matching, the text for three consecutive pages will need to be the same in two places in the document to be considered a match.",
+                        visible=not USE_GREEDY_DUPLICATE_DETECTION,
                     )
 
                 find_duplicate_pages_btn = gr.Button(
-                    value="Identify duplicate pages/subdocuments", variant="primary"
+                    value="Identify duplicate pages/subdocuments",
+                    variant="primary",
+                    elem_id="duplicate-detection-btn",
                 )
 
             with gr.Accordion("Step 2: Review and refine results", open=True):
@@ -2323,12 +3393,17 @@ with blocks:
                     apply_match_btn = gr.Button(
                         value="Apply relevant duplicate page output to document currently under review",
                         variant="secondary",
+                        elem_id="apply-duplicate-pages-btn",
+                    )
+                    go_to_review_redactions_tab_btn_2 = gr.Button(
+                        "Review and modify redactions", variant="primary", scale=1
                     )
 
         ###
         # WORD / TABULAR DATA TAB
         ###
         with gr.Tab(label="Word or Excel/csv files", id=5):
+
             gr.Markdown(
                 """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
             )
@@ -2398,6 +3473,11 @@ with blocks:
                         "Tabular duplicate detection in CSV files"
                     )
 
+                # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace PII with AWS Comprehend for tabular examples
+                if RUN_ALL_EXAMPLES_THROUGH_AWS:
+                    for ex in available_tabular_examples:
+                        ex[2] = AWS_PII_OPTION
+
                 # Only create examples if we have available files
                 if available_tabular_examples:
 
@@ -2414,6 +3494,14 @@ with blocks:
                             "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' below to run the example."
                         )
 
+                        return (
+                            gr.File(value=in_data_files),  # walkthrough_file_input
+                            gr.Radio(
+                                value=pii_identification_method_drop_tabular
+                            ),  # walkthrough_pii_identification_method_drop_tabular
+                            gr.Radio(value=anon_strategy),  # walkthrough_anon_strategy
+                        )
+
                     tabular_examples = gr.Examples(
                         examples=available_tabular_examples,
                         inputs=[
@@ -2425,12 +3513,21 @@ with blocks:
                             tabular_text_columns,
                             tabular_min_word_count,
                         ],
+                        outputs=[
+                            walkthrough_file_input,
+                            walkthrough_pii_identification_method_drop_tabular,
+                            walkthrough_anon_strategy,
+                        ],
                         example_labels=tabular_example_labels,
                         fn=show_tabular_info_box_on_click,
                         run_on_click=True,
+                        cache_examples=False,
                     )
 
-            with gr.Accordion("Redact Word or Excel/csv files", open=True):
+            with gr.Accordion(
+                "Redact Word or Excel/csv files options",
+                open=show_main_redaction_accordion,
+            ):
                 with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
                     in_data_files.render()
                 with gr.Accordion("Redact open text", open=False):
@@ -2440,13 +3537,7 @@ with blocks:
                         max_length=MAX_OPEN_TEXT_CHARACTERS,
                     )
 
-                in_excel_sheets = gr.Dropdown(
-                    choices=["Choose Excel sheets to anonymise"],
-                    multiselect=True,
-                    label="Select Excel sheets that you want to anonymise (showing sheets present across all Excel files).",
-                    visible=False,
-                    allow_custom_value=True,
-                )
+                in_excel_sheets.render()
 
                 in_colnames.render()
 
@@ -2459,24 +3550,24 @@ with blocks:
                     with gr.Row():
                         anon_strategy.render()
 
-                        do_initial_clean = gr.Checkbox(
-                            label="Do initial clean of text (remove URLs, HTML tags, and non-ASCII characters)",
-                            value=DO_INITIAL_TABULAR_DATA_CLEAN,
-                        )
+                        do_initial_clean.render()
 
                 tabular_data_redact_btn = gr.Button(
-                    "Redact text/data files", variant="primary"
+                    "Redact text/data files",
+                    variant="primary",
+                    elem_id="tabular-redact-btn",
                 )
 
-            with gr.Row():
-                text_output_summary = gr.Textbox(label="Output result", lines=4)
-                text_output_file = gr.File(label="Output files")
-                text_tabular_files_done = gr.Number(
-                    value=0,
-                    label="Number of tabular files redacted",
-                    interactive=False,
-                    visible=False,
-                )
+            with gr.Accordion(label="Redact Word/data files", open=True):
+                with gr.Row():
+                    text_output_summary = gr.Textbox(label="Output result", lines=4)
+                    text_output_file = gr.File(label="Output files")
+                    text_tabular_files_done = gr.Number(
+                        value=0,
+                        label="Number of tabular files redacted",
+                        interactive=False,
+                        visible=False,
+                    )
 
             ###
             # TABULAR DUPLICATE DETECTION
@@ -2596,9 +3687,169 @@ with blocks:
             data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
         ###
+        # DOCUMENT SUMMARISATION TAB
+        ###
+        # Build summarization inference method options based on the same flags used for PII detection
+        # Only show options that are available: AWS_LLM_PII_OPTION, LOCAL_TRANSFORMERS_LLM_PII_OPTION, INFERENCE_SERVER_PII_OPTION
+        summarisation_inference_method_options = []
+        if SHOW_AWS_PII_DETECTION_OPTIONS:
+            summarisation_inference_method_options.append(AWS_LLM_PII_OPTION)
+        if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS:
+            summarisation_inference_method_options.append(
+                LOCAL_TRANSFORMERS_LLM_PII_OPTION
+            )
+        if SHOW_INFERENCE_SERVER_PII_OPTIONS:
+            summarisation_inference_method_options.append(INFERENCE_SERVER_PII_OPTION)
+
+        # Determine default value
+        default_summarisation_inference_method = None
+        if summarisation_inference_method_options:
+            if SHOW_AWS_PII_DETECTION_OPTIONS:
+                default_summarisation_inference_method = AWS_LLM_PII_OPTION
+            elif SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS:
+                default_summarisation_inference_method = (
+                    LOCAL_TRANSFORMERS_LLM_PII_OPTION
+                )
+            elif SHOW_INFERENCE_SERVER_PII_OPTIONS:
+                default_summarisation_inference_method = INFERENCE_SERVER_PII_OPTION
+            else:
+                default_summarisation_inference_method = (
+                    summarisation_inference_method_options[0]
+                )
+
+        # Only show the tab if at least one inference method is available
+        visible_summarisation_tab = SHOW_SUMMARISATION and (
+            SHOW_AWS_PII_DETECTION_OPTIONS
+            or SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
+            or SHOW_INFERENCE_SERVER_PII_OPTIONS
+        )
+        with gr.Tab(
+            label="Document summarisation", id=8, visible=visible_summarisation_tab
+        ):
+            gr.Markdown(
+                """
+            This tab allows you to summarise documents using Large Language Model (LLM)-based summarisation. The summarisation process:
+                1. Groups pages to fit within the maximum LLM context length, or by a maximum number of pages per group defined below if smaller
+                2. Summarises each page group
+                3. Creates an overall summary of the entire document based on the page group summaries
+                """,
+                line_breaks=True,
+            )
+
+            in_summarisation_ocr_files = gr.File(
+                label="Upload one or multiple 'ocr_output.csv' files to summarise",
+                file_count="multiple",
+                height=FILE_INPUT_HEIGHT,
+                file_types=[".csv"],
+            )
+
+            with gr.Accordion("Summarisation Settings", open=True):
+                with gr.Row():
+                    summarisation_inference_method = gr.Radio(
+                        label="Choose LLM inference method for summarisation",
+                        choices=summarisation_inference_method_options,
+                        value=default_summarisation_inference_method,
+                        interactive=True,
+                    )
+                    summarisation_temperature = gr.Slider(
+                        label="Temperature",
+                        minimum=0.0,
+                        maximum=2.0,
+                        value=0.6,
+                        step=0.1,
+                        interactive=True,
+                        visible=False,
+                    )
+                    summarisation_max_pages_per_group = gr.Number(
+                        label="Max pages per page-group summary",
+                        info="No single page group will exceed this many pages (in addition to context-length token limits).",
+                        value=30,
+                        minimum=1,
+                        maximum=9999,
+                        precision=0,
+                        interactive=True,
+                        visible=True,
+                    )
+
+            with gr.Row():
+                summarisation_api_key = gr.Textbox(
+                    label="API Key (if required)",
+                    type="password",
+                    visible=False,
+                )
+                summarisation_context = gr.Textbox(
+                    label="Additional context (optional)",
+                    placeholder="e.g., 'This is a consultation response document'",
+                    lines=2,
+                    visible=False,
+                )
+
+            with gr.Row():
+                summarisation_format = gr.Radio(
+                    label="Summary format",
+                    choices=[
+                        concise_summary_format_prompt,
+                        detailed_summary_format_prompt,
+                    ],
+                    value=detailed_summary_format_prompt,
+                    interactive=True,
+                )
+                summarisation_additional_instructions = gr.Textbox(
+                    label="Additional summary instructions (optional)",
+                    placeholder="e.g., 'Focus on key decisions and recommendations'",
+                    lines=2,
+                )
+
+            # Note: AWS credentials are shared with the main redaction settings
+            # Use existing components from Settings tab (aws_access_key_textbox, aws_secret_key_textbox)
+            # For other settings not exposed in Settings tab, create hidden components with config defaults
+            summarisation_aws_region_hidden = gr.Textbox(
+                value=AWS_REGION,
+                visible=False,
+            )
+            summarisation_hf_api_key_hidden = gr.Textbox(
+                value="",  # Not exposed in Settings tab, use empty string
+                visible=False,
+            )
+            summarisation_azure_endpoint_hidden = gr.Textbox(
+                value=AZURE_OPENAI_INFERENCE_ENDPOINT,
+                visible=False,
+            )
+            summarisation_api_url_hidden = gr.Textbox(
+                value=INFERENCE_SERVER_API_URL,
+                visible=False,
+            )
+
+            summarise_btn = gr.Button(
+                "Generate summary",
+                variant="primary",
+                elem_id="summarise-document-btn",
+            )
+
+            with gr.Row(equal_height=True):
+                summarisation_status = gr.Textbox(
+                    label="Status",
+                    lines=3,
+                    interactive=False,
+                )
+                summarisation_output_files = gr.File(
+                    label="Download Summary Files",
+                    file_count="multiple",
+                    interactive=False,
+                )
+
+            summarisation_display = gr.Markdown(
+                label="Summary",
+                value="",
+                line_breaks=True,
+                show_copy_button=True,
+                visible=True,
+            )
+
+        ###
         # SETTINGS TAB
         ###
-        with gr.Tab(label="Redaction settings", id=6):
+        with gr.Tab(label="Settings", id=9):
             with gr.Accordion(
                 "Custom allow, deny, and full page redaction lists", open=True
             ):
@@ -2622,26 +3873,7 @@ with blocks:
                         in_fully_redacted_list_text = gr.Textbox(
                             label="Fully redacted page list load status"
                         )
-                with gr.Accordion(
-                    "Manually modify custom allow, deny, and full page redaction lists (NOTE: you need to press Enter after modifying/adding an entry to the lists to apply them)",
-                    open=False,
-                ):
-                    with gr.Row():
-                        in_allow_list_state = gr.Dataframe(
-                            value=pd.DataFrame(),
-                            headers=["allow_list"],
-                            col_count=(1, "fixed"),
-                            row_count=(0, "dynamic"),
-                            label="Allow list",
-                            visible=True,
-                            type="pandas",
-                            interactive=True,
-                            wrap=True,
-                        )
 
-                        in_deny_list_state.render()  # Defined at beginning of file
-
-                        in_fully_redacted_list_state.render()  # Defined at beginning of file
                     with gr.Row():
                         with gr.Column(scale=2):
                             markdown_placeholder = gr.Markdown("")
@@ -2651,27 +3883,39 @@ with blocks:
                                 variant="secondary",
                             )
 
-            with gr.Accordion("Select entity types to redact", open=True):
-                in_redact_entities.render()
-                in_redact_comprehend_entities.render()
+            with gr.Accordion(
+                "Select entity types to redact", open=True, visible=False
+            ):
 
                 with gr.Row():
-                    max_fuzzy_spelling_mistakes_num = gr.Number(
-                        label="Maximum number of spelling mistakes allowed for fuzzy matching (CUSTOM_FUZZY entity).",
-                        value=DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
-                        minimum=0,
-                        maximum=9,
-                        precision=0,
-                    )
+
                     match_fuzzy_whole_phrase_bool = gr.Checkbox(
                         label="Should fuzzy search match on entire phrases in deny list (as opposed to each word individually)?",
                         value=True,
+                        visible=False,
                     )
 
             with gr.Accordion("Redact only selected pages", open=False):
                 with gr.Row():
                     page_min.render()
                     page_max.render()
+
+            with gr.Accordion("Efficient OCR", open=False):
+                gr.Markdown(
+                    "When enabled, PDFs are processed per page: selectable text extraction is tried first; only pages with too little text use OCR (Tesseract/Textract/VLM), saving time and cost."
+                )
+                with gr.Row():
+                    efficient_ocr_checkbox = gr.Checkbox(
+                        label="Use efficient OCR (try text first, OCR only when needed)",
+                        value=EFFICIENT_OCR,
+                    )
+                    efficient_ocr_min_words_number = gr.Number(
+                        label="Minimum words on page for text-only route (below this use OCR)",
+                        value=EFFICIENT_OCR_MIN_WORDS,
+                        precision=0,
+                        minimum=0,
+                        step=1,
+                    )
 
             if SHOW_LANGUAGE_SELECTION:
                 with gr.Accordion("Language selection", open=False):
@@ -2750,6 +3994,19 @@ with blocks:
                     "Merge multiple review files into one", variant="primary"
                 )
 
+        if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
+            with gr.Accordion(
+                "View all and download all output files from this session",
+                open=False,
+            ):
+                all_output_files_btn.render()
+                all_output_files.render()
+                all_outputs_file_download.render()
+        else:
+            all_output_files_btn.render()
+            all_output_files.render()
+            all_outputs_file_download.render()
+
     ###
     # UI INTERACTION
     ###
@@ -2772,7 +4029,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        text_extract_method_radio.input(
+        text_extract_method_radio.change(
             fn=check_for_relevant_ocr_output_with_words,
             inputs=[
                 doc_file_name_no_extension_textbox,
@@ -2792,7 +4049,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        pii_identification_method_drop.input(
+        pii_identification_method_drop.change(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2804,7 +4061,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        handwrite_signature_checkbox.input(
+        handwrite_signature_checkbox.change(
             fn=check_for_existing_textract_file,
             inputs=[
                 doc_file_name_no_extension_textbox,
@@ -2824,7 +4081,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        textract_output_found_checkbox.input(
+        textract_output_found_checkbox.change(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2836,7 +4093,7 @@ with blocks:
             ],
             outputs=[estimated_aws_costs_number],
         )
-        only_extract_text_radio.input(
+        only_extract_text_radio.change(
             calculate_aws_costs,
             inputs=[
                 total_pdf_page_count,
@@ -2874,7 +4131,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        text_extract_method_radio.input(
+        text_extract_method_radio.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2886,7 +4143,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        pii_identification_method_drop.input(
+        pii_identification_method_drop.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2898,7 +4155,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        handwrite_signature_checkbox.input(
+        handwrite_signature_checkbox.change(
             fn=check_for_existing_textract_file,
             inputs=[
                 doc_file_name_no_extension_textbox,
@@ -2931,7 +4188,7 @@ with blocks:
             ],
             outputs=[estimated_time_taken_number],
         )
-        only_extract_text_radio.input(
+        only_extract_text_radio.change(
             calculate_time_taken,
             inputs=[
                 total_pdf_page_count,
@@ -2968,6 +4225,81 @@ with blocks:
             outputs=[estimated_time_taken_number],
         )
 
+        # Automatically set local_ocr_method_radio to "bedrock-vlm" when AWS Bedrock VLM is selected
+        def auto_set_local_ocr_for_bedrock_vlm(text_extract_method):
+            """Automatically set local OCR method to bedrock-vlm when AWS Bedrock VLM is selected."""
+            if text_extract_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+                # Only set if "bedrock-vlm" is a valid option
+                if "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS:
+                    return gr.update(value="bedrock-vlm")
+            return gr.update()
+
+        text_extract_method_radio.change(
+            fn=auto_set_local_ocr_for_bedrock_vlm,
+            inputs=[text_extract_method_radio],
+            outputs=[local_ocr_method_radio],
+        )
+
+        # Dynamic visibility handlers for main redaction tab
+        # Update visibility of OCR-related accordions based on text extraction method selection
+        text_extract_method_radio.change(
+            fn=handle_main_text_extract_method_selection,
+            inputs=[text_extract_method_radio],
+            outputs=[
+                local_ocr_accordion,
+                inference_server_vlm_accordion,
+                aws_textract_signature_accordion,
+            ],
+        )
+
+        # Update visibility of PII-related components and accordions when general redaction method is selected
+        def handle_main_redaction_method_selection(redaction_method):
+            """Wrapper that applies handle_redaction_method_selection and updates accordion visibility."""
+            results = list(handle_redaction_method_selection(redaction_method))
+            is_redact_all_pii = redaction_method == "Redact all PII"
+            is_redact_selected_terms = redaction_method == "Redact selected terms"
+            show_pii_method = (
+                is_redact_all_pii or is_redact_selected_terms
+            ) and SHOW_PII_IDENTIFICATION_OPTIONS
+            show_selected_terms_lists = is_redact_selected_terms
+            results.append(
+                gr.update(visible=show_pii_method)
+            )  # entity_types_to_redact_accordion
+            results.append(
+                gr.update(visible=show_selected_terms_lists)
+            )  # terms_accordion
+            return results
+
+        redaction_method_radio.change(
+            fn=handle_main_redaction_method_selection,
+            inputs=[redaction_method_radio],
+            outputs=[
+                pii_identification_method_drop,
+                in_redact_entities,
+                in_redact_comprehend_entities,
+                in_redact_llm_entities,
+                custom_llm_instructions_textbox,
+                in_deny_list_state,
+                in_allow_list_state,
+                in_fully_redacted_list_state,
+                entity_types_to_redact_accordion,
+                terms_accordion,
+            ],
+        )
+
+        # Update visibility of PII-related accordions based on PII method selection
+        pii_identification_method_drop.change(
+            fn=handle_main_pii_method_selection,
+            inputs=[pii_identification_method_drop],
+            outputs=[
+                pii_identification_method_drop,  # Keep visible so user can change
+                in_redact_entities,
+                in_redact_comprehend_entities,
+                in_redact_llm_entities,
+                custom_llm_instructions_textbox,
+            ],
+        )
+
     # Allow user to select items from cost code dataframe for cost code
     if SHOW_COSTS and (GET_COST_CODES or ENFORCE_COST_CODES):
         cost_code_dataframe.select(
@@ -2986,6 +4318,45 @@ with blocks:
             inputs=[cost_code_choice_drop, cost_code_dataframe_base],
             outputs=[cost_code_dataframe],
         )
+
+    # Triggers to programmatically click the duplicate detection and apply duplicate pages buttons
+    TRIGGER_DUPLICATE_DETECTION_BUTTON = """
+    function triggerDuplicateDetectionButtonClick() {
+        // Find the checkbox for redacting duplicate pages by its ID
+        const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
+        // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
+        
+        // Only trigger if checkbox exists and is checked
+        if (redactDuplicatePagesCheckbox) {
+            // Find the div with id "duplicate-detection-btn"
+            const duplicateDetectionButton = document.getElementById("duplicate-detection-btn");
+            if (!duplicateDetectionButton) {
+                console.error("Error: Could not find element with id 'duplicate-detection-btn'");
+                return;
+            }
+            // Trigger the click event
+            duplicateDetectionButton.click();
+        }
+    }"""
+
+    TRIGGER_APPLY_DUPLICATE_PAGES_BUTTON = """
+    function triggerApplyDuplicatePagesButtonClick() {
+        // Find the checkbox for redacting duplicate pages by its ID
+        const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
+        // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
+        
+        // Only trigger if checkbox exists and is checked
+        if (redactDuplicatePagesCheckbox) {
+            // Find the div with id "apply-duplicate-pages-btn"
+            const applyDuplicatePagesButton = document.getElementById("apply-duplicate-pages-btn");
+            if (!applyDuplicatePagesButton) {
+                console.error("Error: Could not find element with id 'apply-duplicate-pages-btn'");
+                return;
+            }
+            // Trigger the click event
+            applyDuplicatePagesButton.click();
+        }
+    }"""
 
     in_doc_files.upload(
         fn=get_input_file_names,
@@ -3076,6 +4447,7 @@ with blocks:
             textract_query_number,
             all_page_line_level_ocr_results_with_words,
             input_review_files,
+            latest_file_completed_num,
         ],
     ).success(
         fn=enforce_cost_codes,
@@ -3092,6 +4464,7 @@ with blocks:
             images_pdf_state,
             in_redact_entities,
             in_redact_comprehend_entities,
+            in_redact_llm_entities,
             text_extract_method_radio,
             in_allow_list_state,
             in_deny_list_state,
@@ -3136,6 +4509,10 @@ with blocks:
             local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
+            custom_llm_instructions_textbox,
+            inference_server_vlm_model_textbox,
+            efficient_ocr_checkbox,
+            efficient_ocr_min_words_number,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3162,6 +4539,7 @@ with blocks:
             page_sizes,
             duplication_file_path_outputs_list_state,
             in_duplicate_pages,
+            in_summarisation_ocr_files,
             latest_review_file_path,
             textract_query_number,
             latest_ocr_file_path,
@@ -3171,6 +4549,12 @@ with blocks:
             backup_review_state,
             task_textbox,
             input_review_files,
+            vlm_model_name_textbox,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
+            llm_model_name_textbox,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
         ],
         api_name="redact_doc",
         show_progress_on=[redaction_output_summary_textbox],
@@ -3216,6 +4600,21 @@ with blocks:
         show_progress_on=[annotator],
     )
 
+    def check_duplicate_pages_checkbox(redact_duplicate_pages_checkbox_value: bool):
+        if not redact_duplicate_pages_checkbox_value:
+            # Silently raise an error to avoid showing a popup
+            return
+        if redact_duplicate_pages_checkbox_value:
+            print("Redact duplicate pages checkbox is enabled, identifying duplicates")
+            sys.tracebacklimit = 0  # Suppress traceback
+            raise ProcessStop(
+                "Redact duplicate pages checkbox is enabled, identifying duplicates."
+            )
+
+    def restore_sys_tracebacklimit():
+        sys.tracebacklimit = 1000  # Restore traceback limit
+        return
+
     # If a file has been completed, the function will continue onto the next document
     latest_file_completed_num.change(
         fn=choose_and_run_redactor,
@@ -3225,6 +4624,7 @@ with blocks:
             images_pdf_state,
             in_redact_entities,
             in_redact_comprehend_entities,
+            in_redact_llm_entities,
             text_extract_method_radio,
             in_allow_list_state,
             in_deny_list_state,
@@ -3269,6 +4669,10 @@ with blocks:
             local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
+            custom_llm_instructions_textbox,
+            inference_server_vlm_model_textbox,
+            efficient_ocr_checkbox,
+            efficient_ocr_min_words_number,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3295,6 +4699,7 @@ with blocks:
             page_sizes,
             duplication_file_path_outputs_list_state,
             in_duplicate_pages,
+            in_summarisation_ocr_files,
             latest_review_file_path,
             textract_query_number,
             latest_ocr_file_path,
@@ -3304,6 +4709,12 @@ with blocks:
             backup_review_state,
             task_textbox,
             input_review_files,
+            vlm_model_name_textbox,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
+            llm_model_name_textbox,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
         ],
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
@@ -3373,6 +4784,15 @@ with blocks:
     ).success(
         fn=reset_aws_call_vars,
         outputs=[comprehend_query_number, textract_query_number],
+    ).success(
+        fn=check_duplicate_pages_checkbox,
+        inputs=[redact_duplicate_pages_checkbox],
+        outputs=None,
+    ).failure(
+        fn=lambda: None, js=TRIGGER_DUPLICATE_DETECTION_BUTTON
+    ).then(
+        fn=restore_sys_tracebacklimit,
+        outputs=None,
     )
 
     # If the line level ocr results are changed by load in by user or by a new redaction task, replace the ocr results displayed in the table
@@ -3587,6 +5007,7 @@ with blocks:
             images_pdf_state,
             in_redact_entities,
             in_redact_comprehend_entities,
+            in_redact_llm_entities,
             textract_only_method_drop,
             in_allow_list_state,
             in_deny_list_state,
@@ -3631,6 +5052,10 @@ with blocks:
             local_ocr_method_radio,
             chosen_language_drop,
             input_review_files,
+            custom_llm_instructions_textbox,
+            inference_server_vlm_model_textbox,
+            efficient_ocr_checkbox,
+            efficient_ocr_min_words_number,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -3657,6 +5082,7 @@ with blocks:
             page_sizes,
             duplication_file_path_outputs_list_state,
             in_duplicate_pages,
+            in_summarisation_ocr_files,
             latest_review_file_path,
             textract_query_number,
             latest_ocr_file_path,
@@ -3666,8 +5092,23 @@ with blocks:
             backup_review_state,
             task_textbox,
             input_review_files,
+            vlm_model_name_textbox,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
+            llm_model_name_textbox,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_doc_files,
+        ],
+        outputs=None,
     ).success(
         fn=update_annotator_object_and_filter_df,
         inputs=[
@@ -3701,11 +5142,8 @@ with blocks:
         show_progress_on=[annotator],
     )
 
-    def change_tab():
-        return gr.Tabs(selected=2)
-
     go_to_review_redactions_tab_btn.click(
-        fn=change_tab,
+        fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
     )
@@ -3715,7 +5153,8 @@ with blocks:
     ###
 
     # Upload previous PDF for modifying redactions
-    upload_pdf_for_review_btn.click(
+    # upload_pdf_for_review_btn.click(
+    input_pdf_for_review.upload(
         fn=reset_review_vars,
         inputs=None,
         outputs=[recogniser_entity_dataframe, recogniser_entity_dataframe_base],
@@ -3769,7 +5208,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         api_name="prepare_doc",
-        show_progress_on=[redaction_output_summary_textbox],
+        show_progress_on=[redaction_output_summary_textbox, input_pdf_for_review],
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -3804,7 +5243,8 @@ with blocks:
     )
 
     # Upload previous review CSV files for modifying redactions
-    upload_review_files_btn.click(
+    # upload_review_files_btn.click(
+    input_review_files.upload(
         fn=prepare_image_or_pdf,
         inputs=[
             input_review_files,
@@ -5930,6 +7370,12 @@ with blocks:
     # IDENTIFY DUPLICATE PAGES
     ###
 
+    greedy_match_input.change(
+        fn=lambda greedy: gr.update(visible=not greedy),
+        inputs=[greedy_match_input],
+        outputs=[min_consecutive_pages_input],
+    )
+
     find_duplicate_pages_btn.click(
         fn=run_duplicate_analysis,
         inputs=[
@@ -5938,6 +7384,8 @@ with blocks:
             min_word_count_input,
             min_consecutive_pages_input,
             greedy_match_input,
+            all_page_line_level_ocr_results_df_base,
+            input_review_files,
             combine_page_text_for_duplicates_bool,
             output_folder_textbox,
         ],
@@ -5947,8 +7395,10 @@ with blocks:
             full_duplicate_data_by_file,
             actual_time_taken_number,
             task_textbox,
+            all_page_line_level_ocr_results_df_base,
+            input_review_files,
         ],
-        show_progress_on=[results_df_preview],
+        show_progress_on=[results_df_preview, redaction_output_summary_textbox],
     ).success(
         fn=export_outputs_to_s3,
         # duplicate_files_out returns a single file path; export helper will normalise it
@@ -5958,6 +7408,15 @@ with blocks:
             save_outputs_to_s3_checkbox,
             in_duplicate_pages,
         ],
+        outputs=None,
+    ).success(
+        fn=check_duplicate_pages_checkbox,
+        inputs=[redact_duplicate_pages_checkbox],
+        outputs=None,
+    ).failure(
+        fn=lambda: None, js=TRIGGER_APPLY_DUPLICATE_PAGES_BUTTON
+    ).then(
+        fn=restore_sys_tracebacklimit,
         outputs=None,
     )
 
@@ -5993,6 +7452,10 @@ with blocks:
             combine_page_text_for_duplicates_bool,
         ],
         outputs=[new_duplicate_search_annotation_object],
+        show_progress_on=[
+            new_duplicate_search_annotation_object,
+            redaction_output_summary_textbox,
+        ],
     ).success(
         fn=apply_whole_page_redactions_from_list,
         inputs=[
@@ -6061,6 +7524,12 @@ with blocks:
         show_progress_on=[annotator],
     )
 
+    go_to_review_redactions_tab_btn_2.click(
+        fn=change_tab_to_review_redactions,
+        inputs=None,
+        outputs=tabs,
+    )
+
     ###
     # TABULAR DUPLICATE DETECTION
     ###
@@ -6117,6 +7586,85 @@ with blocks:
     )
 
     ###
+    # SUMMARISATION TAB
+    ###
+
+    summarise_btn.click(
+        fn=enforce_cost_codes,
+        inputs=[
+            enforce_cost_code_textbox,
+            cost_code_choice_drop,
+            cost_code_dataframe_base,
+        ],
+    ).success(
+        fn=summarise_document_wrapper,
+        inputs=[
+            all_page_line_level_ocr_results_df_base,
+            output_folder_textbox,
+            summarisation_inference_method,
+            summarisation_api_key,
+            summarisation_temperature,
+            doc_full_file_name_textbox,
+            summarisation_context,
+            aws_access_key_textbox,  # Use existing component from Settings tab
+            aws_secret_key_textbox,  # Use existing component from Settings tab
+            summarisation_hf_api_key_hidden,  # Not exposed in Settings, use empty
+            summarisation_azure_endpoint_hidden,  # Use config default
+            summarisation_format,
+            summarisation_additional_instructions,
+            summarisation_max_pages_per_group,
+            in_summarisation_ocr_files,
+        ],
+        outputs=[
+            summarisation_output_files,
+            summarisation_status,
+            llm_model_name_textbox,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
+            summarisation_display,
+        ],
+        show_progress=True,
+        show_progress_on=[summarisation_status],
+    ).then(
+        fn=lambda: "summarisation",
+        outputs=[task_textbox],
+    ).success(
+        fn=lambda *args: usage_callback.flag(
+            list(args),
+            save_to_csv=SAVE_LOGS_TO_CSV,
+            save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+            dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+            dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+            replacement_headers=CSV_USAGE_LOG_HEADERS,
+        ),
+        inputs=[
+            session_hash_textbox,
+            doc_file_name_no_extension_textbox,
+            data_file_name_with_extension_textbox,
+            actual_time_taken_number,
+            total_pdf_page_count,
+            textract_query_number,
+            pii_identification_method_drop,
+            comprehend_query_number,
+            cost_code_choice_drop,
+            handwrite_signature_checkbox,
+            host_name_textbox,
+            text_extract_method_radio,
+            is_a_textract_api_call,
+            task_textbox,
+            vlm_model_name_textbox,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
+            llm_model_name_textbox,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
+        ],
+        outputs=[flag_value_placeholder],
+        preprocess=False,
+        api_name="usage_logs_summarisation",
+    )
+
+    ###
     # SETTINGS PAGE INPUT / OUTPUT
     ###
     # If a custom allow/deny/duplicate page list is uploaded
@@ -6134,21 +7682,6 @@ with blocks:
         fn=custom_regex_load,
         inputs=[in_fully_redacted_list, in_fully_redacted_text_in],
         outputs=[in_fully_redacted_list_text, in_fully_redacted_list_state],
-    )
-
-    # The following allows for more reliable updates of the data in the custom list dataframes
-    in_allow_list_state.input(
-        update_dataframe,
-        inputs=[in_allow_list_state],
-        outputs=[in_allow_list_state],
-    )
-    in_deny_list_state.input(
-        update_dataframe, inputs=[in_deny_list_state], outputs=[in_deny_list_state]
-    )
-    in_fully_redacted_list_state.input(
-        update_dataframe,
-        inputs=[in_fully_redacted_list_state],
-        outputs=[in_fully_redacted_list_state],
     )
 
     # Apply whole page redactions from the provided whole page redaction csv file upload/list of specific page numbers given by user
@@ -6582,6 +8115,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             USAGE_LOGS_FOLDER,
         )
@@ -6599,8 +8138,8 @@ with blocks:
                 session_hash_textbox,
                 doc_file_name_no_extension_textbox,
                 data_file_name_with_extension_textbox,
-                total_pdf_page_count,
                 actual_time_taken_number,
+                total_pdf_page_count,
                 textract_query_number,
                 pii_identification_method_drop,
                 comprehend_query_number,
@@ -6610,6 +8149,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6633,8 +8178,8 @@ with blocks:
                 session_hash_textbox,
                 doc_file_name_no_extension_textbox,
                 data_file_name_with_extension_textbox,
-                total_pdf_page_count,
                 actual_time_taken_number,
+                total_pdf_page_count,
                 textract_query_number,
                 pii_identification_method_drop_tabular,
                 comprehend_query_number,
@@ -6644,6 +8189,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6666,8 +8217,8 @@ with blocks:
                 session_hash_textbox,
                 doc_file_name_no_extension_textbox,
                 data_file_name_with_extension_textbox,
-                total_pdf_page_count,
                 actual_time_taken_number,
+                total_pdf_page_count,
                 textract_query_number,
                 pii_identification_method_drop,
                 comprehend_query_number,
@@ -6677,6 +8228,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6701,6 +8258,7 @@ with blocks:
                 blank_doc_file_name_no_extension_textbox_for_logs,
                 blank_data_file_name_no_extension_textbox_for_logs,
                 actual_time_taken_number,
+                total_pdf_page_count,
                 textract_query_number,
                 pii_identification_method_drop_tabular,
                 comprehend_query_number,
@@ -6710,6 +8268,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6732,8 +8296,8 @@ with blocks:
                 session_hash_textbox,
                 blank_doc_file_name_no_extension_textbox_for_logs,
                 blank_data_file_name_no_extension_textbox_for_logs,
-                total_pdf_page_count,
                 actual_time_taken_number,
+                total_pdf_page_count,
                 textract_query_number,
                 pii_identification_method_drop_tabular,
                 comprehend_query_number,
@@ -6743,6 +8307,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6768,6 +8338,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             USAGE_LOGS_FOLDER,
         )
@@ -6796,6 +8372,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6829,6 +8411,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6862,6 +8450,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6885,7 +8479,6 @@ with blocks:
                 session_hash_textbox,
                 placeholder_doc_file_name_no_extension_textbox_for_logs,
                 blank_data_file_name_no_extension_textbox_for_logs,
-                total_pdf_page_count,
                 actual_time_taken_number,
                 total_pdf_page_count,
                 textract_query_number,
@@ -6897,6 +8490,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6919,7 +8518,6 @@ with blocks:
                 session_hash_textbox,
                 placeholder_doc_file_name_no_extension_textbox_for_logs,
                 blank_data_file_name_no_extension_textbox_for_logs,
-                total_pdf_page_count,
                 actual_time_taken_number,
                 total_pdf_page_count,
                 textract_query_number,
@@ -6931,6 +8529,12 @@ with blocks:
                 text_extract_method_radio,
                 is_a_textract_api_call,
                 task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
@@ -6969,6 +8573,9 @@ with blocks:
             app = gr.mount_gradio_app(
                 app,
                 blocks,
+                # theme=gr.themes.Default(primary_hue="blue"),
+                # head=head_html,
+                # css=css,
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
@@ -6984,6 +8591,9 @@ with blocks:
             if __name__ == "__main__":
                 if COGNITO_AUTH:
                     blocks.launch(
+                        # theme=gr.themes.Default(primary_hue="blue"),
+                        # head=head_html,
+                        # css=css,
                         show_error=True,
                         inbrowser=True,
                         auth=authenticate_user,
@@ -6996,6 +8606,9 @@ with blocks:
                     )
                 else:
                     blocks.launch(
+                        # theme=gr.themes.Default(primary_hue="blue"),
+                        # head=head_html,
+                        # css=css,
                         show_error=True,
                         inbrowser=True,
                         max_file_size=MAX_FILE_SIZE,
@@ -7053,6 +8666,7 @@ with blocks:
                 "spacy_model_path": SPACY_MODEL_PATH,
                 # PDF/Image Redaction Arguments
                 "ocr_method": DIRECT_MODE_OCR_METHOD,
+                "ocr_first_pass_max_workers": DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS,
                 "page_min": DIRECT_MODE_PAGE_MIN,
                 "page_max": DIRECT_MODE_PAGE_MAX,
                 "images_dpi": DIRECT_MODE_IMAGES_DPI,
@@ -7069,6 +8683,32 @@ with blocks:
                 "extract_layout": DIRECT_MODE_EXTRACT_LAYOUT,
                 "extract_signatures": DIRECT_MODE_EXTRACT_SIGNATURES,
                 "match_fuzzy_whole_phrase_bool": DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL,
+                # VLM OCR Arguments
+                "vlm_model_choice": CLOUD_VLM_MODEL_CHOICE,
+                "inference_server_vlm_model": DEFAULT_INFERENCE_SERVER_VLM_MODEL,
+                "inference_server_api_url": INFERENCE_SERVER_API_URL,
+                "gemini_api_key": GEMINI_API_KEY,
+                "azure_openai_api_key": AZURE_OPENAI_API_KEY,
+                "azure_openai_endpoint": AZURE_OPENAI_INFERENCE_ENDPOINT,
+                # LLM PII Detection Arguments
+                # Note: The actual model used is determined by pii_identification_method in the downstream code
+                # This is just the default - it will be overridden based on the selected PII method
+                "llm_model_choice": CLOUD_LLM_PII_MODEL_CHOICE,
+                "llm_inference_method": CHOSEN_LLM_PII_INFERENCE_METHOD,
+                "inference_server_pii_model": DEFAULT_INFERENCE_SERVER_PII_MODEL,
+                "llm_temperature": LLM_PII_TEMPERATURE,
+                "llm_max_tokens": LLM_PII_MAX_TOKENS,
+                "llm_redact_entities": CHOSEN_LLM_ENTITIES,
+                "custom_llm_instructions": "",  # Can be set via environment variable if needed
+                # Document Summarisation Arguments (used when task is summarise)
+                "summarisation_inference_method": AWS_LLM_PII_OPTION,
+                "summarisation_temperature": 0.6,
+                "summarisation_max_pages_per_group": 30,
+                "summary_page_group_max_workers": DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS,
+                "summarisation_api_key": "",
+                "summarisation_context": "",
+                "summarisation_format": "detailed",
+                "summarisation_additional_instructions": "",
                 # Word/Tabular Anonymisation Arguments
                 "anon_strategy": DIRECT_MODE_ANON_STRATEGY,
                 "text_columns": DEFAULT_TEXT_COLUMNS,
@@ -7109,6 +8749,12 @@ with blocks:
                 if DEFAULT_TEXT_COLUMNS:
                     print(f"Text columns: {DEFAULT_TEXT_COLUMNS}")
                 print(f"Remove duplicate rows: {REMOVE_DUPLICATE_ROWS}")
+
+            if DIRECT_MODE_TASK == "summarise":
+                print(
+                    "Summarisation: use summarisation_inference_method, summarisation_format, "
+                    "summarisation_context, summarisation_additional_instructions in direct_mode_args."
+                )
 
             # Combine extraction options
             extraction_options = (
