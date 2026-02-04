@@ -1232,48 +1232,13 @@ def prepare_image_or_pdf(
 
             # If we are loading redactions from the pdf, extract the redactions
             if LOAD_REDACTION_ANNOTATIONS_FROM_PDF and prepare_for_review is True:
-                # Ensure every page has a real image so coordinates can be scaled by image size
-                # print("Loading redactions from PDF")
-                # for ps in tqdm(page_sizes, unit="pages", desc="Loading redactions from PDF"):
-                #     try:
-                #         w = (
-                #             float(ps.get("image_width"))
-                #             if ps.get("image_width") is not None
-                #             else 0
-                #         )
-                #         h = (
-                #             float(ps.get("image_height"))
-                #             if ps.get("image_height") is not None
-                #             else 0
-                #         )
-                #         has_valid_dims = w > 0 and h > 0
-                #     except (TypeError, ValueError):
-                #         has_valid_dims = False
-                #     if not has_valid_dims:
-                #         page_num_0 = int(ps["page"]) - 1
-                #         _pnum, img_path, width, height = (
-                #             process_single_page_for_image_conversion(
-                #                 file_path,
-                #                 page_num_0,
-                #                 create_images=True,
-                #                 input_folder=input_folder,
-                #             )
-                #         )
-                #         try:
-                #             if (
-                #                 width is not None
-                #                 and height is not None
-                #                 and float(width) > 0
-                #                 and float(height) > 0
-                #             ):
-                #                 ps["image_path"] = img_path
-                #                 ps["image_width"] = width
-                #                 ps["image_height"] = height
-                #         except (TypeError, ValueError):
-                #             pass
 
                 redactions_list = extract_redactions(pymupdf_doc, page_sizes)
                 all_annotations_object = redactions_list
+
+                review_file_csv = convert_annotation_json_to_review_df(
+                    all_annotations_object
+                )
 
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
             print(f"File {file_name_with_ext} is an image")
@@ -1898,22 +1863,16 @@ def divide_coordinates_by_page_sizes(
                     "Warning: 'page' column not found in page_sizes_df. Cannot merge dimensions."
                 )
 
-        # Fallback to mediabox dimensions if image dimensions are missing
+        # Fallback to mediabox dimensions when image dimensions are missing (e.g. unvisited
+        # pages when only the first page image was loaded). Ensures all pages get relative
+        # (0-1) coordinates so they display correctly when the user navigates to them later.
         if "image_width" in df_abs.columns and "mediabox_width" in df_abs.columns:
-            # Check if image_width mostly missing - use .isna().all() or check percentage
-            if df_abs["image_width"].isna().all():
-                # print("Falling back to mediabox dimensions as image_width is entirely missing.")
-                df_abs["image_width"] = df_abs["image_width"].fillna(
-                    df_abs["mediabox_width"]
-                )
-                df_abs["image_height"] = df_abs["image_height"].fillna(
-                    df_abs["mediabox_height"]
-                )
-            else:
-                # Optional: Fill only missing image dims if some exist?
-                # df_abs["image_width"].fillna(df_abs["mediabox_width"], inplace=True)
-                # df_abs["image_height"].fillna(df_abs["mediabox_height"], inplace=True)
-                pass  # Current logic only falls back if ALL image_width are NaN
+            df_abs["image_width"] = df_abs["image_width"].fillna(
+                df_abs["mediabox_width"]
+            )
+            df_abs["image_height"] = df_abs["image_height"].fillna(
+                df_abs["mediabox_height"]
+            )
 
         # Ensure divisor columns are numeric before division
         divisors_numeric = True
