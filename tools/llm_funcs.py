@@ -2112,8 +2112,6 @@ def calculate_tokens_from_metadata(
         model_name_map (dict): A dictionary mapping model name to source
     """
 
-    model_name_map[model_choice]["source"]
-
     # Regex to find the numbers following the keys in the "Query summary metadata" section
     # This ensures we get the final, aggregated totals for the whole query.
     input_regex = r"input_tokens: (\d+)"
