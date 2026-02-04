@@ -3556,13 +3556,12 @@ with blocks:
 
                         do_initial_clean.render()
 
+            with gr.Accordion(label="Redact Word/data files", open=True):
                 tabular_data_redact_btn = gr.Button(
                     "Redact text/data files",
                     variant="primary",
                     elem_id="tabular-redact-btn",
                 )
-
-            with gr.Accordion(label="Redact Word/data files", open=True):
                 with gr.Row():
                     text_output_summary = gr.Textbox(label="Output result", lines=4)
                     text_output_file = gr.File(label="Output files")
