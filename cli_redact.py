@@ -870,7 +870,7 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
     summarisation_group.add_argument(
         "--summary_page_group_max_workers",
         type=int,
-        default=None,
+        default=SUMMARY_PAGE_GROUP_MAX_WORKERS,
         metavar="N",
         help="Max threads for page-group summarisation (1 = sequential). Defaults to SUMMARY_PAGE_GROUP_MAX_WORKERS config (e.g. 1).",
     )
@@ -1590,6 +1590,45 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                         except Exception as e:
                             print(f"Warning: Could not upload output files to S3: {e}")
 
+                    # Log usage for page deduplication (match app: doc name or "document", data blank)
+                    if usage_logger:
+                        try:
+                            print("Saving logs to CSV")
+                            doc_file_name = (
+                                os.path.basename(args.input_file[0])
+                                if args.display_file_names_in_logs and args.input_file
+                                else "document"
+                            )
+                            data_file_name = ""  # Not applicable for page dedup
+                            log_redaction_usage(
+                                logger=usage_logger,
+                                session_hash=session_hash,
+                                doc_file_name=doc_file_name,
+                                data_file_name=data_file_name,
+                                time_taken=processing_time,
+                                total_pages=0,
+                                textract_queries=0,
+                                comprehend_queries=0,
+                                pii_method=args.pii_detector,
+                                cost_code=args.cost_code,
+                                handwriting_signature="",
+                                text_extraction_method=args.ocr_method,
+                                is_textract_call=False,
+                                task=args.task,
+                                save_to_dynamodb=args.save_logs_to_dynamodb,
+                                save_to_s3=args.upload_logs_to_s3,
+                                s3_bucket=args.s3_bucket,
+                                s3_key_prefix=args.s3_logs_prefix,
+                                vlm_model_name="",
+                                vlm_total_input_tokens=0,
+                                vlm_total_output_tokens=0,
+                                llm_model_name="",
+                                llm_total_input_tokens=0,
+                                llm_total_output_tokens=0,
+                            )
+                        except Exception as e:
+                            print(f"Warning: Could not log usage data: {e}")
+
                 else:
                     print(
                         "Error: Page duplicate detection requires CSV files with OCR data."
@@ -1688,24 +1727,17 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                         try:
                             # Extract file name for logging
                             print("Saving logs to CSV")
-                            doc_file_name = ""
+                            doc_file_name = ""  # Tabular dedup: no doc (match app)
                             data_file_name = (
                                 os.path.basename(args.input_file[0])
-                                if args.display_file_names_in_logs
+                                if args.display_file_names_in_logs and args.input_file
                                 else "data_file"
                             )
 
-                            # Determine if this was a Textract API call
                             is_textract_call = False
-
-                            # Count pages (approximate from page_sizes if available)
-                            total_pages = len(page_sizes) if page_sizes else 1
-
-                            # Count API calls (approximate - would need to be tracked in the redaction function)
+                            total_pages = 0  # Tabular dedup: no page count (match app)
                             textract_queries = 0
                             comprehend_queries = 0
-
-                            # Format handwriting/signature options
                             handwriting_signature = ""
 
                             log_redaction_usage(
@@ -1980,32 +2012,14 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
 
     elif args.task == "summarise":
         print("--- Document Summarisation ---")
-        start_time = time.time()
         try:
             from tools.cli_usage_logger import log_redaction_usage
             from tools.summaries import (
                 concise_summary_format_prompt,
                 detailed_summary_format_prompt,
-                get_model_choice_from_inference_method,
                 load_csv_files_to_dataframe,
-                summarise_document,
+                summarise_document_wrapper,
             )
-
-            # No-op progress for CLI (summarise_document expects progress(frac, desc))
-            class _NoOpProgress:
-                def __call__(self, *args, **kwargs):
-                    pass
-
-            # Map GUI inference method label to internal method name
-            inference_method_map = {
-                AWS_LLM_PII_OPTION: "aws-bedrock",
-                LOCAL_TRANSFORMERS_LLM_PII_OPTION: "local",
-                INFERENCE_SERVER_PII_OPTION: "inference-server",
-            }
-            inference_method = inference_method_map.get(
-                args.summarisation_inference_method, "aws-bedrock"
-            )
-            model_choice = get_model_choice_from_inference_method(inference_method)
 
             # Map format choice to prompt string (same as GUI)
             format_map = {
@@ -2044,34 +2058,26 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                 llm_total_input_tokens,
                 llm_total_output_tokens,
                 summary_display_text,
-            ) = summarise_document(
+                elapsed_seconds,
+            ) = summarise_document_wrapper(
                 ocr_df,
                 args.output_dir,
-                model_choice,
+                args.summarisation_inference_method,
                 args.summarisation_api_key or "",
                 args.summarisation_temperature,
-                file_name=file_name,
-                context_textbox=args.summarisation_context or "",
-                aws_access_key_textbox=args.aws_access_key or "",
-                aws_secret_key_textbox=args.aws_secret_key or "",
-                aws_region_textbox=args.aws_region or "",
-                hf_api_key_textbox="",
-                azure_endpoint_textbox=AZURE_OPENAI_INFERENCE_ENDPOINT or "",
-                api_url=INFERENCE_SERVER_API_URL or None,
-                summarise_format_radio=summarise_format_radio,
-                additional_summary_instructions=args.summarisation_additional_instructions
-                or "",
-                max_pages_per_group=args.summarisation_max_pages_per_group,
-                summary_page_group_max_workers=(
-                    args.summary_page_group_max_workers
-                    if getattr(args, "summary_page_group_max_workers", None) is not None
-                    else SUMMARY_PAGE_GROUP_MAX_WORKERS
-                ),
-                progress=_NoOpProgress(),
+                file_name,
+                args.summarisation_context or "",
+                args.aws_access_key or "",
+                args.aws_secret_key or "",
+                "",
+                AZURE_OPENAI_INFERENCE_ENDPOINT or "",
+                summarise_format_radio,
+                args.summarisation_additional_instructions or "",
+                args.summarisation_max_pages_per_group,
+                None,
             )
 
-            end_time = time.time()
-            processing_time = end_time - start_time
+            processing_time = elapsed_seconds
 
             print(f"\n{status_message}")
             if output_files:
