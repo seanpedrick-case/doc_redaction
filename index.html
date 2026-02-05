@@ -144,7 +144,7 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<p>version: 1.7.0</p>
+<p>version: 1.7.2</p>
 <p>Welcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.</p>
 <p>Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app.</p>
 <section id="document-redaction" class="level2">
@@ -157,7 +157,7 @@ ul.task-list li input[type="checkbox"] {
 </figure>
 </div>
 <p>To identify text in documents, the ‘Local’ text extraction uses PikePDF, and OCR image analysis uses Tesseract, and works well only for documents with typed text or scanned PDFs with clear text. Use AWS Textract to extract more complex elements e.g.&nbsp;handwriting, signatures, or unclear text. For PII identification, ‘Local’ (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings). AWS Comprehend gives better results at a small cost.</p>
-<p>Additional options on the ‘Redaction settings’ include, the type of information to redact (e.g.&nbsp;people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the ‘Review redactions’ tab to quickly create a final redacted document.</p>
+<p>Additional options include, choosing the type of information to redact (e.g.&nbsp;people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the ‘Review redactions’ tab to quickly create a final redacted document.</p>
 <p>NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed <strong>by a human</strong> before using the final outputs.</p>
 
 

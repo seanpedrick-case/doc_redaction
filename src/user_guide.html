@@ -220,6 +220,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#advanced-user-guide-1" id="toc-advanced-user-guide-1" class="nav-link" data-scroll-target="#advanced-user-guide-1">Advanced user guide</a>
   <ul class="collapse">
   <li><a href="#fuzzy-search-and-redaction" id="toc-fuzzy-search-and-redaction" class="nav-link" data-scroll-target="#fuzzy-search-and-redaction">Fuzzy search and redaction</a></li>
+  <li><a href="#document-summarisation-tab" id="toc-document-summarisation-tab" class="nav-link" data-scroll-target="#document-summarisation-tab">Document summarisation tab</a></li>
   <li><a href="#export-to-and-import-from-adobe" id="toc-export-to-and-import-from-adobe" class="nav-link" data-scroll-target="#export-to-and-import-from-adobe">Export to and import from Adobe</a>
   <ul class="collapse">
   <li><a href="#using-_for_review.pdf-files-with-adobe-acrobat" id="toc-using-_for_review.pdf-files-with-adobe-acrobat" class="nav-link" data-scroll-target="#using-_for_review.pdf-files-with-adobe-acrobat">Using _for_review.pdf files with Adobe Acrobat</a></li>
@@ -255,7 +256,6 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#identifying-people-and-signatures-with-vlms" id="toc-identifying-people-and-signatures-with-vlms" class="nav-link" data-scroll-target="#identifying-people-and-signatures-with-vlms">Identifying people and signatures with VLMs</a></li>
   <li><a href="#pii-identification-with-llms" id="toc-pii-identification-with-llms" class="nav-link" data-scroll-target="#pii-identification-with-llms">PII identification with LLMs</a></li>
   </ul></li>
-  <li><a href="#document-summarisation-tab" id="toc-document-summarisation-tab" class="nav-link" data-scroll-target="#document-summarisation-tab">Document summarisation tab</a></li>
   <li><a href="#command-line-interface-cli" id="toc-command-line-interface-cli" class="nav-link" data-scroll-target="#command-line-interface-cli">Command Line Interface (CLI)</a>
   <ul class="collapse">
   <li><a href="#getting-started-with-the-cli" id="toc-getting-started-with-the-cli" class="nav-link" data-scroll-target="#getting-started-with-the-cli">Getting started with the CLI</a></li>
@@ -322,6 +322,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <h3 class="anchored" data-anchor-id="advanced-user-guide">Advanced user guide</h3>
 <ul>
 <li><a href="#fuzzy-search-and-redaction">Fuzzy search and redaction</a></li>
+<li><a href="#document-summarisation-tab">Document summarisation tab</a></li>
 <li><a href="#export-to-and-import-from-adobe">Export redactions to and import from Adobe Acrobat</a>
 <ul>
 <li><a href="#using-_for_reviewpdf-files-with-adobe-acrobat">Using _for_review.pdf files with Adobe Acrobat</a></li>
@@ -339,7 +340,6 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <ul>
 <li><a href="#advanced-ocr-options-hybrid-ocr">Advanced OCR options (Hybrid OCR)</a></li>
 <li><a href="#pii-identification-with-llms">PII identification with LLMs</a></li>
-<li><a href="#document-summarisation-tab">Document summarisation tab</a></li>
 <li><a href="#command-line-interface-cli">Command Line Interface (CLI)</a></li>
 </ul>
 </section>
@@ -400,7 +400,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="text-extraction" class="level3">
 <h3 class="anchored" data-anchor-id="text-extraction">Text extraction</h3>
-<p>Inside the same <strong>‘Redaction settings’</strong> accordion, open the nested accordion <strong>‘Change default redaction settings’</strong> (it may already be open). If enabled, under <strong>‘Change default text extraction OCR method’</strong> you can choose how text is extracted:</p>
+<p>Inside the same <strong>‘Redaction settings’</strong> accordion, open the nested accordion <strong>‘Change default text extraction settings’</strong> (it may already be open). If enabled, under <strong>‘Change default text extraction OCR method’</strong> you can choose how text is extracted:</p>
 <ul>
 <li><strong>‘Local model - selectable text’</strong> - Reads text directly from PDFs that have selectable text (using PikePDF). Best for most PDFs; finds nothing if the PDF has no selectable text and is not suitable for handwriting or signatures. Image files are passed to the next option.</li>
 <li><strong>‘Local OCR model - PDFs without selectable text’</strong> - Uses a local OCR model (Tesseract) to extract text from PDFs/images. Handles most typed text without selectable text but is less reliable for handwriting and signatures; use the AWS option below if you need those.</li>
@@ -420,12 +420,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="pii-redaction-method" class="level3">
 <h3 class="anchored" data-anchor-id="pii-redaction-method">PII redaction method</h3>
-<p>At the start of the <strong>‘Change PII identification method’</strong> accordion (under <strong>‘Change default redaction settings’</strong>) you will see <strong>‘Choose redaction method’</strong>, a radio with three options. <strong>‘Extract text only’</strong> runs text extraction without redaction—useful when you only need OCR output or want to review text before redacting; when selected, the <strong>‘Select entity types to redact’</strong> and <strong>‘Terms to always include or exclude in redactions…’</strong> accordions are hidden. <strong>‘Redact all PII’</strong> (the default) uses the chosen PII detection method to find and redact personal information; the entity-types accordion is shown and the terms (allow/deny/page) accordion is hidden. <strong>‘Redact selected terms’</strong> shows both accordions and focuses on custom allow/deny lists and entity types (e.g.&nbsp;CUSTOM) so you can redact only the terms you specify.</p>
-<p>Still under <strong>‘Change default redaction settings’</strong>, you may see the <strong>‘Change PII identification method’</strong> section, if enabled, which lets you choose how PII is detected:</p>
+<p>At the start of the <strong>‘Change PII identification method’</strong> accordion (under <strong>‘Change default redaction settings’</strong>) you will see <strong>‘Choose redaction method’</strong>, a radio with three options: - <strong>‘Extract text only’</strong> runs text extraction without redaction—useful when you only need OCR output or want to review text before redacting; when selected. - <strong>‘Redact all PII’</strong> (the default) uses the chosen PII detection method to find and redact personal information across a range of types that you can customise below. - <strong>‘Redact selected terms’</strong> shows both accordions and focuses on custom allow/deny lists so you can redact only the terms you specify.</p>
+<p>Still under <strong>‘Change default redaction settings’</strong>, you may see the <strong>‘Change PII identification model’</strong> section, if enabled, which lets you choose how PII is detected. You may have the choice of the following options:</p>
 <ul>
-<li><strong>‘Only extract text - (no redaction)’</strong> - Use this if you only need extracted text (e.g.&nbsp;for duplicate detection or to review on the Review redactions tab).</li>
 <li><strong>‘Local’</strong> - Uses a local model (e.g.&nbsp;spaCy) to detect PII at no extra cost. Often enough when you mainly care about custom terms (see <a href="#customising-redaction-options">Customising redaction options</a>).</li>
 <li><strong>‘AWS Comprehend’</strong> - Uses AWS Comprehend for PII detection when the app is configured for AWS; typically more accurate but incurs a cost (around £0.0075 ($0.01) per 10,000 characters).</li>
+<li>Other options may be available depending on the app settings (e.g.&nbsp;AWS Bedrock, local LLM models).</li>
 </ul>
 <p>Under <strong>‘Select entity types to redact’</strong> you can choose which types of PII to redact (e.g.&nbsp;names, emails, dates). The dropdown label varies by method (Local, AWS Comprehend, or LLM); click in the box or near the dropdown arrow to see the full list.</p>
 </section>
@@ -615,8 +615,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </div>
 <section id="uploading-documents-for-review" class="level3">
 <h3 class="anchored" data-anchor-id="uploading-documents-for-review">Uploading documents for review</h3>
-<p>The top area has a file upload area where you can upload files for review . In the left box, upload the original PDF file. Click ‘1. Upload original PDF’. In the right box, you can upload the ’…_review_file.csv’ that is produced by the redaction process.</p>
-<p>Optionally, you can upload a ’…_ocr_result_with_words’ file here, that will allow you to search through the text and easily <a href="#searching-and-adding-custom-redactions">add new redactions based on word search</a>. You can also upload one of the ’…_ocr_output.csv’ file here that comes out of a redaction task, so that you can navigate the extracted text from the document. Click the button ‘2. Upload Review or OCR csv files’ load in these files.</p>
+<p>The top area has a file upload area where you can upload documents to review redactions. In the left box (1.), upload the original PDF file. If you have a document that you have previously redacted, you can also upload the ‘…redactions_for_review.pdf’ file that is produced by the redaction process, which will load in the previous redactions.</p>
+<p>In the second input file box to the right (2.), you can upload a ’…_ocr_result_with_words’ file, that will allow you to search through the text and easily <a href="#searching-and-adding-custom-redactions">add new redactions based on word search</a>. You can also upload one of the ’…_ocr_output.csv’ file here that comes out of a redaction task, so that you can navigate the extracted text from the document. Click the button ‘2. Upload Review or OCR csv files’ load in these files.</p>
 <p>Now you can review and modify the suggested redactions using the interface described below.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -980,6 +980,23 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </figure>
 </div>
 </section>
+<section id="document-summarisation-tab" class="level2">
+<h2 class="anchored" data-anchor-id="document-summarisation-tab">Document summarisation tab</h2>
+<p>When summarisation is enabled (e.g.&nbsp;<strong>SHOW_SUMMARISATION</strong> and at least one LLM option available), a <strong>Document summarisation</strong> tab is shown in the app. It lets you generate LLM-based summaries from OCR output CSVs (e.g.&nbsp;from a previous redaction run).</p>
+<p><strong>How to use the Document summarisation tab</strong></p>
+<ol type="1">
+<li><strong>Upload OCR output files</strong>: In the summarisation tab, use “Upload one or multiple ‘ocr_output.csv’ files to summarise” to attach one or more <code>*_ocr_output.csv</code> files (produced by the redaction pipeline when you extract text from PDFs/images).</li>
+<li><strong>Summarisation settings</strong> (accordion):
+<ul>
+<li><strong>Choose LLM inference method for summarisation</strong>: Choose from the LLM options available in the app settings.</li>
+<li><strong>Max pages per page-group summary</strong>: Limits how many pages are summarised together before recursive summarisation.</li>
+<li><strong>Summary format</strong>: <strong>Concise</strong> (key themes only) or <strong>Detailed</strong> (as much detail as possible).</li>
+<li><strong>Additional summary instructions (optional)</strong>: e.g.&nbsp;“Focus on key obligations and termination clauses”.</li>
+</ul></li>
+<li><strong>Generate summary</strong>: Click <strong>“Generate summary”</strong> to run the summarisation. The app groups pages, calls the LLM for each group, and creates a combined summary.</li>
+<li><strong>Outputs</strong>: When finished, you can download summary files and view the summary in the tab.</li>
+</ol>
+</section>
 <section id="export-to-and-import-from-adobe" class="level2">
 <h2 class="anchored" data-anchor-id="export-to-and-import-from-adobe">Export to and import from Adobe</h2>
 <p>Files for this section are stored <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/export_to_adobe/">here</a>.</p>
@@ -1290,27 +1307,6 @@ INFERENCE_SERVER_API_URL=http://localhost:7862</code></pre>
 </ul>
 <p>Model choice (Bedrock model ID, inference server URL, or local model name) and parameters (temperature, max tokens) are typically set in <strong>Settings</strong> or via environment variables; see the App settings / config documentation for your deployment.</p>
 </section>
-</section>
-<section id="document-summarisation-tab" class="level2">
-<h2 class="anchored" data-anchor-id="document-summarisation-tab">Document summarisation tab</h2>
-<p>When summarisation is enabled (e.g.&nbsp;<strong>SHOW_SUMMARISATION</strong> and at least one LLM option available), a <strong>Document summarisation</strong> tab is shown in the app. It lets you generate LLM-based summaries from OCR output CSVs (e.g.&nbsp;from a previous redaction run).</p>
-<p><strong>How to use the Document summarisation tab</strong></p>
-<ol type="1">
-<li><strong>Upload OCR output files</strong>: In the summarisation tab, use “Upload one or multiple ‘ocr_output.csv’ files to summarise” to attach one or more <code>*_ocr_output.csv</code> files (produced by the redaction pipeline when you extract text from PDFs/images).</li>
-<li><strong>Summarisation settings</strong> (accordion):
-<ul>
-<li><strong>Choose LLM inference method for summarisation</strong>: e.g.&nbsp;“LLM (AWS Bedrock)”, “Local transformers LLM”, or “Local inference server”, depending on what is enabled.</li>
-<li><strong>Temperature</strong>: Controls randomness (lower is more deterministic).</li>
-<li><strong>Max pages per page-group summary</strong>: Limits how many pages are summarised together before recursive summarisation.</li>
-<li><strong>API Key (if required)</strong>: For providers that need an API key.</li>
-<li><strong>Additional context (optional)</strong>: Short description of the document type (e.g.&nbsp;“This is a partnership agreement”).</li>
-<li><strong>Summary format</strong>: <strong>Concise</strong> (key themes only) or <strong>Detailed</strong> (as much detail as possible).</li>
-<li><strong>Additional summary instructions (optional)</strong>: e.g.&nbsp;“Focus on key obligations and termination clauses”.</li>
-</ul></li>
-<li><strong>Generate summary</strong>: Click <strong>“Generate summary”</strong> to run the summarisation. The app groups pages, calls the LLM, and optionally recurses if the combined summary is long.</li>
-<li><strong>Outputs</strong>: When finished, you can download summary files and view the summary in the tab.</li>
-</ol>
-<p>Summarisation uses the same LLM/inference settings as configured for the app (AWS region, inference server URL, etc.). For batch or scripted summarisation, use the CLI <code>--task summarise</code> (see Command Line Interface).</p>
 </section>
 <section id="command-line-interface-cli" class="level2">
 <h2 class="anchored" data-anchor-id="command-line-interface-cli">Command Line Interface (CLI)</h2>
