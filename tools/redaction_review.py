@@ -765,19 +765,29 @@ def get_and_merge_current_page_annotations(
         existing_annotations_current_page
     )
 
-    # Concatenate and clean, ensuring no duplicates and sorted order
-    # Filter out empty DataFrames before concatenation to avoid FutureWarning
+    # Concatenate and clean, ensuring no duplicates and sorted order.
+    # Deduplicate only by non-null id: pandas treats NaN==NaN in drop_duplicates(subset=["id"]),
+    # which would collapse all rows with missing id to one and drop annotations on other pages.
     dfs_to_concat = [
         df
         for df in [existing_annotations_df, current_page_annotations_df]
         if not df.empty
     ]
     if dfs_to_concat:
-        updated_df = (
-            pd.concat(dfs_to_concat, ignore_index=True)
-            .sort_values(by=["page", "xmin", "ymin"])
-            .drop_duplicates(subset=["id"], keep="first")
-        )
+        combined = pd.concat(dfs_to_concat, ignore_index=True)
+        if "id" in combined.columns:
+            has_id = combined["id"].notna()
+            if has_id.any():
+                deduped = combined.loc[has_id].drop_duplicates(
+                    subset=["id"], keep="first"
+                )
+                updated_df = pd.concat(
+                    [combined.loc[~has_id], deduped], ignore_index=True
+                ).sort_values(by=["page", "xmin", "ymin"])
+            else:
+                updated_df = combined.sort_values(by=["page", "xmin", "ymin"])
+        else:
+            updated_df = combined.sort_values(by=["page", "xmin", "ymin"])
     else:
         # Return empty DataFrame with expected columns from convert_annotation_data_to_dataframe
         updated_df = pd.DataFrame(
