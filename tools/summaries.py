@@ -337,7 +337,8 @@ def summarise_document_wrapper(
         else:
             file_name = "document"
 
-    # Call the actual summarise_document function
+    # Call the actual summarise_document function (timed for usage logs)
+    start_time = time.perf_counter()
     (
         output_files,
         status_message,
@@ -363,6 +364,7 @@ def summarise_document_wrapper(
         summarisation_additional_instructions,
         max_pages_per_group=summarisation_max_pages_per_group,
     )
+    elapsed_seconds = round(time.perf_counter() - start_time, 1)
 
     return (
         output_files,
@@ -371,6 +373,7 @@ def summarise_document_wrapper(
         llm_total_input_tokens,
         llm_total_output_tokens,
         summary_display_text,
+        elapsed_seconds,
     )
 
 
