@@ -26,6 +26,7 @@ format:
 
 ### Advanced user guide
 - [Fuzzy search and redaction](#fuzzy-search-and-redaction)
+- [Document summarisation tab](#document-summarisation-tab)
 - [Export redactions to and import from Adobe Acrobat](#export-to-and-import-from-adobe)
     - [Using _for_review.pdf files with Adobe Acrobat](#using-_for_reviewpdf-files-with-adobe-acrobat)
     - [Exporting to Adobe Acrobat](#exporting-to-adobe-acrobat)
@@ -38,7 +39,6 @@ format:
 ### Features for expert users/system administrators
 - [Advanced OCR options (Hybrid OCR)](#advanced-ocr-options-hybrid-ocr)
 - [PII identification with LLMs](#pii-identification-with-llms)
-- [Document summarisation tab](#document-summarisation-tab)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
 
 ## Built-in example data
@@ -97,7 +97,7 @@ On the **'Redact PDFs/images'** tab, the **'Redaction settings'** accordion at t
 
 ### Text extraction
 
-Inside the same **'Redaction settings'** accordion, open the nested accordion **'Change default redaction settings'** (it may already be open). If enabled, under **'Change default text extraction OCR method'** you can choose how text is extracted:
+Inside the same **'Redaction settings'** accordion, open the nested accordion **'Change default text extraction settings'** (it may already be open). If enabled, under **'Change default text extraction OCR method'** you can choose how text is extracted:
 
 - **'Local model - selectable text'** - Reads text directly from PDFs that have selectable text (using PikePDF). Best for most PDFs; finds nothing if the PDF has no selectable text and is not suitable for handwriting or signatures. Image files are passed to the next option.
 - **'Local OCR model - PDFs without selectable text'** - Uses a local OCR model (Tesseract) to extract text from PDFs/images. Handles most typed text without selectable text but is less reliable for handwriting and signatures; use the AWS option below if you need those.
@@ -113,13 +113,16 @@ If you select **'AWS Textract service - all PDF types'** as the text extraction 
 
 ### PII redaction method
 
-At the start of the **'Change PII identification method'** accordion (under **'Change default redaction settings'**) you will see **'Choose redaction method'**, a radio with three options. **'Extract text only'** runs text extraction without redaction—useful when you only need OCR output or want to review text before redacting; when selected, the **'Select entity types to redact'** and **'Terms to always include or exclude in redactions...'** accordions are hidden. **'Redact all PII'** (the default) uses the chosen PII detection method to find and redact personal information; the entity-types accordion is shown and the terms (allow/deny/page) accordion is hidden. **'Redact selected terms'** shows both accordions and focuses on custom allow/deny lists and entity types (e.g. CUSTOM) so you can redact only the terms you specify.
+At the start of the **'Change PII identification method'** accordion (under **'Change default redaction settings'**) you will see **'Choose redaction method'**, a radio with three options:
+- **'Extract text only'** runs text extraction without redaction—useful when you only need OCR output or want to review text before redacting; when selected.
+- **'Redact all PII'** (the default) uses the chosen PII detection method to find and redact personal information across a range of types that you can customise below.
+- **'Redact selected terms'** shows both accordions and focuses on custom allow/deny lists so you can redact only the terms you specify.
 
-Still under **'Change default redaction settings'**, you may see the **'Change PII identification method'** section, if enabled, which lets you choose how PII is detected:
+Still under **'Change default redaction settings'**, you may see the **'Change PII identification model'** section, if enabled, which lets you choose how PII is detected. You may have the choice of the following options:
 
-- **'Only extract text - (no redaction)'** - Use this if you only need extracted text (e.g. for duplicate detection or to review on the Review redactions tab).
 - **'Local'** - Uses a local model (e.g. spaCy) to detect PII at no extra cost. Often enough when you mainly care about custom terms (see [Customising redaction options](#customising-redaction-options)).
 - **'AWS Comprehend'** - Uses AWS Comprehend for PII detection when the app is configured for AWS; typically more accurate but incurs a cost (around £0.0075 ($0.01) per 10,000 characters).
+- Other options may be available depending on the app settings (e.g. AWS Bedrock, local LLM models).
 
 Under **'Select entity types to redact'** you can choose which types of PII to redact (e.g. names, emails, dates). The dropdown label varies by method (Local, AWS Comprehend, or LLM); click in the box or near the dropdown arrow to see the full list.
 
@@ -269,9 +272,9 @@ On the 'Review redactions' tab you have a visual interface that allows you to in
 
 ### Uploading documents for review
 
-The top area has a file upload area where you can upload files for review . In the left box, upload the original PDF file. Click '1. Upload original PDF'. In the right box, you can upload the '..._review_file.csv' that is produced by the redaction process.
+The top area has a file upload area where you can upload documents to review redactions. In the left box (1.), upload the original PDF file. If you have a document that you have previously redacted, you can also upload the '...redactions_for_review.pdf' file that is produced by the redaction process, which will load in the previous redactions.
 
-Optionally, you can upload a '..._ocr_result_with_words' file here, that will allow you to search through the text and easily [add new redactions based on word search](#searching-and-adding-custom-redactions). You can also upload one of the '..._ocr_output.csv' file here that comes out of a redaction task, so that you can navigate the extracted text from the document. Click the button '2. Upload Review or OCR csv files' load in these files.
+In the second input file box to the right (2.), you can upload a '..._ocr_result_with_words' file, that will allow you to search through the text and easily [add new redactions based on word search](#searching-and-adding-custom-redactions). You can also upload one of the '..._ocr_output.csv' file here that comes out of a redaction task, so that you can navigate the extracted text from the document. Click the button '2. Upload Review or OCR csv files' load in these files.
 
 Now you can review and modify the suggested redactions using the interface described below.
 
@@ -589,6 +592,21 @@ Using these deny list with spelling mistakes, the app fuzzy match these terms to
 
 ![Fuzzy match review outputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/fuzzy_search/img/fuzzy_search_review.PNG)
 
+## Document summarisation tab
+
+When summarisation is enabled (e.g. **SHOW_SUMMARISATION** and at least one LLM option available), a **Document summarisation** tab is shown in the app. It lets you generate LLM-based summaries from OCR output CSVs (e.g. from a previous redaction run).
+
+**How to use the Document summarisation tab**
+
+1. **Upload OCR output files**: In the summarisation tab, use "Upload one or multiple 'ocr_output.csv' files to summarise" to attach one or more `*_ocr_output.csv` files (produced by the redaction pipeline when you extract text from PDFs/images).
+2. **Summarisation settings** (accordion):
+   - **Choose LLM inference method for summarisation**: Choose from the LLM options available in the app settings.
+   - **Max pages per page-group summary**: Limits how many pages are summarised together before recursive summarisation.
+   - **Summary format**: **Concise** (key themes only) or **Detailed** (as much detail as possible).
+   - **Additional summary instructions (optional)**: e.g. "Focus on key obligations and termination clauses".
+3. **Generate summary**: Click **"Generate summary"** to run the summarisation. The app groups pages, calls the LLM for each group, and creates a combined summary.
+4. **Outputs**: When finished, you can download summary files and view the summary in the tab.
+
 ## Export to and import from Adobe
 
 Files for this section are stored [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/export_to_adobe/).
@@ -880,26 +898,6 @@ On the **'Redact PDFs/images'** tab, under **'Redaction settings'**, choose the 
 - Optionally add **custom instructions** (e.g. "Do not redact company names" or "Redact all organisation names with the label ORGANISATION").
 
 Model choice (Bedrock model ID, inference server URL, or local model name) and parameters (temperature, max tokens) are typically set in **Settings** or via environment variables; see the App settings / config documentation for your deployment.
-
-## Document summarisation tab
-
-When summarisation is enabled (e.g. **SHOW_SUMMARISATION** and at least one LLM option available), a **Document summarisation** tab is shown in the app. It lets you generate LLM-based summaries from OCR output CSVs (e.g. from a previous redaction run).
-
-**How to use the Document summarisation tab**
-
-1. **Upload OCR output files**: In the summarisation tab, use "Upload one or multiple 'ocr_output.csv' files to summarise" to attach one or more `*_ocr_output.csv` files (produced by the redaction pipeline when you extract text from PDFs/images).
-2. **Summarisation settings** (accordion):
-   - **Choose LLM inference method for summarisation**: e.g. "LLM (AWS Bedrock)", "Local transformers LLM", or "Local inference server", depending on what is enabled.
-   - **Temperature**: Controls randomness (lower is more deterministic).
-   - **Max pages per page-group summary**: Limits how many pages are summarised together before recursive summarisation.
-   - **API Key (if required)**: For providers that need an API key.
-   - **Additional context (optional)**: Short description of the document type (e.g. "This is a partnership agreement").
-   - **Summary format**: **Concise** (key themes only) or **Detailed** (as much detail as possible).
-   - **Additional summary instructions (optional)**: e.g. "Focus on key obligations and termination clauses".
-3. **Generate summary**: Click **"Generate summary"** to run the summarisation. The app groups pages, calls the LLM, and optionally recurses if the combined summary is long.
-4. **Outputs**: When finished, you can download summary files and view the summary in the tab.
-
-Summarisation uses the same LLM/inference settings as configured for the app (AWS region, inference server URL, etc.). For batch or scripted summarisation, use the CLI `--task summarise` (see Command Line Interface).
 
 ## Command Line Interface (CLI)
 

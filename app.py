@@ -503,7 +503,7 @@ walkthrough_handwrite_signature_checkbox = gr.CheckboxGroup(
 )
 
 walkthrough_pii_identification_method_drop = gr.Radio(
-    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+    label="""Choose personal information detection model. Note that AWS Comprehend, if shown, has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
     value=DEFAULT_PII_DETECTION_MODEL,
     choices=PII_DETECTION_MODELS,
     visible=initial_show_pii_method,
@@ -663,7 +663,7 @@ redaction_method_radio = gr.Radio(
 )
 
 pii_identification_method_drop = gr.Radio(
-    label="""Choose personal information detection method. The local model is lower quality but costs nothing - it may be worth a try if you are willing to spend some time reviewing outputs, or if you are only interested in searching for custom search terms (see Redaction settings - custom deny list). If shown, AWS Comprehend has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
+    label="""Choose personal information detection model. Note that AWS Comprehend, if shown, has a cost of around £0.0075 ($0.01) per 10,000 characters.""",
     value=DEFAULT_PII_DETECTION_MODEL,
     choices=PII_DETECTION_MODELS,
     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
@@ -2581,7 +2581,7 @@ with blocks:
                     default_text = f" The default text extraction method is {DEFAULT_TEXT_EXTRACTION_MODEL}, and the default personal information detection method is {DEFAULT_PII_DETECTION_MODEL}. "
 
                 with gr.Accordion(
-                    label=f"Change default redaction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
+                    label=f"Change default text extraction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
                     open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                 ):
 
@@ -4232,80 +4232,78 @@ with blocks:
             outputs=[estimated_time_taken_number],
         )
 
-        # Automatically set local_ocr_method_radio to "bedrock-vlm" when AWS Bedrock VLM is selected
-        def auto_set_local_ocr_for_bedrock_vlm(text_extract_method):
-            """Automatically set local OCR method to bedrock-vlm when AWS Bedrock VLM is selected."""
-            if text_extract_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
-                # Only set if "bedrock-vlm" is a valid option
-                if "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS:
-                    return gr.update(value="bedrock-vlm")
-            return gr.update()
+    # Dynamic visibility handlers for main redaction tab (run regardless of SHOW_COSTS)
+    # Automatically set local_ocr_method_radio to "bedrock-vlm" when AWS Bedrock VLM is selected
+    def auto_set_local_ocr_for_bedrock_vlm(text_extract_method):
+        """Automatically set local OCR method to bedrock-vlm when AWS Bedrock VLM is selected."""
+        if text_extract_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+            # Only set if "bedrock-vlm" is a valid option
+            if "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS:
+                return gr.update(value="bedrock-vlm")
+        return gr.update()
 
-        text_extract_method_radio.change(
-            fn=auto_set_local_ocr_for_bedrock_vlm,
-            inputs=[text_extract_method_radio],
-            outputs=[local_ocr_method_radio],
-        )
+    text_extract_method_radio.change(
+        fn=auto_set_local_ocr_for_bedrock_vlm,
+        inputs=[text_extract_method_radio],
+        outputs=[local_ocr_method_radio],
+    )
 
-        # Dynamic visibility handlers for main redaction tab
-        # Update visibility of OCR-related accordions based on text extraction method selection
-        text_extract_method_radio.change(
-            fn=handle_main_text_extract_method_selection,
-            inputs=[text_extract_method_radio],
-            outputs=[
-                local_ocr_accordion,
-                inference_server_vlm_accordion,
-                aws_textract_signature_accordion,
-            ],
-        )
+    # Update visibility of OCR-related accordions based on text extraction method selection
+    text_extract_method_radio.change(
+        fn=handle_main_text_extract_method_selection,
+        inputs=[text_extract_method_radio],
+        outputs=[
+            local_ocr_accordion,
+            inference_server_vlm_accordion,
+            aws_textract_signature_accordion,
+        ],
+    )
 
-        # Update visibility of PII-related components and accordions when general redaction method is selected
-        def handle_main_redaction_method_selection(redaction_method):
-            """Wrapper that applies handle_redaction_method_selection and updates accordion visibility."""
-            results = list(handle_redaction_method_selection(redaction_method))
-            is_redact_all_pii = redaction_method == "Redact all PII"
-            is_redact_selected_terms = redaction_method == "Redact selected terms"
-            show_pii_method = (
-                is_redact_all_pii or is_redact_selected_terms
-            ) and SHOW_PII_IDENTIFICATION_OPTIONS
-            show_selected_terms_lists = is_redact_selected_terms
-            results.append(
-                gr.update(visible=show_pii_method)
-            )  # entity_types_to_redact_accordion
-            results.append(
-                gr.update(visible=show_selected_terms_lists)
-            )  # terms_accordion
-            return results
+    # Update visibility of PII-related components and accordions when general redaction method is selected
+    def handle_main_redaction_method_selection(redaction_method):
+        """Wrapper that applies handle_redaction_method_selection and updates accordion visibility."""
+        results = list(handle_redaction_method_selection(redaction_method))
+        is_redact_all_pii = redaction_method == "Redact all PII"
+        is_redact_selected_terms = redaction_method == "Redact selected terms"
+        show_pii_method = (
+            is_redact_all_pii or is_redact_selected_terms
+        ) and SHOW_PII_IDENTIFICATION_OPTIONS
+        show_selected_terms_lists = is_redact_selected_terms
+        results.append(
+            gr.update(visible=show_pii_method)
+        )  # entity_types_to_redact_accordion
+        results.append(gr.update(visible=show_selected_terms_lists))  # terms_accordion
+        return results
 
-        redaction_method_radio.change(
-            fn=handle_main_redaction_method_selection,
-            inputs=[redaction_method_radio],
-            outputs=[
-                pii_identification_method_drop,
-                in_redact_entities,
-                in_redact_comprehend_entities,
-                in_redact_llm_entities,
-                custom_llm_instructions_textbox,
-                in_deny_list_state,
-                in_allow_list_state,
-                in_fully_redacted_list_state,
-                entity_types_to_redact_accordion,
-                terms_accordion,
-            ],
-        )
+    redaction_method_radio.change(
+        fn=handle_main_redaction_method_selection,
+        inputs=[redaction_method_radio],
+        outputs=[
+            pii_identification_method_drop,
+            in_redact_entities,
+            in_redact_comprehend_entities,
+            in_redact_llm_entities,
+            custom_llm_instructions_textbox,
+            in_deny_list_state,
+            in_allow_list_state,
+            in_fully_redacted_list_state,
+            entity_types_to_redact_accordion,
+            terms_accordion,
+        ],
+    )
 
-        # Update visibility of PII-related accordions based on PII method selection
-        pii_identification_method_drop.change(
-            fn=handle_main_pii_method_selection,
-            inputs=[pii_identification_method_drop],
-            outputs=[
-                pii_identification_method_drop,  # Keep visible so user can change
-                in_redact_entities,
-                in_redact_comprehend_entities,
-                in_redact_llm_entities,
-                custom_llm_instructions_textbox,
-            ],
-        )
+    # Update visibility of PII-related accordions based on PII method selection
+    pii_identification_method_drop.change(
+        fn=handle_main_pii_method_selection,
+        inputs=[pii_identification_method_drop],
+        outputs=[
+            pii_identification_method_drop,  # Keep visible so user can change
+            in_redact_entities,
+            in_redact_comprehend_entities,
+            in_redact_llm_entities,
+            custom_llm_instructions_textbox,
+        ],
+    )
 
     # Allow user to select items from cost code dataframe for cost code
     if SHOW_COSTS and (GET_COST_CODES or ENFORCE_COST_CODES):
@@ -6143,6 +6141,27 @@ with blocks:
         increase_bottom_page_count_based_on_top,
         inputs=[annotate_current_page],
         outputs=[annotate_current_page_bottom],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
     )
 
     reset_dropdowns_btn.click(
