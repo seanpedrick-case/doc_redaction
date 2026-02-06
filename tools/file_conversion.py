@@ -9,7 +9,7 @@ import zipfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import gradio as gr
 import numpy as np
@@ -811,7 +811,7 @@ def word_level_ocr_df_to_line_level_ocr_df(
 
 def extract_redactions(
     doc: Document, page_sizes: List[Dict[str, Any]] = None
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Document]:
     """
     Extracts all redaction annotations from a PDF document and converts them
     to Gradio Annotation JSON format.
@@ -828,6 +828,7 @@ def extract_redactions(
 
     Returns:
         List of dictionaries suitable for Gradio Annotation output, one dict per image/page.
+        PyMuPDF document object.
         Each dict has structure: {"image": image_path, "boxes": [list of annotation boxes]}
     """
 
@@ -859,7 +860,7 @@ def extract_redactions(
 
         # The page.annots() method is a generator for all annotations on the page
         for annot in page.annots():
-            # The type of a redaction annotation is 8
+            # The type of a redaction annotation is 12
             if annot.type[0] == pymupdf.PDF_ANNOT_REDACT:
 
                 # Get annotation info with fallbacks
@@ -944,6 +945,16 @@ def extract_redactions(
 
                 page_redactions.append(redaction_box)
 
+                # Remove the redaction annotation from the pymupdf document
+                page.delete_annot(annot)
+
+        # if page.annots:
+        #     page.annots = [
+        #         annot
+        #         for annot in page.annots()
+        #         if annot.type[0] != pymupdf.PDF_ANNOT_REDACT
+        #     ]
+
         if page_redactions:
             redactions_by_page[page_num + 1] = page_redactions
 
@@ -1005,7 +1016,7 @@ def extract_redactions(
         all_image_annotations_df, page_sizes
     )
 
-    return annotations_all_pages_divide
+    return annotations_all_pages_divide, doc
 
 
 def prepare_image_or_pdf(
@@ -1233,7 +1244,9 @@ def prepare_image_or_pdf(
             # If we are loading redactions from the pdf, extract the redactions
             if LOAD_REDACTION_ANNOTATIONS_FROM_PDF and prepare_for_review is True:
 
-                redactions_list = extract_redactions(pymupdf_doc, page_sizes)
+                redactions_list, pymupdf_doc = extract_redactions(
+                    pymupdf_doc, page_sizes
+                )
                 all_annotations_object = redactions_list
 
                 review_file_csv = convert_annotation_json_to_review_df(
@@ -1558,7 +1571,7 @@ def prepare_image_or_pdf(
 
     print(f"Finished loading in {file_path_number} file(s)")
 
-    gr.Info(combined_out_message)
+    gr.Info(f"Finished loading in {file_path_number} file(s)")
 
     return (
         combined_out_message,
