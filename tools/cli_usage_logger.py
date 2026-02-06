@@ -18,7 +18,6 @@ from tools.config import (
     AWS_REGION,
     AWS_SECRET_KEY,
     CSV_USAGE_LOG_HEADERS,
-    DISPLAY_FILE_NAMES_IN_LOGS,
     DOCUMENT_REDACTION_BUCKET,
     DYNAMODB_USAGE_LOG_HEADERS,
     HOST_NAME,
@@ -302,18 +301,8 @@ def log_redaction_usage(
         llm_total_input_tokens: Total LLM input tokens used
         llm_total_output_tokens: Total LLM output tokens used
     """
-    # Use placeholder names if not displaying file names in logs
-    if DISPLAY_FILE_NAMES_IN_LOGS != "True":
-        if doc_file_name:
-            doc_file_name = "document"
-            data_file_name = ""
-        if data_file_name:
-            data_file_name = "data_file"
-            doc_file_name = ""
-    else:
-        doc_file_name = doc_file_name
-        data_file_name = data_file_name
-
+    # Caller is responsible for masking: pass placeholder doc/data when not
+    # displaying file names (matches app.py behaviour per task).
     rounded_time_taken = round(time_taken, 2)
 
     data = [

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "1.7.2"
+version = "1.7.4"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 authors = [

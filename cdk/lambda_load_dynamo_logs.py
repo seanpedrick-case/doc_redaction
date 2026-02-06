@@ -7,10 +7,12 @@ by setting env vars and calling lambda_handler({}, None).
 
 Environment variables (same semantics as load_dynamo_logs.py CLI):
   DYNAMODB_TABLE_NAME       - DynamoDB table name (default: redaction_usage)
-  AWS_REGION                - AWS region (Lambda often sets this)
+  AWS_REGION                - AWS region (optional; if unset, uses AWS_DEFAULT_REGION,
+                              then region from Lambda context ARN, then eu-west-2)
   OUTPUT_FOLDER             - Local output directory, e.g. /tmp (optional)
   OUTPUT_FILENAME           - Local output file name (default: dynamodb_logs_export.csv)
-  OUTPUT                    - Full local output path (overrides folder + filename if set)
+  OUTPUT                    - Full local output path (overrides folder + filename if set).
+                              In Lambda only /tmp is writable; relative paths are auto-resolved to /tmp.
   FROM_DATE                 - Only include entries on/after this date YYYY-MM-DD (optional)
   TO_DATE                   - Only include entries on/before this date YYYY-MM-DD (optional)
   DATE_ATTRIBUTE            - Attribute name for date filtering (default: timestamp)
@@ -27,15 +29,32 @@ from io import StringIO
 import boto3
 
 
-def get_config_from_env():
-    """Read all settings from environment variables (same inputs as load_dynamo_logs.py)."""
+def _get_region_from_context(context):
+    """Extract region from Lambda context invoked_function_arn (arn:aws:lambda:REGION:ACCOUNT:function:NAME)."""
+    if context is None:
+        return None
+    arn = getattr(context, "invoked_function_arn", None)
+    if not arn or not isinstance(arn, str):
+        return None
+    parts = arn.split(":")
+    if len(parts) >= 4:
+        return parts[3]  # region is 4th segment
+    return None
+
+
+def get_config_from_env(context=None):
+    """Read all settings from environment variables (same inputs as load_dynamo_logs.py).
+    When running in Lambda, context can be passed to derive region from the function ARN if env is not set.
+    """
     today = datetime.datetime.now().date()
     one_year_ago = today - datetime.timedelta(days=365)
 
     table_name = os.environ.get("DYNAMODB_TABLE_NAME") or os.environ.get(
         "USAGE_LOG_DYNAMODB_TABLE_NAME", "redaction_usage"
     )
-    region = os.environ.get("AWS_REGION", "")
+    region = (
+        os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or ""
+    ).strip()
     output = os.environ.get("OUTPUT")
     output_folder = os.environ.get("OUTPUT_FOLDER", "output/")
     output_filename = os.environ.get("OUTPUT_FILENAME", "dynamodb_logs_export.csv")
@@ -50,6 +69,20 @@ def get_config_from_env():
     else:
         folder = output_folder.rstrip("/").rstrip("\\")
         local_output_path = os.path.join(folder, output_filename)
+
+    # In AWS Lambda only /tmp is writable; resolve relative paths to /tmp to avoid read-only FS errors
+    if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        resolved = os.path.abspath(local_output_path)
+        if not resolved.startswith("/tmp"):
+            local_output_path = os.path.join(
+                "/tmp", os.path.basename(local_output_path)
+            )
+
+    # Region: env (AWS_REGION / AWS_DEFAULT_REGION) → Lambda context ARN → hardcoded fallback
+    if not region and context is not None:
+        region = _get_region_from_context(context) or ""
+    if not region:
+        region = "FILL IN DEFAULT REGION HERE"
 
     from_date = None
     to_date = None
@@ -253,7 +286,7 @@ def lambda_handler(event, context):
     Event is not required for config; it can be used to override env vars
     (e.g. pass table_name, from_date, to_date, s3_output_bucket, s3_output_key).
     """
-    config = get_config_from_env()
+    config = get_config_from_env(context=context)
 
     # Optional: allow event to override env-based config
     if isinstance(event, dict):

@@ -1911,10 +1911,22 @@ def apply_redactions_to_review_df_and_files(
                     original_cropboxes.append(pymupdf_page.cropbox)
                     pymupdf_page.set_cropbox(pymupdf_page.mediabox)
 
+                    # Remove existing redaction annotations from the page before adding new ones
+                    for annot in pymupdf_page.annots():
+                        # The type of a redaction annotation is 8
+                        if annot.type[0] == pymupdf.PDF_ANNOT_REDACT:
+                            pymupdf_page.delete_annot(annot)
+
                     # Handle review PDF page if needed
                     if RETURN_PDF_FOR_REVIEW and review_pdf_doc:
                         review_pymupdf_page = review_pdf_doc.load_page(i)
                         review_pymupdf_page.set_cropbox(review_pymupdf_page.mediabox)
+
+                        # Remove existing redaction annotations from the page before adding new ones
+                        for annot in review_pymupdf_page.annots():
+                            # The type of a redaction annotation is 8
+                            if annot.type[0] == pymupdf.PDF_ANNOT_REDACT:
+                                review_pymupdf_page.delete_annot(annot)
 
                         # Apply redactions to review page (with annotations visible)
                         review_pymupdf_page = redact_page_with_pymupdf(
