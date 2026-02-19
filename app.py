@@ -1920,7 +1920,7 @@ with blocks:
                     7,
                     1,
                     1,
-                    "paddle",
+                    "tesseract",
                     CHOSEN_REDACT_ENTITIES,
                     CHOSEN_LLM_ENTITIES,
                     "",

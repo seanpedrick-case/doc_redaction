@@ -153,6 +153,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     from tools.config import (
         MAX_NEW_TOKENS,
         MODEL_CACHE_PATH,
+        OVERRIDE_VLM_REPO_ID,
         QUANTISE_VLM_MODELS,
         SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
         USE_FLASH_ATTENTION,
@@ -242,6 +243,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     # Load only the selected model based on configuration
     if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Nanonets-OCR2-3B":
         MODEL_ID = "nanonets/Nanonets-OCR2-3B"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
             "trust_remote_code": True,
@@ -293,6 +296,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         sys.path.append(model_path_d_local)
 
         MODEL_ID = model_path_d_local
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
             "attn_implementation": attn_implementation,
@@ -310,6 +315,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-2B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
             "device_map": "auto",
@@ -338,6 +345,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-4B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
             "attn_implementation": attn_implementation,
@@ -366,6 +375,39 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         )
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-8B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
+        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        load_kwargs = {
+            "attn_implementation": attn_implementation,
+            "device_map": "auto",
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
+        else:
+            load_kwargs["dtype"] = "auto"
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
+            MODEL_ID, **load_kwargs
+        ).eval()
+
+        model_default_prompt = """Read all the text in the image."""
+        model_default_do_sample = False
+        model_default_top_p = 0.8
+        model_default_min_p = 0.0
+        model_default_top_k = 20
+        model_default_temperature = 0.7
+        model_default_repetition_penalty = 1.0
+        model_default_presence_penalty = 1.5
+        model_default_max_new_tokens = MAX_NEW_TOKENS
+        model_supports_presence_penalty = (
+            False  # I found that this doesn't work when using transformers
+        )
+
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-32B-Instruct":
+        MODEL_ID = "Qwen/Qwen3-VL-32B-Instruct"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
             "attn_implementation": attn_implementation,
@@ -395,6 +437,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-30B-A3B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
         from transformers import Qwen3VLMoeForConditionalGeneration
 
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -427,6 +471,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-235B-A22B-Instruct":
         MODEL_ID = "Qwen/Qwen3-VL-235B-A22B-Instruct"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
         from transformers import Qwen3VLMoeForConditionalGeneration
 
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -459,6 +505,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "PaddleOCR-VL":
         MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
         load_kwargs = {
             "trust_remote_code": True,
         }
