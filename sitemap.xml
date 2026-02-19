@@ -2,26 +2,30 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html</loc>
-    <lastmod>2026-02-04T22:23:10.408Z</lastmod>
-  </url>
-  <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html</loc>
-    <lastmod>2026-01-30T15:41:11.576Z</lastmod>
-  </url>
-  <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/src/app_settings.html</loc>
-    <lastmod>2026-02-04T14:10:09.695Z</lastmod>
-  </url>
-  <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/index.html</loc>
-    <lastmod>2026-02-06T13:33:04.809Z</lastmod>
-  </url>
-  <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/src/faq.html</loc>
-    <lastmod>2025-06-18T20:04:04.438Z</lastmod>
+    <lastmod>2026-02-04T22:23:10.000Z</lastmod>
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/management_guide.html</loc>
-    <lastmod>2025-06-18T20:04:04.438Z</lastmod>
+    <lastmod>2025-06-18T20:04:04.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/faq.html</loc>
+    <lastmod>2025-06-18T20:04:04.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/index.html</loc>
+    <lastmod>2026-02-06T13:33:04.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/app_settings.html</loc>
+    <lastmod>2026-02-04T14:10:09.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html</loc>
+    <lastmod>2026-01-30T15:41:11.000Z</lastmod>
+  </url>
+  <url>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/redaction_with_vlm_and_llms.html</loc>
+    <lastmod>2026-02-19T06:37:33.251Z</lastmod>
   </url>
 </urlset>
