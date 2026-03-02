@@ -1742,6 +1742,25 @@ def apply_redactions_to_review_df_and_files(
     if isinstance(file_paths, str):
         file_paths = [file_paths]
 
+    # Remove empty/blank entries that give meaningless file_extension = ""
+    file_paths = [fp for fp in file_paths if fp and fp.strip()]
+
+    # If file_paths is still empty, try to recover the source path from the
+    # PyMuPDF Document that was passed in (pdf_doc_state). This handles the
+    # common case where doc_full_file_name_textbox is blank because the Review
+    # tab was populated programmatically (not via a user upload).
+    if not file_paths and hasattr(doc, "name") and doc.name:
+        recovered = doc.name
+        if os.path.isfile(recovered):
+            print(
+                f"file_paths was empty; recovering source path from doc.name: {recovered}"
+            )
+            file_paths = [recovered]
+
+    if not file_paths:
+        print("No valid file paths found. Cannot apply redactions.")
+        return doc, all_image_annotations, output_files, output_log_files, review_df
+
     for file_path in file_paths:
         file_name_without_ext = get_file_name_without_type(file_path)
         file_name_with_ext = os.path.basename(file_path)
@@ -1784,7 +1803,7 @@ def apply_redactions_to_review_df_and_files(
 
         if save_pdf is True:
             # If working with image docs
-            if (is_pdf(file_path) is False) & (file_extension not in ".csv"):
+            if (is_pdf(file_path) is False) & (file_extension != ".csv"):
                 image = Image.open(file_paths[-1])
 
                 draw = ImageDraw.Draw(image)
@@ -1858,7 +1877,7 @@ def apply_redactions_to_review_df_and_files(
 
                 doc = [image]
 
-            elif file_extension in ".csv":
+            elif file_extension == ".csv":
                 pdf_doc = list()
 
             # If working with pdfs

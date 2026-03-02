@@ -655,9 +655,26 @@ def choose_and_run_redactor(
             review_file_path,
             total_textract_query_number,
             ocr_file_path,
-            all_page_line_level_ocr_results,
-            all_page_line_level_ocr_results_with_words,
-            all_page_line_level_ocr_results_with_words_df,
+            (
+                all_page_line_level_ocr_results
+                if all_page_line_level_ocr_results
+                else gr.update()
+            ),
+            (
+                all_page_line_level_ocr_results_with_words
+                if all_page_line_level_ocr_results_with_words
+                else gr.update()
+            ),
+            (
+                all_page_line_level_ocr_results_with_words_df
+                if (
+                    isinstance(
+                        all_page_line_level_ocr_results_with_words_df, pd.DataFrame
+                    )
+                    and not all_page_line_level_ocr_results_with_words_df.empty
+                )
+                else gr.update()
+            ),
             review_file_state,
             task_textbox,
             ocr_review_files,

@@ -1,7 +1,5 @@
-import logging
 import os
 import sys
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 import gradio as gr
@@ -213,7 +211,7 @@ from tools.find_duplicate_pages import (
     exclude_match,
     handle_selection_and_preview,
     run_duplicate_analysis,
-    run_full_search_and_analysis,
+    run_search_with_regex_option,
 )
 from tools.find_duplicate_tabular import (
     clean_tabular_duplicates,
@@ -222,14 +220,19 @@ from tools.find_duplicate_tabular import (
 )
 from tools.helper_functions import (
     all_outputs_file_download_fn,
+    auto_set_local_ocr_for_bedrock_vlm,
     calculate_aws_costs,
     calculate_time_taken,
+    change_tab_to_review_redactions,
+    change_tab_to_tabular_or_document_redactions,
+    check_duplicate_pages_checkbox,
     check_for_existing_textract_file,
     check_for_relevant_ocr_output_with_words,
     custom_regex_load,
     enforce_cost_codes,
     ensure_folder_exists,
     get_connection_params,
+    lifespan,
     load_all_output_files,
     load_in_default_allow_list,
     load_in_default_cost_codes,
@@ -242,13 +245,20 @@ from tools.helper_functions import (
     reset_ocr_with_words_base_dataframe,
     reset_review_vars,
     reset_state_vars,
+    restore_sys_tracebacklimit,
     reveal_feedback_buttons,
+    show_duplicate_info_box_on_click,
+    show_info_box_on_click,
+    show_info_box_on_click_ocr_examples,
+    show_tabular_info_box_on_click,
+    silent_exception_handler,
     update_cost_code_dataframe_from_dropdown_select,
     update_language_dropdown,
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.quickstart import (
     handle_main_pii_method_selection,
+    handle_main_redaction_method_selection,
     handle_main_text_extract_method_selection,
     handle_pii_method_selection,
     handle_redaction_method_selection,
@@ -322,62 +332,79 @@ CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
 FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 FULL_LLM_ENTITY_LIST.extend(custom_entities)
 
-
-# 1. Create a custom error class
-class ProcessStop(UserWarning):
-    pass
-
-
-# 2. Tell Python how to display it (Short and sweet)
-def silent_exception_handler(etype, value, tb):
-    print(f"etype: {etype}, value: {value}, tb: {tb}")
-    if issubclass(etype, ProcessStop):
-        print(f"INFO: {value}")  # Only print the message, no traceback
-    else:
-        sys.__excepthook__(etype, value, tb)  # Use default for real bugs
-
-
 sys.excepthook = silent_exception_handler
+
+# Custom javascript
+TRIGGER_DOCUMENT_REDACT_BUTTON = """
+function triggerChatButtonClick() {
+
+// Find the div with id "document-redact-btn"
+const documentRedactButton = document.getElementById("document-redact-btn");
+
+if (!documentRedactButton) {
+    console.error("Error: Could not find element with id 'document-redact-btn'");
+    return;
+}
+
+// Trigger the click event
+documentRedactButton.click();
+
+}"""
+
+TRIGGER_TABULAR_REDACT_BUTTON = """
+function triggerTabularRedactButtonClick() {
+    // Find the div with id "tabular-redact-btn"
+    const tabularRedactButton = document.getElementById("tabular-redact-btn");
+    if (!tabularRedactButton) {
+        console.error("Error: Could not find element with id 'tabular-redact-btn'");
+        return;
+    }
+    // Trigger the click event
+    tabularRedactButton.click();
+}"""
+
+# Triggers to programmatically click the duplicate detection and apply duplicate pages buttons
+TRIGGER_DUPLICATE_DETECTION_BUTTON = """
+function triggerDuplicateDetectionButtonClick() {
+    // Find the checkbox for redacting duplicate pages by its ID
+    const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
+    // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
+    
+    // Only trigger if checkbox exists and is checked
+    if (redactDuplicatePagesCheckbox) {
+        // Find the div with id "duplicate-detection-btn"
+        const duplicateDetectionButton = document.getElementById("duplicate-detection-btn");
+        if (!duplicateDetectionButton) {
+            console.error("Error: Could not find element with id 'duplicate-detection-btn'");
+            return;
+        }
+        // Trigger the click event
+        duplicateDetectionButton.click();
+    }
+}"""
+
+TRIGGER_APPLY_DUPLICATE_PAGES_BUTTON = """
+function triggerApplyDuplicatePagesButtonClick() {
+    // Find the checkbox for redacting duplicate pages by its ID
+    const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
+    // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
+    
+    // Only trigger if checkbox exists and is checked
+    if (redactDuplicatePagesCheckbox) {
+        // Find the div with id "apply-duplicate-pages-btn"
+        const applyDuplicatePagesButton = document.getElementById("apply-duplicate-pages-btn");
+        if (!applyDuplicatePagesButton) {
+            console.error("Error: Could not find element with id 'apply-duplicate-pages-btn'");
+            return;
+        }
+        // Trigger the click event
+        applyDuplicatePagesButton.click();
+    }
+}"""
+
 ###
 # Load in FastAPI app
 ###
-
-
-# Custom logging filter to remove logs from healthiness/readiness endpoints so they don't fill up application log flow
-class EndpointFilter(logging.Filter):
-    def __init__(self, path: str, *args, **kwargs):
-        self._path = path
-        super().__init__(*args, **kwargs)
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return record.getMessage().find(self._path) == -1
-
-
-# 2. Define the lifespan context manager
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # --- STARTUP LOGIC ---
-    # Filter out /health logging to declutter ECS logs
-    uvicorn_access_logger = logging.getLogger("uvicorn.access")
-    uvicorn_access_logger.addFilter(EndpointFilter(path="/health"))
-
-    # Yield control back to the application
-    yield
-
-    # --- SHUTDOWN LOGIC ---
-    # (Any cleanup code would go here, e.g., closing DB connections)
-    pass
-
-
-def change_tab_to_tabular_or_document_redactions(is_data_file):
-    if is_data_file:
-        return gr.Tabs(selected=3)
-    else:
-        return gr.Tabs(selected=1)
-
-
-def change_tab_to_review_redactions():
-    return gr.Tabs(selected=2)
 
 
 # 3. Initialize the App with the lifespan parameter
@@ -895,7 +922,7 @@ clean_path = f"/{ROOT_PATH.strip('/')}"
 base_href = f"{clean_path}/" if clean_path != "/" else "/"
 
 if ROOT_PATH:
-    print(f"✅ Setting HTML base href for Gradio to: '{base_href}'")
+    print(f"Setting HTML base href for Gradio to: '{base_href}'")
 
 head_html = f"""<base href='{base_href}'>
 
@@ -921,9 +948,9 @@ div[class*="tab-nav"] button {
 # Create the gradio interface.
 if RUN_FASTAPI:
     blocks = gr.Blocks(
-        theme=gr.themes.Default(primary_hue="blue"),
-        head=head_html,
-        css=css,
+        # theme=gr.themes.Default(primary_hue="blue"),
+        # head=head_html,
+        # css=css,
         analytics_enabled=False,
         title="Document Redaction App",
         delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
@@ -931,9 +958,9 @@ if RUN_FASTAPI:
     )
 else:
     blocks = gr.Blocks(
-        theme=gr.themes.Default(primary_hue="blue"),
-        head=head_html,
-        css=css,
+        # theme=gr.themes.Default(primary_hue="blue"),
+        # head=head_html,
+        # css=css,
         analytics_enabled=False,
         title="Document Redaction App",
         delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
@@ -958,7 +985,7 @@ with blocks:
     all_decision_process_table_state = gr.Dataframe(
         value=pd.DataFrame(),
         headers=None,
-        col_count=0,
+        column_count=0,
         row_count=(0, "dynamic"),
         label="all_decision_process_table",
         visible=False,
@@ -1339,7 +1366,7 @@ with blocks:
         pd.DataFrame(
             data={"page": list(), "label": list(), "text": list(), "id": list()}
         ),
-        col_count=(4, "fixed"),
+        column_count=(4, "fixed"),
         type="pandas",
         label="Table rows with same text",
         headers=["page", "label", "text", "id"],
@@ -1382,7 +1409,7 @@ with blocks:
     duplicate_pages_df = gr.Dataframe(
         value=pd.DataFrame(),
         headers=None,
-        col_count=0,
+        column_count=0,
         row_count=(0, "dynamic"),
         label="duplicate_pages_df",
         visible=False,
@@ -1392,7 +1419,7 @@ with blocks:
     full_duplicated_data_df = gr.Dataframe(
         value=pd.DataFrame(),
         headers=None,
-        col_count=0,
+        column_count=0,
         row_count=(0, "dynamic"),
         label="full_duplicated_data_df",
         visible=False,
@@ -1723,146 +1750,6 @@ with blocks:
         # Only create examples if we have available files
         if available_examples:
 
-            def show_info_box_on_click(
-                in_doc_files,
-                text_extract_method_radio,
-                pii_identification_method_drop,
-                handwrite_signature_checkbox,
-                in_redact_entities,
-                in_redact_comprehend_entities,
-                prepared_pdf_state,
-                doc_full_file_name_textbox,
-                in_deny_list,
-                in_deny_list_state,
-                in_fully_redacted_list,
-                in_fully_redacted_list_state,
-                total_pdf_page_count,
-            ):
-                gr.Info(
-                    "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
-                )
-
-                # Convert deny_list_state, allow_list_state, and fully_redacted_list_state to lists if they are DataFrames
-                # Handle deny_list_state
-                deny_list_walkthrough = []
-                if isinstance(in_deny_list_state, pd.DataFrame):
-                    # Explicitly convert empty DataFrame to empty list
-                    if in_deny_list_state.empty:
-                        deny_list_walkthrough = []
-                    else:
-                        deny_list_walkthrough = (
-                            in_deny_list_state.iloc[:, 0].dropna().astype(str).tolist()
-                        )
-                elif isinstance(in_deny_list_state, list):
-                    deny_list_walkthrough = (
-                        [str(item) for item in in_deny_list_state if item]
-                        if in_deny_list_state
-                        else []
-                    )
-                else:
-                    # Default to empty list for any other type
-                    deny_list_walkthrough = []
-
-                # Handle fully_redacted_list_state
-                fully_redacted_list_walkthrough = []
-                if isinstance(in_fully_redacted_list_state, pd.DataFrame):
-                    # Explicitly convert empty DataFrame to empty list
-                    if in_fully_redacted_list_state.empty:
-                        fully_redacted_list_walkthrough = []
-                    else:
-                        fully_redacted_list_walkthrough = (
-                            in_fully_redacted_list_state.iloc[:, 0]
-                            .dropna()
-                            .astype(str)
-                            .tolist()
-                        )
-                elif isinstance(in_fully_redacted_list_state, list):
-                    fully_redacted_list_walkthrough = (
-                        [str(item) for item in in_fully_redacted_list_state if item]
-                        if in_fully_redacted_list_state
-                        else []
-                    )
-                else:
-                    # Default to empty list for any other type
-                    fully_redacted_list_walkthrough = []
-
-                # Allow list is not in examples, so always set to empty list
-                allow_list_walkthrough = []
-
-                # Use default local OCR method - examples don't set this directly
-                local_ocr_method = CHOSEN_LOCAL_OCR_MODEL
-
-                # Update visibility of main PII entity components based on selected PII method
-                # This ensures visibility is correct even when clicking examples with the same PII method
-                # Determine visibility based on PII method (same logic as handle_main_pii_method_selection)
-                is_no_redaction = (
-                    pii_identification_method_drop == NO_REDACTION_PII_OPTION
-                )
-                show_local_entities = (
-                    not is_no_redaction
-                    and pii_identification_method_drop == LOCAL_PII_OPTION
-                )
-                show_comprehend_entities = (
-                    not is_no_redaction
-                    and pii_identification_method_drop == AWS_PII_OPTION
-                )
-                is_llm_method = not is_no_redaction and (
-                    pii_identification_method_drop == LOCAL_TRANSFORMERS_LLM_PII_OPTION
-                    or pii_identification_method_drop == INFERENCE_SERVER_PII_OPTION
-                    or pii_identification_method_drop == AWS_LLM_PII_OPTION
-                )
-
-                # Create updates with both value and visibility for main components
-                main_local_entities_update = gr.update(
-                    value=in_redact_entities,
-                    visible=show_local_entities,
-                )
-                main_comprehend_entities_update = gr.update(
-                    value=in_redact_comprehend_entities,
-                    visible=show_comprehend_entities,
-                )
-                main_llm_entities_update = gr.update(
-                    visible=is_llm_method,
-                )
-                main_llm_instructions_update = gr.update(
-                    visible=is_llm_method,
-                )
-
-                return (
-                    gr.File(value=in_doc_files),  # walkthrough_file_input
-                    gr.Dropdown(
-                        value=in_redact_entities
-                    ),  # walkthrough_in_redact_entities
-                    gr.Dropdown(
-                        value=in_redact_comprehend_entities
-                    ),  # walkthrough_in_redact_comprehend_entities
-                    gr.Radio(
-                        value=text_extract_method_radio
-                    ),  # walkthrough_text_extract_method_radio
-                    gr.Radio(
-                        value=local_ocr_method
-                    ),  # walkthrough_local_ocr_method_radio
-                    gr.CheckboxGroup(
-                        value=handwrite_signature_checkbox
-                    ),  # walkthrough_handwrite_signature_checkbox
-                    gr.Radio(
-                        value=pii_identification_method_drop
-                    ),  # walkthrough_pii_identification_method_drop
-                    gr.Dropdown(
-                        value=allow_list_walkthrough
-                    ),  # walkthrough_allow_list_state
-                    gr.Dropdown(
-                        value=deny_list_walkthrough
-                    ),  # walkthrough_deny_list_state
-                    gr.Dropdown(
-                        value=fully_redacted_list_walkthrough
-                    ),  # walkthrough_fully_redacted_list_state
-                    main_local_entities_update,  # in_redact_entities (main component)
-                    main_comprehend_entities_update,  # in_redact_comprehend_entities (main component)
-                    main_llm_entities_update,  # in_redact_llm_entities (main component)
-                    main_llm_instructions_update,  # custom_llm_instructions_textbox (main component)
-                )
-
             redaction_examples = gr.Examples(
                 examples=available_examples,
                 inputs=[
@@ -1920,7 +1807,7 @@ with blocks:
                     7,
                     1,
                     1,
-                    "paddle",
+                    "tesseract",
                     CHOSEN_REDACT_ENTITIES,
                     CHOSEN_LLM_ENTITIES,
                     "",
@@ -2017,56 +1904,6 @@ with blocks:
         # Only create examples if we have available files
         if available_ocr_examples:
 
-            def show_info_box_on_click(
-                in_doc_files,
-                text_extract_method_radio,
-                pii_identification_method_drop,
-                handwrite_signature_checkbox,
-                prepared_pdf_state,
-                doc_full_file_name_textbox,
-                total_pdf_page_count,
-                page_min,
-                page_max,
-                local_ocr_method_radio,
-                in_redact_entities,
-                in_redact_llm_entities,
-                custom_llm_instructions_textbox,
-            ):
-                gr.Info(
-                    "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
-                )
-
-                return (
-                    gr.File(value=in_doc_files),  # walkthrough_file_input
-                    gr.Dropdown(
-                        value=in_redact_entities
-                    ),  # walkthrough_in_redact_entities
-                    gr.Radio(
-                        value=text_extract_method_radio
-                    ),  # walkthrough_text_extract_method_radio
-                    gr.Radio(
-                        value=local_ocr_method_radio
-                    ),  # walkthrough_local_ocr_method_radio
-                    gr.CheckboxGroup(
-                        value=handwrite_signature_checkbox
-                    ),  # walkthrough_handwrite_signature_checkbox
-                    gr.Radio(
-                        value=pii_identification_method_drop
-                    ),  # walkthrough_pii_identification_method_drop
-                    gr.Dropdown(
-                        value=in_redact_llm_entities
-                    ),  # walkthrough_in_redact_llm_entities
-                    gr.Textbox(
-                        value=custom_llm_instructions_textbox
-                    ),  # walkthrough_custom_llm_instructions_textbox
-                    gr.Dropdown(
-                        value=in_redact_llm_entities
-                    ),  # in_redact_llm_entities (main component)
-                    gr.Textbox(
-                        value=custom_llm_instructions_textbox
-                    ),  # custom_llm_instructions_textbox (main component)
-                )
-
             ocr_examples = gr.Examples(
                 examples=available_ocr_examples,
                 inputs=[
@@ -2097,7 +1934,7 @@ with blocks:
                     custom_llm_instructions_textbox,  # Main component
                 ],
                 example_labels=ocr_example_labels,
-                fn=show_info_box_on_click,
+                fn=show_info_box_on_click_ocr_examples,
                 run_on_click=True,
                 cache_examples=False,
             )
@@ -2137,9 +1974,7 @@ with blocks:
                         walkthrough_file_input.render()
                         with gr.Row():
                             step_1_back_btn = gr.Button("Back", variant="secondary")
-                            step_1_back_btn.click(
-                                lambda: gr.Walkthrough(selected=0), outputs=walkthrough
-                            )
+
                             step_1_next_btn = gr.Button("Next", variant="primary")
                     with gr.Step("Choose text extraction (OCR) method", id=2):
                         # Components for data files (conditionally visible)
@@ -2165,9 +2000,7 @@ with blocks:
                         walkthrough_handwrite_signature_checkbox.render()
                         with gr.Row():
                             step_2_back_btn = gr.Button("Back", variant="secondary")
-                            step_2_back_btn.click(
-                                lambda: gr.Walkthrough(selected=1), outputs=walkthrough
-                            )
+
                             step_2_next_btn = gr.Button("Next", variant="primary")
                     with gr.Step("Choose PII detection method", id=3):
                         # Redaction method selection (at the top of Step 3)
@@ -2229,9 +2062,7 @@ with blocks:
 
                         with gr.Row():
                             step_3_back_btn = gr.Button("Back", variant="secondary")
-                            step_3_back_btn.click(
-                                lambda: gr.Walkthrough(selected=2), outputs=walkthrough
-                            )
+
                             step_3_next_btn = gr.Button("Next", variant="primary")
                     with gr.Step("Redact", id=4):
                         # Page selection (always visible)
@@ -2336,62 +2167,22 @@ with blocks:
                                         visible=show_cost_codes,
                                     )
 
-                        TRIGGER_DOCUMENT_REDACT_BUTTON = """
-                        function triggerChatButtonClick() {
-
-                        // Find the div with id "document-redact-btn"
-                        const documentRedactButton = document.getElementById("document-redact-btn");
-
-                        if (!documentRedactButton) {
-                            console.error("Error: Could not find element with id 'document-redact-btn'");
-                            return;
-                        }
-
-                        // Trigger the click event
-                        documentRedactButton.click();
-
-                        }"""
-
-                        TRIGGER_TABULAR_REDACT_BUTTON = """
-                        function triggerTabularRedactButtonClick() {
-                            // Find the div with id "tabular-redact-btn"
-                            const tabularRedactButton = document.getElementById("tabular-redact-btn");
-                            if (!tabularRedactButton) {
-                                console.error("Error: Could not find element with id 'tabular-redact-btn'");
-                                return;
-                            }
-                            // Trigger the click event
-                            tabularRedactButton.click();
-                        }"""
-
                         with gr.Row():
                             step_4_back_btn = gr.Button("Back", variant="secondary")
-                            step_4_back_btn.click(
-                                lambda: gr.Walkthrough(selected=3), outputs=walkthrough
-                            )
+
                             step_4_next_document_redact_btn = gr.Button(
                                 "Redact document", variant="primary", visible=True
                             )
                             step_4_next_tabular_redact_btn = gr.Button(
                                 "Redact data files", variant="primary", visible=False
                             )
-                            step_4_next_document_redact_btn.click(
-                                fn=lambda: None, js=TRIGGER_DOCUMENT_REDACT_BUTTON
-                            ).then(
-                                change_tab_to_tabular_or_document_redactions,
-                                inputs=walkthrough_is_data_file,
-                                outputs=tabs,
-                            )
-                            step_4_next_tabular_redact_btn.click(
-                                fn=lambda: None, js=TRIGGER_TABULAR_REDACT_BUTTON
-                            ).then(
-                                change_tab_to_tabular_or_document_redactions,
-                                inputs=walkthrough_is_data_file,
-                                outputs=tabs,
-                            )
+
             ###
             # QUICKSTART WALKTHROUGH EVENT HANDLERS
             ###
+            step_1_back_btn.click(
+                lambda: gr.Walkthrough(selected=0), outputs=walkthrough
+            )
             # Step 1: Route files to appropriate component when Next is clicked
             step_1_next_btn.click(
                 fn=route_walkthrough_files,
@@ -2404,10 +2195,14 @@ with blocks:
                 ],
             )
 
-            # Step 2: For data files, populate dropdowns when Next is clicked
+            ### Step 2
 
             # Note: in_excel_sheets is defined in the "Word or Excel/csv files" tab (id=5)
             # Both tabs are in the same gr.Tabs() context, so components are accessible at runtime
+            step_2_back_btn.click(
+                lambda: gr.Walkthrough(selected=1), outputs=walkthrough
+            )
+
             step_2_next_btn.click(
                 fn=handle_step_2_next,
                 inputs=[
@@ -2485,7 +2280,11 @@ with blocks:
                 ],
             )
 
-            # Step 3: Write values to main components when Next is clicked
+            ### Step 3
+            step_3_back_btn.click(
+                lambda: gr.Walkthrough(selected=2), outputs=walkthrough
+            )
+
             step_3_next_btn.click(
                 fn=handle_step_3_next,
                 inputs=[
@@ -2545,6 +2344,27 @@ with blocks:
                     step_4_next_document_redact_btn,
                     step_4_next_tabular_redact_btn,
                 ],
+            )
+
+            ### Step 4
+
+            step_4_back_btn.click(
+                lambda: gr.Walkthrough(selected=3), outputs=walkthrough
+            )
+
+            step_4_next_document_redact_btn.click(
+                fn=lambda: None, js=TRIGGER_DOCUMENT_REDACT_BUTTON
+            ).then(
+                change_tab_to_tabular_or_document_redactions,
+                inputs=walkthrough_is_data_file,
+                outputs=tabs,
+            )
+            step_4_next_tabular_redact_btn.click(
+                fn=lambda: None, js=TRIGGER_TABULAR_REDACT_BUTTON
+            ).then(
+                change_tab_to_tabular_or_document_redactions,
+                inputs=walkthrough_is_data_file,
+                outputs=tabs,
             )
 
         ###
@@ -2963,6 +2783,8 @@ with blocks:
                     zoom_str = str(annotator_zoom_number) + "%"
 
                     annotator = image_annotator(
+                        # value={"image": "examples/base.png"}, # "examples/graduate-job-example-cover-letter_page_0.png"
+                        value=None,
                         label="Modify redaction boxes",
                         label_list=["Redaction"],
                         label_colors=[(0, 0, 0)],
@@ -2977,7 +2799,8 @@ with blocks:
                         show_share_button=False,
                         show_remove_button=False,
                         handles_cursor=True,
-                        interactive=False,
+                        interactive=True,
+                        enable_keyboard_shortcuts=True,
                     )
 
                     with gr.Row(equal_height=True):
@@ -3224,7 +3047,7 @@ with blocks:
                             pd.DataFrame(
                                 data={"page": list(), "line": list(), "text": list()}
                             ),
-                            col_count=3,
+                            column_count=3,
                             type="pandas",
                             visible=False,
                             headers=["page", "line", "text"],
@@ -3266,16 +3089,6 @@ with blocks:
                 duplicate_example_file = "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
 
                 if os.path.exists(duplicate_example_file):
-
-                    def show_duplicate_info_box_on_click(
-                        in_duplicate_pages,
-                        duplicate_threshold_input,
-                        min_word_count_input,
-                        combine_page_text_for_duplicates_bool,
-                    ):
-                        gr.Info(
-                            "Example data loaded. Now click on 'Identify duplicate pages/subdocuments' below to run the example duplicate detection."
-                        )
 
                     duplicate_examples = gr.Examples(
                         examples=[
@@ -3484,27 +3297,6 @@ with blocks:
 
                 # Only create examples if we have available files
                 if available_tabular_examples:
-
-                    def show_tabular_info_box_on_click(
-                        in_data_files,
-                        in_colnames,
-                        pii_identification_method_drop_tabular,
-                        anon_strategy,
-                        in_tabular_duplicate_files,
-                        tabular_text_columns,
-                        tabular_min_word_count,
-                    ):
-                        gr.Info(
-                            "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' below to run the example."
-                        )
-
-                        return (
-                            gr.File(value=in_data_files),  # walkthrough_file_input
-                            gr.Radio(
-                                value=pii_identification_method_drop_tabular
-                            ),  # walkthrough_pii_identification_method_drop_tabular
-                            gr.Radio(value=anon_strategy),  # walkthrough_anon_strategy
-                        )
 
                     tabular_examples = gr.Examples(
                         examples=available_tabular_examples,
@@ -3845,7 +3637,7 @@ with blocks:
                 label="Summary",
                 value="",
                 line_breaks=True,
-                show_copy_button=True,
+                buttons=["copy"],
                 visible=True,
             )
 
@@ -4232,16 +4024,6 @@ with blocks:
             outputs=[estimated_time_taken_number],
         )
 
-    # Dynamic visibility handlers for main redaction tab (run regardless of SHOW_COSTS)
-    # Automatically set local_ocr_method_radio to "bedrock-vlm" when AWS Bedrock VLM is selected
-    def auto_set_local_ocr_for_bedrock_vlm(text_extract_method):
-        """Automatically set local OCR method to bedrock-vlm when AWS Bedrock VLM is selected."""
-        if text_extract_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
-            # Only set if "bedrock-vlm" is a valid option
-            if "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS:
-                return gr.update(value="bedrock-vlm")
-        return gr.update()
-
     text_extract_method_radio.change(
         fn=auto_set_local_ocr_for_bedrock_vlm,
         inputs=[text_extract_method_radio],
@@ -4258,22 +4040,6 @@ with blocks:
             aws_textract_signature_accordion,
         ],
     )
-
-    # Update visibility of PII-related components and accordions when general redaction method is selected
-    def handle_main_redaction_method_selection(redaction_method):
-        """Wrapper that applies handle_redaction_method_selection and updates accordion visibility."""
-        results = list(handle_redaction_method_selection(redaction_method))
-        is_redact_all_pii = redaction_method == "Redact all PII"
-        is_redact_selected_terms = redaction_method == "Redact selected terms"
-        show_pii_method = (
-            is_redact_all_pii or is_redact_selected_terms
-        ) and SHOW_PII_IDENTIFICATION_OPTIONS
-        show_selected_terms_lists = is_redact_selected_terms
-        results.append(
-            gr.update(visible=show_pii_method)
-        )  # entity_types_to_redact_accordion
-        results.append(gr.update(visible=show_selected_terms_lists))  # terms_accordion
-        return results
 
     redaction_method_radio.change(
         fn=handle_main_redaction_method_selection,
@@ -4323,60 +4089,6 @@ with blocks:
             inputs=[cost_code_choice_drop, cost_code_dataframe_base],
             outputs=[cost_code_dataframe],
         )
-
-    # Triggers to programmatically click the duplicate detection and apply duplicate pages buttons
-    TRIGGER_DUPLICATE_DETECTION_BUTTON = """
-    function triggerDuplicateDetectionButtonClick() {
-        // Find the checkbox for redacting duplicate pages by its ID
-        const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
-        // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
-        
-        // Only trigger if checkbox exists and is checked
-        if (redactDuplicatePagesCheckbox) {
-            // Find the div with id "duplicate-detection-btn"
-            const duplicateDetectionButton = document.getElementById("duplicate-detection-btn");
-            if (!duplicateDetectionButton) {
-                console.error("Error: Could not find element with id 'duplicate-detection-btn'");
-                return;
-            }
-            // Trigger the click event
-            duplicateDetectionButton.click();
-        }
-    }"""
-
-    TRIGGER_APPLY_DUPLICATE_PAGES_BUTTON = """
-    function triggerApplyDuplicatePagesButtonClick() {
-        // Find the checkbox for redacting duplicate pages by its ID
-        const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
-        // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
-        
-        // Only trigger if checkbox exists and is checked
-        if (redactDuplicatePagesCheckbox) {
-            // Find the div with id "apply-duplicate-pages-btn"
-            const applyDuplicatePagesButton = document.getElementById("apply-duplicate-pages-btn");
-            if (!applyDuplicatePagesButton) {
-                console.error("Error: Could not find element with id 'apply-duplicate-pages-btn'");
-                return;
-            }
-            // Trigger the click event
-            applyDuplicatePagesButton.click();
-        }
-    }"""
-
-    def check_duplicate_pages_checkbox(redact_duplicate_pages_checkbox_value: bool):
-        if not redact_duplicate_pages_checkbox_value:
-            # Silently raise an error to avoid showing a popup
-            return
-        if redact_duplicate_pages_checkbox_value:
-            print("Redact duplicate pages checkbox is enabled, identifying duplicates")
-            sys.tracebacklimit = 0  # Suppress traceback
-            raise ProcessStop(
-                "Redact duplicate pages checkbox is enabled, identifying duplicates."
-            )
-
-    def restore_sys_tracebacklimit():
-        sys.tracebacklimit = 1000  # Restore traceback limit
-        return
 
     in_doc_files.upload(
         fn=get_document_file_names,
@@ -4689,16 +4401,6 @@ with blocks:
         ],
         show_progress_on=[annotator],
     )
-    # ).success(
-    #     fn=check_duplicate_pages_checkbox,
-    #     inputs=[redact_duplicate_pages_checkbox],
-    #     outputs=None,
-    # ).failure(
-    #     fn=lambda: None, js=TRIGGER_DUPLICATE_DETECTION_BUTTON
-    # ).then(
-    #     fn=restore_sys_tracebacklimit,
-    #     outputs=None,
-    # )
 
     # If a file has been completed, the function will continue onto the next document
     latest_file_completed_num.change(
@@ -6619,22 +6321,6 @@ with blocks:
         outputs=[all_page_line_level_ocr_results_with_words_df],
     )
 
-    def run_search_with_regex_option(
-        search_text, word_df, similarity_threshold, use_regex_flag
-    ):
-        """Wrapper function to call run_full_search_and_analysis with regex option"""
-        return run_full_search_and_analysis(
-            search_query_text=search_text,
-            word_level_df_orig=word_df,
-            similarity_threshold=similarity_threshold,
-            combine_pages=False,
-            min_word_count=1,
-            min_consecutive_pages=1,
-            greedy_match=True,
-            remake_index=False,
-            use_regex=use_regex_flag,
-        )
-
     multi_word_search_text.submit(
         fn=run_search_with_regex_option,
         inputs=[
@@ -8037,7 +7723,7 @@ with blocks:
         outputs=all_output_files,
     )
 
-    all_output_files.change(
+    all_output_files.input(
         fn=all_outputs_file_download_fn,
         inputs=all_output_files,
         outputs=all_outputs_file_download,
@@ -8702,9 +8388,9 @@ with blocks:
             if __name__ == "__main__":
                 if COGNITO_AUTH:
                     blocks.launch(
-                        # theme=gr.themes.Default(primary_hue="blue"),
-                        # head=head_html,
-                        # css=css,
+                        theme=gr.themes.Default(primary_hue="blue"),
+                        head=head_html,
+                        css=css,
                         show_error=True,
                         inbrowser=True,
                         auth=authenticate_user,
@@ -8717,9 +8403,9 @@ with blocks:
                     )
                 else:
                     blocks.launch(
-                        # theme=gr.themes.Default(primary_hue="blue"),
-                        # head=head_html,
-                        # css=css,
+                        theme=gr.themes.Default(primary_hue="blue"),
+                        head=head_html,
+                        css=css,
                         show_error=True,
                         inbrowser=True,
                         max_file_size=MAX_FILE_SIZE,

@@ -933,6 +933,10 @@ QUANTISE_VLM_MODELS = convert_string_to_boolean(
     get_or_create_env_var("QUANTISE_VLM_MODELS", "False")
 )  # Whether to use 4-bit quantisation (bitsandbytes) for VLM models. Only applies when SHOW_VLM_MODEL_OPTIONS is True.
 
+OVERRIDE_VLM_REPO_ID = get_or_create_env_var(
+    "OVERRIDE_VLM_REPO_ID", ""
+)  # If set, overrides the Hugging Face repo ID or model path used for the selected VLM (e.g. local path or different repo). Leave empty for no override.
+
 REPORT_VLM_OUTPUTS_TO_GUI = convert_string_to_boolean(
     get_or_create_env_var("REPORT_VLM_OUTPUTS_TO_GUI", "False")
 )  # Whether to report VLM outputs to the GUI with info boxes as they are processed..
@@ -1518,7 +1522,7 @@ if LOW_VRAM_SYSTEM:
     print("Using settings for low VRAM system")
     USE_LLAMA_CPP = get_or_create_env_var("USE_LLAMA_CPP", "True")
     LLM_MAX_NEW_TOKENS = int(get_or_create_env_var("LLM_MAX_NEW_TOKENS", "4096"))
-    LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "16384"))
+    LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "8192"))
     LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "512"))
     K_QUANT_LEVEL = int(
         get_or_create_env_var("K_QUANT_LEVEL", "2")
@@ -1729,7 +1733,7 @@ LLM_RESET = convert_string_to_boolean(get_or_create_env_var("LLM_RESET", "False"
 LLM_STREAM = convert_string_to_boolean(get_or_create_env_var("LLM_STREAM", "True"))
 LLM_THREADS = int(get_or_create_env_var("LLM_THREADS", "-1"))
 LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "2048"))
-LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "32768"))  # 24576
+LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "32768"))
 LLM_SAMPLE = convert_string_to_boolean(get_or_create_env_var("LLM_SAMPLE", "True"))
 LLM_STOP_STRINGS = _get_env_list(
     get_or_create_env_var("LLM_STOP_STRINGS", r"['\n\n\n\n\n\n']")

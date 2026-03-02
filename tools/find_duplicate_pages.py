@@ -1990,3 +1990,20 @@ def create_annotation_objects_from_duplicates(
                 )
 
     return final_output
+
+
+def run_search_with_regex_option(
+    search_text, word_df, similarity_threshold, use_regex_flag
+):
+    """Wrapper function to call run_full_search_and_analysis with regex option"""
+    return run_full_search_and_analysis(
+        search_query_text=search_text,
+        word_level_df_orig=word_df,
+        similarity_threshold=similarity_threshold,
+        combine_pages=False,
+        min_word_count=1,
+        min_consecutive_pages=1,
+        greedy_match=True,
+        remake_index=False,
+        use_regex=use_regex_flag,
+    )

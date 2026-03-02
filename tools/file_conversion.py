@@ -2284,10 +2284,14 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
 
     # 6. Combine the base data (image, page) with the normalized box data
     # Use the index of the exploded frame (where mask is True) to ensure correct alignment
+    # Drop any columns from normalized_boxes that already exist on the left side to avoid
+    # duplicate column errors (e.g. box dicts may carry their own "page" key).
+    left_cols = ["image", "page"]
+    normalized_boxes = normalized_boxes.drop(
+        columns=[c for c in left_cols if c in normalized_boxes.columns]
+    )
     final_df = (
-        df_exploded.loc[mask, ["image", "page"]]
-        .reset_index(drop=True)
-        .join(normalized_boxes)
+        df_exploded.loc[mask, left_cols].reset_index(drop=True).join(normalized_boxes)
     )
 
     # --- Optional: Handle rows that might have had non-dict items in 'boxes' ---

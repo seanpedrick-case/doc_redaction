@@ -6053,8 +6053,42 @@ class CustomImageAnalyzerEngine:
         if input_image_height is None:
             input_image_height = img_height
 
-        # Create a deep copy of paddle_results to modify
-        copied_paddle_results = copy.deepcopy(paddle_results)
+        # Convert PaddleOCR result objects to plain dictionaries for pickling
+        # The @spaces.GPU decorator requires picklable arguments, but PaddleOCR
+        # result objects contain CopyableWeakMethod references that can't be pickled
+        def _paddle_result_to_plain_dict(result):
+            """Convert PaddleOCR result object to a plain dictionary."""
+            plain_dict = {}
+            # Extract all standard keys as plain Python types
+            for key in ["rec_texts", "rec_scores", "rec_polys", "rec_models"]:
+                if key in result or hasattr(result, key):
+                    value = (
+                        result.get(key, [])
+                        if hasattr(result, "get")
+                        else getattr(result, key, [])
+                    )
+                    if value is not None:
+                        # Convert to list to ensure it's a plain Python type
+                        plain_dict[key] = (
+                            list(value)
+                            if hasattr(value, "__iter__") and not isinstance(value, str)
+                            else value
+                        )
+            # Also extract dimension info if present
+            for key in ["image_width", "image_height"]:
+                if key in result or hasattr(result, key):
+                    value = (
+                        result.get(key)
+                        if hasattr(result, "get")
+                        else getattr(result, key, None)
+                    )
+                    if value is not None:
+                        plain_dict[key] = value
+            return plain_dict
+
+        copied_paddle_results = [
+            _paddle_result_to_plain_dict(result) for result in paddle_results
+        ]
 
         modified_paddle_results = _process_page_result_with_hybrid_vlm_ocr(
             copied_paddle_results,

@@ -253,6 +253,23 @@ def handle_redaction_method_selection(redaction_method):
     )
 
 
+# Update visibility of PII-related components and accordions when general redaction method is selected
+def handle_main_redaction_method_selection(redaction_method):
+    """Wrapper that applies handle_redaction_method_selection and updates accordion visibility."""
+    results = list(handle_redaction_method_selection(redaction_method))
+    is_redact_all_pii = redaction_method == "Redact all PII"
+    is_redact_selected_terms = redaction_method == "Redact selected terms"
+    show_pii_method = (
+        is_redact_all_pii or is_redact_selected_terms
+    ) and SHOW_PII_IDENTIFICATION_OPTIONS
+    show_selected_terms_lists = is_redact_selected_terms
+    results.append(
+        gr.update(visible=show_pii_method)
+    )  # entity_types_to_redact_accordion
+    results.append(gr.update(visible=show_selected_terms_lists))  # terms_accordion
+    return results
+
+
 def handle_pii_method_selection(pii_method):
     """Handle PII method selection - show appropriate entity dropdowns."""
     # Check if method is Local
