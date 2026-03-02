@@ -101,7 +101,7 @@ vlm = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]==5.49.1"
+    "gradio[mcp]<=6.8.0"
 ]
 
 [project.urls]

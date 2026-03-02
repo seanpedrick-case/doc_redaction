@@ -948,9 +948,6 @@ div[class*="tab-nav"] button {
 # Create the gradio interface.
 if RUN_FASTAPI:
     blocks = gr.Blocks(
-        # theme=gr.themes.Default(primary_hue="blue"),
-        # head=head_html,
-        # css=css,
         analytics_enabled=False,
         title="Document Redaction App",
         delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
@@ -958,9 +955,6 @@ if RUN_FASTAPI:
     )
 else:
     blocks = gr.Blocks(
-        # theme=gr.themes.Default(primary_hue="blue"),
-        # head=head_html,
-        # css=css,
         analytics_enabled=False,
         title="Document Redaction App",
         delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
@@ -8370,9 +8364,6 @@ with blocks:
             app = gr.mount_gradio_app(
                 app,
                 blocks,
-                # theme=gr.themes.Default(primary_hue="blue"),
-                # head=head_html,
-                # css=css,
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,

@@ -8119,7 +8119,7 @@ def visualise_ocr_words_bounding_boxes(
             text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "inference-server"
         ):
-            base_model_name = "Inference server"
+            base_model_name = "Inference Server"
             visualisation_folder = "inference_server_visualisations"
         else:
             base_model_name = "OCR"
@@ -8278,19 +8278,27 @@ def visualise_ocr_words_bounding_boxes(
             # Determine bounding box color: grey for replaced words, otherwise based on confidence
             # if is_replaced:
             #     box_color = (128, 128, 128)  # Grey for model replacements (bounding box only)
+            #      # Draw bounding box
+            #     cv2.rectangle(image_cv, (x1, y1), (x2, y2), box_color, 1)
             # else:
-            box_color = (0, 0, 255)  # Default to red
-            for min_conf, max_conf, conf_color, _ in confidence_ranges:
-                if min_conf <= conf <= max_conf:
-                    box_color = conf_color
-                    break
+            #     box_color = (0, 0, 255)  # Default to red
+            #     for min_conf, max_conf, conf_color, _ in confidence_ranges:
+            #         if min_conf <= conf <= max_conf:
+            #             box_color = conf_color
+            #             break
 
-            # Draw bounding box
-            cv2.rectangle(image_cv, (x1, y1), (x2, y2), box_color, 1)
-
+    # Show model replacement in legend when using a model that can have VLM/inference-server replacements
+    show_model_replacement_legend = chosen_local_ocr_model in (
+        "hybrid-paddle-inference-server",
+        "hybrid-paddle-vlm",
+        "hybrid-vlm",
+        "inference-server",
+    )
     # Add legend
     if add_legend:
-        add_confidence_legend(image_cv, confidence_ranges, show_model_replacement=False)
+        add_confidence_legend(
+            image_cv, confidence_ranges, show_model_replacement=show_model_replacement_legend
+        )
 
     # Create second page with text overlay
     text_page = np.ones((height, width, 3), dtype=np.uint8) * 255  # White background
@@ -8564,7 +8572,9 @@ def visualise_ocr_words_bounding_boxes(
     # Add legend to second page
     if add_legend:
         add_confidence_legend(
-            text_page, text_confidence_ranges, show_model_replacement=True
+            text_page,
+            text_confidence_ranges,
+            show_model_replacement=show_model_replacement_legend,
         )
 
     # Concatenate images horizontally

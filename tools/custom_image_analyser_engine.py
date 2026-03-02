@@ -1911,6 +1911,7 @@ def _inference_server_ocr_predict(
         image: PIL Image to process
         prompt: Text prompt for the VLM
         max_retries: Maximum number of retry attempts for API calls (default: 5)
+        model_name: Name of the inference-server model to use
 
     Returns:
         Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
@@ -1977,24 +1978,26 @@ def _inference_server_ocr_predict(
                         else None
                     )
 
-                extracted_text = _call_inference_server_vlm_api(
-                    image=image,
-                    prompt=prompt,
-                    model_name=final_model_name,
-                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
-                    temperature=model_default_temperature,
-                    top_p=model_default_top_p,
-                    top_k=model_default_top_k,
-                    repetition_penalty=model_default_repetition_penalty,
-                    seed=(
-                        int(model_default_seed)
-                        if model_default_seed is not None
-                        else None
-                    ),
-                    do_sample=model_default_do_sample,
-                    min_p=model_default_min_p,
-                    presence_penalty=model_default_presence_penalty,
-                    use_llama_swap=USE_LLAMA_SWAP,
+                extracted_text, _vlm_input_tokens, _vlm_output_tokens = (
+                    _call_inference_server_vlm_api(
+                        image=image,
+                        prompt=prompt,
+                        model_name=final_model_name,
+                        max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                        temperature=model_default_temperature,
+                        top_p=model_default_top_p,
+                        top_k=model_default_top_k,
+                        repetition_penalty=model_default_repetition_penalty,
+                        seed=(
+                            int(model_default_seed)
+                            if model_default_seed is not None
+                            else None
+                        ),
+                        do_sample=model_default_do_sample,
+                        min_p=model_default_min_p,
+                        presence_penalty=model_default_presence_penalty,
+                        use_llama_swap=USE_LLAMA_SWAP,
+                    )
                 )
                 # If we get here, the API call succeeded
                 break
@@ -3802,7 +3805,7 @@ def _inference_server_page_ocr_predict(
             result["width"].append(width)
             result["height"].append(height)
             result["conf"].append(int(round(confidence)))
-            result["model"].append("Inference server")
+            result["model"].append("Inference Server")
 
         # Get model name for tracking
         vlm_model_name = final_model_name or "Inference Server"
@@ -6130,6 +6133,7 @@ class CustomImageAnalyzerEngine:
             image_name: Name of the image for logging/debugging
             input_image_width: Original image width (before preprocessing)
             input_image_height: Original image height (before preprocessing)
+            model_name: Name of the inference-server model to use
 
         Returns:
             Modified paddle_results with inference-server replacements for low-confidence lines
@@ -6238,6 +6242,7 @@ class CustomImageAnalyzerEngine:
                     threshold will be replaced using the inference server.
                 image_name (str): The name of the source image, used for logging/debugging.
                 instance_self (object): The enclosing class instance to access inference invocation.
+                padding (int): Padding to add around line crops.
 
             Returns:
                 None. Modifies page_results in place with higher-confidence text replacements when possible.
@@ -6400,6 +6405,10 @@ class CustomImageAnalyzerEngine:
                         inference_server_rec_texts = []
                         inference_server_rec_scores = []
 
+                        print(
+                            f"  Line {i + 1}/{num_lines}: Sending to inference server "
+                            f"(Paddle conf: {line_conf:.1f}%, words: {paddle_word_count})"
+                        )
                         try:
                             inference_server_result = _inference_server_ocr_predict(
                                 cropped_image,
@@ -6423,6 +6432,13 @@ class CustomImageAnalyzerEngine:
                             # Ensure we keep original PaddleOCR result on error
                             inference_server_rec_texts = []
                             inference_server_rec_scores = []
+
+                        if not (inference_server_rec_texts and inference_server_rec_scores):
+                            # Inference server returned empty or no results - keep Paddle
+                            print(
+                                f"  Line {i + 1}/{num_lines}: Inference server returned no results "
+                                f"(Paddle conf: {line_conf:.1f}%, text: '{line_text[:40]}{'...' if len(line_text) > 40 else ''}'), keeping Paddle result."
+                            )
 
                         if inference_server_rec_texts and inference_server_rec_scores:
                             # Combine inference-server words into a single text string
@@ -7119,8 +7135,11 @@ class CustomImageAnalyzerEngine:
         ]
 
         # Determine default model based on OCR engine if model field is not present
-        if "model" in ocr_result:
-            # Model field exists and has correct length - use it
+        if (
+            "model" in ocr_result
+            and len(ocr_result["model"]) == len(ocr_result["text"])
+        ):
+            # Model field exists and has correct length - use it (preserves VLM/inference-server replacements)
             def get_model_name(idx):
                 return ocr_result["model"][idx]
 
@@ -10798,6 +10817,7 @@ def split_words_and_punctuation_from_line(
                     width=punc_width,
                     height=word_result.height,
                     conf=word_result.conf,
+                    model=word_result.model,
                 )
             )
             current_left += punc_width
@@ -10813,6 +10833,7 @@ def split_words_and_punctuation_from_line(
                     width=core_width,
                     height=word_result.height,
                     conf=word_result.conf,
+                    model=word_result.model,
                 )
             )
             current_left += core_width
@@ -10828,6 +10849,7 @@ def split_words_and_punctuation_from_line(
                     width=punc_width,
                     height=word_result.height,
                     conf=word_result.conf,
+                    model=word_result.model,
                 )
             )
 
