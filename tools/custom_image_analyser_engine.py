@@ -923,8 +923,22 @@ def _call_inference_server_vlm_api(
         payload["model"] = model_name
     if do_sample is not None:
         payload["do_sample"] = do_sample
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if top_k is not None:
+        payload["top_k"] = top_k
+    if repetition_penalty is not None:
+        payload["repeat_penalty"] = repetition_penalty
+    if presence_penalty is not None:
+        payload["presence_penalty"] = presence_penalty
+    if max_new_tokens is not None:
+        payload["max_tokens"] = max_new_tokens
+    if seed is not None:
+        payload["seed"] = seed
 
-    # Handle deterministic (greedy) vs non-deterministic (sampling) generation
+    # Handle deterministic (greedy) generation
     if do_sample is False:
         # Greedy decoding (deterministic): always pick the highest probability token
         # This emulates transformers' do_sample=False behavior
@@ -933,34 +947,7 @@ def _call_inference_server_vlm_api(
         payload["top_p"] = 1.0  # Consider all tokens (but top_k=1 overrides this)
         payload["min_p"] = 0.0  # Minimum probability threshold for token sampling.
         payload["presence_penalty"] = 1.0  # Penalty for token presence.
-        # Don't set min_p for greedy decoding - it's a sampling parameter
-        # Use repetition_penalty=1.0 (no penalty) for deterministic generation
-        # If a repetition_penalty was provided, use it; otherwise default to 1.0
-        if repetition_penalty is not None:
-            payload["repeat_penalty"] = repetition_penalty
-        else:
-            payload["repeat_penalty"] = 1.0  # No penalty for deterministic
-    else:
-        # Sampling (non-deterministic): use provided sampling parameters
-        if temperature is not None:
-            payload["temperature"] = temperature
-        if top_p is not None:
-            payload["top_p"] = top_p
-        if min_p is not None:
-            payload["min_p"] = min_p
-        if top_k is not None:
-            payload["top_k"] = top_k
-        if repetition_penalty is not None:
-            payload["repeat_penalty"] = repetition_penalty
-        if presence_penalty is not None:
-            payload["presence_penalty"] = presence_penalty
-
-    if max_new_tokens is not None:
-        payload["max_tokens"] = max_new_tokens
-    if seed is not None:
-        payload["seed"] = seed
-
-    # print(f"Payload: {payload}")
+        payload["repeat_penalty"] = 1.0  # No penalty for deterministic
 
     endpoint = f"{api_url}/v1/chat/completions"
 
@@ -1984,18 +1971,14 @@ def _inference_server_ocr_predict(
                         prompt=prompt,
                         model_name=final_model_name,
                         max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
-                        temperature=model_default_temperature,
-                        top_p=model_default_top_p,
-                        top_k=model_default_top_k,
-                        repetition_penalty=model_default_repetition_penalty,
-                        seed=(
-                            int(model_default_seed)
-                            if model_default_seed is not None
-                            else None
-                        ),
+                        temperature=None,
+                        top_p=None,
+                        top_k=None,
+                        repetition_penalty=None,
+                        seed=None,
                         do_sample=model_default_do_sample,
-                        min_p=model_default_min_p,
-                        presence_penalty=model_default_presence_penalty,
+                        min_p=None,
+                        presence_penalty=None,
                         use_llama_swap=USE_LLAMA_SWAP,
                     )
                 )
@@ -3464,14 +3447,14 @@ def _inference_server_page_ocr_predict(
                 prompt=prompt,
                 model_name=final_model_name,
                 max_new_tokens=model_default_max_new_tokens,
-                temperature=model_default_temperature,
-                top_p=model_default_top_p,
-                top_k=model_default_top_k,
-                repetition_penalty=model_default_repetition_penalty,
-                seed=model_default_seed,
+                temperature=None,
+                top_p=None,
+                top_k=None,
+                repetition_penalty=None,
+                seed=None,
                 do_sample=model_default_do_sample,
-                min_p=model_default_min_p,
-                presence_penalty=model_default_presence_penalty,
+                min_p=None,
+                presence_penalty=None,
                 use_llama_swap=USE_LLAMA_SWAP,
             )
         )
@@ -6443,6 +6426,12 @@ class CustomImageAnalyzerEngine:
                         if inference_server_rec_texts and inference_server_rec_scores:
                             # Combine inference-server words into a single text string
                             inference_server_text = " ".join(inference_server_rec_texts)
+
+                            ### If text starts with "Cannot read", then skip this line
+                            if inference_server_text.startswith('""'):
+                                print(f"Inference server text starts with '""', skipping line {i + 1} of {num_lines}")
+                                continue
+
                             inference_server_word_count = len(
                                 inference_server_rec_texts
                             )
@@ -6451,7 +6440,7 @@ class CustomImageAnalyzerEngine:
                             )  # Keep as 0-1 range for paddle format
 
                             # Only replace if word counts match
-                            word_count_allowed_difference = 4
+                            word_count_allowed_difference = 7
                             if (
                                 inference_server_word_count - paddle_word_count
                                 <= word_count_allowed_difference

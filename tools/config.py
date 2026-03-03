@@ -906,7 +906,7 @@ DEFAULT_MAX_NEW_TOKENS = int(
 )  # Default maximum number of tokens to generate
 
 HYBRID_OCR_MAX_NEW_TOKENS = int(
-    get_or_create_env_var("HYBRID_OCR_MAX_NEW_TOKENS", "30")
+    get_or_create_env_var("HYBRID_OCR_MAX_NEW_TOKENS", "50")
 )  # Maximum number of tokens to generate for hybrid OCR
 
 MAX_INPUT_TOKEN_LENGTH = int(
@@ -1000,7 +1000,7 @@ else:
     VLM_DEFAULT_REPETITION_PENALTY = None
 
 VLM_DEFAULT_DO_SAMPLE = get_or_create_env_var(
-    "VLM_DEFAULT_DO_SAMPLE", ""
+    "VLM_DEFAULT_DO_SAMPLE", "True"
 )  # Default do_sample setting for VLM generation. If empty, model-specific defaults will be used. True means use sampling, False means use greedy decoding (do_sample=False).
 if VLM_DEFAULT_DO_SAMPLE and VLM_DEFAULT_DO_SAMPLE.strip():
     VLM_DEFAULT_DO_SAMPLE = convert_string_to_boolean(VLM_DEFAULT_DO_SAMPLE)
@@ -1146,11 +1146,11 @@ INFERENCE_SERVER_TIMEOUT = int(
 )  # Timeout in seconds for API requests
 
 DEFAULT_INFERENCE_SERVER_VLM_MODEL = get_or_create_env_var(
-    "DEFAULT_INFERENCE_SERVER_VLM_MODEL", "qwen_3_vl_30b_a3b_it"
+    "DEFAULT_INFERENCE_SERVER_VLM_MODEL", "qwen_3_5_27b"
 )  # Default model name for inference-server VLM API calls. If empty, uses INFERENCE_SERVER_MODEL_NAME or server default
 
 DEFAULT_INFERENCE_SERVER_PII_MODEL = get_or_create_env_var(
-    "DEFAULT_INFERENCE_SERVER_PII_MODEL", "gemma_3_12b"
+    "DEFAULT_INFERENCE_SERVER_PII_MODEL", "gemma_3_27b"
 )  # Default model name for inference-server PII detection API calls. If empty, uses INFERENCE_SERVER_MODEL_NAME, CHOSEN_INFERENCE_SERVER_PII_MODEL, or server default
 
 MODEL_CACHE_PATH = get_or_create_env_var("MODEL_CACHE_PATH", "./model_cache")
@@ -1158,11 +1158,11 @@ MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)
 
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
-    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "95")
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "97")
 )  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
 
 HYBRID_OCR_PADDING = int(
-    get_or_create_env_var("HYBRID_OCR_PADDING", "1")
+    get_or_create_env_var("HYBRID_OCR_PADDING", "5")
 )  # The padding (in pixels) to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
 
 TESSERACT_WORD_LEVEL_OCR = convert_string_to_boolean(

@@ -7,6 +7,7 @@ import spaces
 from PIL import Image
 
 from tools.config import (
+    DEFAULT_LANGUAGE_FULL_NAME,
     LOAD_PADDLE_AT_STARTUP,
     MAX_NEW_TOKENS,
     MAX_SPACES_GPU_RUN_TIME,
@@ -30,6 +31,12 @@ from tools.config import (
     VLM_SEED,
 )
 from tools.helper_functions import get_system_font_path
+
+text_read_default_prompt = f"""Read all the text in the centre line of the image. Ignore text partially visible in the margins of the image. Ensure that spaces between words and upper/lower cases are preserved. The language of the document is {DEFAULT_LANGUAGE_FULL_NAME}, only return responses in {DEFAULT_LANGUAGE_FULL_NAME}, or return an empty string "". Never return text in another language. If you can't read the text, return an empty string ""."""
+
+text_read_default_prompt = text_read_default_prompt.format(DEFAULT_LANGUAGE_FULL_NAME=DEFAULT_LANGUAGE_FULL_NAME)
+
+print(f"text_read_default_prompt: {text_read_default_prompt}")
 
 if LOAD_PADDLE_AT_STARTUP is True:
     # Set PaddleOCR environment variables BEFORE importing PaddleOCR
@@ -118,7 +125,7 @@ _loaded_vlm_processor = None
 
 # Define module-level defaults for model parameters (always available for import)
 # These will be overridden inside the SHOW_VLM_MODEL_OPTIONS block if enabled
-model_default_prompt = """Read all the text in the image."""
+model_default_prompt = text_read_default_prompt
 model_default_do_sample = (
     VLM_DEFAULT_DO_SAMPLE if VLM_DEFAULT_DO_SAMPLE is not None else None
 )
@@ -189,7 +196,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     # Initialize model-specific generation parameters (will be set by specific models if needed)
     # If config values are provided, use them; otherwise leave as None to use model defaults
-    model_default_prompt = """Read all the text in the image."""
+    model_default_prompt = text_read_default_prompt
     model_default_do_sample = (
         VLM_DEFAULT_DO_SAMPLE if VLM_DEFAULT_DO_SAMPLE is not None else None
     )
@@ -260,7 +267,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         if quantization_config is None:
             model = model.to(device)
 
-        model_default_prompt = """Extract the text from the above document as if you were reading it naturally."""
+        model_default_prompt = text_read_default_prompt
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Dots.OCR":
         # Download and patch Dots.OCR model
@@ -310,7 +317,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["torch_dtype"] = torch.bfloat16
         model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs).eval()
 
-        model_default_prompt = """Extract the text content from this image."""
+        model_default_prompt = text_read_default_prompt
         model_default_max_new_tokens = MAX_NEW_TOKENS
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-2B-Instruct":
@@ -330,8 +337,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             MODEL_ID, **load_kwargs
         ).eval()
 
-        model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = False
+        model_default_prompt = text_read_default_prompt
+        model_default_do_sample = model_default_do_sample
         model_default_top_p = 0.8
         model_default_min_p = 0.0
         model_default_top_k = 20
@@ -361,8 +368,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             MODEL_ID, **load_kwargs
         ).eval()
 
-        model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = False
+        model_default_prompt = text_read_default_prompt
+        model_default_do_sample = model_default_do_sample
         model_default_top_p = 0.8
         model_default_min_p = 0.0
         model_default_top_k = 20
@@ -391,8 +398,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             MODEL_ID, **load_kwargs
         ).eval()
 
-        model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = False
+        model_default_prompt = text_read_default_prompt
+        model_default_do_sample = model_default_do_sample
         model_default_top_p = 0.8
         model_default_min_p = 0.0
         model_default_top_k = 20
@@ -422,8 +429,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             MODEL_ID, **load_kwargs
         ).eval()
 
-        model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = False
+        model_default_prompt = text_read_default_prompt
+        model_default_do_sample = model_default_do_sample
         model_default_top_p = 0.8
         model_default_min_p = 0.0
         model_default_top_k = 20
@@ -457,7 +464,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         ).eval()
 
         model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = False
+        model_default_do_sample = model_default_do_sample
         model_default_top_p = 0.8
         model_default_min_p = 0.0
         model_default_top_k = 20
@@ -490,8 +497,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             MODEL_ID, **load_kwargs
         ).eval()
 
-        model_default_prompt = """Read all the text in the image."""
-        model_default_do_sample = False
+        model_default_prompt = text_read_default_prompt
+        model_default_do_sample = model_default_do_sample
         model_default_top_p = 0.8
         model_default_min_p = 0.0
         model_default_top_k = 20
@@ -826,7 +833,7 @@ def extract_text_from_image_vlm(
     return buffer, input_tokens, output_tokens
 
 
-full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': 'identified text'}, ...].
+full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': 'identified text'}, ...].
 
 IMPORTANT: Extract each horizontal line of text separately. Do NOT combine multiple lines into paragraphs. Each line that appears on a separate horizontal row in the image should be a separate entry.
 
@@ -840,9 +847,9 @@ Rules:
 
 # Only return valid JSON, no additional text or explanation."""
 
-full_page_ocr_people_vlm_prompt = """Spot all photos of people's faces in the image, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
+full_page_ocr_people_vlm_prompt = """Spot all photos of people's faces in the image, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
 
-Always return the JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
+Always return the JSON format as [{'bbox': [x1, y1, x2, y2], 'text': '[PERSON]'}, ...].
 
 Rules:
 - Each photo of a person's face must be a separate entry.
@@ -854,9 +861,9 @@ Rules:
 
 # Only return valid JSON, no additional text or explanation."""
 
-full_page_ocr_signature_vlm_prompt = """Spot all signatures in the image, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[SIGNATURE]'}, ...].
+full_page_ocr_signature_vlm_prompt = """Spot all signatures in the image, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]'}, ...].
 
-Always return the JSON format as [{'bb': [x1, y1, x2, y2], 'text': '[SIGNATURE]'}, ...].
+Always return the JSON format as [{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]'}, ...].
 
 Rules:
 - Each signature must be a separate entry.
@@ -869,16 +876,16 @@ Rules:
 # Only return valid JSON, no additional text or explanation."""
 
 # Test for word-level OCR with VLMs - makes some mistakes but not bad
-# full_page_ocr_vlm_prompt = """Spot all the text in the image at word-level, and output in JSON format as [{'bb': [x1, y1, x2, y2], 'text': 'identified word'}, ...].
+full_page_ocr_vlm_words_prompt = """Spot all the text in the image at word-level, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': 'identified word'}, ...].
 
-# IMPORTANT: Extract each word in the image separately. Do NOT combine words into longer fragments, sentences, or paragraphs. Each entry must correspond to a single, individual word as visually separated in the image.
+IMPORTANT: Extract each word in the image separately. Do NOT combine words into longer fragments, sentences, or paragraphs. Each entry must correspond to a single, individual word as visually separated in the image.
 
-# Rules:
-# - Each entry should correspond to a single distinct word (not groups of words, not whole lines).
-# - For each word, provide a tight bounding box [x1, y1, x2, y2] around just that word.
-# - Do not merge words. Do not split words into letters. Only return one entry per word.
-# - Maintain the order of words as they appear spatially from top to bottom, left to right.
-# - Skip any empty or whitespace-only entries.
-# - Do not include extraneous text, explanations, or formatting beyond the required JSON.
+Rules:
+- Each entry should correspond to a single distinct word (not groups of words, not whole lines).
+- For each word, provide a tight bounding box [x1, y1, x2, y2] around just that word.
+- Do not merge words. Do not split words into letters. Only return one entry per word.
+- Maintain the order of words as they appear spatially from top to bottom, left to right.
+- Skip any empty or whitespace-only entries.
+- Do not include extraneous text, explanations, or formatting beyond the required JSON.
 
-# Only return valid JSON, no additional text or explanation."""
+Only return valid JSON, no additional text or explanation."""

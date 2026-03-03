@@ -81,7 +81,7 @@ test = ["pytest", "pytest-cov"]
 # To install the app with paddle and vlm support with pip, example command (in base folder and correct python environment): pip install .[paddle,vlm], or uv pip install .[paddle,vlm] if using uv. Note need to GPU version of Torch below
 
 # Extra dependencies for PaddleOCR
-# The following installs the CPU version of paddleOCR. If you want the GPU-accelerated version, run manually pip install paddlepaddle-gpu --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
+# The following installs the CPU version of paddleOCR. If you want the GPU-accelerated version, run pip install the relevant wheel for paddlepaddle-gpu==3.2.1 from the following link: https://www.paddlepaddle.org.cn/packages/stable/cu129/
 paddle = [
     "paddlepaddle>=3.0.0,<=3.2.1", 
     "paddleocr==3.3.0",
@@ -89,7 +89,7 @@ paddle = [
 ]
 
 # Extra dependencies for VLM models
-# The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install torch torchvision --index-url https://download.pytorch.org/whl/cu129 after installation
+# The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu129 after installation
 vlm = [
     "torch>=2.5.1,<=2.8.0", 
     "torchvision>=0.20.1",

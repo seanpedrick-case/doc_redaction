@@ -8279,13 +8279,14 @@ def visualise_ocr_words_bounding_boxes(
             # if is_replaced:
             #     box_color = (128, 128, 128)  # Grey for model replacements (bounding box only)
             #      # Draw bounding box
-            #     cv2.rectangle(image_cv, (x1, y1), (x2, y2), box_color, 1)
+            #     
             # else:
-            #     box_color = (0, 0, 255)  # Default to red
-            #     for min_conf, max_conf, conf_color, _ in confidence_ranges:
-            #         if min_conf <= conf <= max_conf:
-            #             box_color = conf_color
-            #             break
+            box_color = (0, 0, 255)  # Default to red
+            for min_conf, max_conf, conf_color, _ in confidence_ranges:
+                if min_conf <= conf <= max_conf:
+                    box_color = conf_color
+                    break
+            cv2.rectangle(image_cv, (x1, y1), (x2, y2), box_color, 1)
 
     # Show model replacement in legend when using a model that can have VLM/inference-server replacements
     show_model_replacement_legend = chosen_local_ocr_model in (
