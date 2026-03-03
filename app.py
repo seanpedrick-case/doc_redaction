@@ -1872,6 +1872,15 @@ with blocks:
     # This ensures they exist for examples and event handlers even when Quickstart tab is hidden
     if not SHOW_QUICKSTART:
         with gr.Column(visible=False):
+            walkthrough_list_accordion = gr.Accordion(
+                "Allow, deny, and full page redaction list settings",
+                open=False,
+                visible=False,
+            )
+            with walkthrough_list_accordion:
+                walkthrough_deny_list_state.render()
+                walkthrough_allow_list_state.render()
+                walkthrough_fully_redacted_list_state.render()
             walkthrough_file_input.render()
             walkthrough_in_redact_entities.render()
             walkthrough_in_redact_comprehend_entities.render()
@@ -1881,9 +1890,6 @@ with blocks:
             walkthrough_local_ocr_method_radio.render()
             walkthrough_handwrite_signature_checkbox.render()
             walkthrough_pii_identification_method_drop.render()
-            walkthrough_allow_list_state.render()
-            walkthrough_deny_list_state.render()
-            walkthrough_fully_redacted_list_state.render()
             walkthrough_pii_identification_method_drop_tabular.render()
             walkthrough_anon_strategy.render()
             walkthrough_do_initial_clean.render()
