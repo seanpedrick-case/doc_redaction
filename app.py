@@ -1871,6 +1871,7 @@ with blocks:
     # Render walkthrough components in a hidden container when SHOW_QUICKSTART is False
     # This ensures they exist for examples and event handlers even when Quickstart tab is hidden
     if not SHOW_QUICKSTART:
+        walkthrough_is_data_file = gr.State(value=False)
         with gr.Column(visible=False):
             walkthrough_list_accordion = gr.Accordion(
                 "Allow, deny, and full page redaction list settings",
@@ -1893,6 +1894,13 @@ with blocks:
             walkthrough_pii_identification_method_drop_tabular.render()
             walkthrough_anon_strategy.render()
             walkthrough_do_initial_clean.render()
+            # Placeholder buttons so step_4_*_btn.click() handlers below are defined
+            step_4_next_document_redact_btn = gr.Button(
+                "Redact document", variant="primary", visible=False
+            )
+            step_4_next_tabular_redact_btn = gr.Button(
+                "Redact data files", variant="primary", visible=False
+            )
 
     with gr.Tabs() as tabs:
         ###
