@@ -34,9 +34,9 @@ from tools.helper_functions import get_system_font_path
 
 text_read_default_prompt = f"""Read all the text in the centre line of the image. Ignore text partially visible in the margins of the image. Ensure that spaces between words and upper/lower cases are preserved. The language of the document is {DEFAULT_LANGUAGE_FULL_NAME}, only return responses in {DEFAULT_LANGUAGE_FULL_NAME}, or return an empty string "". Never return text in another language. If you can't read the text, return an empty string ""."""
 
-text_read_default_prompt = text_read_default_prompt.format(DEFAULT_LANGUAGE_FULL_NAME=DEFAULT_LANGUAGE_FULL_NAME)
-
-print(f"text_read_default_prompt: {text_read_default_prompt}")
+text_read_default_prompt = text_read_default_prompt.format(
+    DEFAULT_LANGUAGE_FULL_NAME=DEFAULT_LANGUAGE_FULL_NAME
+)
 
 if LOAD_PADDLE_AT_STARTUP is True:
     # Set PaddleOCR environment variables BEFORE importing PaddleOCR

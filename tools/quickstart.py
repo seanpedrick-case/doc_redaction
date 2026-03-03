@@ -143,51 +143,69 @@ def update_step_2_on_data_file_upload(files, is_data_file):
         return gr.Dropdown(visible=False), gr.Dropdown(visible=False)
 
 
-def handle_text_extract_method_selection(text_extract_method):
+def handle_text_extract_method_selection(text_extract_method: str):
     """Handle text extraction method selection - show local OCR radio only if Local OCR model is selected,
-    and show AWS Textract settings only if AWS Textract is selected."""
+    and show AWS Textract settings only if AWS Textract is selected.
+
+    Args:
+        text_extract_method: Selected text extraction method
+
+    Returns:
+        Tuple of visibility updates for local OCR radio, and AWS Textract accordion
+    """
+    # Normalize (Gradio can send None when .change() fires before sync); default so something stays visible
+    if isinstance(text_extract_method, str):
+        text_extract_method = text_extract_method.strip()
+    if text_extract_method is None or text_extract_method == "":
+        text_extract_method = TESSERACT_TEXT_EXTRACT_OPTION
+
     # Show local OCR method radio only if "Local OCR model - PDFs without selectable text" is selected
     # When "AWS Bedrock VLM OCR" is selected, the local OCR method is automatically set to "bedrock-vlm" but the component is hidden
     show_local_ocr = text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION
-    # Show AWS Textract settings only if "AWS Textract service - all PDF types" is selected
-    show_aws_textract = text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION
+    # Show AWS Textract settings accordion only if "AWS Textract service - all PDF types" is selected
+    show_aws_textract = (
+        text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION
+        and SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+    )
 
     return (
-        gr.Radio(visible=show_local_ocr),  # walkthrough_local_ocr_method_radio
-        gr.CheckboxGroup(
+        gr.update(visible=show_local_ocr),  # walkthrough_local_ocr_method_radio
+        gr.update(
             visible=show_aws_textract
         ),  # walkthrough_handwrite_signature_checkbox
     )
 
 
-def handle_redaction_method_selection(redaction_method):
+def handle_redaction_method_selection(redaction_method: str, pii_method: str):
     """Handle redaction method selection in Step 3 - show appropriate components based on selection."""
+    # Normalize inputs (Gradio can send whitespace or None when .change() fires before sync)
+    if isinstance(redaction_method, str):
+        redaction_method = redaction_method.strip()
+    if redaction_method is None or redaction_method == "":
+        redaction_method = "Redact all PII"
+    if isinstance(pii_method, str):
+        pii_method = pii_method.strip()
+    if pii_method is None or pii_method == "":
+        pii_method = DEFAULT_PII_DETECTION_MODEL
+
     # Check which redaction method is selected
     is_redact_all_pii = redaction_method == "Redact all PII"
     is_redact_selected_terms = redaction_method == "Redact selected terms"
+    is_redact_all_pii_or_selected_terms = is_redact_all_pii or is_redact_selected_terms
 
     # Show PII detection settings if "Redact all PII" OR "Redact selected terms" is selected
     # Both options need PII detection method to determine what to redact
     show_pii_method = (
-        is_redact_all_pii or is_redact_selected_terms
+        is_redact_all_pii_or_selected_terms
     ) and SHOW_PII_IDENTIFICATION_OPTIONS
 
-    # Show deny/allow/fully redacted lists only if "Redact selected terms" is selected
-    # These lists are essential for "Redact selected terms" mode, so show them regardless of SHOW_PII_IDENTIFICATION_OPTIONS
-    show_selected_terms_lists = is_redact_selected_terms
-
-    # Determine initial visibility of entity dropdowns based on default PII method
-    default_pii_method = DEFAULT_PII_DETECTION_MODEL
-    show_local_entities_init = show_pii_method and (
-        default_pii_method == LOCAL_PII_OPTION
-    )
-    show_comprehend_entities_init = show_pii_method and (
-        default_pii_method == AWS_PII_OPTION
-    )
+    # Determine visibility of entity dropdowns based on PII method
+    show_local_entities_init = show_pii_method and (pii_method == LOCAL_PII_OPTION)
+    show_comprehend_entities_init = show_pii_method and (pii_method == AWS_PII_OPTION)
     is_llm_method_init = show_pii_method and (
-        default_pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
-        or default_pii_method == INFERENCE_SERVER_PII_OPTION
-        or default_pii_method == AWS_LLM_PII_OPTION
+        pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+        or pii_method == INFERENCE_SERVER_PII_OPTION
+        or pii_method == AWS_LLM_PII_OPTION
     )
 
     # For "Extract text only", hide all components
@@ -197,13 +215,13 @@ def handle_redaction_method_selection(redaction_method):
     # Set entity values based on redaction method
     if is_redact_selected_terms:
         # For "Redact selected terms", only show CUSTOM entity
-        local_entities_update = gr.update(
+        local_entities_update = gr.Dropdown(
             visible=show_local_entities_init, value=["CUSTOM"]
         )
-        comprehend_entities_update = gr.update(
+        comprehend_entities_update = gr.Dropdown(
             visible=show_comprehend_entities_init, value=["CUSTOM"]
         )
-        llm_entities_update = gr.update(visible=is_llm_method_init, value=["CUSTOM"])
+        llm_entities_update = gr.Dropdown(visible=is_llm_method_init, value=["CUSTOM"])
     elif is_redact_all_pii:
         # For "Redact all PII", use default entities
         # Ensure entities are lists (they should already be parsed in config.py)
@@ -217,23 +235,20 @@ def handle_redaction_method_selection(redaction_method):
             if isinstance(CHOSEN_COMPREHEND_ENTITIES, list)
             else ["CUSTOM"]
         )
-        llm_entities_val = (
+        llm_entities_update = (
             CHOSEN_LLM_ENTITIES if isinstance(CHOSEN_LLM_ENTITIES, list) else ["CUSTOM"]
         )
-        local_entities_update = gr.update(
+        local_entities_update = gr.Dropdown(
             visible=show_local_entities_init, value=local_entities_val
         )
-        comprehend_entities_update = gr.update(
+        comprehend_entities_update = gr.Dropdown(
             visible=show_comprehend_entities_init, value=comprehend_entities_val
-        )
-        llm_entities_update = gr.update(
-            visible=is_llm_method_init, value=llm_entities_val
         )
     else:
         # For "Extract text only", just update visibility without changing value
-        local_entities_update = gr.update(visible=show_local_entities_init)
-        comprehend_entities_update = gr.update(visible=show_comprehend_entities_init)
-        llm_entities_update = gr.update(visible=is_llm_method_init)
+        local_entities_update = gr.Dropdown(visible=show_local_entities_init)
+        comprehend_entities_update = gr.Dropdown(visible=show_comprehend_entities_init)
+        llm_entities_update = gr.Dropdown(visible=is_llm_method_init)
 
     return (
         gr.update(
@@ -241,22 +256,24 @@ def handle_redaction_method_selection(redaction_method):
         ),  # walkthrough_pii_identification_method_drop
         local_entities_update,  # walkthrough_in_redact_entities
         comprehend_entities_update,  # walkthrough_in_redact_comprehend_entities
+        gr.update(visible=is_llm_method_init),  # walkthrough_llm_entities_accordion
         llm_entities_update,  # walkthrough_in_redact_llm_entities
         gr.update(
-            visible=is_llm_method_init
-        ),  # walkthrough_custom_llm_instructions_textbox
-        gr.update(visible=show_selected_terms_lists),  # walkthrough_deny_list_state
-        gr.update(visible=show_selected_terms_lists),  # walkthrough_allow_list_state
+            visible=is_redact_all_pii_or_selected_terms
+        ),  # walkthrough_list_accordion
         gr.update(
-            visible=show_selected_terms_lists
-        ),  # walkthrough_fully_redacted_list_state
+            visible=is_redact_all_pii_or_selected_terms
+        ),  # walkthrough_redact_duplicate_pages_checkbox
+        gr.update(
+            visible=is_redact_all_pii_or_selected_terms
+        ),  # walkthrough_max_fuzzy_spelling_mistakes_num
     )
 
 
 # Update visibility of PII-related components and accordions when general redaction method is selected
-def handle_main_redaction_method_selection(redaction_method):
+def handle_main_redaction_method_selection(redaction_method, pii_method):
     """Wrapper that applies handle_redaction_method_selection and updates accordion visibility."""
-    results = list(handle_redaction_method_selection(redaction_method))
+    results = list(handle_redaction_method_selection(redaction_method, pii_method))
     is_redact_all_pii = redaction_method == "Redact all PII"
     is_redact_selected_terms = redaction_method == "Redact selected terms"
     show_pii_method = (
@@ -270,18 +287,25 @@ def handle_main_redaction_method_selection(redaction_method):
     return results
 
 
-def handle_pii_method_selection(pii_method):
+def handle_pii_method_selection(pii_method: str):
     """Handle PII method selection - show appropriate entity dropdowns."""
-    # Check if method is Local
-    show_local_entities = pii_method == LOCAL_PII_OPTION
-    # Check if method is AWS Comprehend
-    show_comprehend_entities = pii_method == AWS_PII_OPTION
-    # Check if method is an LLM option
-    is_llm_method = (
-        pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
-        or pii_method == INFERENCE_SERVER_PII_OPTION
-        or pii_method == AWS_LLM_PII_OPTION
-    )
+    # When value is None/empty (e.g. first .change() after loading an example sets the
+    # component programmatically), avoid hiding all entity selectors by defaulting to Local.
+    if pii_method is None or (isinstance(pii_method, str) and not pii_method.strip()):
+        show_local_entities = True
+        show_comprehend_entities = False
+        is_llm_method = False
+    else:
+        # Check if method is Local
+        show_local_entities = pii_method == LOCAL_PII_OPTION
+        # Check if method is AWS Comprehend
+        show_comprehend_entities = pii_method == AWS_PII_OPTION
+        # Check if method is an LLM option
+        is_llm_method = (
+            pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+            or pii_method == INFERENCE_SERVER_PII_OPTION
+            or pii_method == AWS_LLM_PII_OPTION
+        )
 
     return (
         gr.Dropdown(visible=show_local_entities),  # walkthrough_in_redact_entities
@@ -292,6 +316,7 @@ def handle_pii_method_selection(pii_method):
         gr.Textbox(
             visible=is_llm_method
         ),  # walkthrough_custom_llm_instructions_textbox
+        gr.update(visible=is_llm_method),  # walkthrough_llm_entities_accordion
     )
 
 
@@ -615,7 +640,7 @@ def update_step_4_visibility(is_data_file):
     )
 
 
-def handle_main_text_extract_method_selection(text_extract_method):
+def handle_main_text_extract_method_selection(text_extract_method: str):
     """Handle text extraction method selection for main components - show local OCR options only if Local OCR model is selected,
     and show AWS Textract settings only if AWS Textract is selected.
 
@@ -625,6 +650,12 @@ def handle_main_text_extract_method_selection(text_extract_method):
     Returns:
         Tuple of visibility updates for local OCR accordion, inference server accordion, and AWS Textract accordion
     """
+    # Normalize (Gradio can send None when .change() fires before sync); default so something stays visible
+    if isinstance(text_extract_method, str):
+        text_extract_method = text_extract_method.strip()
+    if text_extract_method is None or text_extract_method == "":
+        text_extract_method = TESSERACT_TEXT_EXTRACT_OPTION
+
     # Show local OCR method accordion only if "Local OCR model - PDFs without selectable text" is selected
     # When "AWS Bedrock VLM OCR" is selected, the local OCR method is automatically set to "bedrock-vlm" but the component is hidden
     show_local_ocr = text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION
@@ -658,6 +689,19 @@ def handle_main_pii_method_selection(pii_method):
         Tuple of visibility updates for PII method dropdown, local entities accordion, comprehend entities accordion,
         LLM entities accordion, and LLM custom instructions accordion
     """
+    # Normalize string (Gradio can send whitespace)
+    if isinstance(pii_method, str):
+        pii_method = pii_method.strip()
+    # When value is None/empty (e.g. .change() fired before component synced), default to Local so at least one section is visible (e.g. when user clicked Local)
+    if pii_method is None or pii_method == "":
+        return (
+            gr.update(visible=True),  # pii_identification_method_drop
+            gr.update(visible=True),  # in_redact_entities
+            gr.update(visible=False),  # in_redact_comprehend_entities
+            gr.update(visible=False),  # in_redact_llm_entities
+            gr.update(visible=False),  # custom_llm_instructions_textbox
+        )
+
     # Check if "No PII redaction" is selected
     is_no_redaction = pii_method == NO_REDACTION_PII_OPTION
 

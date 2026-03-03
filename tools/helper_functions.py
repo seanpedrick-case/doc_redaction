@@ -284,9 +284,10 @@ def ensure_folder_exists(output_folder: str):
     if not os.path.exists(output_folder):
         # Create the folder if it doesn't exist
         os.makedirs(output_folder, exist_ok=True)
-        print(f"Created the {output_folder} folder.")
+        # print(f"Created the {output_folder} folder.")
     else:
-        print(f"The {output_folder} folder already exists.")
+        # print(f"The {output_folder} folder already exists.")
+        pass
 
 
 def update_dataframe(df_or_list):
@@ -1331,12 +1332,18 @@ def show_info_box_on_click(
         visible=is_llm_method,
     )
 
+    # Set visibility on walkthrough entity dropdowns so they match PII method after example load
+    walkthrough_local_update = gr.update(
+        value=in_redact_entities, visible=show_local_entities
+    )
+    walkthrough_comprehend_update = gr.update(
+        value=in_redact_comprehend_entities, visible=show_comprehend_entities
+    )
+
     return (
         gr.File(value=in_doc_files),  # walkthrough_file_input
-        gr.Dropdown(value=in_redact_entities),  # walkthrough_in_redact_entities
-        gr.Dropdown(
-            value=in_redact_comprehend_entities
-        ),  # walkthrough_in_redact_comprehend_entities
+        walkthrough_local_update,  # walkthrough_in_redact_entities
+        walkthrough_comprehend_update,  # walkthrough_in_redact_comprehend_entities
         gr.Radio(
             value=text_extract_method_radio
         ),  # walkthrough_text_extract_method_radio

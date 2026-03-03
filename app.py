@@ -334,74 +334,6 @@ FULL_LLM_ENTITY_LIST.extend(custom_entities)
 
 sys.excepthook = silent_exception_handler
 
-# Custom javascript
-TRIGGER_DOCUMENT_REDACT_BUTTON = """
-function triggerChatButtonClick() {
-
-// Find the div with id "document-redact-btn"
-const documentRedactButton = document.getElementById("document-redact-btn");
-
-if (!documentRedactButton) {
-    console.error("Error: Could not find element with id 'document-redact-btn'");
-    return;
-}
-
-// Trigger the click event
-documentRedactButton.click();
-
-}"""
-
-TRIGGER_TABULAR_REDACT_BUTTON = """
-function triggerTabularRedactButtonClick() {
-    // Find the div with id "tabular-redact-btn"
-    const tabularRedactButton = document.getElementById("tabular-redact-btn");
-    if (!tabularRedactButton) {
-        console.error("Error: Could not find element with id 'tabular-redact-btn'");
-        return;
-    }
-    // Trigger the click event
-    tabularRedactButton.click();
-}"""
-
-# Triggers to programmatically click the duplicate detection and apply duplicate pages buttons
-TRIGGER_DUPLICATE_DETECTION_BUTTON = """
-function triggerDuplicateDetectionButtonClick() {
-    // Find the checkbox for redacting duplicate pages by its ID
-    const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
-    // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
-    
-    // Only trigger if checkbox exists and is checked
-    if (redactDuplicatePagesCheckbox) {
-        // Find the div with id "duplicate-detection-btn"
-        const duplicateDetectionButton = document.getElementById("duplicate-detection-btn");
-        if (!duplicateDetectionButton) {
-            console.error("Error: Could not find element with id 'duplicate-detection-btn'");
-            return;
-        }
-        // Trigger the click event
-        duplicateDetectionButton.click();
-    }
-}"""
-
-TRIGGER_APPLY_DUPLICATE_PAGES_BUTTON = """
-function triggerApplyDuplicatePagesButtonClick() {
-    // Find the checkbox for redacting duplicate pages by its ID
-    const redactDuplicatePagesCheckbox = document.getElementById("redact_duplicate_pages_checkbox");
-    // console.log("redactDuplicatePagesCheckbox", redactDuplicatePagesCheckbox);
-    
-    // Only trigger if checkbox exists and is checked
-    if (redactDuplicatePagesCheckbox) {
-        // Find the div with id "apply-duplicate-pages-btn"
-        const applyDuplicatePagesButton = document.getElementById("apply-duplicate-pages-btn");
-        if (!applyDuplicatePagesButton) {
-            console.error("Error: Could not find element with id 'apply-duplicate-pages-btn'");
-            return;
-        }
-        // Trigger the click event
-        applyDuplicatePagesButton.click();
-    }
-}"""
-
 ###
 # Load in FastAPI app
 ###
@@ -519,14 +451,14 @@ walkthrough_local_ocr_method_radio = gr.Radio(
     value=initial_walkthrough_local_ocr_value,
     choices=LOCAL_OCR_MODEL_OPTIONS,
     interactive=True,
-    visible=initial_local_ocr_visible,
+    visible=True,
 )
 
 walkthrough_handwrite_signature_checkbox = gr.CheckboxGroup(
     label="AWS Textract extraction settings",
     choices=HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS,
     value=DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX,
-    visible=initial_aws_textract_visible,
+    visible=True,
 )
 
 walkthrough_pii_identification_method_drop = gr.Radio(
@@ -541,6 +473,7 @@ walkthrough_deny_list_state = gr.Dropdown(
     label="Deny list (always redact these words)",
     interactive=True,
     multiselect=True,
+    visible=True,
 )
 
 walkthrough_allow_list_state = gr.Dropdown(
@@ -548,6 +481,7 @@ walkthrough_allow_list_state = gr.Dropdown(
     label="Allow list (always exclude these words from redaction)",
     interactive=True,
     multiselect=True,
+    visible=True,
 )
 
 walkthrough_fully_redacted_list_state = gr.Dropdown(
@@ -555,6 +489,7 @@ walkthrough_fully_redacted_list_state = gr.Dropdown(
     label="Fully redacted pages (fully redact these page numbers)",
     interactive=True,
     multiselect=True,
+    visible=True,
 )
 
 # State variable to sync the checkbox value across both locations
@@ -599,7 +534,7 @@ walkthrough_in_redact_llm_entities = gr.Dropdown(
     choices=FULL_LLM_ENTITY_LIST,
     multiselect=True,
     label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
-    visible=initial_is_llm_method,
+    visible=True,
 )
 
 walkthrough_custom_llm_instructions_textbox = gr.Textbox(
@@ -607,7 +542,7 @@ walkthrough_custom_llm_instructions_textbox = gr.Textbox(
     placeholder="Specify new labels to redact with a description. E.g. 'Redact information related to Mark Wilson with the label MARK_WILSON' or 'redact all company names with the label COMPANY_NAME'.",
     value="",
     lines=3,
-    visible=initial_is_llm_method,
+    visible=True,
 )
 
 ## Redaction examples
@@ -1989,9 +1924,21 @@ with blocks:
                         # Text extraction method radio (conditionally visible)
                         walkthrough_text_extract_method_radio.render()
                         # Local OCR method radio (shown only if Local OCR model is selected)
-                        walkthrough_local_ocr_method_radio.render()
-                        # AWS Textract extraction settings (shown only if AWS Textract is selected)
-                        walkthrough_handwrite_signature_checkbox.render()
+                        walkthrough_local_ocr_accordion = gr.Accordion(
+                            "Local OCR method",
+                            open=True,
+                            visible=initial_local_ocr_visible,
+                        )
+                        walkthrough_aws_textract_accordion = gr.Accordion(
+                            "AWS Textract settings",
+                            open=True,
+                            visible=initial_aws_textract_visible,
+                        )
+                        with walkthrough_local_ocr_accordion:
+                            walkthrough_local_ocr_method_radio.render()
+                        with walkthrough_aws_textract_accordion:
+                            walkthrough_handwrite_signature_checkbox.render()
+
                         with gr.Row():
                             step_2_back_btn = gr.Button("Back", variant="secondary")
 
@@ -2015,18 +1962,29 @@ with blocks:
 
                         walkthrough_in_redact_comprehend_entities.render()
 
-                        walkthrough_in_redact_llm_entities.render()
-
-                        walkthrough_custom_llm_instructions_textbox.render()
+                        walkthrough_llm_entities_accordion = gr.Accordion(
+                            "LLM PII identification model",
+                            open=True,
+                            visible=initial_is_llm_method,
+                        )
+                        with walkthrough_llm_entities_accordion:
+                            walkthrough_in_redact_llm_entities.render()
+                            walkthrough_custom_llm_instructions_textbox.render()
 
                         # Components for "Redact selected terms" option (conditionally visible)
                         # Note: Accordion removed to avoid block ID mismatches
                         with gr.Row(equal_height=True):
                             with gr.Column(scale=3):
-                                with gr.Row(equal_height=True):
-                                    walkthrough_deny_list_state.render()
-                                    walkthrough_allow_list_state.render()
-                                    walkthrough_fully_redacted_list_state.render()
+                                walkthrough_list_accordion = gr.Accordion(
+                                    "Allow, deny, and full page redaction list settings",
+                                    open=True,
+                                    visible=True,
+                                )
+                                with walkthrough_list_accordion:
+                                    with gr.Row(equal_height=True):
+                                        walkthrough_deny_list_state.render()
+                                        walkthrough_allow_list_state.render()
+                                        walkthrough_fully_redacted_list_state.render()
 
                             with gr.Column(scale=1):
                                 # Checkbox for automatically redacting duplicate pages
@@ -2217,13 +2175,16 @@ with blocks:
             )
 
             # Update local OCR method radio and AWS Textract settings visibility when text extraction method is selected
+            # queue=False: handler is trivial (visibility only); skip queue so no loading spinner / wait behind other jobs
             walkthrough_text_extract_method_radio.change(
                 fn=handle_text_extract_method_selection,
                 inputs=[walkthrough_text_extract_method_radio],
                 outputs=[
-                    walkthrough_local_ocr_method_radio,
-                    walkthrough_handwrite_signature_checkbox,
+                    walkthrough_local_ocr_accordion,
+                    walkthrough_aws_textract_accordion,
                 ],
+                queue=False,
+                postprocess=False,
             )
 
             # When data files are uploaded in walkthrough, automatically populate dropdowns
@@ -2238,16 +2199,19 @@ with blocks:
             # Update Step 3 components visibility when redaction method is selected
             walkthrough_redaction_method_dropdown.change(
                 fn=handle_redaction_method_selection,
-                inputs=[walkthrough_redaction_method_dropdown],
+                inputs=[
+                    walkthrough_redaction_method_dropdown,
+                    walkthrough_pii_identification_method_drop,
+                ],
                 outputs=[
                     walkthrough_pii_identification_method_drop,
                     walkthrough_in_redact_entities,
                     walkthrough_in_redact_comprehend_entities,
+                    walkthrough_llm_entities_accordion,
                     walkthrough_in_redact_llm_entities,
-                    walkthrough_custom_llm_instructions_textbox,
-                    walkthrough_deny_list_state,
-                    walkthrough_allow_list_state,
-                    walkthrough_fully_redacted_list_state,
+                    walkthrough_list_accordion,
+                    walkthrough_redact_duplicate_pages_checkbox,
+                    walkthrough_max_fuzzy_spelling_mistakes_num,
                 ],
             )
 
@@ -2260,6 +2224,7 @@ with blocks:
                     walkthrough_in_redact_comprehend_entities,
                     walkthrough_in_redact_llm_entities,
                     walkthrough_custom_llm_instructions_textbox,
+                    walkthrough_llm_entities_accordion,
                 ],
             )
 
@@ -2346,20 +2311,7 @@ with blocks:
                 lambda: gr.Walkthrough(selected=3), outputs=walkthrough
             )
 
-            step_4_next_document_redact_btn.click(
-                fn=lambda: None, js=TRIGGER_DOCUMENT_REDACT_BUTTON
-            ).then(
-                change_tab_to_tabular_or_document_redactions,
-                inputs=walkthrough_is_data_file,
-                outputs=tabs,
-            )
-            step_4_next_tabular_redact_btn.click(
-                fn=lambda: None, js=TRIGGER_TABULAR_REDACT_BUTTON
-            ).then(
-                change_tab_to_tabular_or_document_redactions,
-                inputs=walkthrough_is_data_file,
-                outputs=tabs,
-            )
+            ## Step 4 next button actions are further down the file (step_4_next_document_redact_btn.click and step_4_next_tabular_redact_btn.click)
 
         ###
         # REDACTION PDF/IMAGES TABLE
@@ -3361,6 +3313,15 @@ with blocks:
             ###
             # TABULAR DUPLICATE DETECTION
             ###
+            # List of duplicate (Page2) page numbers from run_duplicate_analysis; used by apply_whole_page_redactions_from_list in the upload flow
+            duplicate_pages_list_state = gr.Dropdown(
+                value=[],
+                multiselect=True,
+                allow_custom_value=True,
+                label="Duplicate pages list",
+                visible=False,
+            )
+
             with gr.Accordion(label="Find duplicate cells in tabular data", open=False):
                 gr.Markdown(
                     """Find duplicate cells or rows in CSV, Excel, or Parquet files. This tool analyses text content across all columns to identify similar or identical entries that may be duplicates. You can review the results and choose to remove duplicate rows from your files."""
@@ -4037,18 +3998,18 @@ with blocks:
 
     redaction_method_radio.change(
         fn=handle_main_redaction_method_selection,
-        inputs=[redaction_method_radio],
+        inputs=[redaction_method_radio, pii_identification_method_drop],
         outputs=[
             pii_identification_method_drop,
             in_redact_entities,
             in_redact_comprehend_entities,
             in_redact_llm_entities,
             custom_llm_instructions_textbox,
-            in_deny_list_state,
-            in_allow_list_state,
-            in_fully_redacted_list_state,
+            walkthrough_list_accordion,
             entity_types_to_redact_accordion,
             terms_accordion,
+            redact_duplicate_pages_checkbox,
+            max_fuzzy_spelling_mistakes_num,
         ],
     )
 
@@ -4084,6 +4045,7 @@ with blocks:
             outputs=[cost_code_dataframe],
         )
 
+    # Uploading a file writes to state variables
     in_doc_files.upload(
         fn=get_document_file_names,
         inputs=[in_doc_files],
@@ -4221,7 +4183,188 @@ with blocks:
         outputs=[relevant_ocr_output_with_words_found_checkbox],
     )
 
-    # Run redaction function
+    # Run redaction function from walkthrough button or main redaction tab button
+
+    ## From walkthrough tab button
+    step_4_next_document_redact_btn.click(
+        change_tab_to_tabular_or_document_redactions,
+        inputs=walkthrough_is_data_file,
+        outputs=tabs,
+    ).then(
+        fn=reset_state_vars,
+        outputs=[
+            all_image_annotations_state,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            comprehend_query_number,
+            textract_metadata_textbox,
+            annotator,
+            output_file_list_state,
+            log_files_output_list_state,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            pdf_doc_state,
+            duplication_file_path_outputs_list_state,
+            redaction_output_summary_textbox,
+            is_a_textract_api_call,
+            textract_query_number,
+            all_page_line_level_ocr_results_with_words,
+            input_review_files,
+            latest_file_completed_num,
+        ],
+    ).success(
+        fn=enforce_cost_codes,
+        inputs=[
+            enforce_cost_code_textbox,
+            cost_code_choice_drop,
+            cost_code_dataframe_base,
+        ],
+    ).success(
+        fn=choose_and_run_redactor,
+        inputs=[
+            in_doc_files,
+            prepared_pdf_state,
+            images_pdf_state,
+            in_redact_entities,
+            in_redact_comprehend_entities,
+            in_redact_llm_entities,
+            text_extract_method_radio,
+            in_allow_list_state,
+            in_deny_list_state,
+            in_fully_redacted_list_state,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            output_file_list_state,
+            log_files_output_list_state,
+            first_loop_state,
+            page_min,
+            page_max,
+            actual_time_taken_number,
+            handwrite_signature_checkbox,
+            textract_metadata_textbox,
+            all_image_annotations_state,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            pdf_doc_state,
+            current_loop_page_number,
+            page_break_return,
+            pii_identification_method_drop,
+            comprehend_query_number,
+            max_fuzzy_spelling_mistakes_num,
+            match_fuzzy_whole_phrase_bool,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            annotate_max_pages,
+            review_file_df,
+            output_folder_textbox,
+            document_cropboxes,
+            page_sizes,
+            textract_output_found_checkbox,
+            only_extract_text_radio,
+            duplication_file_path_outputs_list_state,
+            latest_review_file_path,
+            input_folder_textbox,
+            textract_query_number,
+            latest_ocr_file_path,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            local_ocr_method_radio,
+            chosen_language_drop,
+            input_review_files,
+            custom_llm_instructions_textbox,
+            inference_server_vlm_model_textbox,
+            efficient_ocr_checkbox,
+            efficient_ocr_min_words_number,
+        ],
+        outputs=[
+            redaction_output_summary_textbox,
+            output_file,
+            output_file_list_state,
+            latest_file_completed_num,
+            log_files_output,
+            log_files_output_list_state,
+            actual_time_taken_number,
+            textract_metadata_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            current_loop_page_number,
+            page_break_return,
+            all_page_line_level_ocr_results_df_base,
+            all_decision_process_table_state,
+            comprehend_query_number,
+            input_pdf_for_review,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            prepared_pdf_state,
+            images_pdf_state,
+            review_file_df,
+            page_sizes,
+            duplication_file_path_outputs_list_state,
+            in_duplicate_pages,
+            in_summarisation_ocr_files,
+            latest_review_file_path,
+            textract_query_number,
+            latest_ocr_file_path,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            backup_review_state,
+            task_textbox,
+            input_review_files,
+            vlm_model_name_textbox,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
+            llm_model_name_textbox,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
+            total_pdf_page_count,
+        ],
+        api_name="redact_doc",
+        show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_doc_files,
+        ],
+        outputs=None,
+    ).success(
+        fn=update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            page_min,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
+
+    # Run redaction function from document redaction tab button
     document_redact_btn.click(
         fn=reset_state_vars,
         outputs=[
@@ -4571,10 +4714,189 @@ with blocks:
         inputs=[redact_duplicate_pages_checkbox],
         outputs=None,
     ).failure(
-        fn=lambda: None, js=TRIGGER_DUPLICATE_DETECTION_BUTTON
+        fn=lambda: None
     ).then(
         fn=restore_sys_tracebacklimit,
         outputs=None,
+    ).then(
+        fn=run_duplicate_analysis,
+        inputs=[
+            all_page_line_level_ocr_results_df_base,
+            duplicate_threshold_input,
+            min_word_count_input,
+            min_consecutive_pages_input,
+            greedy_match_input,
+            all_page_line_level_ocr_results_df_base,
+            input_review_files,
+            combine_page_text_for_duplicates_bool,
+            output_folder_textbox,
+            doc_file_name_with_extension_textbox,
+        ],
+        outputs=[
+            results_df_preview,
+            duplicate_files_out,
+            full_duplicate_data_by_file,
+            actual_time_taken_number,
+            task_textbox,
+            all_page_line_level_ocr_results_df_base,
+            input_review_files,
+            duplicate_pages_list_state,
+        ],
+        show_progress_on=[results_df_preview, redaction_output_summary_textbox],
+    ).success(
+        fn=export_outputs_to_s3,
+        # duplicate_files_out returns a single file path; export helper will normalise it
+        inputs=[
+            duplicate_files_out,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_duplicate_pages,
+        ],
+        outputs=None,
+    ).success(
+        fn=lambda: "deduplicate",
+        outputs=[task_textbox],
+    ).success(
+        fn=lambda *args: usage_callback.flag(
+            list(args),
+            save_to_csv=SAVE_LOGS_TO_CSV,
+            save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+            dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+            dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+            replacement_headers=CSV_USAGE_LOG_HEADERS,
+        ),
+        inputs=(
+            [
+                session_hash_textbox,
+                doc_file_name_no_extension_textbox,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                actual_time_taken_number,
+                total_pdf_page_count,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
+            ]
+            if DISPLAY_FILE_NAMES_IN_LOGS
+            else [
+                session_hash_textbox,
+                placeholder_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                actual_time_taken_number,
+                total_pdf_page_count,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
+            ]
+        ),
+        outputs=[flag_value_placeholder],
+        preprocess=False,
+    ).success(
+        fn=upload_log_file_to_s3,
+        inputs=[usage_logs_state, usage_s3_logs_loc_state],
+        outputs=[s3_logs_output_textbox],
+    ).success(
+        fn=create_annotation_objects_from_duplicates,
+        inputs=[
+            results_df_preview,
+            all_page_line_level_ocr_results_df_base,
+            page_sizes,
+            combine_page_text_for_duplicates_bool,
+        ],
+        outputs=[new_duplicate_search_annotation_object],
+        show_progress_on=[
+            new_duplicate_search_annotation_object,
+            redaction_output_summary_textbox,
+        ],
+    ).success(
+        fn=apply_whole_page_redactions_from_list,
+        inputs=[
+            duplicate_pages_list_state,
+            doc_file_name_with_extension_textbox,
+            review_file_df,
+            duplicate_files_out,
+            pdf_doc_state,
+            page_sizes,
+            all_image_annotations_state,
+            combine_page_text_for_duplicates_bool,
+            new_duplicate_search_annotation_object,
+        ],
+        outputs=[review_file_df, all_image_annotations_state],
+    ).success(
+        update_annotator_page_from_review_df,
+        inputs=[
+            review_file_df,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            annotator,
+            selected_entity_dataframe_row,
+            input_folder_textbox,
+            doc_full_file_name_textbox,
+        ],
+        outputs=[
+            annotator,
+            all_image_annotations_state,
+            annotate_current_page,
+            page_sizes,
+            review_file_df,
+            annotate_previous_page,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
     )
 
     # If the line level ocr results are changed by load in by user or by a new redaction task, replace the ocr results displayed in the table
@@ -7039,6 +7361,67 @@ with blocks:
         ],
     )
 
+    # Redact tabular data
+
+    ## From walkthrough tab button
+    step_4_next_tabular_redact_btn.click(
+        reset_data_vars,
+        outputs=[
+            actual_time_taken_number,
+            log_files_output_list_state,
+            comprehend_query_number,
+        ],
+    ).success(
+        fn=anonymise_files_with_open_text,
+        inputs=[
+            in_data_files,
+            in_text,
+            anon_strategy,
+            in_colnames,
+            in_redact_entities,
+            in_allow_list_state,
+            text_tabular_files_done,
+            text_output_summary,
+            text_output_file_list_state,
+            log_files_output_list_state,
+            in_excel_sheets,
+            first_loop_state,
+            output_folder_textbox,
+            in_deny_list_state,
+            max_fuzzy_spelling_mistakes_num,
+            pii_identification_method_drop_tabular,
+            in_redact_comprehend_entities,
+            comprehend_query_number,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            actual_time_taken_number,
+            do_initial_clean,
+            chosen_language_drop,
+        ],
+        outputs=[
+            text_output_summary,
+            text_output_file,
+            text_output_file_list_state,
+            text_tabular_files_done,
+            log_files_output,
+            log_files_output_list_state,
+            actual_time_taken_number,
+            comprehend_query_number,
+        ],
+        api_name="redact_data",
+        show_progress_on=[text_output_summary],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            text_output_file_list_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
+    )
+
+    ## From tabular data redaction tab button
     tabular_data_redact_btn.click(
         reset_data_vars,
         outputs=[
@@ -7176,6 +7559,7 @@ with blocks:
             input_review_files,
             combine_page_text_for_duplicates_bool,
             output_folder_textbox,
+            doc_file_name_with_extension_textbox,
         ],
         outputs=[
             results_df_preview,
@@ -7185,6 +7569,7 @@ with blocks:
             task_textbox,
             all_page_line_level_ocr_results_df_base,
             input_review_files,
+            duplicate_pages_list_state,
         ],
         show_progress_on=[results_df_preview, redaction_output_summary_textbox],
     ).success(
@@ -7262,15 +7647,6 @@ with blocks:
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
-    ).success(
-        fn=check_duplicate_pages_checkbox,
-        inputs=[redact_duplicate_pages_checkbox],
-        outputs=None,
-    ).failure(
-        fn=lambda: None, js=TRIGGER_APPLY_DUPLICATE_PAGES_BUTTON
-    ).then(
-        fn=restore_sys_tracebacklimit,
-        outputs=None,
     )
 
     # full_duplicated_data_df,
@@ -7287,12 +7663,18 @@ with blocks:
     # When the user clicks the "Exclude" button
     exclude_match_btn.click(
         fn=exclude_match,
-        inputs=[results_df_preview, selected_duplicate_data_row_index],
+        inputs=[
+            results_df_preview,
+            selected_duplicate_data_row_index,
+            output_folder_textbox,
+            doc_file_name_with_extension_textbox,
+        ],
         outputs=[
             results_df_preview,
             duplicate_files_out,
             page1_text_preview,
             page2_text_preview,
+            duplicate_pages_list_state,
         ],
     )
 
@@ -7312,7 +7694,7 @@ with blocks:
     ).success(
         fn=apply_whole_page_redactions_from_list,
         inputs=[
-            in_fully_redacted_list_state,
+            duplicate_pages_list_state,
             doc_file_name_with_extension_textbox,
             review_file_df,
             duplicate_files_out,

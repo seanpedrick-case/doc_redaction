@@ -6416,7 +6416,9 @@ class CustomImageAnalyzerEngine:
                             inference_server_rec_texts = []
                             inference_server_rec_scores = []
 
-                        if not (inference_server_rec_texts and inference_server_rec_scores):
+                        if not (
+                            inference_server_rec_texts and inference_server_rec_scores
+                        ):
                             # Inference server returned empty or no results - keep Paddle
                             print(
                                 f"  Line {i + 1}/{num_lines}: Inference server returned no results "
@@ -6429,7 +6431,10 @@ class CustomImageAnalyzerEngine:
 
                             ### If text starts with "Cannot read", then skip this line
                             if inference_server_text.startswith('""'):
-                                print(f"Inference server text starts with '""', skipping line {i + 1} of {num_lines}")
+                                print(
+                                    "Inference server text starts with '"
+                                    "', skipping line {i + 1} of {num_lines}"
+                                )
                                 continue
 
                             inference_server_word_count = len(
@@ -7124,9 +7129,8 @@ class CustomImageAnalyzerEngine:
         ]
 
         # Determine default model based on OCR engine if model field is not present
-        if (
-            "model" in ocr_result
-            and len(ocr_result["model"]) == len(ocr_result["text"])
+        if "model" in ocr_result and len(ocr_result["model"]) == len(
+            ocr_result["text"]
         ):
             # Model field exists and has correct length - use it (preserves VLM/inference-server replacements)
             def get_model_name(idx):

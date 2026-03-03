@@ -1971,7 +1971,6 @@ def choose_and_run_redactor(
                     number_of_pages,
                     page_max,
                 )
-                # print("Saving PDF file for review:", out_review_pdf_file_path)
 
                 if out_review_pdf_file_path:
                     save_pdf_with_or_without_compression(
@@ -7631,9 +7630,6 @@ def redact_text_pdf(
                                     [page_sizes_df, pd.DataFrame([new_row])],
                                     ignore_index=True,
                                 )
-                    print(
-                        f"Created image for page {reported_page_number} for review: {created_image_path}"
-                    )
                 else:
                     print(
                         f"Warning: Failed to create image for page {reported_page_number} for review"
@@ -8279,7 +8275,7 @@ def visualise_ocr_words_bounding_boxes(
             # if is_replaced:
             #     box_color = (128, 128, 128)  # Grey for model replacements (bounding box only)
             #      # Draw bounding box
-            #     
+            #
             # else:
             box_color = (0, 0, 255)  # Default to red
             for min_conf, max_conf, conf_color, _ in confidence_ranges:
@@ -8298,7 +8294,9 @@ def visualise_ocr_words_bounding_boxes(
     # Add legend
     if add_legend:
         add_confidence_legend(
-            image_cv, confidence_ranges, show_model_replacement=show_model_replacement_legend
+            image_cv,
+            confidence_ranges,
+            show_model_replacement=show_model_replacement_legend,
         )
 
     # Create second page with text overlay
