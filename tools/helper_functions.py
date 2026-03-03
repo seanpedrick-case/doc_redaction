@@ -1,9 +1,12 @@
+import logging
 import os
 import platform
 import random
 import re
 import string
+import sys
 import unicodedata
+from contextlib import asynccontextmanager
 from datetime import datetime
 from math import ceil
 from pathlib import Path
@@ -19,17 +22,25 @@ from botocore.exceptions import (
     NoCredentialsError,
     PartialCredentialsError,
 )
+from fastapi import FastAPI
 from gradio_image_annotation import image_annotator
 
 from tools.config import (
+    AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
     AWS_USER_POOL_ID,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION,
+    CHOSEN_LOCAL_OCR_MODEL,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
     DEFAULT_LANGUAGE,
+    INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     LANGUAGE_CHOICES,
     LANGUAGE_MAP,
+    LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     NO_REDACTION_PII_OPTION,
     OUTPUT_FOLDER,
     S3_OUTPUTS_FOLDER,
@@ -273,9 +284,10 @@ def ensure_folder_exists(output_folder: str):
     if not os.path.exists(output_folder):
         # Create the folder if it doesn't exist
         os.makedirs(output_folder, exist_ok=True)
-        print(f"Created the {output_folder} folder.")
+        # print(f"Created the {output_folder} folder.")
     else:
-        print(f"The {output_folder} folder already exists.")
+        # print(f"The {output_folder} folder already exists.")
+        pass
 
 
 def update_dataframe(df_or_list):
@@ -1018,6 +1030,22 @@ def reset_ocr_with_words_base_dataframe(
     df: pd.DataFrame, page_entity_dropdown_redaction_value: str
 ):
 
+    if "page" not in df.columns:
+        print("df does not contain page column")
+        df_out = pd.DataFrame(
+            columns=[
+                "page",
+                "line",
+                "word_text",
+                "word_x0",
+                "word_y0",
+                "word_x1",
+                "word_y1",
+                "index",
+            ]
+        )
+        return df_out, df_out
+
     df["index"] = df.index
     output_df = df.copy()
 
@@ -1134,3 +1162,294 @@ def get_system_font_path():
                 return font_path
 
     return None
+
+
+# Create a custom error class
+class ProcessStop(UserWarning):
+    pass
+
+
+# How to display it
+def silent_exception_handler(etype, value, tb):
+    print(f"etype: {etype}, value: {value}, tb: {tb}")
+    if issubclass(etype, ProcessStop):
+        print(f"INFO: {value}")  # Only print the message, no traceback
+    else:
+        sys.__excepthook__(etype, value, tb)  # Use default for real bugs
+
+
+# Custom logging filter to remove logs from healthiness/readiness endpoints so they don't fill up application log flow
+class EndpointFilter(logging.Filter):
+    def __init__(self, path: str, *args, **kwargs):
+        self._path = path
+        super().__init__(*args, **kwargs)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage().find(self._path) == -1
+
+
+# 2. Define the lifespan context manager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- STARTUP LOGIC ---
+    # Filter out /health logging to declutter ECS logs
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.addFilter(EndpointFilter(path="/health"))
+
+    # Yield control back to the application
+    yield
+
+    pass
+
+
+def check_duplicate_pages_checkbox(redact_duplicate_pages_checkbox_value: bool):
+    if not redact_duplicate_pages_checkbox_value:
+        # Silently raise an error to avoid showing a popup
+        return
+    if redact_duplicate_pages_checkbox_value:
+        print("Redact duplicate pages checkbox is enabled, identifying duplicates")
+        sys.tracebacklimit = 0  # Suppress traceback
+        raise ProcessStop(
+            "Redact duplicate pages checkbox is enabled, identifying duplicates."
+        )
+
+
+def restore_sys_tracebacklimit():
+    sys.tracebacklimit = 1000  # Restore traceback limit
+    return
+
+
+# Tab switch functions
+
+
+def change_tab_to_tabular_or_document_redactions(is_data_file):
+    if is_data_file:
+        return gr.Tabs(selected=3)
+    else:
+        return gr.Tabs(selected=1)
+
+
+def change_tab_to_review_redactions():
+    return gr.Tabs(selected=2)
+
+
+### Examples functions
+def show_info_box_on_click(
+    in_doc_files,
+    text_extract_method_radio,
+    pii_identification_method_drop,
+    handwrite_signature_checkbox,
+    in_redact_entities,
+    in_redact_comprehend_entities,
+    prepared_pdf_state,
+    doc_full_file_name_textbox,
+    in_deny_list,
+    in_deny_list_state,
+    in_fully_redacted_list,
+    in_fully_redacted_list_state,
+    total_pdf_page_count,
+):
+    gr.Info(
+        "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
+    )
+
+    # Convert deny_list_state, allow_list_state, and fully_redacted_list_state to lists if they are DataFrames
+    # Handle deny_list_state
+    deny_list_walkthrough = []
+    if isinstance(in_deny_list_state, pd.DataFrame):
+        # Explicitly convert empty DataFrame to empty list
+        if in_deny_list_state.empty:
+            deny_list_walkthrough = []
+        else:
+            deny_list_walkthrough = (
+                in_deny_list_state.iloc[:, 0].dropna().astype(str).tolist()
+            )
+    elif isinstance(in_deny_list_state, list):
+        deny_list_walkthrough = (
+            [str(item) for item in in_deny_list_state if item]
+            if in_deny_list_state
+            else []
+        )
+    else:
+        # Default to empty list for any other type
+        deny_list_walkthrough = []
+
+    # Handle fully_redacted_list_state
+    fully_redacted_list_walkthrough = []
+    if isinstance(in_fully_redacted_list_state, pd.DataFrame):
+        # Explicitly convert empty DataFrame to empty list
+        if in_fully_redacted_list_state.empty:
+            fully_redacted_list_walkthrough = []
+        else:
+            fully_redacted_list_walkthrough = (
+                in_fully_redacted_list_state.iloc[:, 0].dropna().astype(str).tolist()
+            )
+    elif isinstance(in_fully_redacted_list_state, list):
+        fully_redacted_list_walkthrough = (
+            [str(item) for item in in_fully_redacted_list_state if item]
+            if in_fully_redacted_list_state
+            else []
+        )
+    else:
+        # Default to empty list for any other type
+        fully_redacted_list_walkthrough = []
+
+    # Allow list is not in examples, so always set to empty list
+    allow_list_walkthrough = []
+
+    # Use default local OCR method - examples don't set this directly
+    local_ocr_method = CHOSEN_LOCAL_OCR_MODEL
+
+    # Update visibility of main PII entity components based on selected PII method
+    # This ensures visibility is correct even when clicking examples with the same PII method
+    # Determine visibility based on PII method (same logic as handle_main_pii_method_selection)
+    is_no_redaction = pii_identification_method_drop == NO_REDACTION_PII_OPTION
+    show_local_entities = (
+        not is_no_redaction and pii_identification_method_drop == LOCAL_PII_OPTION
+    )
+    show_comprehend_entities = (
+        not is_no_redaction and pii_identification_method_drop == AWS_PII_OPTION
+    )
+    is_llm_method = not is_no_redaction and (
+        pii_identification_method_drop == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+        or pii_identification_method_drop == INFERENCE_SERVER_PII_OPTION
+        or pii_identification_method_drop == AWS_LLM_PII_OPTION
+    )
+
+    # Create updates with both value and visibility for main components
+    main_local_entities_update = gr.update(
+        value=in_redact_entities,
+        visible=show_local_entities,
+    )
+    main_comprehend_entities_update = gr.update(
+        value=in_redact_comprehend_entities,
+        visible=show_comprehend_entities,
+    )
+    main_llm_entities_update = gr.update(
+        visible=is_llm_method,
+    )
+    main_llm_instructions_update = gr.update(
+        visible=is_llm_method,
+    )
+
+    # Set visibility on walkthrough entity dropdowns so they match PII method after example load
+    walkthrough_local_update = gr.update(
+        value=in_redact_entities, visible=show_local_entities
+    )
+    walkthrough_comprehend_update = gr.update(
+        value=in_redact_comprehend_entities, visible=show_comprehend_entities
+    )
+
+    return (
+        gr.File(value=in_doc_files),  # walkthrough_file_input
+        walkthrough_local_update,  # walkthrough_in_redact_entities
+        walkthrough_comprehend_update,  # walkthrough_in_redact_comprehend_entities
+        gr.Radio(
+            value=text_extract_method_radio
+        ),  # walkthrough_text_extract_method_radio
+        gr.Radio(value=local_ocr_method),  # walkthrough_local_ocr_method_radio
+        gr.CheckboxGroup(
+            value=handwrite_signature_checkbox
+        ),  # walkthrough_handwrite_signature_checkbox
+        gr.Radio(
+            value=pii_identification_method_drop
+        ),  # walkthrough_pii_identification_method_drop
+        gr.Dropdown(value=allow_list_walkthrough),  # walkthrough_allow_list_state
+        gr.Dropdown(value=deny_list_walkthrough),  # walkthrough_deny_list_state
+        gr.Dropdown(
+            value=fully_redacted_list_walkthrough
+        ),  # walkthrough_fully_redacted_list_state
+        main_local_entities_update,  # in_redact_entities (main component)
+        main_comprehend_entities_update,  # in_redact_comprehend_entities (main component)
+        main_llm_entities_update,  # in_redact_llm_entities (main component)
+        main_llm_instructions_update,  # custom_llm_instructions_textbox (main component)
+    )
+
+
+def show_info_box_on_click_ocr_examples(
+    in_doc_files,
+    text_extract_method_radio,
+    pii_identification_method_drop,
+    handwrite_signature_checkbox,
+    prepared_pdf_state,
+    doc_full_file_name_textbox,
+    total_pdf_page_count,
+    page_min,
+    page_max,
+    local_ocr_method_radio,
+    in_redact_entities,
+    in_redact_llm_entities,
+    custom_llm_instructions_textbox,
+):
+    gr.Info(
+        "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
+    )
+
+    return (
+        gr.File(value=in_doc_files),  # walkthrough_file_input
+        gr.Dropdown(value=in_redact_entities),  # walkthrough_in_redact_entities
+        gr.Radio(
+            value=text_extract_method_radio
+        ),  # walkthrough_text_extract_method_radio
+        gr.Radio(value=local_ocr_method_radio),  # walkthrough_local_ocr_method_radio
+        gr.CheckboxGroup(
+            value=handwrite_signature_checkbox
+        ),  # walkthrough_handwrite_signature_checkbox
+        gr.Radio(
+            value=pii_identification_method_drop
+        ),  # walkthrough_pii_identification_method_drop
+        gr.Dropdown(value=in_redact_llm_entities),  # walkthrough_in_redact_llm_entities
+        gr.Textbox(
+            value=custom_llm_instructions_textbox
+        ),  # walkthrough_custom_llm_instructions_textbox
+        gr.Dropdown(
+            value=in_redact_llm_entities
+        ),  # in_redact_llm_entities (main component)
+        gr.Textbox(
+            value=custom_llm_instructions_textbox
+        ),  # custom_llm_instructions_textbox (main component)
+    )
+
+
+def show_duplicate_info_box_on_click(
+    in_duplicate_pages,
+    duplicate_threshold_input,
+    min_word_count_input,
+    combine_page_text_for_duplicates_bool,
+):
+    gr.Info(
+        "Example data loaded. Now click on 'Identify duplicate pages/subdocuments' below to run the example duplicate detection."
+    )
+
+
+def show_tabular_info_box_on_click(
+    in_data_files,
+    in_colnames,
+    pii_identification_method_drop_tabular,
+    anon_strategy,
+    in_tabular_duplicate_files,
+    tabular_text_columns,
+    tabular_min_word_count,
+):
+    gr.Info(
+        "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' below to run the example."
+    )
+
+    return (
+        gr.File(value=in_data_files),  # walkthrough_file_input
+        gr.Radio(
+            value=pii_identification_method_drop_tabular
+        ),  # walkthrough_pii_identification_method_drop_tabular
+        gr.Radio(value=anon_strategy),  # walkthrough_anon_strategy
+    )
+
+
+# Dynamic visibility handlers for main redaction tab (run regardless of SHOW_COSTS)
+# Automatically set local_ocr_method_radio to "bedrock-vlm" when AWS Bedrock VLM is selected
+def auto_set_local_ocr_for_bedrock_vlm(text_extract_method):
+    """Automatically set local OCR method to bedrock-vlm when AWS Bedrock VLM is selected."""
+    if text_extract_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+        # Only set if "bedrock-vlm" is a valid option
+        if "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS:
+            return gr.update(value="bedrock-vlm")
+    return gr.update()

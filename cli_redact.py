@@ -1553,6 +1553,7 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                         task_textbox,
                         _,
                         _,
+                        _,
                     ) = run_duplicate_analysis(
                         files=args.input_file,
                         threshold=args.similarity_threshold,

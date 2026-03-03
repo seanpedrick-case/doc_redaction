@@ -31,8 +31,8 @@ presidio_anonymizer==2.2.360
 presidio-image-redactor==0.0.57
 
 # --- Gradio and apps ---
-gradio==5.49.1
-https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.3.3/gradio_image_annotation-0.3.3-py3-none-any.whl  # Custom annotator version with rotation, zoom, labels, and box IDs
+gradio==6.6.0
+https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.0/gradio_image_annotation-0.5.0-py3-none-any.whl  # Custom annotator version with rotation, zoom, labels, and box IDs
 spaces==0.47.0
 
 # --- AWS Lambda runtime ---
