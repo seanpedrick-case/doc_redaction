@@ -402,14 +402,19 @@ S3_OUTPUTS_BUCKET = get_or_create_env_var(
 
 # Allow for files to be saved in a temporary folder for increased security in some instances
 if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
-    # Create a temporary directory
-    with tempfile.TemporaryDirectory() as temp_dir:
-        print(f"Temporary directory created at: {temp_dir}")
+    # Use mkdtemp so the directory persists for the lifetime of the process.
+    # TemporaryDirectory() as a context manager deletes the directory immediately on exit.
+    import atexit
+    import shutil
 
-        if OUTPUT_FOLDER == "TEMP":
-            OUTPUT_FOLDER = temp_dir + "/"
-        if INPUT_FOLDER == "TEMP":
-            INPUT_FOLDER = temp_dir + "/"
+    temp_dir = tempfile.mkdtemp()
+    print(f"Temporary directory created at: {temp_dir}")
+    atexit.register(shutil.rmtree, temp_dir, ignore_errors=True)
+
+    if OUTPUT_FOLDER == "TEMP":
+        OUTPUT_FOLDER = temp_dir + "/"
+    if INPUT_FOLDER == "TEMP":
+        INPUT_FOLDER = temp_dir + "/"
 else:
     # Ensure folders are within app directory (skip validation for TEMP as it's handled above)
     OUTPUT_FOLDER = ensure_folder_within_app_directory(OUTPUT_FOLDER)

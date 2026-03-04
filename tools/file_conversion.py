@@ -1147,11 +1147,20 @@ def prepare_image_or_pdf(
 
     progress(0.1, desc="Preparing file")
 
+    def _file_item_to_path(item):
+        """Normalize Gradio file input (str, dict with 'name'/'path', or object with .name/.path) to path string."""
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            return item.get("name") or item.get("path") or ""
+        return getattr(item, "name", None) or getattr(item, "path", None) or ""
+
     if isinstance(file_paths, str):
         file_paths_list = [file_paths]
         file_paths_loop = file_paths_list
     else:
-        file_paths_list = file_paths
+        file_paths_list = [_file_item_to_path(f) for f in file_paths if f is not None]
+        file_paths_list = [p for p in file_paths_list if p and str(p).strip()]
         file_paths_loop = sorted(
             file_paths_list,
             key=lambda x: (
@@ -1165,10 +1174,7 @@ def prepare_image_or_pdf(
         converted_file_path = list()
         image_file_path = list()
 
-        if isinstance(file, str):
-            file_path = file
-        else:
-            file_path = file.name
+        file_path = file if isinstance(file, str) else _file_item_to_path(file)
         file_path_without_ext = get_file_name_without_type(file_path)
         file_name_with_ext = os.path.basename(file_path)
 
