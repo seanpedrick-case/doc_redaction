@@ -152,7 +152,6 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
     review_dataframe = review_df
 
     try:
-        # print("converting annotation json in get_filtered_recogniser...")
 
         review_dataframe = convert_annotation_json_to_review_df(
             page_image_annotator_object, review_df, page_sizes
@@ -738,8 +737,6 @@ def _merge_horizontally_adjacent_boxes(
 
     merged_df = df_sorted.groupby("merge_group").agg(agg_funcs).reset_index(drop=True)
 
-    # print(f"Merged {len(df)} annotations into {len(merged_df)}.")
-
     return merged_df
 
 
@@ -910,11 +907,9 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             )
 
             progress(0.3, desc="Checking for adjacent annotations to merge...")
-            # print("Checking for adjacent annotations to merge...")
             new_annotations_df = _merge_horizontally_adjacent_boxes(new_annotations_df)
 
             progress(0.4, desc="Creating new redaction IDs...")
-            # print("Creating new redaction IDs...")
             existing_ids = (
                 set(existing_annotations_df["id"].dropna())
                 if "id" in existing_annotations_df.columns
@@ -1335,7 +1330,7 @@ def update_annotator_object_and_filter_df(
             show_remove_button=False,
             handles_cursor=True,
             interactive=True,
-            use_default_label=True,
+            use_default_label=False,
         )
         blank_df_out_gr = gr.Dataframe(
             pd.DataFrame(columns=["page", "label", "text", "id"])
@@ -1381,7 +1376,6 @@ def update_annotator_object_and_filter_df(
             print("Warning: Page sizes DataFrame became empty after processing.")
 
     # --- Handle Image Path Replacement for the Current Page ---
-
     if len(all_image_annotations) > page_num_reported_zero_indexed:
 
         page_object_to_update = all_image_annotations[page_num_reported_zero_indexed]
@@ -1590,6 +1584,7 @@ def update_annotator_object_and_filter_df(
             show_remove_button=False,
             handles_cursor=True,
             interactive=True,  # Keep interactive if data is present
+            use_default_label=False,
         )
 
     page_entities_drop_redaction_list = list()
@@ -1629,15 +1624,17 @@ def update_all_page_annotation_object_based_on_previous_page(
 ):
     """
     Overwrite image annotations on the page we are moving from with modifications.
+
+    Converts annotator output coordinates to relative (0-1) before storing, so that
+    manually added boxes (which the annotator returns in display/canvas pixel space)
+    are stored consistently with existing boxes. Without this, new boxes would be
+    misplaced on the next display (shifted and scaled incorrectly).
     """
 
     if current_page > len(page_sizes):
         raise Warning("Selected page is higher than last page number")
     elif current_page <= 0:
         raise Warning("Selected page is lower than first page")
-
-    # print("all_image_annotations:", all_image_annotations)
-    # print("page_image_annotator_object:", page_image_annotator_object)
 
     previous_page_zero_index = previous_page - 1
 
@@ -1655,11 +1652,46 @@ def update_all_page_annotation_object_based_on_previous_page(
     )
 
     if clear_all is False:
+        # Convert annotator boxes to relative (0-1) coordinates before storing.
+        if page_sizes and page_image_annotator_object.get("boxes"):
+            try:
+                page_sizes_df = pd.DataFrame(page_sizes)
+                ann_df = convert_annotation_data_to_dataframe(
+                    [page_image_annotator_object]
+                )
+                ann_df["page"] = previous_page
+                ann_df = divide_coordinates_by_page_sizes(
+                    ann_df,
+                    page_sizes_df,
+                    xmin="xmin",
+                    xmax="xmax",
+                    ymin="ymin",
+                    ymax="ymax",
+                )
+                if not ann_df.empty:
+                    box_cols = [
+                        "xmin",
+                        "ymin",
+                        "xmax",
+                        "ymax",
+                        "label",
+                        "color",
+                        "text",
+                        "id",
+                    ]
+                    available = [c for c in box_cols if c in ann_df.columns]
+                    if available:
+                        boxes = ann_df[available].to_dict(orient="records")
+                        page_image_annotator_object = dict(page_image_annotator_object)
+                        page_image_annotator_object["boxes"] = boxes
+            except Exception as e:
+                print(
+                    f"Warning: Could not convert annotator coordinates to relative format: {e}. "
+                    "Storing raw annotator output."
+                )
         all_image_annotations[previous_page_zero_index] = page_image_annotator_object
     else:
         all_image_annotations[previous_page_zero_index]["boxes"] = list()
-
-    # print("all_image_annotations:", all_image_annotations)
 
     return all_image_annotations, current_page, current_page
 
@@ -2008,7 +2040,6 @@ def apply_redactions_to_review_df_and_files(
                 output_files.append(orig_pdf_file_path)
 
         try:
-            # print("Saving review file.")
             review_df = convert_annotation_json_to_review_df(
                 all_image_annotations, review_file_state.copy(), page_sizes=page_sizes
             )
@@ -2617,9 +2648,7 @@ def update_selected_review_df_row_colour(
         else:
             # No rows matched the selection
             print("No reviews found matching selection criteria")
-            # The reset logic at the beginning already handles setting color to (0, 0, 0)
-            # if it was the highlight colour and didn't match.
-            # No specific action needed here for color reset beyond what's done initially.
+
             previous_colour = (
                 "(0, 0, 0)"  # Reset previous_colour as no row was highlighted
             )
@@ -3178,8 +3207,6 @@ def convert_xfdf_to_dataframe(
                     try:
                         image = Image.open(image_path)
                     except Exception:
-                        # print(f"Error opening image: {e}")
-
                         page_num, out_path, width, height = (
                             process_single_page_for_image_conversion(
                                 pdf_path, page_python_format, input_folder=input_folder
