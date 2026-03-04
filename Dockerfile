@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS builder
+FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS builder
 
 # Install system dependencies
 RUN apt-get update \
@@ -42,7 +42,7 @@ fi
 # ===================================================================
 # Stage 2: A common 'base' for both Lambda and Gradio
 # ===================================================================
-FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS base
+FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS base
 
 # Set build-time and runtime environment variable for whether to run in Gradio mode or Lambda mode
 ARG APP_MODE=gradio
@@ -79,8 +79,7 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     PYTHONDONTWRITEBYTECODE=1 \
     GRADIO_ALLOW_FLAGGING=never \
     GRADIO_NUM_PORTS=1 \    
-    GRADIO_ANALYTICS_ENABLED=False \
-    DEFAULT_CONCURRENCY_LIMIT=3
+    GRADIO_ANALYTICS_ENABLED=False
 
 # Copy Python packages from the builder stage
 COPY --from=builder /install /usr/local/lib/python3.12/site-packages/

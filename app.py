@@ -904,12 +904,7 @@ with blocks:
 
     # Pymupdf doc needs to be stored as State objects as they do not have a standard Gradio component equivalent
     pdf_doc_state = gr.State(list())
-    all_image_annotations_state = gr.Dropdown(
-        "",
-        label="all_image_annotations_state",
-        allow_custom_value=True,
-        visible=False,
-    )
+    all_image_annotations_state = gr.State(list())
 
     all_decision_process_table_state = gr.Dataframe(
         value=pd.DataFrame(),
@@ -922,18 +917,8 @@ with blocks:
         wrap=True,
     )
 
-    all_page_line_level_ocr_results = gr.Dropdown(
-        "",
-        label="all_page_line_level_ocr_results",
-        allow_custom_value=True,
-        visible=False,
-    )
-    all_page_line_level_ocr_results_with_words = gr.Dropdown(
-        "",
-        label="all_page_line_level_ocr_results_with_words",
-        allow_custom_value=True,
-        visible=False,
-    )
+    all_page_line_level_ocr_results = gr.State(list())
+    all_page_line_level_ocr_results_with_words = gr.State(list())
 
     session_hash_state = gr.Textbox(label="session_hash_state", value="", visible=False)
     host_name_textbox = gr.Textbox(
@@ -963,53 +948,17 @@ with blocks:
     )
     save_pdf_state = gr.Checkbox(label="save_pdf_state", value=True, visible=False)
 
-    prepared_pdf_state = gr.Dropdown(
-        label="prepared_pdf_list", value="", allow_custom_value=True, visible=False
-    )
-    document_cropboxes = gr.Dropdown(
-        label="document_cropboxes", value="", allow_custom_value=True, visible=False
-    )
-    page_sizes = gr.Dropdown(
-        label="page_sizes", value="", allow_custom_value=True, visible=False
-    )
-    images_pdf_state = gr.Dropdown(
-        label="images_pdf_list", value="", allow_custom_value=True, visible=False
-    )
-    all_img_details_state = gr.Dropdown(
-        label="all_img_details_state",
-        value="",
-        allow_custom_value=True,
-        visible=False,
-    )
+    prepared_pdf_state = gr.State(list())
+    document_cropboxes = gr.State(list())
+    page_sizes = gr.State(list())
+    images_pdf_state = gr.State(list())
+    all_img_details_state = gr.State(list())
 
-    output_image_files_state = gr.Dropdown(
-        label="output_image_files_list",
-        value="",
-        allow_custom_value=True,
-        visible=False,
-    )
-    output_file_list_state = gr.Dropdown(
-        label="output_file_list", value="", allow_custom_value=True, visible=False
-    )
-    text_output_file_list_state = gr.Dropdown(
-        label="text_output_file_list",
-        value="",
-        allow_custom_value=True,
-        visible=False,
-    )
-    log_files_output_list_state = gr.Dropdown(
-        label="log_files_output_list",
-        value="",
-        allow_custom_value=True,
-        visible=False,
-    )
-    duplication_file_path_outputs_list_state = gr.Dropdown(
-        label="duplication_file_path_outputs_list",
-        value=list(),
-        multiselect=True,
-        allow_custom_value=True,
-        visible=False,
-    )
+    output_image_files_state = gr.State(list())
+    output_file_list_state = gr.State(list())
+    text_output_file_list_state = gr.State(list())
+    log_files_output_list_state = gr.State(list())
+    duplication_file_path_outputs_list_state = gr.State(list())
 
     # Backup versions of these objects in case you make a mistake
     backup_review_state = gr.State(pd.DataFrame())
@@ -4590,7 +4539,7 @@ with blocks:
             aws_access_key_textbox,
             aws_secret_key_textbox,
             annotate_max_pages,
-            review_file_df,
+            backup_review_state,
             output_folder_textbox,
             document_cropboxes,
             page_sizes,
@@ -8760,6 +8709,7 @@ with blocks:
             app = gr.mount_gradio_app(
                 app,
                 blocks,
+                theme=gr.themes.Default(primary_hue="blue"),
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,

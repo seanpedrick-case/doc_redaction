@@ -442,8 +442,8 @@ def choose_and_run_redactor(
     if pii_identification_method == "None":
         pii_identification_method = NO_REDACTION_PII_OPTION
 
-    # If output folder doesn't end with a forward slash, add one
-    if not output_folder.endswith("/"):
+    # Normalise the output folder path separator (handles Windows backslash paths)
+    if not output_folder.endswith(("/", os.sep)):
         output_folder = output_folder + "/"
 
     # Use provided language or default
@@ -533,13 +533,26 @@ def choose_and_run_redactor(
         review_out_file_paths = list()
 
     # Choose the correct file to prepare
+    # Normalize so we support both path strings and Gradio file objects (dict with "name" or object with .name)
     if isinstance(file_paths, str):
         file_paths_list = [os.path.abspath(file_paths)]
     elif isinstance(file_paths, dict):
         file_paths = file_paths["name"]
         file_paths_list = [os.path.abspath(file_paths)]
     else:
-        file_paths_list = file_paths
+        # List from Gradio: can be list of path strings or list of file objects (dict / object with .name)
+        def _file_item_to_path(item):
+            if isinstance(item, str):
+                return item
+            if isinstance(item, dict):
+                return item.get("name") or item.get("path") or ""
+            return getattr(item, "name", None) or getattr(item, "path", None) or ""
+
+        file_paths_list = [_file_item_to_path(f) for f in file_paths if f is not None]
+        # Resolve to absolute paths so paths work consistently in Docker (cwd may differ)
+        file_paths_list = [
+            os.path.abspath(p) for p in file_paths_list if p and str(p).strip()
+        ]
 
     if len(file_paths_list) > MAX_SIMULTANEOUS_FILES:
         out_message = f"Number of files to redact is greater than {MAX_SIMULTANEOUS_FILES}. Please submit a smaller number of files."
@@ -761,8 +774,8 @@ def choose_and_run_redactor(
             True,
             annotate_max_pages,
             annotations_all_pages,
-            document_cropboxes,
-            redact_whole_page_list,
+            prepare_for_review=False,
+            in_fully_redacted_list=redact_whole_page_list,
             output_folder=output_folder,
             prepare_images=prepare_images_flag,
             page_sizes=page_sizes,

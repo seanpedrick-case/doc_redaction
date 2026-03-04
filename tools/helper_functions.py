@@ -748,9 +748,9 @@ async def get_connection_params(
         s3_outputs_folder = s3_outputs_folder.rstrip("/") + "/" + today_suffix
 
     if not os.path.exists(output_folder):
-        os.mkdir(output_folder)
+        os.makedirs(output_folder, exist_ok=True)
     if not os.path.exists(input_folder):
-        os.mkdir(input_folder)
+        os.makedirs(input_folder, exist_ok=True)
 
     return (
         out_session_hash,

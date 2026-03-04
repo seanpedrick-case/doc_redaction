@@ -29,7 +29,7 @@ python-docx==1.2.0
 
 # --- Gradio and apps ---
 gradio<=6.8.0
-https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.0/gradio_image_annotation-0.5.0-py3-none-any.whl  # Custom annotator version with rotation, zoom, labels, and box IDs
+https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.0/gradio_image_annotation-0.5.1-py3-none-any.whl  # Custom annotator version with rotation, zoom, labels, and box IDs
 spaces==0.47.0
 
 # --- AWS Lambda runtime ---

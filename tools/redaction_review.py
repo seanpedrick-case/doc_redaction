@@ -1312,6 +1312,21 @@ def update_annotator_object_and_filter_df(
             pd.DataFrame(data={"page": [], "label": [], "text": [], "id": []})
         )
 
+    print(f"review_df: {review_df}")
+    print(f"recogniser_dataframe_base: {recogniser_dataframe_base}")
+    print(f"all_image_annotations: {all_image_annotations}")
+    print(f"page_sizes: {page_sizes}")
+    print(f"doc_full_file_name_textbox: {doc_full_file_name_textbox}")
+    print(f"input_folder: {input_folder}")
+    print(f"zoom: {zoom}")
+    print(
+        f"gradio_annotator_current_page_number: {gradio_annotator_current_page_number}"
+    )
+    print(f"recogniser_entities_dropdown_value: {recogniser_entities_dropdown_value}")
+    print(f"page_dropdown_value: {page_dropdown_value}")
+    print(f"page_dropdown_redaction_value: {page_dropdown_redaction_value}")
+    print(f"text_dropdown_value: {text_dropdown_value}")
+
     # Handle empty all_image_annotations state early
     if not all_image_annotations:
         print("No all_image_annotation object found")
