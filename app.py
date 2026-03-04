@@ -2692,7 +2692,6 @@ with blocks:
                     zoom_str = str(annotator_zoom_number) + "%"
 
                     annotator = image_annotator(
-                        # value={"image": "examples/base.png"}, # "examples/graduate-job-example-cover-letter_page_0.png"
                         value=None,
                         label="Modify redaction boxes",
                         label_list=["Redaction"],
@@ -2710,6 +2709,7 @@ with blocks:
                         handles_cursor=True,
                         interactive=True,
                         enable_keyboard_shortcuts=True,
+                        use_default_label=False,
                     )
 
                     with gr.Row(equal_height=True):
