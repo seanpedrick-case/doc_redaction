@@ -1424,6 +1424,10 @@ def prepare_image_or_pdf(
                         )
                     )
 
+                    # Use mediabox for division when loading text-extraction output (PDF-point coords)
+                    coords_in_pdf_points = file_path.endswith(
+                        "_ocr_results_with_words_local_text.json"
+                    )
                     all_page_line_level_ocr_results_with_words_df = (
                         divide_coordinates_by_page_sizes(
                             all_page_line_level_ocr_results_with_words_df,
@@ -1432,6 +1436,7 @@ def prepare_image_or_pdf(
                             xmax="word_x1",
                             ymin="word_y0",
                             ymax="word_y1",
+                            coordinates_in_pdf_points=coords_in_pdf_points,
                         )
                     )
                     all_page_line_level_ocr_results_with_words_df = (
@@ -1442,6 +1447,7 @@ def prepare_image_or_pdf(
                             xmax="line_x1",
                             ymin="line_y0",
                             ymax="line_y1",
+                            coordinates_in_pdf_points=coords_in_pdf_points,
                         )
                     )
 
@@ -1772,6 +1778,7 @@ def divide_coordinates_by_page_sizes(
     xmax="xmax",
     ymin="ymin",
     ymax="ymax",
+    coordinates_in_pdf_points: bool = False,
 ) -> pd.DataFrame:
     """
     Optimized function to convert absolute image coordinates (>1) to relative coordinates (<=1).
@@ -1784,6 +1791,9 @@ def divide_coordinates_by_page_sizes(
         page_sizes_df: DataFrame with page dimensions ('page', 'image_width',
                        'image_height', 'mediabox_width', 'mediabox_height').
         xmin, xmax, ymin, ymax: Names of the coordinate columns.
+        coordinates_in_pdf_points: If True, coordinates are in PDF space (points);
+            use mediabox_width/mediabox_height for division regardless of
+            image_width/image_height (e.g. when called from redact_text_pdf).
 
     Returns:
         DataFrame with coordinates converted to relative system, sorted.
@@ -1882,16 +1892,25 @@ def divide_coordinates_by_page_sizes(
                     "Warning: 'page' column not found in page_sizes_df. Cannot merge dimensions."
                 )
 
-        # Fallback to mediabox dimensions when image dimensions are missing (e.g. unvisited
-        # pages when only the first page image was loaded). Ensures all pages get relative
-        # (0-1) coordinates so they display correctly when the user navigates to them later.
-        if "image_width" in df_abs.columns and "mediabox_width" in df_abs.columns:
-            df_abs["image_width"] = df_abs["image_width"].fillna(
-                df_abs["mediabox_width"]
-            )
-            df_abs["image_height"] = df_abs["image_height"].fillna(
-                df_abs["mediabox_height"]
-            )
+        # When coordinates are in PDF points (e.g. from redact_text_pdf), always use
+        # mediabox for division. Otherwise fall back to mediabox when image dimensions
+        # are missing (e.g. unvisited pages, or selectable text without prepared images).
+        if "mediabox_width" in df_abs.columns and "mediabox_height" in df_abs.columns:
+            if coordinates_in_pdf_points:
+                # Force use of mediabox so PDF-point coordinates are divided correctly
+                # even when image_width/image_height exist (e.g. from a previous run).
+                df_abs["image_width"] = df_abs["mediabox_width"]
+                df_abs["image_height"] = df_abs["mediabox_height"]
+            elif "image_width" not in df_abs.columns:
+                df_abs["image_width"] = df_abs["mediabox_width"]
+                df_abs["image_height"] = df_abs["mediabox_height"]
+            elif "image_width" in df_abs.columns:
+                df_abs["image_width"] = df_abs["image_width"].fillna(
+                    df_abs["mediabox_width"]
+                )
+                df_abs["image_height"] = df_abs["image_height"].fillna(
+                    df_abs["mediabox_height"]
+                )
 
         # Ensure divisor columns are numeric before division
         divisors_numeric = True

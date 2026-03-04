@@ -681,16 +681,24 @@ def update_annotator_page_from_review_df(
 
 
 def _merge_horizontally_adjacent_boxes(
-    df: pd.DataFrame, x_merge_threshold: int = 0.02
+    df: pd.DataFrame,
+    x_merge_threshold: float = 0.02,
+    y_merge_threshold: float = 0.01,
 ) -> pd.DataFrame:
     """
-    Merges horizontally adjacent bounding boxes within the same line.
+    Merges horizontally adjacent bounding boxes within the same visual line.
+
+    Only merges boxes that are on the same visual line (similar y position),
+    so that merged boxes do not span multiple lines and get incorrect ymax
+    (e.g. 1.0 when the OCR "line" field is shared across the page).
 
     Args:
         df (pd.DataFrame): DataFrame containing annotation boxes with columns
-                           like 'page', 'line', 'xmin', 'xmax', etc.
-        x_merge_threshold (int): The maximum pixel gap on the x-axis to
-                                 consider two boxes as adjacent.
+                           like 'page', 'line', 'xmin', 'xmax', 'ymin', 'ymax', etc.
+        x_merge_threshold (float): The maximum gap on the x-axis (normalised 0-1)
+                                   to consider two boxes as adjacent.
+        y_merge_threshold (float): The maximum vertical distance (normalised 0-1)
+                                   to consider two boxes on the same visual line.
 
     Returns:
         pd.DataFrame: A new DataFrame with adjacent boxes merged.
@@ -698,7 +706,8 @@ def _merge_horizontally_adjacent_boxes(
     if df.empty:
         return df
 
-    # 1. Sort values to ensure we are comparing adjacent boxes
+    # 1. Sort by page, then by vertical position (ymin) then horizontal (xmin)
+    #    so that we compare consecutive words on the same visual line.
     df_sorted = df.sort_values(by=["page", "line", "xmin"]).copy()
 
     # 2. Identify groups of boxes to merge using shift() and cumsum()
@@ -707,12 +716,15 @@ def _merge_horizontally_adjacent_boxes(
     prev_page = df_sorted["page"].shift(1)
     prev_line = df_sorted["line"].shift(1)
 
-    # A box should be merged with the previous one if it's on the same page/line
-    # and the horizontal gap is within the threshold.
-    is_adjacent = (
-        (df_sorted["page"] == prev_page)
-        & (df_sorted["line"] == prev_line)
-        & (df_sorted["xmin"] - prev_xmax <= x_merge_threshold)
+    # Same text line
+    same_visual_line = (df_sorted["page"] == prev_page) & (
+        df_sorted["line"] == prev_line
+    )
+
+    # A box should be merged with the previous one if it's on the same page,
+    # same visual line (similar y), and the horizontal gap is within threshold.
+    is_adjacent = same_visual_line & (
+        df_sorted["xmin"] - prev_xmax <= x_merge_threshold
     )
 
     # A new group starts wherever a box is NOT adjacent to the previous one.
@@ -725,7 +737,7 @@ def _merge_horizontally_adjacent_boxes(
         "xmin": "min",
         "ymin": "min",  # To get the highest point of the combined box
         "xmax": "max",
-        "ymax": "max",  # To get the lowest point of the combined box
+        "ymax": "min",  # To ensure we take just one line
         "text": lambda s: " ".join(s.astype(str)),  # Join the text
         # Carry over the first value for columns that are constant within a group
         "page": "first",
@@ -906,8 +918,18 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
                 }
             )
 
+            print(
+                "new_annotations_df at start of create_annotation_objects_from_filtered_ocr_results_with_words:",
+                new_annotations_df[["page", "xmin", "ymin", "xmax", "ymax", "text"]],
+            )
+
             progress(0.3, desc="Checking for adjacent annotations to merge...")
             new_annotations_df = _merge_horizontally_adjacent_boxes(new_annotations_df)
+
+            print(
+                "new_annotations_df at after merge in create_annotation_objects_from_filtered_ocr_results_with_words:",
+                new_annotations_df[["page", "xmin", "ymin", "xmax", "ymax", "text"]],
+            )
 
             progress(0.4, desc="Creating new redaction IDs...")
             existing_ids = (
@@ -1652,43 +1674,6 @@ def update_all_page_annotation_object_based_on_previous_page(
     )
 
     if clear_all is False:
-        # Convert annotator boxes to relative (0-1) coordinates before storing.
-        if page_sizes and page_image_annotator_object.get("boxes"):
-            try:
-                page_sizes_df = pd.DataFrame(page_sizes)
-                ann_df = convert_annotation_data_to_dataframe(
-                    [page_image_annotator_object]
-                )
-                ann_df["page"] = previous_page
-                ann_df = divide_coordinates_by_page_sizes(
-                    ann_df,
-                    page_sizes_df,
-                    xmin="xmin",
-                    xmax="xmax",
-                    ymin="ymin",
-                    ymax="ymax",
-                )
-                if not ann_df.empty:
-                    box_cols = [
-                        "xmin",
-                        "ymin",
-                        "xmax",
-                        "ymax",
-                        "label",
-                        "color",
-                        "text",
-                        "id",
-                    ]
-                    available = [c for c in box_cols if c in ann_df.columns]
-                    if available:
-                        boxes = ann_df[available].to_dict(orient="records")
-                        page_image_annotator_object = dict(page_image_annotator_object)
-                        page_image_annotator_object["boxes"] = boxes
-            except Exception as e:
-                print(
-                    f"Warning: Could not convert annotator coordinates to relative format: {e}. "
-                    "Storing raw annotator output."
-                )
         all_image_annotations[previous_page_zero_index] = page_image_annotator_object
     else:
         all_image_annotations[previous_page_zero_index]["boxes"] = list()

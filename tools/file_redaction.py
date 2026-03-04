@@ -2061,6 +2061,9 @@ def choose_and_run_redactor(
                     xmax="word_x1",
                     ymin="word_y0",
                     ymax="word_y1",
+                    coordinates_in_pdf_points=(
+                        text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+                    ),
                 )
             )
 
@@ -8021,6 +8024,7 @@ def redact_text_pdf(
             xmax="width",
             ymin="top",
             ymax="height",
+            coordinates_in_pdf_points=True,
         )
 
         # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
