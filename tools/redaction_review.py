@@ -918,18 +918,8 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
                 }
             )
 
-            print(
-                "new_annotations_df at start of create_annotation_objects_from_filtered_ocr_results_with_words:",
-                new_annotations_df[["page", "xmin", "ymin", "xmax", "ymax", "text"]],
-            )
-
             progress(0.3, desc="Checking for adjacent annotations to merge...")
             new_annotations_df = _merge_horizontally_adjacent_boxes(new_annotations_df)
-
-            print(
-                "new_annotations_df at after merge in create_annotation_objects_from_filtered_ocr_results_with_words:",
-                new_annotations_df[["page", "xmin", "ymin", "xmax", "ymax", "text"]],
-            )
 
             progress(0.4, desc="Creating new redaction IDs...")
             existing_ids = (
@@ -964,6 +954,11 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             ):
                 unique_new_df = new_annotations_df
             else:
+                # Ensure that columns of both sides have the same type
+                new_annotations_df.loc[:, key_cols] = new_annotations_df.loc[
+                    :, key_cols
+                ].astype(existing_annotations_df.loc[:, key_cols].dtypes)
+
                 # Do not add duplicate redactions
                 merged = pd.merge(
                     new_annotations_df,
@@ -1019,13 +1014,42 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             existing_recogniser_entity_df,
         )
 
+    # Always derive image paths from page using current page_sizes, so that
+    # updated_annotations_df never has None/missing image when page is valid
+    # (e.g. after copy from existing_annotations_df or concat with unique_new_df).
+
     all_pages_df = pd.DataFrame(page_sizes).rename(columns={"image_path": "image"})
 
+    # Join image paths to updated_annotations_df based on page number
+    # Drop image column from updated_annotations_df
+    updated_annotations_df = updated_annotations_df.drop(columns=["image"])
+
+    # set page to number
+    updated_annotations_df["page"] = updated_annotations_df["page"].astype(int)
+    all_pages_df["page"] = all_pages_df["page"].astype(int)
+
+    updated_annotations_df = pd.merge(
+        updated_annotations_df, all_pages_df[["page", "image"]], on="page", how="left"
+    )
+
+    if not updated_annotations_df.empty and "page" in updated_annotations_df.columns:
+        missing_image = updated_annotations_df["image"].isna()
+        if missing_image.any():
+            n_missing = missing_image.sum()
+            print(
+                f"Warning: {n_missing} annotation(s) have page not in page_sizes; "
+                "they will not appear in output. Dropping them from updated_annotations_df."
+            )
+            updated_annotations_df = updated_annotations_df.loc[~missing_image].copy()
+        # Keep recogniser entity in sync with possibly trimmed annotations
+        if not updated_annotations_df.empty:
+            updated_recogniser_entity_df = updated_annotations_df[
+                ["page", "label", "text", "id"]
+            ]
+        else:
+            updated_recogniser_entity_df = pd.DataFrame()
+
     if not updated_annotations_df.empty:
-        page_to_image_map = {item["page"]: item["image_path"] for item in page_sizes}
-        updated_annotations_df["image"] = updated_annotations_df["page"].map(
-            page_to_image_map
-        )
         merged_df = pd.merge(
             all_pages_df[["image"]], updated_annotations_df, on="image", how="left"
         )
@@ -1609,7 +1633,7 @@ def update_annotator_object_and_filter_df(
             use_default_label=False,
         )
 
-    page_entities_drop_redaction_list = list()
+    page_entities_drop_redaction_list = ["ALL"]
     all_pages_in_doc_list = [str(i) for i in range(1, len(page_sizes) + 1)]
     page_entities_drop_redaction_list.extend(all_pages_in_doc_list)
 
@@ -2292,10 +2316,10 @@ def update_redact_choice_df_from_page_dropdown(choice: str, df: pd.DataFrame):
             "page",
             "line",
             "word_text",
-            "word_x0",
-            "word_y0",
-            "word_x1",
-            "word_y1",
+            # "word_x0",
+            # "word_y0",
+            # "word_x1",
+            # "word_y1",
             "index",
         ]
     ].copy()
@@ -2423,21 +2447,21 @@ def df_select_callback_dataframe_row_ocr_with_words(
     row_value_line = int(evt.row_value[1])  # This is the label number value
     row_value_text = evt.row_value[2]  # This is the text number value
 
-    row_value_x0 = evt.row_value[3]  # This is the x0 value
-    row_value_y0 = evt.row_value[4]  # This is the y0 value
-    row_value_x1 = evt.row_value[5]  # This is the x1 value
-    row_value_y1 = evt.row_value[6]  # This is the y1 value
-    row_value_index = evt.row_value[7]  # This is the y1 value
+    # evt.row_value[3]  # This is the x0 value
+    # evt.row_value[4]  # This is the y0 value
+    # evt.row_value[5]  # This is the x1 value
+    # evt.row_value[6]  # This is the y1 value
+    row_value_index = evt.row_value[3]  # This is the index value
 
     row_value_df = pd.DataFrame(
         data={
             "page": [row_value_page],
             "line": [row_value_line],
             "word_text": [row_value_text],
-            "word_x0": [row_value_x0],
-            "word_y0": [row_value_y0],
-            "word_x1": [row_value_x1],
-            "word_y1": [row_value_y1],
+            # "word_x0": [row_value_x0],
+            # "word_y0": [row_value_y0],
+            # "word_x1": [row_value_x1],
+            # "word_y1": [row_value_y1],
             "index": row_value_index,
         }
     )

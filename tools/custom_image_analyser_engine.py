@@ -5650,7 +5650,26 @@ class CustomImageAnalyzerEngine:
         output_path = os.path.join(tesseract_viz_folder, filename)
 
         # Save the image
-        cv2.imwrite(output_path, image_cv)
+        max_filesize = 500 * 1024  # 500kb in bytes
+        quality = 95  # Start high, OpenCV JPEG quality range is 0-100
+
+        # Try lowering JPEG quality until file is below size limit
+        is_saved = False
+        while quality >= 10:
+            cv2.imwrite(output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+            if (
+                os.path.exists(output_path)
+                and os.path.getsize(output_path) <= max_filesize
+            ):
+                is_saved = True
+                break
+            quality -= 5
+
+        if not is_saved:
+            # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
+            cv2.imwrite(output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 10])
+            # Optionally log warning here that file could not be compressed below 500kb
+
         print(f"Tesseract visualization saved to: {output_path}")
 
     def _add_confidence_legend(
@@ -6972,7 +6991,28 @@ class CustomImageAnalyzerEngine:
                     filename = f"initial_bounding_boxes_{timestamp}.jpg"
 
                 output_path = os.path.join(paddle_viz_folder, filename)
-                cv2.imwrite(output_path, image_cv)
+                max_filesize = 500 * 1024  # 500kb in bytes
+                quality = 95  # Start high, OpenCV JPEG quality range is 0-100
+
+                # Try lowering JPEG quality until file is below size limit
+                is_saved = False
+                while quality >= 10:
+                    cv2.imwrite(
+                        output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                    )
+                    if (
+                        os.path.exists(output_path)
+                        and os.path.getsize(output_path) <= max_filesize
+                    ):
+                        is_saved = True
+                        break
+                    quality -= 5
+
+                if not is_saved:
+                    # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
+                    cv2.imwrite(
+                        output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 10]
+                    )
 
         else:
             raise RuntimeError(f"Unsupported OCR engine: {self.ocr_engine}")

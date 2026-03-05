@@ -192,6 +192,10 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
     is_redact_all_pii = redaction_method == "Redact all PII"
     is_redact_selected_terms = redaction_method == "Redact selected terms"
     is_redact_all_pii_or_selected_terms = is_redact_all_pii or is_redact_selected_terms
+    is_extract_text_only = (
+        isinstance(redaction_method, str)
+        and redaction_method.strip() == "Extract text only"
+    )
 
     # Show PII detection settings if "Redact all PII" OR "Redact selected terms" is selected
     # Both options need PII detection method to determine what to redact
@@ -222,6 +226,10 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
             visible=show_comprehend_entities_init, value=["CUSTOM"]
         )
         llm_entities_update = gr.Dropdown(visible=is_llm_method_init, value=["CUSTOM"])
+        walkthrough_pii_identification_method_drop_update = gr.update(
+            visible=show_pii_method
+        )
+
     elif is_redact_all_pii:
         # For "Redact all PII", use default entities
         # Ensure entities are lists (they should already be parsed in config.py)
@@ -244,16 +252,20 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
         comprehend_entities_update = gr.Dropdown(
             visible=show_comprehend_entities_init, value=comprehend_entities_val
         )
-    else:
+        walkthrough_pii_identification_method_drop_update = gr.update(
+            visible=show_pii_method
+        )
+    elif is_extract_text_only:
         # For "Extract text only", just update visibility without changing value
         local_entities_update = gr.Dropdown(visible=show_local_entities_init)
         comprehend_entities_update = gr.Dropdown(visible=show_comprehend_entities_init)
         llm_entities_update = gr.Dropdown(visible=is_llm_method_init)
+        walkthrough_pii_identification_method_drop_update = gr.update(
+            visible=show_pii_method, value=NO_REDACTION_PII_OPTION
+        )
 
     return (
-        gr.update(
-            visible=show_pii_method
-        ),  # walkthrough_pii_identification_method_drop
+        walkthrough_pii_identification_method_drop_update,  # walkthrough_pii_identification_method_drop
         local_entities_update,  # walkthrough_in_redact_entities
         comprehend_entities_update,  # walkthrough_in_redact_comprehend_entities
         gr.update(visible=is_llm_method_init),  # walkthrough_llm_entities_accordion
@@ -733,5 +745,5 @@ def handle_main_pii_method_selection(pii_method):
         gr.update(visible=show_local_entities),  # local_entities_accordion
         gr.update(visible=show_comprehend_entities),  # comprehend_entities_accordion
         gr.update(visible=is_llm_method),  # llm_entities_accordion
-        gr.update(visible=is_llm_method),  # llm_custom_instructions_accordion
+        gr.update(visible=is_llm_method, value=""),  # llm_custom_instructions_accordion
     )

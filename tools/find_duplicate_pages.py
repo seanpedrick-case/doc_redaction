@@ -280,7 +280,8 @@ def run_full_search_and_analysis(
         )
 
     word_level_df_out = word_level_df_orig.loc[
-        word_level_df_orig["index"].isin(results_df_index_list)
+        word_level_df_orig["index"].isin(results_df_index_list),
+        ["page", "line", "word_text", "index"],
     ]
 
     return word_level_df_out, duplicate_files, full_data

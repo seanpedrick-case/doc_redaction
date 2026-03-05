@@ -708,6 +708,31 @@ max_fuzzy_spelling_mistakes_num = gr.Number(
     precision=0,
 )
 
+## Cost codes
+cost_code_dataframe = gr.Dataframe(
+    value=pd.DataFrame(columns=["Cost code", "Description"]),
+    row_count=(0, "dynamic"),
+    label="Existing cost codes",
+    type="pandas",
+    interactive=True,
+    show_search="filter",
+    wrap=True,
+    max_height=200,
+    visible=GET_COST_CODES or ENFORCE_COST_CODES,
+)
+cost_code_choice_drop = gr.Dropdown(
+    value=DEFAULT_COST_CODE,
+    label="Choose cost code for analysis",
+    choices=[DEFAULT_COST_CODE],
+    allow_custom_value=False,
+    visible=GET_COST_CODES or ENFORCE_COST_CODES,
+)
+
+reset_cost_code_dataframe_button = gr.Button(
+    value="Reset code code table filter",
+    visible=GET_COST_CODES or ENFORCE_COST_CODES,
+)
+
 ## Page options
 
 page_min = gr.Number(
@@ -967,128 +992,62 @@ with blocks:
     backup_all_page_line_level_ocr_results_with_words_df_base = gr.State(pd.DataFrame())
 
     # Logging variables
-    access_logs_state = gr.Textbox(
-        label="access_logs_state",
-        value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME,
-        visible=False,
-    )
-    access_s3_logs_loc_state = gr.Textbox(
-        label="access_s3_logs_loc_state", value=S3_ACCESS_LOGS_FOLDER, visible=False
-    )
-    feedback_logs_state = gr.Textbox(
-        label="feedback_logs_state",
-        value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME,
-        visible=False,
-    )
-    feedback_s3_logs_loc_state = gr.Textbox(
-        label="feedback_s3_logs_loc_state",
-        value=S3_FEEDBACK_LOGS_FOLDER,
-        visible=False,
-    )
-    usage_logs_state = gr.Textbox(
-        label="usage_logs_state",
-        value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME,
-        visible=False,
-    )
-    usage_s3_logs_loc_state = gr.Textbox(
-        label="usage_s3_logs_loc_state", value=S3_USAGE_LOGS_FOLDER, visible=False
-    )
+    access_logs_state = gr.State(value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME)
+    access_s3_logs_loc_state = gr.State(value=S3_ACCESS_LOGS_FOLDER)
+    feedback_logs_state = gr.State(value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME)
+    feedback_s3_logs_loc_state = gr.State(value=S3_FEEDBACK_LOGS_FOLDER)
+    usage_logs_state = gr.State(value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME)
+    usage_s3_logs_loc_state = gr.State(value=S3_USAGE_LOGS_FOLDER)
 
-    session_hash_textbox = gr.Textbox(
-        label="session_hash_textbox", value="", visible=False
-    )
-    textract_metadata_textbox = gr.Textbox(
-        label="textract_metadata_textbox", value="", visible=False
-    )
-    comprehend_query_number = gr.Number(
-        label="comprehend_query_number", value=0, visible=False
-    )
-    textract_query_number = gr.Number(
-        label="textract_query_number", value=0, visible=False
-    )
+    session_hash_textbox = gr.State(value="")
+    textract_metadata_textbox = gr.State(value="")
+    comprehend_query_number = gr.State(value=0)
+    textract_query_number = gr.State(value=0)
 
     # VLM and LLM tracking components for usage logs
-    vlm_model_name_textbox = gr.Textbox(label="vlm_model_name", value="", visible=False)
-    vlm_total_input_tokens_number = gr.Number(
-        label="vlm_total_input_tokens", value=0, visible=False
-    )
-    vlm_total_output_tokens_number = gr.Number(
-        label="vlm_total_output_tokens", value=0, visible=False
-    )
-    llm_model_name_textbox = gr.Textbox(label="llm_model_name", value="", visible=False)
-    llm_total_input_tokens_number = gr.Number(
-        label="llm_total_input_tokens", value=0, visible=False
-    )
-    llm_total_output_tokens_number = gr.Number(
-        label="llm_total_output_tokens", value=0, visible=False
-    )
+    vlm_model_name_textbox = gr.State(value="")
+    vlm_total_input_tokens_number = gr.State(value=0)
+    vlm_total_output_tokens_number = gr.State(value=0)
+    llm_model_name_textbox = gr.State(value="")
+    llm_total_input_tokens_number = gr.State(value=0)
+    llm_total_output_tokens_number = gr.State(value=0)
 
-    doc_full_file_name_textbox = gr.Textbox(
-        label="doc_full_file_name_textbox", value="", visible=False
-    )
-    doc_file_name_no_extension_textbox = gr.Textbox(
-        label="doc_full_file_name_textbox", value="", visible=False
-    )
-    blank_doc_file_name_no_extension_textbox_for_logs = gr.Textbox(
-        label="doc_full_file_name_textbox", value="", visible=False
-    )
-    blank_data_file_name_no_extension_textbox_for_logs = gr.Textbox(
-        label="data_full_file_name_textbox", value="", visible=False
-    )
-    placeholder_doc_file_name_no_extension_textbox_for_logs = gr.Textbox(
-        label="doc_full_file_name_textbox", value="document", visible=False
-    )
-    placeholder_data_file_name_no_extension_textbox_for_logs = gr.Textbox(
-        label="data_full_file_name_textbox", value="data_file", visible=False
+    doc_full_file_name_textbox = gr.State(value="")
+    doc_file_name_no_extension_textbox = gr.State(value="")
+    blank_doc_file_name_no_extension_textbox_for_logs = gr.State(value="")
+    blank_data_file_name_no_extension_textbox_for_logs = gr.State(value="")
+    placeholder_doc_file_name_no_extension_textbox_for_logs = gr.State(value="document")
+    placeholder_data_file_name_no_extension_textbox_for_logs = gr.State(
+        value="data_file"
     )
 
     # Left blank for when user does not want to report file names
-    doc_file_name_with_extension_textbox = gr.Textbox(
-        label="doc_file_name_with_extension_textbox", value="", visible=False
-    )
-    doc_file_name_textbox_list = gr.Dropdown(
-        label="doc_file_name_textbox_list",
-        value="",
-        allow_custom_value=True,
-        visible=False,
-    )
-    latest_review_file_path = gr.Textbox(
-        label="latest_review_file_path", value="", visible=False
+    doc_file_name_with_extension_textbox = gr.State(value="")
+    doc_file_name_textbox_list = gr.State(value="")
+    latest_review_file_path = gr.State(
+        value=""
     )  # Latest review file path output from redaction
-    latest_ocr_file_path = gr.Textbox(
-        label="latest_ocr_file_path", value="", visible=False
+    latest_ocr_file_path = gr.State(
+        value=""
     )  # Latest ocr file path output from text extraction
 
-    data_full_file_name_textbox = gr.Textbox(
-        label="data_full_file_name_textbox", value="", visible=False
-    )
-    data_file_name_no_extension_textbox = gr.Textbox(
-        label="data_full_file_name_textbox", value="", visible=False
-    )
-    data_file_name_with_extension_textbox = gr.Textbox(
-        label="data_file_name_with_extension_textbox", value="", visible=False
-    )
-    data_file_name_textbox_list = gr.Dropdown(
-        label="data_file_name_textbox_list",
-        value="",
-        allow_custom_value=True,
-        visible=False,
-    )
+    data_full_file_name_textbox = gr.State(value="")
+    data_file_name_no_extension_textbox = gr.State(value="")
+    data_file_name_with_extension_textbox = gr.State(value="")
+    data_file_name_textbox_list = gr.State(value="")
 
     # Constants just to use with the review dropdowns for filtering by various columns
-    label_name_const = gr.Textbox(
-        label="label_name_const", value="label", visible=False
-    )
-    text_name_const = gr.Textbox(label="text_name_const", value="text", visible=False)
-    page_name_const = gr.Textbox(label="page_name_const", value="page", visible=False)
+    label_name_const = gr.State(value="label")
+    text_name_const = gr.State(value="text")
+    page_name_const = gr.State(value="page")
 
-    actual_time_taken_number = gr.Number(
-        label="actual_time_taken_number", value=0.0, precision=1, visible=False
+    actual_time_taken_number = gr.State(
+        value=0.0
     )  # This keeps track of the time taken to redact files for logging purposes.
-    annotate_previous_page = gr.Number(
-        value=0, label="Previous page", precision=0, visible=False
+    annotate_previous_page = gr.State(
+        value=0
     )  # Keeps track of the last page that the annotator was on
-    s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
+    s3_logs_output_textbox = gr.State(value="")
 
     ## Annotator zoom value
     annotator_zoom_number = gr.Number(
@@ -1122,77 +1081,36 @@ with blocks:
     )
 
     # S3 settings for default allow list load
-    s3_default_bucket = gr.Textbox(
-        label="Default S3 bucket", value=DOCUMENT_REDACTION_BUCKET, visible=False
+    s3_default_bucket = gr.State(value=DOCUMENT_REDACTION_BUCKET)
+    s3_default_allow_list_file = gr.State(value=S3_ALLOW_LIST_PATH)
+    default_allow_list_output_folder_location = gr.State(value=ALLOW_LIST_PATH)
+
+    s3_whole_document_textract_default_bucket = gr.State(
+        value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET
     )
-    s3_default_allow_list_file = gr.Textbox(
-        label="Default allow list file", value=S3_ALLOW_LIST_PATH, visible=False
+    s3_whole_document_textract_input_subfolder = gr.State(
+        value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER
     )
-    default_allow_list_output_folder_location = gr.Textbox(
-        label="Output default allow list location",
-        value=ALLOW_LIST_PATH,
-        visible=False,
+    s3_whole_document_textract_output_subfolder = gr.State(
+        value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER
     )
 
-    s3_whole_document_textract_default_bucket = gr.Textbox(
-        label="Default Textract whole_document S3 bucket",
-        value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
-        visible=False,
+    successful_textract_api_call_number = gr.State(value=0)
+    no_redaction_method_drop = gr.State(value=NO_REDACTION_PII_OPTION)
+    textract_only_method_drop = gr.State(value=TEXTRACT_TEXT_EXTRACT_OPTION)
+
+    load_s3_whole_document_textract_logs_bool = gr.State(
+        value=LOAD_PREVIOUS_TEXTRACT_JOBS_S3
     )
-    s3_whole_document_textract_input_subfolder = gr.Textbox(
-        label="Default Textract whole_document S3 input folder",
-        value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
-        visible=False,
-    )
-    s3_whole_document_textract_output_subfolder = gr.Textbox(
-        label="Default Textract whole_document S3 output folder",
-        value=TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
-        visible=False,
-    )
-    successful_textract_api_call_number = gr.Number(precision=0, value=0, visible=False)
-    no_redaction_method_drop = gr.Radio(
-        label="""Placeholder for no redaction method after downloading Textract outputs""",
-        value=NO_REDACTION_PII_OPTION,
-        choices=[NO_REDACTION_PII_OPTION],
-        visible=False,
-    )
-    textract_only_method_drop = gr.Radio(
-        label="""Placeholder for Textract method after downloading Textract outputs""",
-        value=TEXTRACT_TEXT_EXTRACT_OPTION,
-        choices=[TEXTRACT_TEXT_EXTRACT_OPTION],
-        visible=False,
+    s3_whole_document_textract_logs_subfolder = gr.State(value=TEXTRACT_JOBS_S3_LOC)
+    local_whole_document_textract_logs_subfolder = gr.State(
+        value=TEXTRACT_JOBS_LOCAL_LOC
     )
 
-    load_s3_whole_document_textract_logs_bool = gr.Textbox(
-        label="Load Textract logs or not",
-        value=LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
-        visible=False,
-    )
-    s3_whole_document_textract_logs_subfolder = gr.Textbox(
-        label="Default Textract whole_document S3 input folder",
-        value=TEXTRACT_JOBS_S3_LOC,
-        visible=False,
-    )
-    local_whole_document_textract_logs_subfolder = gr.Textbox(
-        label="Default Textract whole_document S3 output folder",
-        value=TEXTRACT_JOBS_LOCAL_LOC,
-        visible=False,
-    )
-
-    s3_default_cost_codes_file = gr.Textbox(
-        label="Default cost centre file", value=S3_COST_CODES_PATH, visible=False
-    )
-    default_cost_codes_output_folder_location = gr.Textbox(
-        label="Output default cost centre location",
-        value=OUTPUT_COST_CODES_PATH,
-        visible=False,
-    )
-    enforce_cost_code_textbox = gr.Textbox(
-        label="Enforce cost code textbox", value=ENFORCE_COST_CODES, visible=False
-    )
-    default_cost_code_textbox = gr.Textbox(
-        label="Default cost code textbox", value=DEFAULT_COST_CODE, visible=False
-    )
+    s3_default_cost_codes_file = gr.State(value=S3_COST_CODES_PATH)
+    default_cost_codes_output_folder_location = gr.State(value=OUTPUT_COST_CODES_PATH)
+    enforce_cost_code_textbox = gr.State(value=ENFORCE_COST_CODES)
+    default_cost_code_textbox = gr.State(value=DEFAULT_COST_CODE)
 
     # Base tables that are not modified subsequent to load
     recogniser_entity_dataframe_base = gr.State(
@@ -1227,34 +1145,41 @@ with blocks:
         )
     )
 
+    all_page_line_level_ocr_results_with_words_df_base = gr.State(
+        value=pd.DataFrame(
+            columns=[
+                "page",
+                "line",
+                "word_text",
+                "word_x0",
+                "word_y0",
+                "word_x1",
+                "word_y1",
+                "word_conf",
+                "line_text",
+                "line_x0",
+                "line_y0",
+                "line_x1",
+                "line_y1",
+                "line_conf",
+            ]
+        )
+    )
+
     # Placeholder for selected entity dataframe row
-    selected_entity_id = gr.Textbox(value="", label="selected_entity_id", visible=False)
-    selected_entity_colour = gr.Textbox(
-        value="", label="selected_entity_colour", visible=False
-    )
-    selected_entity_dataframe_row_text = gr.Textbox(
-        value="", label="selected_entity_dataframe_row_text", visible=False
-    )
-    selected_entity_dataframe_row_text_redact = gr.Textbox(
-        value="", label="selected_entity_dataframe_row_text_redact", visible=False
-    )
+    selected_entity_id = gr.State(value="")
+    selected_entity_colour = gr.State(value="")
+    selected_entity_dataframe_row_text = gr.State(value="")
+    selected_entity_dataframe_row_text_redact = gr.State(value="")
 
     # This is an invisible dataframe that holds all items from the redaction outputs that have the same text as the selected row
-    recogniser_entity_dataframe_same_text = gr.Dataframe(
-        pd.DataFrame(
+    recogniser_entity_dataframe_same_text = gr.State(
+        value=pd.DataFrame(
             data={"page": list(), "label": list(), "text": list(), "id": list()}
-        ),
-        column_count=(4, "fixed"),
-        type="pandas",
-        label="Table rows with same text",
-        headers=["page", "label", "text", "id"],
-        wrap=True,
-        max_height=400,
-        static_columns=[0, 1, 2, 3],
-        visible=False,
+        )
     )
 
-    to_redact_dataframe_same_text = gr.Dataframe(
+    to_redact_dataframe_same_text = gr.State(
         pd.DataFrame(
             data={
                 "page": list(),
@@ -1266,92 +1191,30 @@ with blocks:
                 "word_y1": list(),
                 "index": list(),
             }
-        ),
-        type="pandas",
-        headers=[
-            "page",
-            "line",
-            "word_text",
-            "word_x0",
-            "word_y0",
-            "word_x1",
-            "word_y1",
-            "index",
-        ],
-        wrap=False,
-        visible=False,
+        )
     )
 
     # Duplicate page detection
-    in_duplicate_pages_text = gr.Textbox(label="in_duplicate_pages_text", visible=False)
-    duplicate_pages_df = gr.Dataframe(
-        value=pd.DataFrame(),
-        headers=None,
-        column_count=0,
-        row_count=(0, "dynamic"),
-        label="duplicate_pages_df",
-        visible=False,
-        type="pandas",
-        wrap=True,
-    )
-    full_duplicated_data_df = gr.Dataframe(
-        value=pd.DataFrame(),
-        headers=None,
-        column_count=0,
-        row_count=(0, "dynamic"),
-        label="full_duplicated_data_df",
-        visible=False,
-        type="pandas",
-        wrap=True,
-    )
-    selected_duplicate_data_row_index = gr.Number(
-        value=None, label="selected_duplicate_data_row_index", visible=False
-    )
-    full_duplicate_data_by_file = (
-        gr.State()
+    selected_duplicate_data_row_index = gr.State(value=None)
+    full_duplicate_data_by_file = gr.State(
+        value={}
     )  # A dictionary of the full duplicate data indexed by file
 
     # Tracking variables for current page (not visible)
-    current_loop_page_number = gr.Number(
-        value=0,
-        precision=0,
-        interactive=False,
-        label="Last redacted page in document",
-        visible=False,
-    )
-    page_break_return = gr.Checkbox(
-        value=False, label="Page break reached", visible=False
-    )
+    current_loop_page_number = gr.State(value=0)
+    page_break_return = gr.State(value=False)
+    latest_file_completed_num = gr.State(value=0)
 
-    latest_file_completed_num = gr.Number(
-        value=0,
-        label="Number of documents redacted",
-        interactive=False,
-        visible=False,
-    )
+    # Base cost code dataframe that is not modified
+    cost_code_dataframe_base = gr.State(value=pd.DataFrame())
+
+    # Spacy analyser state
+    updated_nlp_analyser_state = gr.State(list())
+    tesseract_lang_data_file_path = gr.State(value="")
+
+    flag_value_placeholder = gr.State(value="")  # Placeholder for flag value
 
     # Placeholders for elements that may be made visible later below depending on environment variables
-    cost_code_dataframe_base = gr.Dataframe(
-        value=pd.DataFrame(),
-        row_count=(0, "dynamic"),
-        label="Cost codes",
-        type="pandas",
-        interactive=True,
-        show_search="filter",
-        wrap=True,
-        max_height=200,
-        visible=False,
-    )
-    cost_code_dataframe = gr.Dataframe(
-        value=pd.DataFrame(), type="pandas", visible=False, wrap=True
-    )
-    cost_code_choice_drop = gr.Dropdown(
-        value=DEFAULT_COST_CODE,
-        label="Choose cost code for analysis. Please contact Finance if you can't find your cost code in the given list.",
-        choices=[DEFAULT_COST_CODE],
-        allow_custom_value=False,
-        visible=False,
-    )
 
     textract_output_found_checkbox = gr.Checkbox(
         value=False,
@@ -1473,14 +1336,6 @@ with blocks:
         allow_custom_value=True,
         visible=False,
     )
-
-    # Spacy analyser state
-    updated_nlp_analyser_state = gr.State(list())
-    tesseract_lang_data_file_path = gr.Textbox("", visible=False)
-
-    flag_value_placeholder = gr.Textbox(
-        value="", visible=False
-    )  # Placeholder for flag value
 
     ###
     # UI DESIGN
@@ -2467,30 +2322,14 @@ with blocks:
                                     open=False,
                                     visible=True,
                                 ):
-                                    cost_code_dataframe = gr.Dataframe(
-                                        value=pd.DataFrame(
-                                            columns=["Cost code", "Description"]
-                                        ),
-                                        row_count=(0, "dynamic"),
-                                        label="Existing cost codes",
-                                        type="pandas",
-                                        interactive=True,
-                                        show_search="filter",
-                                        visible=True,
-                                        wrap=True,
-                                        max_height=200,
-                                    )
-                                    reset_cost_code_dataframe_button = gr.Button(
-                                        value="Reset code code table filter"
-                                    )
+                                    cost_code_dataframe.render()
+                                    reset_cost_code_dataframe_button.render()
                             with gr.Column():
-                                cost_code_choice_drop = gr.Dropdown(
-                                    value=DEFAULT_COST_CODE,
-                                    label="Choose cost code for analysis",
-                                    choices=[DEFAULT_COST_CODE],
-                                    allow_custom_value=False,
-                                    visible=True,
-                                )
+                                cost_code_choice_drop.render()
+                else:
+                    cost_code_dataframe.render()
+                    cost_code_choice_drop.render()
+                    reset_cost_code_dataframe_button.render()
 
                 if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
                     with gr.Accordion(
@@ -2598,14 +2437,6 @@ with blocks:
         # REVIEW REDACTIONS TAB
         ###
         with gr.Tab("Review redactions", id=2):
-
-            all_page_line_level_ocr_results_with_words_df_base = gr.Dataframe(
-                type="pandas",
-                label="all_page_line_level_ocr_results_with_words_df_base",
-                wrap=False,
-                show_search="filter",
-                visible=False,
-            )
 
             with gr.Accordion(
                 label="Upload PDFs/images and OCR results for review", open=True
@@ -2860,35 +2691,35 @@ with blocks:
                                             info="When enabled, the search text will be treated as a regular expression pattern instead of literal text",
                                         )
 
-                            all_page_line_level_ocr_results_with_words_df = (
-                                gr.Dataframe(
-                                    pd.DataFrame(
-                                        data={
-                                            "page": list(),
-                                            "line": list(),
-                                            "word_text": list(),
-                                            "word_x0": list(),
-                                            "word_y0": list(),
-                                            "word_x1": list(),
-                                            "word_y1": list(),
-                                        }
-                                    ),
-                                    row_count=(0, "dynamic"),
-                                    type="pandas",
-                                    label="Click table row to select and go to page",
-                                    headers=[
-                                        "page",
-                                        "line",
-                                        "word_text",
-                                        "word_x0",
-                                        "word_y0",
-                                        "word_x1",
-                                        "word_y1",
-                                    ],
-                                    wrap=False,
-                                    max_height=400,
-                                    show_search="filter",
-                                )
+                            all_page_line_level_ocr_results_with_words_df = gr.Dataframe(
+                                pd.DataFrame(
+                                    data={
+                                        "page": list(),
+                                        "line": list(),
+                                        "word_text": list(),
+                                        # "word_x0": list(),
+                                        # "word_y0": list(),
+                                        # "word_x1": list(),
+                                        # "word_y1": list(),
+                                        "index": list(),
+                                    }
+                                ),
+                                row_count=(0, "dynamic"),
+                                type="pandas",
+                                label="Click table row to select and go to page",
+                                headers=[
+                                    "page",
+                                    "line",
+                                    "word_text",
+                                    # "word_x0",
+                                    # "word_y0",
+                                    # "word_x1",
+                                    # "word_y1",
+                                    "index",
+                                ],
+                                wrap=False,
+                                max_height=400,
+                                show_search="filter",
                             )
 
                             redact_selected_btn = gr.Button(
@@ -2905,10 +2736,11 @@ with blocks:
                                             "page": list(),
                                             "line": list(),
                                             "word_text": list(),
-                                            "word_x0": list(),
-                                            "word_y0": list(),
-                                            "word_x1": list(),
-                                            "word_y1": list(),
+                                            # "word_x0": list(),
+                                            # "word_y0": list(),
+                                            # "word_x1": list(),
+                                            # "word_y1": list(),
+                                            "index": list(),
                                         }
                                     ),
                                     row_count=(0, "dynamic"),
@@ -2917,10 +2749,11 @@ with blocks:
                                         "page",
                                         "line",
                                         "word_text",
-                                        "word_x0",
-                                        "word_y0",
-                                        "word_x1",
-                                        "word_y1",
+                                        # "word_x0",
+                                        # "word_y0",
+                                        # "word_x1",
+                                        # "word_y1",
+                                        "index",
                                     ],
                                     wrap=False,
                                 )
@@ -3969,10 +3802,10 @@ with blocks:
             in_redact_llm_entities,
             custom_llm_instructions_textbox,
             walkthrough_list_accordion,
-            entity_types_to_redact_accordion,
-            terms_accordion,
             redact_duplicate_pages_checkbox,
             max_fuzzy_spelling_mistakes_num,
+            entity_types_to_redact_accordion,
+            terms_accordion,
         ],
     )
 
@@ -4502,6 +4335,62 @@ with blocks:
         show_progress_on=[annotator],
     )
 
+    # Log processing usage - time taken for redaction queries, and also logs for queries to Textract/Comprehend
+    usage_callback = CSVLogger_custom(dataset_file_name=USAGE_LOG_FILE_NAME)
+
+    if DISPLAY_FILE_NAMES_IN_LOGS:
+        usage_callback.setup(
+            [
+                session_hash_textbox,
+                doc_file_name_no_extension_textbox,
+                data_file_name_with_extension_textbox,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
+            ],
+            USAGE_LOGS_FOLDER,
+        )
+    else:
+        usage_callback.setup(
+            [
+                session_hash_textbox,
+                blank_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                total_pdf_page_count,
+                actual_time_taken_number,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
+            ],
+            USAGE_LOGS_FOLDER,
+        )
+
     # If a file has been completed, the function will continue onto the next document
     latest_file_completed_num.change(
         fn=choose_and_run_redactor,
@@ -4606,6 +4495,69 @@ with blocks:
         ],
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
+        fn=lambda *args: usage_callback.flag(
+            list(args),
+            save_to_csv=SAVE_LOGS_TO_CSV,
+            save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+            dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+            dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+            replacement_headers=CSV_USAGE_LOG_HEADERS,
+        ),
+        inputs=(
+            [
+                session_hash_textbox,
+                doc_file_name_no_extension_textbox,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                actual_time_taken_number,
+                total_pdf_page_count,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
+            ]
+            if DISPLAY_FILE_NAMES_IN_LOGS
+            else [
+                session_hash_textbox,
+                placeholder_doc_file_name_no_extension_textbox_for_logs,
+                blank_data_file_name_no_extension_textbox_for_logs,
+                actual_time_taken_number,
+                total_pdf_page_count,
+                textract_query_number,
+                pii_identification_method_drop,
+                comprehend_query_number,
+                cost_code_choice_drop,
+                handwrite_signature_checkbox,
+                host_name_textbox,
+                text_extract_method_radio,
+                is_a_textract_api_call,
+                task_textbox,
+                vlm_model_name_textbox,
+                vlm_total_input_tokens_number,
+                vlm_total_output_tokens_number,
+                llm_model_name_textbox,
+                llm_total_input_tokens_number,
+                llm_total_output_tokens_number,
+            ]
+        ),
+        outputs=[flag_value_placeholder],
+        preprocess=False,
+        api_name="usage_logs",
+    ).success(
+        fn=upload_log_file_to_s3,
+        inputs=[usage_logs_state, usage_s3_logs_loc_state],
+        outputs=[s3_logs_output_textbox],
+    ).success(
         fn=export_outputs_to_s3,
         inputs=[
             output_file_list_state,
@@ -4670,9 +4622,6 @@ with blocks:
             pdf_feedback_title,
         ],
     ).success(
-        fn=reset_aws_call_vars,
-        outputs=[comprehend_query_number, textract_query_number],
-    ).success(
         fn=check_duplicate_pages_checkbox,
         inputs=[redact_duplicate_pages_checkbox],
         outputs=None,
@@ -4681,6 +4630,9 @@ with blocks:
     ).then(
         fn=restore_sys_tracebacklimit,
         outputs=None,
+    ).then(
+        fn=reset_aws_call_vars,
+        outputs=[comprehend_query_number, textract_query_number],
     ).then(
         fn=run_duplicate_analysis,
         inputs=[
@@ -7612,7 +7564,6 @@ with blocks:
         outputs=[s3_logs_output_textbox],
     )
 
-    # full_duplicated_data_df,
     results_df_preview.select(
         fn=handle_selection_and_preview,
         inputs=[results_df_preview, full_duplicate_data_by_file],
@@ -8387,76 +8338,9 @@ with blocks:
             outputs=[data_further_details_text],
         )
 
-    ### USAGE LOGS
-    # Log processing usage - time taken for redaction queries, and also logs for queries to Textract/Comprehend
-    usage_callback = CSVLogger_custom(dataset_file_name=USAGE_LOG_FILE_NAME)
+    ### USAGE LOGS for data file analysis and Textract API calls
 
     if DISPLAY_FILE_NAMES_IN_LOGS:
-        usage_callback.setup(
-            [
-                session_hash_textbox,
-                doc_file_name_no_extension_textbox,
-                data_file_name_with_extension_textbox,
-                total_pdf_page_count,
-                actual_time_taken_number,
-                textract_query_number,
-                pii_identification_method_drop,
-                comprehend_query_number,
-                cost_code_choice_drop,
-                handwrite_signature_checkbox,
-                host_name_textbox,
-                text_extract_method_radio,
-                is_a_textract_api_call,
-                task_textbox,
-                vlm_model_name_textbox,
-                vlm_total_input_tokens_number,
-                vlm_total_output_tokens_number,
-                llm_model_name_textbox,
-                llm_total_input_tokens_number,
-                llm_total_output_tokens_number,
-            ],
-            USAGE_LOGS_FOLDER,
-        )
-
-        latest_file_completed_num.change(
-            lambda *args: usage_callback.flag(
-                list(args),
-                save_to_csv=SAVE_LOGS_TO_CSV,
-                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                replacement_headers=CSV_USAGE_LOG_HEADERS,
-            ),
-            [
-                session_hash_textbox,
-                doc_file_name_no_extension_textbox,
-                blank_data_file_name_no_extension_textbox_for_logs,
-                actual_time_taken_number,
-                total_pdf_page_count,
-                textract_query_number,
-                pii_identification_method_drop,
-                comprehend_query_number,
-                cost_code_choice_drop,
-                handwrite_signature_checkbox,
-                host_name_textbox,
-                text_extract_method_radio,
-                is_a_textract_api_call,
-                task_textbox,
-                vlm_model_name_textbox,
-                vlm_total_input_tokens_number,
-                vlm_total_output_tokens_number,
-                llm_model_name_textbox,
-                llm_total_input_tokens_number,
-                llm_total_output_tokens_number,
-            ],
-            outputs=[flag_value_placeholder],
-            preprocess=False,
-            api_name="usage_logs",
-        ).success(
-            fn=upload_log_file_to_s3,
-            inputs=[usage_logs_state, usage_s3_logs_loc_state],
-            outputs=[s3_logs_output_textbox],
-        )
 
         text_tabular_files_done.change(
             lambda *args: usage_callback.flag(
@@ -8537,71 +8421,6 @@ with blocks:
         )
 
     else:
-        usage_callback.setup(
-            [
-                session_hash_textbox,
-                blank_doc_file_name_no_extension_textbox_for_logs,
-                blank_data_file_name_no_extension_textbox_for_logs,
-                total_pdf_page_count,
-                actual_time_taken_number,
-                textract_query_number,
-                pii_identification_method_drop,
-                comprehend_query_number,
-                cost_code_choice_drop,
-                handwrite_signature_checkbox,
-                host_name_textbox,
-                text_extract_method_radio,
-                is_a_textract_api_call,
-                task_textbox,
-                vlm_model_name_textbox,
-                vlm_total_input_tokens_number,
-                vlm_total_output_tokens_number,
-                llm_model_name_textbox,
-                llm_total_input_tokens_number,
-                llm_total_output_tokens_number,
-            ],
-            USAGE_LOGS_FOLDER,
-        )
-
-        latest_file_completed_num.change(
-            lambda *args: usage_callback.flag(
-                list(args),
-                save_to_csv=SAVE_LOGS_TO_CSV,
-                save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-                dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
-                dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
-                replacement_headers=CSV_USAGE_LOG_HEADERS,
-            ),
-            [
-                session_hash_textbox,
-                placeholder_doc_file_name_no_extension_textbox_for_logs,
-                blank_data_file_name_no_extension_textbox_for_logs,
-                actual_time_taken_number,
-                total_pdf_page_count,
-                textract_query_number,
-                pii_identification_method_drop,
-                comprehend_query_number,
-                cost_code_choice_drop,
-                handwrite_signature_checkbox,
-                host_name_textbox,
-                text_extract_method_radio,
-                is_a_textract_api_call,
-                task_textbox,
-                vlm_model_name_textbox,
-                vlm_total_input_tokens_number,
-                vlm_total_output_tokens_number,
-                llm_model_name_textbox,
-                llm_total_input_tokens_number,
-                llm_total_output_tokens_number,
-            ],
-            outputs=[flag_value_placeholder],
-            preprocess=False,
-        ).success(
-            fn=upload_log_file_to_s3,
-            inputs=[usage_logs_state, usage_s3_logs_loc_state],
-            outputs=[s3_logs_output_textbox],
-        )
-
         text_tabular_files_done.change(
             lambda *args: usage_callback.flag(
                 list(args),
@@ -8679,6 +8498,10 @@ with blocks:
             inputs=[usage_logs_state, usage_s3_logs_loc_state],
             outputs=[s3_logs_output_textbox],
         )
+
+    ###
+    # APP RUN SETTINGS
+    ###
 
     blocks.queue(
         max_size=int(MAX_QUEUE_SIZE),

@@ -245,7 +245,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
                 print("Falling back to loading models without quantization")
                 quantization_config = None
 
-    print(f"Loading vision model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
+    # print(f"Loading vision model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
 
     # Load only the selected model based on configuration
     if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Nanonets-OCR2-3B":
@@ -562,7 +562,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     _loaded_vlm_model = model
     _loaded_vlm_processor = processor
 
-    print(f"Successfully loaded {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
+    # print(f"Successfully loaded {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
 
 
 def get_loaded_vlm_model_and_tokenizer():

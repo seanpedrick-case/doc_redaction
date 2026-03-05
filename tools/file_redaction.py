@@ -400,6 +400,14 @@ def choose_and_run_redactor(
         ocr_review_files = list()
     current_loop_page = 0
 
+    # When EFFICIENT_OCR uses simple text extraction, OCR results are in PDF points; when
+    # OCR path runs, they are in image pixels. Used so divide_coordinates_by_page_sizes
+    # uses mediabox (not image) dimensions when appropriate.
+    ocr_results_use_pdf_points = None
+    # When EFFICIENT_OCR runs both paths, page numbers (1-based) that used text extraction
+    # (so their coordinates are in PDF points). Passed as pages_in_pdf_points for per-page division.
+    pages_with_text_extraction_1based = None
+
     # Initialize LLM token tracking variables
     llm_model_name = ""
     llm_total_input_tokens = 0
@@ -515,9 +523,11 @@ def choose_and_run_redactor(
         estimated_time_taken_state = 0
         comprehend_query_number = 0
         total_textract_query_number = 0
-    elif current_loop_page == 0:
-        comprehend_query_number = 0
-        total_textract_query_number = 0
+    # elif current_loop_page == 0:
+    # comprehend_query_number = 0
+    # Do not reset total_textract_query_number here: EFFICIENT_OCR and other paths
+    # accumulate Textract count during the run; resetting would overwrite the
+    # value when the run completes and report 0 to the UI.
     # If not the first time around, and the current page loop has been set to a huge number (been through all pages), reset current page to 0
     # elif (first_loop_state is False) & (current_loop_page == 999):
     #     current_loop_page = 0
@@ -625,20 +635,23 @@ def choose_and_run_redactor(
             number_of_pages = pymupdf_doc.page_count
             if total_textract_query_number > number_of_pages:
                 total_textract_query_number = number_of_pages
+            # Ensure Total pages UI shows document count (not stale input)
+            if number_of_pages and number_of_pages > 0:
+                annotate_max_pages = number_of_pages
+                annotate_max_pages_bottom = number_of_pages
+        else:
+            number_of_pages = 1
+
+        # No files to process: total page count stays 0 for usage logging
+        total_pages_for_ui = number_of_pages if number_of_pages else 1
 
         sum_numbers_before_seconds(combined_out_message)
-        # print(
-        #     "Estimated total processing time:",
-        #     str(estimate_total_processing_time),
-        #     "seconds",
-        # )
+
         print(combined_out_message)
         gr.Info(combined_out_message)
 
         page_break_return = True
 
-        # No files to process: total page count stays 0 for usage logging
-        total_pages_for_ui = len(page_sizes) if page_sizes else 0
         return (
             combined_out_message,
             out_file_paths,
@@ -1615,6 +1628,18 @@ def choose_and_run_redactor(
             # Set current_loop_page so downstream logic sees "all pages done"
             current_loop_page = number_of_pages_to_process
 
+            # Ensure Total pages (annotate_max_pages / annotate_max_pages_bottom) show full
+            # document count when mixing text extraction and OCR pages
+            annotate_max_pages = number_of_pages
+
+            # OCR results are in PDF points only when no OCR path ran (text path only).
+            # When redact_image_pdf ran, results are in image pixels.
+            ocr_results_use_pdf_points = not pages_needing_ocr_1based
+            # For mixed (text + OCR) we need per-page division; record text-extracted pages.
+            pages_with_text_extraction_1based = (
+                list(pages_with_text_1based) if pages_with_text_1based else None
+            )
+
         elif (
             text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
             or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
@@ -2053,6 +2078,13 @@ def choose_and_run_redactor(
                 )
             )
 
+            # When EFFICIENT_OCR mixes text (PDF points) and OCR (image pixels), pass
+            # pages_in_pdf_points so division uses mediabox for text pages and image dims for OCR.
+            _pages_pdf_points = (
+                set(pages_with_text_extraction_1based)
+                if pages_with_text_extraction_1based
+                else None
+            )
             all_page_line_level_ocr_results_with_words_df = (
                 divide_coordinates_by_page_sizes(
                     all_page_line_level_ocr_results_with_words_df,
@@ -2063,13 +2095,35 @@ def choose_and_run_redactor(
                     ymax="word_y1",
                     coordinates_in_pdf_points=(
                         text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+                        or ocr_results_use_pdf_points is True
                     ),
+                    pages_in_pdf_points=_pages_pdf_points,
                 )
             )
 
-            if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
-                # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
-                if not all_page_line_level_ocr_results_with_words_df.empty:
+            # Reverse y for PDF-point coordinates (text path or EFFICIENT_OCR text pages)
+            # so they match image annotator (y from top). When mixed, reverse only text pages.
+            if not all_page_line_level_ocr_results_with_words_df.empty:
+                if (
+                    pages_with_text_extraction_1based
+                    and ocr_results_use_pdf_points is False
+                ):
+                    # Mixed: reverse y only for rows from text-extracted pages
+                    mask = all_page_line_level_ocr_results_with_words_df["page"].isin(
+                        pages_with_text_extraction_1based
+                    )
+                    for col in ("word_y0", "word_y1"):
+                        all_page_line_level_ocr_results_with_words_df.loc[mask, col] = (
+                            1
+                            - all_page_line_level_ocr_results_with_words_df.loc[
+                                mask, col
+                            ].astype(float)
+                        ).round(6)
+                elif (
+                    text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+                    or ocr_results_use_pdf_points is True
+                ):
+                    # All from text path: reverse entire columns
                     all_page_line_level_ocr_results_with_words_df["word_y0"] = (
                         reverse_y_coords(
                             all_page_line_level_ocr_results_with_words_df, "word_y0"
@@ -2331,6 +2385,8 @@ def choose_and_run_redactor(
         time_taken = toc - tic
         estimated_time_taken_state += time_taken
 
+        estimated_time_taken_state = round(estimated_time_taken_state, 1)
+
         out_time_message = f" Redacted in {estimated_time_taken_state:0.1f} seconds."
         combined_out_message = (
             combined_out_message + " " + out_time_message
@@ -2418,6 +2474,15 @@ def choose_and_run_redactor(
         total_textract_query_number = number_of_pages
 
     page_break_return = True
+
+    # Ensure Total pages (annotate_max_pages / annotate_max_pages_bottom) reflect the
+    # processed document so the UI is correct (e.g. after EFFICIENT_OCR or multi-file).
+    if not isinstance(pymupdf_doc, list) and hasattr(pymupdf_doc, "page_count"):
+        _doc_pages = pymupdf_doc.page_count
+        if _doc_pages and _doc_pages > 0:
+            annotate_max_pages = _doc_pages
+
+    estimated_time_taken_state = round(estimated_time_taken_state, 1)
 
     return (
         combined_out_message,
@@ -3375,7 +3440,6 @@ def redact_page_with_pymupdf(
                         print(
                             "Could not convert image annotator coordinates in redact_page_with_pymupdf"
                         )
-                        print("img_annotation_box", img_annotation_box)
                         pymupdf_x1 = img_annotation_box["xmin"]
                         pymupdf_y1 = img_annotation_box["ymin"]
                         pymupdf_x2 = img_annotation_box["xmax"]
@@ -3959,7 +4023,7 @@ def redact_image_pdf(
         # raise Exception(out_message)
 
     number_of_pages = pymupdf_doc.page_count
-    print("Number of pages:", str(number_of_pages))
+    print("Number of pages in document:", str(number_of_pages))
 
     # Check that page_min and page_max are within expected ranges
     if page_max > number_of_pages or page_max == 0:
@@ -4006,11 +4070,14 @@ def redact_image_pdf(
         all_page_line_level_ocr_results_with_words_json_file_path = (
             output_folder + file_name + "_ocr_results_with_words_local_ocr.json"
         )
+
         if OVERWRITE_EXISTING_OCR_RESULTS:
             # Skip loading existing results, start fresh
             all_page_line_level_ocr_results_with_words = []
             is_missing = True
-        else:
+            print("overwriting existing OCR results with words")
+        elif os.path.exists(all_page_line_level_ocr_results_with_words_json_file_path):
+            print("Loading existing OCR results with words for local OCR analysis")
             (
                 all_page_line_level_ocr_results_with_words,
                 is_missing,
@@ -4020,6 +4087,7 @@ def redact_image_pdf(
                 log_files_output_paths,
                 page_sizes_df,
             )
+
         original_all_page_line_level_ocr_results_with_words = (
             all_page_line_level_ocr_results_with_words.copy()
         )
@@ -4058,6 +4126,74 @@ def redact_image_pdf(
     # Dictionary to store OCR results and page metadata for two-pass processing
     # This allows us to do all OCR first, then all PII detection, avoiding model switching
     ocr_results_by_page = {}
+
+    # Pre-initialise ocr_results_by_page from pages that already have OCR/text results
+    # (e.g. when EFFICIENT_OCR is True, text-extraction pages are already processed by redact_text_pdf)
+    if all_page_line_level_ocr_results_with_words:
+        by_page = {}
+        for item in all_page_line_level_ocr_results_with_words:
+            p = item.get("page")
+            if p is None:
+                continue
+            page_1based = int(p) if isinstance(p, str) else p
+            if page_1based not in by_page:
+                by_page[page_1based] = {"page": page_1based, "results": {}}
+            by_page[page_1based]["results"].update(item.get("results", {}))
+
+        for page_1based in by_page:
+            page_no = page_1based - 1
+            if page_no < 0 or page_no >= number_of_pages:
+                continue
+            try:
+                image_path = page_sizes_df.loc[
+                    page_sizes_df["page"] == page_1based, "image_path"
+                ].iloc[0]
+            except Exception:
+                image_path = (
+                    pdf_image_file_paths[page_no]
+                    if page_no < len(pdf_image_file_paths)
+                    else ""
+                )
+            try:
+                pymupdf_page = pymupdf_doc.load_page(page_no)
+            except Exception:
+                continue
+            try:
+                original_cropbox = page_sizes_df.loc[
+                    page_sizes_df["page"] == page_1based, "original_cropbox"
+                ].iloc[0]
+            except Exception:
+                original_cropbox = pymupdf_page.cropbox.irect
+
+            image = None
+            page_width = pymupdf_page.mediabox.width
+            page_height = pymupdf_page.mediabox.height
+            if isinstance(image_path, str) and image_path:
+                normalized_path = os.path.normpath(os.path.abspath(image_path))
+                if validate_path_containment(normalized_path, input_folder):
+                    try:
+                        image = Image.open(normalized_path)
+                        page_width, page_height = image.size
+                    except Exception:
+                        pass
+
+            page_data_merged = by_page[page_1based]
+            page_line_level_ocr_results_with_words = [page_data_merged]
+
+            ocr_results_by_page[page_no] = {
+                "page_line_level_ocr_results": None,
+                "page_line_level_ocr_results_with_words": page_line_level_ocr_results_with_words,
+                "page_signature_recogniser_results": list(),
+                "page_handwriting_recogniser_results": list(),
+                "handwriting_or_signature_boxes": list(),
+                "image_path": image_path,
+                "pymupdf_page": pymupdf_page,
+                "original_cropbox": original_cropbox,
+                "page_width": page_width,
+                "page_height": page_height,
+                "image": image,
+                "reported_page_number": str(page_1based),
+            }
 
     # When > 1, OCR first pass runs analyse_page_with_textract in parallel (AWS Textract only).
     # With efficient_ocr, the caller can pass pages_to_process so multiple OCR-needed pages
@@ -4260,16 +4396,9 @@ def redact_image_pdf(
                         # Load the created image
                         if os.path.exists(created_image_path):
                             image = Image.open(created_image_path)
-                            # print(
-                            #     f"Successfully created and loaded image from: {created_image_path}"
-                            # )
                         else:
-                            # print(f"Failed to create image at: {created_image_path}")
                             page_width = pymupdf_page.mediabox.width
                             page_height = pymupdf_page.mediabox.height
-                        # print(
-                        #     "Image is None and not a placeholder - using mediabox coordinates"
-                        # )
 
                     except Exception as e:
                         print(f"Error creating image from file_path: {e}")
@@ -5073,12 +5202,7 @@ def redact_image_pdf(
                         )
 
                 # Use image dimensions for json_to_ocrresult so that OCR result coordinates
-                # are in image pixel space. Downstream code (image annotator, review PDF,
-                # redacted PDF) expects image-space coordinates; convert_*_to_pymupdf then
-                # scales from image to PDF when drawing. Using PDF mediabox here would
-                # produce coordinates in PDF space and cause redaction boxes to be
-                # misplaced (shifted up-left and too small) on the second run when
-                # reusing existing Textract output.
+                # are in image pixel space.
                 textract_page_width = page_width
                 textract_page_height = page_height
 
@@ -5439,8 +5563,6 @@ def redact_image_pdf(
                         )
 
             # Store OCR results and page metadata for second pass (PII detection)
-            # This happens after all OCR processing is complete for this page
-            # Only store if we're in the processing range
             if page_no >= page_min and page_no < page_max:
                 ocr_results_by_page[page_no] = {
                     "page_line_level_ocr_results": page_line_level_ocr_results,
@@ -5459,8 +5581,6 @@ def redact_image_pdf(
 
             # Skip PII detection and redaction in first pass - we'll do it in second pass
             # Continue to next page for OCR
-            # Note: Pages outside page_min/page_max range will not have OCR results stored
-            # and will be skipped in the second pass
             continue
 
     # Parallel Textract first pass: run analyse_page_with_textract in worker threads, then merge in page order
@@ -6007,29 +6127,9 @@ def redact_image_pdf(
                         text_analyzer_kwargs["model_choice"] = (
                             LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                         )
-                        # Load PII-specific model and tokenizer if not already loaded
-                        # from tools.llm_funcs import (
-                        #     USE_LLAMA_CPP,
-                        #     get_pii_model,
-                        #     get_pii_tokenizer,
-                        # )
-
-                        # if (
-                        #     "local_model" not in text_analyzer_kwargs
-                        #     or text_analyzer_kwargs["local_model"] is None
-                        # ):
-                        #     text_analyzer_kwargs["local_model"] = get_pii_model()
-                        # if (
-                        #     "tokenizer" not in text_analyzer_kwargs
-                        #     or text_analyzer_kwargs["tokenizer"] is None
-                        # ) and USE_LLAMA_CPP != "True":
-                        #     text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-                        # print("Using local transformers PII model for entity detection")
 
                     # Optional additional Bedrock VLM pass to detect people
                     # and inject [PERSON] entries into the word-level OCR structure for AWS Comprehend.
-                    # This must happen BEFORE analyze_text so the entries are included in the analysis.
-                    # bedrock_runtime is guaranteed to be available if CUSTOM_VLM_PERSON is selected with AWS Comprehend
                     if (
                         pii_identification_method == AWS_PII_OPTION
                         and "CUSTOM_VLM_PERSON" in chosen_redact_comprehend_entities
@@ -7490,7 +7590,7 @@ def redact_text_pdf(
     else:
         page_loop_pages = None
 
-    print("Page range is", str(page_loop_start + 1), "to", str(page_loop_end))
+    print("Page range: ", str(page_loop_start + 1), "to", str(page_loop_end))
 
     # First pass: parallel text extraction (read-only per page, thread-safe)
     if page_loop_pages is not None:
@@ -8175,29 +8275,6 @@ def visualise_ocr_words_bounding_boxes(
                     x1, y1, x2, y2 = bbox
                     all_x_coords.extend([x1, x2])
                     all_y_coords.extend([y1, y2])
-
-        # Check if coordinates appear to be in PyMuPDF range (typically 0-1200 points)
-        # and image is much larger (indicating coordinate system mismatch)
-        # if all_x_coords and all_y_coords:
-        #     max_x = max(all_x_coords)
-        #     max_y = max(all_y_coords)
-        #     # PyMuPDF coordinates are typically in points (0-1200 range)
-        #     # If max coordinates are much smaller than image dimensions, likely need conversion
-        #     if (
-        #         max_x < width * 0.6
-        #         and max_y < height * 0.6
-        #         and max_x < 1500
-        #         and max_y < 1500
-        #     ):
-        #         # Estimate source dimensions from actual coordinate range
-        #         # Add some padding to account for coordinates not reaching edges
-        #         source_width = max(
-        #             max_x * 1.1, 612
-        #         )  # Default to US Letter width if too small
-        #         source_height = max(
-        #             max_y * 1.1, 792
-        #         )  # Default to US Letter height if too small
-        #         needs_coordinate_conversion = True
     else:
         # For non-Textract methods (Tesseract, VLM, inference-server, etc.),
         # coordinates should be in image pixel space, but check if there's a size mismatch
@@ -8288,12 +8365,7 @@ def visualise_ocr_words_bounding_boxes(
             model = word_data.get("model", None)
             is_replaced = model and model.lower() != base_model_name.lower()
 
-            # Determine bounding box color: grey for replaced words, otherwise based on confidence
-            # if is_replaced:
-            #     box_color = (128, 128, 128)  # Grey for model replacements (bounding box only)
-            #      # Draw bounding box
-            #
-            # else:
+            # Determine bounding box color: grey for replaced words
             box_color = (0, 0, 255)  # Default to red
             for min_conf, max_conf, conf_color, _ in confidence_ranges:
                 if min_conf <= conf <= max_conf:
@@ -8635,8 +8707,31 @@ def visualise_ocr_words_bounding_boxes(
 
         output_path = os.path.join(textract_viz_folder, filename)
 
-        # Save the combined image
-        cv2.imwrite(output_path, combined_image)
+        # Save the combined image. Ensure that image file size is 500kb or less
+
+        max_filesize = 500 * 1024  # 500kb in bytes
+        quality = 95  # Start high, OpenCV JPEG quality range is 0-100
+
+        # Try lowering JPEG quality until file is below size limit
+        is_saved = False
+        while quality >= 10:
+            cv2.imwrite(
+                output_path, combined_image, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+            )
+            if (
+                os.path.exists(output_path)
+                and os.path.getsize(output_path) <= max_filesize
+            ):
+                is_saved = True
+                break
+            quality -= 5
+
+        if not is_saved:
+            # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
+            cv2.imwrite(
+                output_path, combined_image, [int(cv2.IMWRITE_JPEG_QUALITY), 10]
+            )
+            # Optionally log warning here that file could not be compressed below 500kb
 
         log_files_output_paths.append(output_path)
 

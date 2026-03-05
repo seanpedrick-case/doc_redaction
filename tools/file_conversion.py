@@ -9,7 +9,7 @@ import zipfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import gradio as gr
 import numpy as np
@@ -1698,11 +1698,21 @@ def save_pdf_with_or_without_compression(
     Save a pymupdf document with basic cleaning or with full compression options. Can be useful for low memory systems to do minimal cleaning to avoid crashing with large PDFs.
     """
     if COMPRESS_REDACTED_PDF is True:
-        pymupdf_doc.save(
-            out_redacted_pdf_file_path, garbage=4, deflate=True, clean=True
-        )
+        try:
+            pymupdf_doc.save(
+                out_redacted_pdf_file_path, garbage=4, deflate=True, clean=True
+            )
+        except Exception as e:
+            print(
+                f"Error saving PDF with compression: {e}, trying again without compression"
+            )
+            pymupdf_doc.save(out_redacted_pdf_file_path, clean=True)
     else:
-        pymupdf_doc.save(out_redacted_pdf_file_path, garbage=1, clean=True)
+        try:
+            pymupdf_doc.save(out_redacted_pdf_file_path, garbage=1, clean=True)
+        except Exception as e:
+            print(f"Error saving PDF without compression: {e}, trying again")
+            pymupdf_doc.save(out_redacted_pdf_file_path, clean=True)
 
 
 def join_values_within_threshold(df1: pd.DataFrame, df2: pd.DataFrame):
@@ -1779,6 +1789,7 @@ def divide_coordinates_by_page_sizes(
     ymin="ymin",
     ymax="ymax",
     coordinates_in_pdf_points: bool = False,
+    pages_in_pdf_points: Optional[Set[int]] = None,
 ) -> pd.DataFrame:
     """
     Optimized function to convert absolute image coordinates (>1) to relative coordinates (<=1).
@@ -1794,6 +1805,10 @@ def divide_coordinates_by_page_sizes(
         coordinates_in_pdf_points: If True, coordinates are in PDF space (points);
             use mediabox_width/mediabox_height for division regardless of
             image_width/image_height (e.g. when called from redact_text_pdf).
+        pages_in_pdf_points: If set, page numbers (1-based) whose coordinates are in PDF
+            points; all other pages use image dimensions. Used when EFFICIENT_OCR mixes
+            text-extracted pages (PDF points) and OCR pages (image pixels). Ignored if
+            coordinates_in_pdf_points is True for the whole dataframe.
 
     Returns:
         DataFrame with coordinates converted to relative system, sorted.
@@ -1895,12 +1910,29 @@ def divide_coordinates_by_page_sizes(
         # When coordinates are in PDF points (e.g. from redact_text_pdf), always use
         # mediabox for division. Otherwise fall back to mediabox when image dimensions
         # are missing (e.g. unvisited pages, or selectable text without prepared images).
+        # When pages_in_pdf_points is set (EFFICIENT_OCR mixed), use mediabox only for
+        # those pages and image dimensions for the rest.
         if "mediabox_width" in df_abs.columns and "mediabox_height" in df_abs.columns:
             if coordinates_in_pdf_points:
                 # Force use of mediabox so PDF-point coordinates are divided correctly
                 # even when image_width/image_height exist (e.g. from a previous run).
                 df_abs["image_width"] = df_abs["mediabox_width"]
                 df_abs["image_height"] = df_abs["mediabox_height"]
+            elif pages_in_pdf_points is not None:
+                # Per-page: use mediabox for pages in pages_in_pdf_points, image dims otherwise
+                page_numeric = pd.to_numeric(df_abs["page"], errors="coerce")
+                use_mediabox = page_numeric.isin(pages_in_pdf_points)
+                img_w = df_abs["image_width"].fillna(df_abs["mediabox_width"])
+                img_h = df_abs["image_height"].fillna(df_abs["mediabox_height"])
+                df_abs["_div_width"] = np.where(
+                    use_mediabox, df_abs["mediabox_width"], img_w
+                )
+                df_abs["_div_height"] = np.where(
+                    use_mediabox, df_abs["mediabox_height"], img_h
+                )
+                df_abs["image_width"] = df_abs["_div_width"]
+                df_abs["image_height"] = df_abs["_div_height"]
+                df_abs.drop(columns=["_div_width", "_div_height"], inplace=True)
             elif "image_width" not in df_abs.columns:
                 df_abs["image_width"] = df_abs["mediabox_width"]
                 df_abs["image_height"] = df_abs["mediabox_height"]
