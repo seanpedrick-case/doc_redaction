@@ -1607,7 +1607,7 @@ with blocks:
             )
             ocr_example_labels.append("CV with photo - face identification")
 
-        if os.path.exists(ocr_example_files[0]):
+        if os.path.exists(example_files[0]):
             available_ocr_examples.append(
                 [
                     [example_files[0]],
@@ -1620,8 +1620,8 @@ with blocks:
                     0,
                     0,
                     "paddle",
-                    CHOSEN_REDACT_ENTITIES,
-                    [],
+                    ["CUSTOM"],
+                    ["CUSTOM"],
                     "Redact Lauren's name, email addresses, and phone numbers with the label LAUREN. Redact university names with the label UNIVERSITY.",
                 ],
             )
@@ -3814,7 +3814,6 @@ with blocks:
         fn=handle_main_pii_method_selection,
         inputs=[pii_identification_method_drop],
         outputs=[
-            pii_identification_method_drop,  # Keep visible so user can change
             in_redact_entities,
             in_redact_comprehend_entities,
             in_redact_llm_entities,

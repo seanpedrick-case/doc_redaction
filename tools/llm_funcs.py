@@ -12,6 +12,7 @@ from tools.config import (
     MAX_SPACES_GPU_RUN_TIME,
     PRINT_TRANSFORMERS_USER_PROMPT,
     REPORT_LLM_OUTPUTS_TO_GUI,
+    VLM_DEFAULT_DO_SAMPLE,
 )
 
 # Import mock patches if in test mode
@@ -56,14 +57,6 @@ model_type = None  # global variable setup
 full_text = (
     ""  # Define dummy source text (full text) just to enable highlight function to load
 )
-
-# Global variables for model and tokenizer
-# Note: These are kept for backward compatibility but are no longer used.
-# All model loading now uses the PII globals (_pii_model, _pii_tokenizer, _pii_assistant_model)
-# via get_pii_model(), get_pii_tokenizer(), etc.
-# _model = None
-# _tokenizer = None
-# _assistant_model = None
 
 # Global variables for PII detection model and tokenizer
 # These are now used for all LLM model loading (both general and PII-specific)
@@ -679,128 +672,6 @@ def load_model(
     return model, tokenizer, assistant_model
 
 
-# def # get_assistant_model():
-#     """Get the globally loaded assistant model. Load it if not already loaded."""
-#     global _pii_model, _pii_tokenizer, _pii_assistant_model
-#     # Use PII globals to match get_pii_model() behavior
-#     if _pii_assistant_model is None:
-#         # Ensure model and tokenizer are loaded first
-#         get_pii_model()
-#         get_pii_tokenizer()
-#     return _pii_assistant_model
-
-
-# def set_model(model, tokenizer, assistant_model=None):
-#     """Set the global model, tokenizer, and assistant model.
-
-#     Note: This function now sets the PII globals to maintain consistency.
-#     """
-#     global _pii_model, _pii_tokenizer, _pii_assistant_model
-#     _pii_model = model
-#     _pii_tokenizer = tokenizer
-#     _pii_assistant_model = assistant_model
-
-
-# def get_pii_model():
-#     """Get the globally loaded PII detection model. Load it if not already loaded."""
-#     global _pii_model, _pii_tokenizer, _pii_assistant_model
-
-#     # Check if model is already loaded
-#     if _pii_model is not None:
-#         print("PII model already loaded, reusing existing model instance.")
-#         return _pii_model
-
-#     # Determine which repo_id, model_file, and model_folder to use
-#     # If PII-specific config is set, use it; otherwise fall back to general local model config
-#     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
-#         pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-#         pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-#         pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-#     else:
-#         raise ValueError(
-#             "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
-#             "Please configure the PII model repository ID."
-#         )
-
-#     print("Loading PII model for the first time...")
-#     _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-#         local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-#         gpu_layers=gpu_layers,
-#         max_context_length=context_length,
-#         gpu_config=gpu_config,
-#         cpu_config=cpu_config,
-#         torch_device=torch_device,
-#         repo_id=pii_repo_id,
-#         model_filename=pii_model_file,
-#         model_dir=pii_model_folder,
-#         compile_mode=COMPILE_MODE,
-#         model_dtype=MODEL_DTYPE,
-#         hf_token=HF_TOKEN,
-#         model=_pii_model,
-#         tokenizer=_pii_tokenizer,
-#         assistant_model=_pii_assistant_model,
-#     )
-#     print("PII model loaded successfully.")
-#     return _pii_model
-
-
-# def get_pii_tokenizer():
-#     """Get the globally loaded PII detection tokenizer. Load it if not already loaded."""
-#     global _pii_model, _pii_tokenizer, _pii_assistant_model
-
-#     # Check if tokenizer is already loaded
-#     if _pii_tokenizer is not None:
-#         print("PII tokenizer already loaded, reusing existing tokenizer instance.")
-#         return _pii_tokenizer
-
-#     # Determine which repo_id, model_file, and model_folder to use
-#     # If PII-specific config is set, use it; otherwise fall back to general local model config
-#     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
-#         pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-#         pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-#         pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-#     else:
-#         raise ValueError(
-#             "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
-#             "Please configure the PII model repository ID."
-#         )
-
-#     print("Loading PII tokenizer for the first time...")
-#     _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-#         local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-#         gpu_layers=gpu_layers,
-#         max_context_length=context_length,
-#         gpu_config=gpu_config,
-#         cpu_config=cpu_config,
-#         torch_device=torch_device,
-#         repo_id=pii_repo_id,
-#         model_filename=pii_model_file,
-#         model_dir=pii_model_folder,
-#         compile_mode=COMPILE_MODE,
-#         model_dtype=MODEL_DTYPE,
-#         hf_token=HF_TOKEN,
-#         model=_pii_model,
-#         tokenizer=_pii_tokenizer,
-#         assistant_model=_pii_assistant_model,
-#     )
-#     print("PII tokenizer loaded successfully.")
-#     return _pii_tokenizer, _pii_tokenizer, _pii_assistant_model
-
-# def get_model_and_tokenizer():
-#     """Get both the globally loaded model and tokenizer together.
-
-#     This is the recommended way to get both when you need them, as it ensures
-#     they're loaded atomically from the same source and prevents mismatches.
-
-#     Returns:
-#         tuple: (model, tokenizer) - Both loaded and guaranteed to be from the same source
-#     """
-#     # Use PII versions which have better error handling
-#     model = get_pii_model()
-#     tokenizer = get_pii_tokenizer()
-#     return model, tokenizer
-
-
 # Initialize PII model at startup if configured (even if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS is False)
 # This allows PII model to be loaded independently for PII detection tasks
 if (
@@ -840,7 +711,7 @@ def call_transformers_model(
     tokenizer=_pii_tokenizer,
     assistant_model=_pii_assistant_model,
     speculative_decoding=speculative_decoding,
-    use_vlm_safe_generation=False,
+    use_vlm_safe_generation=VLM_DEFAULT_DO_SAMPLE,
 ):
     """
     This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
@@ -936,14 +807,18 @@ def call_transformers_model(
     try:
         # Try applying chat template with system prompt (if present)
         # Create inputs dict like VLM does - this allows model to handle device placement automatically
-        input_ids = tokenizer.apply_chat_template(
+        # From transformers v5, apply_chat_template returns BatchEncoding; extract input_ids tensor
+        _encoded = tokenizer.apply_chat_template(
             conversation,
             add_generation_prompt=True,
             tokenize=True,
             return_tensors="pt",
-        ).to(
-            device
-        )  # Ensure inputs match model device
+        )
+        input_ids = (
+            _encoded["input_ids"].to(device)
+            if hasattr(_encoded, "keys")
+            else _encoded.to(device)
+        )
 
         if PRINT_TRANSFORMERS_USER_PROMPT:
             print("Input IDs:", input_ids)
@@ -965,12 +840,17 @@ def call_transformers_model(
             # Try again with only user prompt
             user_only_conversation = [{"role": "user", "content": str(prompt)}]
             try:
-                input_ids = tokenizer.apply_chat_template(
+                _encoded = tokenizer.apply_chat_template(
                     user_only_conversation,
                     add_generation_prompt=True,
                     tokenize=True,
                     return_tensors="pt",
-                ).to(device)
+                )
+                input_ids = (
+                    _encoded["input_ids"].to(device)
+                    if hasattr(_encoded, "keys")
+                    else _encoded.to(device)
+                )
 
                 if PRINT_TRANSFORMERS_USER_PROMPT:
                     print("Input IDs:", input_ids)
@@ -990,18 +870,20 @@ def call_transformers_model(
                 full_prompt = (
                     f"{system_prompt}\n\n{prompt}" if has_system_prompt else prompt
                 )
-                # Tokenize manually with special tokens
-                input_ids = tokenizer(
+                # Tokenize manually with special tokens (tokenizer() returns BatchEncoding; extract tensor)
+                encoded = tokenizer(
                     full_prompt, return_tensors="pt", add_special_tokens=True
-                ).to(device)
+                )
+                input_ids = encoded["input_ids"].to(device)
 
         else:
             # No system prompt, but chat template still failed - use manual tokenization
             print(f"Chat template failed ({e}), using manual tokenization")
             full_prompt = str(prompt)
-            input_ids = tokenizer(
+            encoded = tokenizer(
                 full_prompt, return_tensors="pt", add_special_tokens=True
-            ).to(device)
+            )
+            input_ids = encoded["input_ids"].to(device)
 
     except Exception as e:
         print("Error applying chat template:", e)
@@ -1445,7 +1327,7 @@ def send_request(
                         gen_config,
                         model=vlm_model,
                         tokenizer=vlm_tokenizer,
-                        use_vlm_safe_generation=True,
+                        use_vlm_safe_generation=VLM_DEFAULT_DO_SAMPLE,
                     )
                 else:
                     (

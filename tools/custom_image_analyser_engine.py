@@ -1444,7 +1444,6 @@ def _vlm_ocr_predict(
         # Use the VLM to extract text
         # Pass None for parameters to prioritize model-specific defaults from run_vlm.py
         # If model defaults are not available, general defaults will be used (matching current values)
-        # print(f"Calling extract_text_from_image_vlm with image size: {width}x{height}")
         extracted_text, _, _ = extract_text_from_image_vlm(
             text=prompt,
             image=image,

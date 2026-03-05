@@ -1341,23 +1341,29 @@ def show_info_box_on_click(
     )
 
     return (
-        gr.File(value=in_doc_files),  # walkthrough_file_input
+        gr.File(value=in_doc_files, visible=True),  # walkthrough_file_input
         walkthrough_local_update,  # walkthrough_in_redact_entities
         walkthrough_comprehend_update,  # walkthrough_in_redact_comprehend_entities
         gr.Radio(
-            value=text_extract_method_radio
+            value=text_extract_method_radio, visible=True
         ),  # walkthrough_text_extract_method_radio
-        gr.Radio(value=local_ocr_method),  # walkthrough_local_ocr_method_radio
+        gr.Radio(
+            value=local_ocr_method, visible=True
+        ),  # walkthrough_local_ocr_method_radio
         gr.CheckboxGroup(
-            value=handwrite_signature_checkbox
+            value=handwrite_signature_checkbox, visible=True
         ),  # walkthrough_handwrite_signature_checkbox
         gr.Radio(
-            value=pii_identification_method_drop
+            value=pii_identification_method_drop, visible=True
         ),  # walkthrough_pii_identification_method_drop
-        gr.Dropdown(value=allow_list_walkthrough),  # walkthrough_allow_list_state
-        gr.Dropdown(value=deny_list_walkthrough),  # walkthrough_deny_list_state
         gr.Dropdown(
-            value=fully_redacted_list_walkthrough
+            value=allow_list_walkthrough, visible=True
+        ),  # walkthrough_allow_list_state
+        gr.Dropdown(
+            value=deny_list_walkthrough, visible=True
+        ),  # walkthrough_deny_list_state
+        gr.Dropdown(
+            value=fully_redacted_list_walkthrough, visible=True
         ),  # walkthrough_fully_redacted_list_state
         main_local_entities_update,  # in_redact_entities (main component)
         main_comprehend_entities_update,  # in_redact_comprehend_entities (main component)
@@ -1385,29 +1391,49 @@ def show_info_box_on_click_ocr_examples(
         "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
     )
 
+    is_no_redaction = pii_identification_method_drop == NO_REDACTION_PII_OPTION
+    show_local_entities = (
+        not is_no_redaction and pii_identification_method_drop == LOCAL_PII_OPTION
+    )
+    is_llm_method = not is_no_redaction and (
+        pii_identification_method_drop == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+        or pii_identification_method_drop == INFERENCE_SERVER_PII_OPTION
+        or pii_identification_method_drop == AWS_LLM_PII_OPTION
+    )
+
+    main_local_entities_update = gr.update(
+        value=in_redact_entities,
+        visible=show_local_entities,
+    )
+
+    main_llm_entities_update = gr.update(
+        value=in_redact_llm_entities,
+        visible=is_llm_method,
+    )
+    main_llm_instructions_update = gr.update(
+        value=custom_llm_instructions_textbox,
+        visible=is_llm_method,
+    )
+
     return (
-        gr.File(value=in_doc_files),  # walkthrough_file_input
-        gr.Dropdown(value=in_redact_entities),  # walkthrough_in_redact_entities
+        gr.File(value=in_doc_files, visible=True),  # walkthrough_file_input
+        main_local_entities_update,  # walkthrough_in_redact_entities
         gr.Radio(
-            value=text_extract_method_radio
+            value=text_extract_method_radio, visible=True
         ),  # walkthrough_text_extract_method_radio
-        gr.Radio(value=local_ocr_method_radio),  # walkthrough_local_ocr_method_radio
+        gr.Radio(
+            value=local_ocr_method_radio, visible=True
+        ),  # walkthrough_local_ocr_method_radio
         gr.CheckboxGroup(
-            value=handwrite_signature_checkbox
+            value=handwrite_signature_checkbox, visible=True
         ),  # walkthrough_handwrite_signature_checkbox
         gr.Radio(
-            value=pii_identification_method_drop
+            value=pii_identification_method_drop, visible=True
         ),  # walkthrough_pii_identification_method_drop
-        gr.Dropdown(value=in_redact_llm_entities),  # walkthrough_in_redact_llm_entities
-        gr.Textbox(
-            value=custom_llm_instructions_textbox
-        ),  # walkthrough_custom_llm_instructions_textbox
-        gr.Dropdown(
-            value=in_redact_llm_entities
-        ),  # in_redact_llm_entities (main component)
-        gr.Textbox(
-            value=custom_llm_instructions_textbox
-        ),  # custom_llm_instructions_textbox (main component)
+        main_llm_entities_update,  # walkthrough_in_redact_llm_entities
+        main_llm_instructions_update,  # walkthrough_custom_llm_instructions_textbox
+        main_llm_entities_update,  # in_redact_llm_entities (main component)
+        main_llm_instructions_update,  # custom_llm_instructions_textbox (main component)
     )
 
 

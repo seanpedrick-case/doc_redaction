@@ -707,11 +707,10 @@ def handle_main_pii_method_selection(pii_method):
     # When value is None/empty (e.g. .change() fired before component synced), default to Local so at least one section is visible (e.g. when user clicked Local)
     if pii_method is None or pii_method == "":
         return (
-            gr.update(visible=True),  # pii_identification_method_drop
-            gr.update(visible=True),  # in_redact_entities
-            gr.update(visible=False),  # in_redact_comprehend_entities
-            gr.update(visible=False),  # in_redact_llm_entities
-            gr.update(visible=False),  # custom_llm_instructions_textbox
+            gr.update(visible=True),  #  local_entities
+            gr.update(visible=False),  # comprehend_entities
+            gr.update(visible=False),  # llm_entities
+            gr.update(visible=False),  # llm_custom_instructions
         )
 
     # Check if "No PII redaction" is selected
@@ -720,9 +719,6 @@ def handle_main_pii_method_selection(pii_method):
     # If no redaction, hide all PII-related components
     if is_no_redaction:
         return (
-            gr.update(
-                visible=True
-            ),  # pii_identification_method_drop (keep visible so user can change selection)
             gr.update(visible=False),  # local_entities
             gr.update(visible=False),  # comprehend_entities
             gr.update(visible=False),  # llm_entities
@@ -741,9 +737,8 @@ def handle_main_pii_method_selection(pii_method):
     )
 
     return (
-        gr.update(visible=True),  # pii_identification_method_drop
-        gr.update(visible=show_local_entities),  # local_entities_accordion
-        gr.update(visible=show_comprehend_entities),  # comprehend_entities_accordion
-        gr.update(visible=is_llm_method),  # llm_entities_accordion
-        gr.update(visible=is_llm_method, value=""),  # llm_custom_instructions_accordion
+        gr.update(visible=show_local_entities),  # local_entities
+        gr.update(visible=show_comprehend_entities),  # comprehend_entities
+        gr.update(visible=is_llm_method),  # llm_entities
+        gr.update(visible=is_llm_method),  # llm_custom_instructions
     )
