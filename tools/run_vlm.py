@@ -627,7 +627,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         )
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B-FP8":
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from transformers import AutoModelForImageTextToText, AutoProcessor, FineGrainedFP8Config
 
         MODEL_ID = "Qwen/Qwen3.5-27B-FP8"
         if OVERRIDE_VLM_REPO_ID:
@@ -639,7 +639,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
         if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
+            load_kwargs["quantization_config"] = FineGrainedFP8Config()
         else:
             load_kwargs["dtype"] = "auto"
         model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
@@ -658,7 +658,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         )
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-35B-A3B-FP8":
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from transformers import AutoModelForImageTextToText, AutoProcessor, FineGrainedFP8Config
 
         MODEL_ID = "Qwen/Qwen3.5-35B-A3B-FP8"
         if OVERRIDE_VLM_REPO_ID:
@@ -670,7 +670,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
         if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
+            load_kwargs["quantization_config"] = FineGrainedFP8Config()
         else:
             load_kwargs["dtype"] = "auto"
         model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
@@ -689,7 +689,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         )
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-122B-A10B-FP8":
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from transformers import AutoModelForImageTextToText, AutoProcessor, FineGrainedFP8Config
 
         MODEL_ID = "Qwen/Qwen3.5-122B-A10B-FP8"
         if OVERRIDE_VLM_REPO_ID:
@@ -701,7 +701,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
         if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
+            load_kwargs["quantization_config"] = FineGrainedFP8Config()
         else:
             load_kwargs["dtype"] = "auto"
         model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
@@ -720,7 +720,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         )
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-397B-A17B-FP8":
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from transformers import AutoModelForImageTextToText, AutoProcessor, FineGrainedFP8Config
 
         MODEL_ID = "Qwen/Qwen3.5-397B-A17B-FP8"
         if OVERRIDE_VLM_REPO_ID:
@@ -732,7 +732,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
         if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
+            load_kwargs["quantization_config"] = FineGrainedFP8Config()
         else:
             load_kwargs["dtype"] = "auto"
         model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
