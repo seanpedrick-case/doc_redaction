@@ -91,6 +91,10 @@ def reset_state_vars():
         [],
         [],
         0,  # latest_file_completed_num: reset to 0 at start of document redaction
+        0,  # LLM total input tokens
+        0,  # LLM total output tokens
+        0,  # VLM total input tokens
+        0,  # VLM total output tokens
     )
 
 

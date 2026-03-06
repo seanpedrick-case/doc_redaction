@@ -312,6 +312,12 @@ def choose_and_run_redactor(
     inference_server_vlm_model: str = "",
     efficient_ocr: bool = EFFICIENT_OCR,
     efficient_ocr_min_words: Union[int, float, None] = EFFICIENT_OCR_MIN_WORDS,
+    llm_model_name="",
+    llm_total_input_tokens=0,
+    llm_total_output_tokens=0,
+    vlm_model_name="",
+    vlm_total_input_tokens=0,
+    vlm_total_output_tokens=0,
     ocr_first_pass_max_workers: Optional[int] = None,
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
@@ -375,6 +381,12 @@ def choose_and_run_redactor(
     - inference_server_vlm_model (str, optional): The name of the inference server VLM model to use for OCR. Defaults to an empty string.
     - efficient_ocr (bool, optional): Boolean to determine whether to use efficient OCR.
     - efficient_ocr_min_words (int, optional): The minimum number of words on a page for efficient OCR.
+    - llm_model_name (str, optional): The name of the LLM model to use for the redaction process. Defaults to an empty string.
+    - llm_total_input_tokens (int, optional): The total number of input tokens for the LLM model. Defaults to 0.
+    - llm_total_output_tokens (int, optional): The total number of output tokens for the LLM model. Defaults to 0.
+    - vlm_model_name (str, optional): The name of the VLM model to use for the redaction process. Defaults to an empty string.
+    - vlm_total_input_tokens (int, optional): The total number of input tokens for the VLM model. Defaults to 0.
+    - vlm_total_output_tokens (int, optional): The total number of output tokens for the VLM model. Defaults to 0.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - RETURN_REDACTED_PDF (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
     - RETURN_PDF_FOR_REVIEW (bool, optional): Boolean to determine whether to return a review PDF at the end of the redaction process.
@@ -415,16 +427,6 @@ def choose_and_run_redactor(
     # When EFFICIENT_OCR runs both paths, page numbers (1-based) that used text extraction
     # (so their coordinates are in PDF points). Passed as pages_in_pdf_points for per-page division.
     pages_with_text_extraction_1based = None
-
-    # Initialize LLM token tracking variables
-    llm_model_name = ""
-    llm_total_input_tokens = 0
-    llm_total_output_tokens = 0
-
-    # Initialize VLM token tracking variables
-    vlm_model_name = ""
-    vlm_total_input_tokens = 0
-    vlm_total_output_tokens = 0
 
     efficient_ocr_min_words = (
         int(efficient_ocr_min_words)
@@ -531,6 +533,14 @@ def choose_and_run_redactor(
         estimated_time_taken_state = 0
         comprehend_query_number = 0
         total_textract_query_number = 0
+
+        # Initialize VLM and LLM token tracking variables
+        llm_model_name = ""
+        llm_total_input_tokens = 0
+        llm_total_output_tokens = 0
+        vlm_model_name = ""
+        vlm_total_input_tokens = 0
+        vlm_total_output_tokens = 0
     # elif current_loop_page == 0:
     # comprehend_query_number = 0
     # Do not reset total_textract_query_number here: EFFICIENT_OCR and other paths

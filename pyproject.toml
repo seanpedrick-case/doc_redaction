@@ -52,7 +52,7 @@ dependencies = [
     "scikit-learn<=1.8.0",
     "spacy==3.8.11",
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
-    "gradio<=6.8.0",
+    "gradio<=6.9.0",
     "boto3==1.42.61",
     "pyarrow==21.0.0",
     "openpyxl==3.1.5",

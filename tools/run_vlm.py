@@ -236,7 +236,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
                     bnb_4bit_use_double_quant=True,
                     bnb_4bit_quant_type="nf4",
                 )
-                print("4-bit quantization enabled using bitsandbytes")
+                print("Created quantization config for bitsandbytes")
             except Exception as e:
                 print(f"Warning: Could not setup bitsandbytes quantization: {e}")
                 print("Falling back to loading models without quantization")
@@ -626,10 +626,13 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B-FP8":
-        from transformers import AutoModelForImageTextToText, AutoProcessor, FineGrainedFP8Config
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B":
+        from transformers import (
+            AutoModelForImageTextToText,
+            AutoProcessor,
+        )
 
-        MODEL_ID = "Qwen/Qwen3.5-27B-FP8"
+        MODEL_ID = "Qwen/Qwen3.5-27B"
         if OVERRIDE_VLM_REPO_ID:
             MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -639,7 +642,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
         if quantization_config is not None:
-            load_kwargs["quantization_config"] = FineGrainedFP8Config()
+            load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
         model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
@@ -657,10 +660,13 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-35B-A3B-FP8":
-        from transformers import AutoModelForImageTextToText, AutoProcessor, FineGrainedFP8Config
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B-bnb-4bit":
+        from transformers import (
+            AutoModelForImageTextToText,
+            AutoProcessor,
+        )
 
-        MODEL_ID = "Qwen/Qwen3.5-35B-A3B-FP8"
+        MODEL_ID = "cyberenchanter/Qwen3.5-27B-bnb-4bit"
         if OVERRIDE_VLM_REPO_ID:
             MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -670,7 +676,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
         if quantization_config is not None:
-            load_kwargs["quantization_config"] = FineGrainedFP8Config()
+            load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
         model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
@@ -688,10 +694,13 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-122B-A10B-FP8":
-        from transformers import AutoModelForImageTextToText, AutoProcessor, FineGrainedFP8Config
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-35B-A3B":
+        from transformers import (
+            AutoModelForImageTextToText,
+            AutoProcessor,
+        )
 
-        MODEL_ID = "Qwen/Qwen3.5-122B-A10B-FP8"
+        MODEL_ID = "Qwen/Qwen3.5-35B-A3B"
         if OVERRIDE_VLM_REPO_ID:
             MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -701,7 +710,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
         if quantization_config is not None:
-            load_kwargs["quantization_config"] = FineGrainedFP8Config()
+            load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
         model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
@@ -719,10 +728,13 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             False  # I found that this doesn't work when using transformers
         )
 
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-397B-A17B-FP8":
-        from transformers import AutoModelForImageTextToText, AutoProcessor, FineGrainedFP8Config
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-122B-A10B":
+        from transformers import (
+            AutoModelForImageTextToText,
+            AutoProcessor,
+        )
 
-        MODEL_ID = "Qwen/Qwen3.5-397B-A17B-FP8"
+        MODEL_ID = "Qwen/Qwen3.5-122B-A10B"
         if OVERRIDE_VLM_REPO_ID:
             MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -732,7 +744,41 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "trust_remote_code": True,
         }
         if quantization_config is not None:
-            load_kwargs["quantization_config"] = FineGrainedFP8Config()
+            load_kwargs["quantization_config"] = quantization_config
+        else:
+            load_kwargs["dtype"] = "auto"
+        model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
+
+        model_default_prompt = text_read_default_prompt
+        model_default_do_sample = model_default_do_sample
+        model_default_top_p = 0.8
+        model_default_min_p = 0.0
+        model_default_top_k = 20
+        model_default_temperature = 0.7
+        model_default_repetition_penalty = 1.0
+        model_default_presence_penalty = 1.5
+        model_default_max_new_tokens = MAX_NEW_TOKENS
+        model_supports_presence_penalty = (
+            False  # I found that this doesn't work when using transformers
+        )
+
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-397B-A17B":
+        from transformers import (
+            AutoModelForImageTextToText,
+            AutoProcessor,
+        )
+
+        MODEL_ID = "Qwen/Qwen3.5-397B-A17B"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
+        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        load_kwargs = {
+            "attn_implementation": attn_implementation,
+            "device_map": "auto",
+            "trust_remote_code": True,
+        }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
         model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
@@ -756,7 +802,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     else:
         raise ValueError(
-            f"Invalid model selected: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}. Valid options are: Nanonets-OCR2-3B, Dots.OCR, Qwen3-VL-2B-Instruct, Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, PaddleOCR-VL, or None"
+            f"Invalid model selected: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}. Valid options are shown in tools/run_vlm.py, or None"
         )
 
     # Override model defaults with user-provided config values if they are set
