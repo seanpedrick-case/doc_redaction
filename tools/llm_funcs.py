@@ -109,7 +109,7 @@ from tools.config import (
     TIMEOUT_WAIT,
     USE_LLAMA_CPP,
     USE_LLAMA_SWAP,
-    USE_TRANFORMERS_VLM_MODEL_AS_LLM,
+    USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
 )
 
 
@@ -1293,10 +1293,10 @@ def send_request(
                     num_transformer_generated_tokens,
                 )
     elif "Local" in model_source:
-        # This is the local model. When USE_TRANFORMERS_VLM_MODEL_AS_LLM and model_choice is the VLM model, use the loaded VLM model/tokenizer.
+        # This is the local model. When USE_TRANSFORMERS_VLM_MODEL_AS_LLM and model_choice is the VLM model, use the loaded VLM model/tokenizer.
         vlm_model, vlm_tokenizer = None, None
         if (
-            USE_TRANFORMERS_VLM_MODEL_AS_LLM
+            USE_TRANSFORMERS_VLM_MODEL_AS_LLM
             and model_choice == SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
         ):
             try:
@@ -1305,7 +1305,7 @@ def send_request(
                 vlm_model, vlm_tokenizer = get_loaded_vlm_model_and_tokenizer()
             except Exception as e:
                 print(
-                    f"Could not get VLM model for LLM task (USE_TRANFORMERS_VLM_MODEL_AS_LLM): {e}"
+                    f"Could not get VLM model for LLM task (USE_TRANSFORMERS_VLM_MODEL_AS_LLM): {e}"
                 )
 
         for i in progress_bar:
@@ -1315,7 +1315,7 @@ def send_request(
                 gen_config = LlamaCPPGenerationConfig()
                 gen_config.update_temp(temperature)
 
-                # Call transformers model; use VLM model/tokenizer when USE_TRANFORMERS_VLM_MODEL_AS_LLM and available
+                # Call transformers model; use VLM model/tokenizer when USE_TRANSFORMERS_VLM_MODEL_AS_LLM and available
                 if vlm_model is not None and vlm_tokenizer is not None:
                     (
                         response,

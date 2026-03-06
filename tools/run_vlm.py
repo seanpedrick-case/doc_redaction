@@ -119,7 +119,7 @@ if LOAD_PADDLE_AT_STARTUP is True:
         )
 
 
-# Module-level refs to loaded VLM model/processor (set when SHOW_VLM_MODEL_OPTIONS and model is loaded). Used by LLM entity detection when USE_TRANFORMERS_VLM_MODEL_AS_LLM.
+# Module-level refs to loaded VLM model/processor (set when SHOW_VLM_MODEL_OPTIONS and model is loaded). Used by LLM entity detection when USE_TRANSFORMERS_VLM_MODEL_AS_LLM.
 _loaded_vlm_model = None
 _loaded_vlm_processor = None
 
@@ -614,6 +614,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
+        model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
 
         model_default_prompt = text_read_default_prompt
         model_default_do_sample = model_default_do_sample
@@ -780,7 +781,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     if VLM_SEED is not None:
         model_default_seed = VLM_SEED
 
-    # Store at module level for USE_TRANFORMERS_VLM_MODEL_AS_LLM (no global needed at module level)
+    # Store at module level for USE_TRANSFORMERS_VLM_MODEL_AS_LLM (no global needed at module level)
     _loaded_vlm_model = model
     _loaded_vlm_processor = processor
 
@@ -789,7 +790,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
 def get_loaded_vlm_model_and_tokenizer():
     """
-    Return the currently loaded VLM model and its tokenizer for use by LLM tasks (e.g. entity detection) when USE_TRANFORMERS_VLM_MODEL_AS_LLM is True.
+    Return the currently loaded VLM model and its tokenizer for use by LLM tasks (e.g. entity detection) when USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True.
     Returns (model, tokenizer) or (None, None) if the VLM has not been loaded yet.
     """
     global _loaded_vlm_model, _loaded_vlm_processor
