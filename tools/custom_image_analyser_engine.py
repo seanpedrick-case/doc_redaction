@@ -1390,6 +1390,45 @@ def _call_azure_openai_vlm_api(
         raise ConnectionError(f"Failed to call Azure/OpenAI API: {str(e)}")
 
 
+def _extract_last_text_dict_from_vlm_response(raw: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract the last JSON object that contains a "text" key from a VLM response.
+    Handles thinking blocks (e.g. <think>...</think>) that may contain multiple dicts;
+    the final answer is assumed to be the last valid dict in correct format.
+
+    Returns:
+        The parsed dict with "text" (and optionally "confidence"), or None if none found.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    last_valid = None
+    i = 0
+    while i < len(raw):
+        start = raw.find("{", i)
+        if start == -1:
+            break
+        depth = 1
+        j = start + 1
+        while j < len(raw) and depth > 0:
+            if raw[j] == "{":
+                depth += 1
+            elif raw[j] == "}":
+                depth -= 1
+            j += 1
+        if depth != 0:
+            i = start + 1
+            continue
+        snippet = raw[start:j]
+        try:
+            obj = json.loads(snippet)
+            if isinstance(obj, dict) and "text" in obj:
+                last_valid = obj
+        except (json.JSONDecodeError, TypeError):
+            pass
+        i = j
+    return last_valid
+
+
 def _vlm_ocr_predict(
     image: Image.Image,
     prompt: str = model_default_prompt,
@@ -1447,7 +1486,7 @@ def _vlm_ocr_predict(
         extracted_text, _, _ = extract_text_from_image_vlm(
             text=prompt,
             image=image,
-            max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
+            max_new_tokens=None,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
             temperature=None,  # Use model default if available, otherwise 0.7
             top_p=None,  # Use model default if available, otherwise 0.9
             min_p=None,  # Use model default if available, otherwise 0.0
@@ -1465,33 +1504,39 @@ def _vlm_ocr_predict(
             # print(f"VLM OCR warning: extract_text_from_image_vlm returned unexpected type: {type(extracted_text)}")
             return {"rec_texts": [], "rec_scores": []}
 
-        if extracted_text.strip():
-
-            # Clean the text
-
-            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
-            cleaned_text = cleaned_text.strip()
-
-            # Split into words for compatibility with PaddleOCR format
-            words = cleaned_text.split()
-
-            # If text has more than 30 words, assume something went wrong and skip it
-            if len(words) > 30:
-                print(
-                    f"VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
-                )
-                return {"rec_texts": [], "rec_scores": []}
-
-            # Create PaddleOCR-compatible result
-            result = {
-                "rec_texts": words,
-                "rec_scores": [1.0] * len(words),  # High confidence for VLM results
-            }
-
-            return result
-        else:
+        if not extracted_text.strip():
             # print("VLM OCR warning: Extracted text is empty after stripping")
             return {"rec_texts": [], "rec_scores": []}
+
+        # Parse VLM response: expect dictionary format {"text": "...", "confidence": ...}
+        # Keep the last valid dict in case the thinking response contains multiple dictionaries
+        parsed = _extract_last_text_dict_from_vlm_response(extracted_text)
+        if parsed is None:
+            return {"rec_texts": [], "rec_scores": []}
+
+        text_content = parsed.get("text")
+        confidence = parsed.get("confidence")
+        if text_content is None or not isinstance(text_content, str):
+            return {"rec_texts": [], "rec_scores": []}
+        # Clamp confidence to [0, 1]; default 1.0 if missing or invalid
+        try:
+            score = float(confidence) if confidence is not None else 1.0
+            score = max(0.0, min(1.0, score))
+        except (TypeError, ValueError):
+            score = 1.0
+
+        cleaned_text = re.sub(r"[\r\n]+", " ", text_content).strip()
+        words = cleaned_text.split()
+
+        # Enforce output length below HYBRID_OCR_MAX_NEW_TOKENS (truncate if over)
+        if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
+            words = words[:HYBRID_OCR_MAX_NEW_TOKENS]
+
+        result = {
+            "rec_texts": words,
+            "rec_scores": [score] * len(words),
+        }
+        return result
 
     except Exception:
         # print(f"VLM OCR error: {e}")

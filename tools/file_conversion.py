@@ -1019,6 +1019,172 @@ def extract_redactions(
     return annotations_all_pages_divide, doc
 
 
+def _rects_match(rect_a, rect_b, tolerance: float = 0.5) -> bool:
+    """Return True if two PyMuPDF rects are the same within tolerance (in points)."""
+    return (
+        abs(rect_a.x0 - rect_b.x0) <= tolerance
+        and abs(rect_a.y0 - rect_b.y0) <= tolerance
+        and abs(rect_a.x1 - rect_b.x1) <= tolerance
+        and abs(rect_a.y1 - rect_b.y1) <= tolerance
+    )
+
+
+def _dst_page_has_duplicate_redact(dst_page, rect, title: str, content: str) -> bool:
+    """Return True if dst_page already has a redaction annot with same rect, title, and content."""
+    title = (title or "").strip()
+    content = (content or "").strip()
+    for existing in dst_page.annots():
+        if existing.type[0] != pymupdf.PDF_ANNOT_REDACT:
+            continue
+        if not _rects_match(rect, existing.rect):
+            continue
+        info = existing.info or {}
+        existing_title = (info.get("title") or "").strip()
+        existing_content = (info.get("content") or "").strip()
+        if existing_title == title and existing_content == content:
+            return True
+    return False
+
+
+def _get_base_name_from_review_pdf_path(file_path: str) -> str:
+    """
+    Extract the base file name from a '_redactions_for_review...' path.
+    E.g. 'mydoc_redactions_for_review.pdf' -> 'mydoc',
+         'mydoc_redactions_for_review_pages_1-2.pdf' -> 'mydoc'.
+    """
+    basename = os.path.basename(file_path)
+    name_without_ext = os.path.splitext(basename)[0]
+    suffix = "_redactions_for_review"
+    if suffix in name_without_ext:
+        return name_without_ext.split(suffix)[0]
+    return name_without_ext
+
+
+def _parse_review_pdf_page_suffix(
+    file_path: str,
+) -> Tuple[bool, Optional[int], Optional[int]]:
+    """
+    If the review PDF path ends with a page-range suffix _N_M (e.g. _2_4), return
+    (True, N, M). Otherwise return (False, None, None).
+    E.g. 'mydoc_redactions_for_review_2_4.pdf' -> (True, 2, 4)
+         'mydoc_redactions_for_review.pdf' -> (False, None, None)
+    """
+    basename = os.path.basename(file_path)
+    name_without_ext = os.path.splitext(basename)[0]
+    match = re.search(r"_(\d+)_(\d+)$", name_without_ext)
+    if match:
+        return True, int(match.group(1)), int(match.group(2))
+    return False, None, None
+
+
+def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
+    """
+    Combine redaction comments from multiple '_redactions_for_review' PDFs from the
+    same base document into one PDF.
+
+    Validates that all files share the same base name (before '_redactions_for_review')
+    and the same page count, then merges all redaction annotations into a single
+    output file. If any input has no page-range suffix, output is
+    base_name_redactions_for_review_combined.pdf. If all inputs have page suffixes
+    (e.g. _2_4, _5_7), output is base_name_redactions_for_review_{min}_{max}.pdf
+    (e.g. _2_7).
+
+    Args:
+        file_list: List of file paths or Gradio FileData-like objects with .name.
+        output_folder: Folder to write the combined PDF.
+
+    Returns:
+        List containing the path to the combined PDF for use as gr.File output.
+        On validation error, returns empty list (caller may show error via message).
+    """
+    if not file_list:
+        return []
+
+    # Normalise to paths (Gradio may pass FileData with .name or dict with "name")
+    paths = []
+    for f in file_list:
+        p = (
+            getattr(f, "name", None)
+            or (f.get("name") if isinstance(f, dict) else None)
+            or f
+        )
+        if isinstance(p, str):
+            paths.append(p)
+    if not paths:
+        return []
+
+    base_name = _get_base_name_from_review_pdf_path(paths[0])
+    first_doc = pymupdf.open(paths[0])
+    page_count = len(first_doc)
+
+    # Determine output filename: _combined if any input has no page suffix, else _min_max
+    page_ranges = [_parse_review_pdf_page_suffix(pa) for pa in paths]
+    any_without_suffix = any(not has_s for has_s, _s, _e in page_ranges)
+    if any_without_suffix:
+        output_suffix = "_redactions_for_review_combined"
+    else:
+        starts = [s for _h, s, _e in page_ranges if s is not None]
+        ends = [e for _h, _s, e in page_ranges if e is not None]
+        if starts and ends:
+            output_suffix = f"_redactions_for_review_{min(starts)}_{max(ends)}"
+        else:
+            output_suffix = "_redactions_for_review_combined"
+
+    for p in paths[1:]:
+        other_base = _get_base_name_from_review_pdf_path(p)
+        if other_base != base_name:
+            first_doc.close()
+            raise ValueError(
+                f"All files must come from the same base document. "
+                f"Expected base name '{base_name}' but found '{other_base}' in {os.path.basename(p)}."
+            )
+        other_doc = pymupdf.open(p)
+        if len(other_doc) != page_count:
+            other_doc.close()
+            first_doc.close()
+            raise ValueError(
+                f"All files must have the same number of pages. "
+                f"'{os.path.basename(paths[0])}' has {page_count} pages but "
+                f"'{os.path.basename(p)}' has {len(other_doc)} pages."
+            )
+        # Copy redaction annotations from each page of other_doc into first_doc
+        for page_num in range(page_count):
+            src_page = other_doc[page_num]
+            dst_page = first_doc[page_num]
+            # Collect annots so we don't modify while iterating
+            annots = list(src_page.annots())
+            for annot in annots:
+                if annot.type[0] != pymupdf.PDF_ANNOT_REDACT:
+                    continue
+                rect = annot.rect
+                annot_colors = annot.colors or {}
+                annot_info = annot.info or {}
+                title = annot_info.get("title", "Redaction")
+                content = annot_info.get("content", "")
+                # Skip duplicate: same position and same label/text content
+                if _dst_page_has_duplicate_redact(dst_page, rect, title, content):
+                    continue
+                stroke = annot_colors.get("stroke", (0, 0, 0))
+                fill = annot_colors.get("fill", (0, 0, 0))
+                new_annot = dst_page.add_redact_annot(rect)
+                new_annot.set_colors(stroke=stroke, fill=fill, colors=fill)
+                new_annot.set_name(title)
+                new_annot.set_info(
+                    info=title,
+                    title=title,
+                    subject=annot_info.get("subject", "Redaction"),
+                    content=content,
+                    creationDate=annot_info.get("creationDate", ""),
+                )
+                new_annot.update(opacity=0.5, cross_out=False)
+        other_doc.close()
+
+    out_path = os.path.join(output_folder, base_name + output_suffix + ".pdf")
+    first_doc.save(out_path, clean=True)
+    first_doc.close()
+    return [out_path]
+
+
 def prepare_image_or_pdf(
     file_paths: List[str],
     text_extract_method: str,

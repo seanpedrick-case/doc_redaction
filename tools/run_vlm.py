@@ -26,17 +26,14 @@ from tools.config import (
     VLM_DEFAULT_TEMPERATURE,
     VLM_DEFAULT_TOP_K,
     VLM_DEFAULT_TOP_P,
+    VLM_DISABLE_QWEN3_5_THINKING,
     VLM_MAX_IMAGE_SIZE,
     VLM_MIN_IMAGE_SIZE,
     VLM_SEED,
 )
 from tools.helper_functions import get_system_font_path
 
-text_read_default_prompt = f"""Read all the text in the centre line of the image. Ignore text partially visible in the margins of the image. Ensure that spaces between words and upper/lower cases are preserved. The language of the document is {DEFAULT_LANGUAGE_FULL_NAME}, only return responses in {DEFAULT_LANGUAGE_FULL_NAME}, or return an empty string "". Never return text in another language. If you can't read the text, return an empty string ""."""
-
-text_read_default_prompt = text_read_default_prompt.format(
-    DEFAULT_LANGUAGE_FULL_NAME=DEFAULT_LANGUAGE_FULL_NAME
-)
+text_read_default_prompt = f"""Read all the text in the centre line of the image, and return the text in the dictionary format {{"text":"text content", "confidence":"confidence score from 0-1"}}. Ignore text partially visible in the margins of the image. Ensure that spaces between words and upper/lower cases are preserved. The language of the document is {DEFAULT_LANGUAGE_FULL_NAME}, only return responses in {DEFAULT_LANGUAGE_FULL_NAME}, or return an empty string "". Never return text in another language. If you can't read the text, return an empty string ""."""
 
 if LOAD_PADDLE_AT_STARTUP is True:
     # Set PaddleOCR environment variables BEFORE importing PaddleOCR
@@ -952,9 +949,15 @@ def extract_text_from_image_vlm(
             ],
         }
     ]
+    # Build prompt: when disabling Qwen3.5 thinking we append <think></think> after the generation
+    # prompt so the model sees it and continues with the answer (avoids continue_final_message
+    # which can fail when the chat template does not include the final assistant message in the
+    # rendered string).
     prompt_full = processor.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
+    if VLM_DISABLE_QWEN3_5_THINKING:
+        prompt_full = prompt_full + "<think></think>"
 
     inputs = processor(
         text=[prompt_full],
