@@ -164,6 +164,7 @@ from tools.config import (
     SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
     SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+    SHOW_AWS_API_KEYS,
     SHOW_AWS_EXAMPLES,
     SHOW_AWS_PII_DETECTION_OPTIONS,
     SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
@@ -200,6 +201,7 @@ from tools.config import (
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.data_anonymise import anonymise_files_with_open_text
 from tools.file_conversion import (
+    combine_review_pdf_files,
     get_document_file_names,
     get_input_file_names,
     prepare_image_or_pdf,
@@ -3463,45 +3465,33 @@ with blocks:
                         step=1,
                     )
 
-            if SHOW_LANGUAGE_SELECTION:
-                with gr.Accordion("Language selection", open=False):
-                    gr.Markdown(
-                        """Note that AWS Textract is compatible with English, Spanish, Italian, Portuguese, French, and German, and handwriting detection is only available in English. AWS Comprehend for detecting PII is only compatible with English and Spanish.
-                    The local models (Tesseract and SpaCy) are compatible with the other languages in the list below. However, the language packs for these models need to be installed on your system. When you first run a document through the app, the language packs will be downloaded automatically, but please expect a delay as the models are large."""
+            with gr.Accordion(
+                "Language selection", open=False, visible=SHOW_LANGUAGE_SELECTION
+            ):
+                gr.Markdown(
+                    """Note that AWS Textract is compatible with English, Spanish, Italian, Portuguese, French, and German, and handwriting detection is only available in English. AWS Comprehend for detecting PII is only compatible with English and Spanish.
+                The local models (Tesseract and SpaCy) are compatible with the other languages in the list below. However, the language packs for these models need to be installed on your system. When you first run a document through the app, the language packs will be downloaded automatically, but please expect a delay as the models are large."""
+                )
+                with gr.Row():
+                    chosen_language_full_name_drop = gr.Dropdown(
+                        value=DEFAULT_LANGUAGE_FULL_NAME,
+                        choices=MAPPED_LANGUAGE_CHOICES,
+                        label="Chosen language",
+                        multiselect=False,
+                        visible=True,
                     )
-                    with gr.Row():
-                        chosen_language_full_name_drop = gr.Dropdown(
-                            value=DEFAULT_LANGUAGE_FULL_NAME,
-                            choices=MAPPED_LANGUAGE_CHOICES,
-                            label="Chosen language",
-                            multiselect=False,
-                            visible=True,
-                        )
-                        chosen_language_drop = gr.Dropdown(
-                            value=DEFAULT_LANGUAGE,
-                            choices=LANGUAGE_CHOICES,
-                            label="Chosen language short code",
-                            multiselect=False,
-                            visible=True,
-                            interactive=False,
-                        )
-            else:
-                chosen_language_full_name_drop = gr.Dropdown(
-                    value=DEFAULT_LANGUAGE_FULL_NAME,
-                    choices=MAPPED_LANGUAGE_CHOICES,
-                    label="Chosen language",
-                    multiselect=False,
-                    visible=False,
-                )
-                chosen_language_drop = gr.Dropdown(
-                    value=DEFAULT_LANGUAGE,
-                    choices=LANGUAGE_CHOICES,
-                    label="Chosen language short code",
-                    multiselect=False,
-                    visible=False,
-                )
+                    chosen_language_drop = gr.Dropdown(
+                        value=DEFAULT_LANGUAGE,
+                        choices=LANGUAGE_CHOICES,
+                        label="Chosen language short code",
+                        multiselect=False,
+                        visible=True,
+                        interactive=False,
+                    )
 
-            with gr.Accordion("Use API keys for AWS services", open=False):
+            with gr.Accordion(
+                "Use API keys for AWS services", open=False, visible=SHOW_AWS_API_KEYS
+            ):
                 with gr.Row():
                     aws_access_key_textbox = gr.Textbox(
                         value="",
@@ -3534,7 +3524,21 @@ with blocks:
                     visible=SAVE_OUTPUTS_TO_S3,
                 )
 
-            with gr.Accordion("Combine multiple review files", open=False):
+            with gr.Accordion("Combine multiple review PDFs or CSV files", open=False):
+                gr.Markdown(
+                    "Upload multiple '_redactions_for_review' PDFs from the same base document. "
+                    "All files must share the same base file name and page count. "
+                    "Comments from all files will be merged into one PDF: base_name_redactions_for_review_combined.pdf"
+                )
+                combine_review_pdfs_in_out = gr.File(
+                    label="Combine multiple _redactions_for_review PDFs",
+                    file_count="multiple",
+                    file_types=[".pdf"],
+                )
+                combine_review_pdfs_btn = gr.Button(
+                    "Combine review PDFs into one", variant="primary"
+                )
+
                 multiple_review_files_in_out = gr.File(
                     label="Combine multiple review_file.csv files together here.",
                     file_count="multiple",
@@ -7999,6 +8003,13 @@ with blocks:
         fn=merge_csv_files,
         inputs=multiple_review_files_in_out,
         outputs=multiple_review_files_in_out,
+    )
+
+    # Combine multiple review PDFs (merge redaction comments into one file)
+    combine_review_pdfs_btn.click(
+        fn=combine_review_pdf_files,
+        inputs=[combine_review_pdfs_in_out, output_folder_textbox],
+        outputs=combine_review_pdfs_in_out,
     )
 
     # Need to momentarilly change the root directory of the file explorer to another non-sensitive folder when the button is clicked to get it to update (workaround))

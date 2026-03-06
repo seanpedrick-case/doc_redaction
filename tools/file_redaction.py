@@ -227,17 +227,25 @@ def add_page_range_suffix_to_file_path(
     if current_loop_page >= number_of_pages:
         return file_path
 
-    # Calculate the page range that was actually processed
-    # page_min is 0-indexed (converted in redact_image_pdf/redact_text_pdf), convert to 1-indexed
-    start_page = page_min
+    # Calculate the page range that was actually processed (for display in filename)
+    # page_min from UI: 0 means "first page", 1+ means that page. Never show 0 in suffix (not a real page number).
+    start_page = page_min if page_min >= 1 else 1
 
-    # Calculate end_page: page_min is 0-indexed, current_loop_page is number of pages processed
-    # Last page processed (0-indexed) = page_min + current_loop_page - 1
-    # Convert to 1-indexed: page_min + current_loop_page
-    # But don't exceed page_max (which is 1-indexed)
-    last_page_processed_1_indexed = page_min + current_loop_page
-    end_page = min(page_max, last_page_processed_1_indexed)
-
+    # Calculate end_page: page_min is 1-indexed (UI), current_loop_page is count of pages processed
+    # Last page processed (1-indexed) = start + count - 1
+    last_page_processed_1_indexed = page_min + current_loop_page - 1
+    if page_min < 1:
+        last_page_processed_1_indexed = (
+            current_loop_page  # started from "first page" (0)
+        )
+    end_page = (
+        min(page_max, last_page_processed_1_indexed)
+        if page_max and page_max > 0
+        else last_page_processed_1_indexed
+    )
+    # Never show 0 in suffix (not a real page number)
+    if end_page < 1:
+        end_page = 1
     if end_page < start_page:
         end_page = start_page
 
@@ -822,8 +830,11 @@ def choose_and_run_redactor(
 
     number_of_pages = pymupdf_doc.page_count
 
+    # page_max 0 means "last page of document"
     if page_min == 0 and page_max == 0:
         number_of_pages_to_process = number_of_pages
+    elif page_max == 0:
+        number_of_pages_to_process = (number_of_pages - page_min) + 1
     else:
         number_of_pages_to_process = (page_max - page_min) + 1
 

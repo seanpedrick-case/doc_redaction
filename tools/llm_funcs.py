@@ -110,6 +110,7 @@ from tools.config import (
     USE_LLAMA_CPP,
     USE_LLAMA_SWAP,
     USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
+    VLM_DISABLE_QWEN3_5_THINKING,
 )
 
 
@@ -763,6 +764,13 @@ def call_transformers_model(
     if REASONING_SUFFIX and REASONING_SUFFIX.strip():
         prompt = f"{prompt} {REASONING_SUFFIX}".strip()
 
+    # When using VLM as LLM with Qwen3.5 thinking disabled, we append <think></think> after the generation
+    # prompt so the model continues with the answer (avoids continue_final_message which can fail
+    # when the chat template does not include the final assistant message in the rendered string).
+    add_nothink_assistant_turn = (
+        VLM_DISABLE_QWEN3_5_THINKING and USE_TRANSFORMERS_VLM_MODEL_AS_LLM
+    )
+
     # 1. Define the conversation as a list of dictionaries
     # Note: The multimodal format [{"type": "text", "text": text}] is only needed for actual multimodal models
     # with images/videos. For text-only content, even multimodal models expect plain strings.
@@ -893,6 +901,27 @@ def call_transformers_model(
         raise
 
     attention_mask = torch.ones_like(input_ids).to(device)
+
+    # When disabling Qwen3.5 thinking, append <think></think> to prompt so model continues with the answer
+    if add_nothink_assistant_turn:
+        nothink_tokens = tokenizer.encode(
+            "<think></think>", add_special_tokens=False, return_tensors="pt"
+        )
+        if nothink_tokens.dim() == 1:
+            nothink_tokens = nothink_tokens.unsqueeze(0)
+        nothink_tokens = nothink_tokens.to(device)
+        input_ids = torch.cat([input_ids, nothink_tokens], dim=1)
+        attention_mask = torch.cat(
+            [
+                attention_mask,
+                torch.ones(
+                    (attention_mask.shape[0], nothink_tokens.shape[1]),
+                    device=device,
+                    dtype=attention_mask.dtype,
+                ),
+            ],
+            dim=1,
+        )
 
     # Map LlamaCPP parameters to transformers parameters.
     # When use_vlm_safe_generation (VLM model used for LLM tasks), use greedy decoding to avoid

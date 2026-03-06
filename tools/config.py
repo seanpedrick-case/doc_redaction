@@ -1020,6 +1020,10 @@ if VLM_DEFAULT_PRESENCE_PENALTY and VLM_DEFAULT_PRESENCE_PENALTY.strip():
 else:
     VLM_DEFAULT_PRESENCE_PENALTY = None
 
+VLM_DISABLE_QWEN3_5_THINKING = convert_string_to_boolean(
+    get_or_create_env_var("VLM_DISABLE_QWEN3_5_THINKING", "False")
+)  # Whether to disable Qwen3.5 thinking.
+
 
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
@@ -1242,7 +1246,9 @@ SAVE_VLM_INPUT_IMAGES = convert_string_to_boolean(
 )  # Whether to save input images sent to VLM OCR for debugging.
 
 ### LLM options
-
+SHOW_AWS_API_KEYS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_AWS_API_KEYS", "False")
+)
 # Gemini settings
 SHOW_GEMINI_LLM_MODELS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_GEMINI_LLM_MODELS", "False")
