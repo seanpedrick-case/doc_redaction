@@ -535,7 +535,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     ###
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-2B":
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
 
         MODEL_ID = "Qwen/Qwen3.5-2B"
         if OVERRIDE_VLM_REPO_ID:
@@ -551,6 +551,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         else:
             load_kwargs["dtype"] = "auto"
 
+        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
+
         model_default_prompt = text_read_default_prompt
         model_default_do_sample = model_default_do_sample
         model_default_top_p = 0.8
@@ -565,7 +567,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         )
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-4B":
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
 
         MODEL_ID = "Qwen/Qwen3.5-4B"
         if OVERRIDE_VLM_REPO_ID:
@@ -580,7 +582,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
-        model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
+        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
 
         model_default_prompt = text_read_default_prompt
         model_default_do_sample = model_default_do_sample
@@ -596,7 +598,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         )
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-9B":
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
 
         MODEL_ID = "Qwen/Qwen3.5-9B"
         if OVERRIDE_VLM_REPO_ID:
@@ -611,7 +613,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
-        model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
+        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
 
         model_default_prompt = text_read_default_prompt
         model_default_do_sample = model_default_do_sample
@@ -628,8 +630,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B":
         from transformers import (
-            AutoModelForImageTextToText,
             AutoProcessor,
+            Qwen3_5ForConditionalGeneration,
         )
 
         MODEL_ID = "Qwen/Qwen3.5-27B"
@@ -645,7 +647,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
-        model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
+        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
 
         model_default_prompt = text_read_default_prompt
         model_default_do_sample = model_default_do_sample
@@ -662,11 +664,11 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B-bnb-4bit":
         from transformers import (
-            AutoModelForImageTextToText,
             AutoProcessor,
+            Qwen3_5ForConditionalGeneration,
         )
 
-        MODEL_ID = "cyberenchanter/Qwen3.5-27B-bnb-4bit"
+        MODEL_ID = "skkwowee/Qwen3.5-27B-bnb-4bit"
         if OVERRIDE_VLM_REPO_ID:
             MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -679,7 +681,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
-        model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
+        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
 
         model_default_prompt = text_read_default_prompt
         model_default_do_sample = model_default_do_sample
@@ -696,8 +698,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-35B-A3B":
         from transformers import (
-            AutoModelForImageTextToText,
             AutoProcessor,
+            Qwen3_5MoeForConditionalGeneration,
         )
 
         MODEL_ID = "Qwen/Qwen3.5-35B-A3B"
@@ -713,7 +715,9 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
-        model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
+        model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
+            MODEL_ID, **load_kwargs
+        )
 
         model_default_prompt = text_read_default_prompt
         model_default_do_sample = model_default_do_sample
@@ -730,8 +734,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-122B-A10B":
         from transformers import (
-            AutoModelForImageTextToText,
             AutoProcessor,
+            Qwen3_5MoeForConditionalGeneration,
         )
 
         MODEL_ID = "Qwen/Qwen3.5-122B-A10B"
@@ -747,7 +751,9 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
-        model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
+        model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
+            MODEL_ID, **load_kwargs
+        )
 
         model_default_prompt = text_read_default_prompt
         model_default_do_sample = model_default_do_sample
@@ -764,8 +770,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-397B-A17B":
         from transformers import (
-            AutoModelForImageTextToText,
             AutoProcessor,
+            Qwen3_5MoeForConditionalGeneration,
         )
 
         MODEL_ID = "Qwen/Qwen3.5-397B-A17B"
@@ -781,7 +787,9 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             load_kwargs["quantization_config"] = quantization_config
         else:
             load_kwargs["dtype"] = "auto"
-        model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, **load_kwargs)
+        model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
+            MODEL_ID, **load_kwargs
+        )
 
         model_default_prompt = text_read_default_prompt
         model_default_do_sample = model_default_do_sample

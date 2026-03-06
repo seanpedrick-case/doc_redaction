@@ -4010,6 +4010,10 @@ with blocks:
             all_page_line_level_ocr_results_with_words,
             input_review_files,
             latest_file_completed_num,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
         ],
     ).success(
         fn=enforce_cost_codes,
