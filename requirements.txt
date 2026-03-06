@@ -1,5 +1,5 @@
 # --- Core and data packages ---
-numpy==2.4.2
+numpy<=2.4.2
 pandas==2.3.3
 bleach==6.3.0
 polars==1.38.1
