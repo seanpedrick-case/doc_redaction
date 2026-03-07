@@ -1376,9 +1376,28 @@ class AdaptiveSegmenter:
 class HybridWordSegmenter:
     """
     Implements a two-step approach for word segmentation:
-    1. Proportional estimation based on text.
-    2. Image-based refinement with a "Bounded Scan" to prevent
-       over-correction.
+    1. Proportional estimation based on text (primary; avoids image noise).
+    2. Image-based refinement with a "Bounded Scan" that cannot shrink boxes
+       beyond a fraction of the text-based width.
+
+    Design: Relies more on expected character spacing from the text than on
+    image analysis, so noisy images are less likely to produce tiny or
+    missing boxes.
+
+    Situations that could otherwise cause very small boxes (and how we mitigate):
+    - False gaps in the vertical projection (noise/speckle) -> refinement is
+      bounded by shrink_limit_fraction; initial boxes use proportional only.
+    - Image-based "justified" gap anchoring picking wrong cuts -> we do not
+      use vertical_projection for initial segmentation here; only proportional.
+    - Bidirectional scan snapping to a thin low-density strip inside a word ->
+      same shrink bound; fallback "thinnest point" also clamped.
+    - De-overlapping stealing space from the next word -> shrink bound keeps
+      each box at least (1 - shrink_limit_fraction) of initial width.
+
+    ROBUSTNESS UPGRADES:
+    - Uses Horizontal Smearing to prevent cutting inside noisy characters.
+    - Uses Gaussian Blur to suppress speckle noise.
+    - Implements 'Noise Floors' for gap detection (never assumes perfect 0).
     """
 
     def convert_line_to_word_level(
@@ -1389,10 +1408,8 @@ class HybridWordSegmenter:
         vertical_projection: np.ndarray = None,
     ) -> Dict[str, List]:
         """
-        Step 1: Converts line-level OCR results to word-level by using a
-        robust proportional estimation method, or gap-anchored allocation when
-        the projection has obvious wide gaps (justified text).
-        Guarantees output box count equals input word count.
+        Step 1: Converts line-level OCR results to word-level using proportional estimation.
+        Includes noise-tolerant gap anchoring for justified text.
         """
         output = {
             "text": list(),
@@ -1406,7 +1423,7 @@ class HybridWordSegmenter:
         if not line_data or not line_data.get("text"):
             return output
 
-        i = 0  # Assuming a single line
+        i = 0
         line_text = line_data["text"][i]
         line_left = float(line_data["left"][i])
         line_top = float(line_data["top"][i])
@@ -1430,19 +1447,18 @@ class HybridWordSegmenter:
             and len(vertical_projection) == image_width
             and num_spaces > 0
         ):
-            # Allow small non-zero in gaps (JPEG/scan noise); ~1% of column as noise floor
-            # Projection is sum of 0/255; allow at least one pixel so small images still get a floor
-            dynamic_gap_threshold = max(255.0 * 0.01 * image_height, 255.0)
+            # ROBUSTNESS: Allow significantly more noise in gaps for justified text detection.
+            # Allow up to 3% of the column height to be noise and still count as a "gap".
+            dynamic_gap_threshold = max(255.0 * 0.03 * image_height, 255.0 * 2)
             gaps = _find_widest_zero_gaps(
                 vertical_projection, n=num_spaces, gap_threshold=dynamic_gap_threshold
             )
             if len(gaps) == num_spaces:
-                # Cut points: line start, center of each gap, line end (in image coords)
                 cuts = [0]
                 for start, end in gaps:
                     cuts.append((start + end) // 2)
                 cuts.append(image_width)
-                # Build boxes from [cuts[i], cuts[i+1]) for word i
+
                 for idx, word in enumerate(words):
                     left_px = cuts[idx]
                     right_px = cuts[idx + 1]
@@ -1455,7 +1471,7 @@ class HybridWordSegmenter:
                     output["conf"].append(line_conf)
                 return output
 
-        # --- Proportional estimation (weighted for variable character widths) ---
+        # --- Proportional estimation ---
         total_line_weight = get_weighted_length(line_text)
         if total_line_weight <= 0:
             total_line_weight = 1.0
@@ -1492,18 +1508,30 @@ class HybridWordSegmenter:
         img_h: int,
         direction: str = "ltr",
         trailing_punctuation: List[bool] = None,
+        shrink_limit_fraction: float = 0.5,
     ) -> List[Dict]:
         """
         Helper function to run one pass of refinement.
-        IMPROVED: Uses local minima detection for cursive script where
-        perfect zero-gaps (white space) might not exist.
-        When trailing_punctuation[i] is True, the right boundary is placed after
-        the next small component (punctuation), not in the gap before it.
+        ROBUSTNESS UPGRADE:
+        - Uses a 'gap_noise_floor' instead of looking for 0.
+        - Enforces 'safety_density_limit': if the "thinnest" point is still thick (ink),
+          it refuses to cut there (prevents cutting bold letters).
+        - shrink_limit_fraction: Refinement cannot shrink a box by more than this fraction
+          of its initial (text-based) width from either edge. Prevents noise from creating
+          tiny boxes; keeps segmentation anchored to expected character spacing.
         """
 
         refined_boxes = [box.copy() for box in initial_boxes]
         if trailing_punctuation is None:
             trailing_punctuation = [False] * len(initial_boxes)
+
+        # ROBUSTNESS: Define what constitutes a "gap" vs "ink"
+        # 1. Gap Floor: Anything below 5% of image height is treated as empty space (noise tolerance)
+        gap_noise_floor = 255.0 * (img_h * 0.05)
+
+        # 2. Ink Safety Limit: If the "thinnest" point has > 25% ink density, it is NOT a gap.
+        # It's a character. Do not cut.
+        safety_density_limit = 255.0 * (img_h * 0.25)
 
         if direction == "ltr":
             last_corrected_right_edge = 0
@@ -1516,109 +1544,127 @@ class HybridWordSegmenter:
             box = refined_boxes[i]
             left = int(box["left"])
             right = int(box["left"] + box["width"])
+            init_width = max(1, int(box["width"]))
+            # Bounds from initial (text-based) box: don't let image refinement shrink too much
+            min_right = right - int(shrink_limit_fraction * init_width)
+            max_left = left + int(shrink_limit_fraction * init_width)
 
             left = max(0, min(left, img_w - 1))
             right = max(0, min(right, img_w - 1))
 
             new_left, new_right = left, right
 
-            # --- Boundary search with improved gap detection ---
-            # Priority 1: True gap (zero projection)
-            # Priority 2: Valley with lowest ink density (thinnest connection)
-            # When word ends with punctuation: place boundary after the punctuation blob.
-
-            if direction == "ltr" or direction == "both":  # Scan right logic
+            if direction == "ltr" or direction == "both":  # Scan right
                 if right < img_w:
                     scan_limit = min(img_w, right + max_scan_distance)
                     search_range = range(right, scan_limit)
 
                     best_x = right
                     min_density = float("inf")
-                    found_zero = False
-                    first_zero_x = None
+                    found_gap = False
+                    first_gap_x = None
 
-                    # Look for the best cut in the window
                     for x in search_range:
                         density = vertical_projection[x]
-                        if density == 0:
-                            first_zero_x = x
-                            found_zero = True
+
+                        # Check for Gap
+                        if density <= gap_noise_floor:
+                            first_gap_x = x
+                            found_gap = True
                             break
+
+                        # Track minimum density for fallback
                         if density < min_density:
                             min_density = density
                             best_x = x
 
-                    if found_zero and first_zero_x is not None:
+                    if found_gap and first_gap_x is not None:
                         if trailing_punctuation[i]:
-                            # Anchor punctuation: extend to include the next small component
-                            # (gap then punctuation blob); put boundary after the blob.
-                            # Safety limits to avoid runaway (eating the next word) or noise.
+                            # Logic to jump over the gap and include the punctuation blob
+                            # ... (same safety limits as before) ...
                             proj_len = len(vertical_projection)
-                            x_pos = first_zero_x
-                            # 1. Cross the gap (white space). Don't cross a gap larger than ~2x normal space.
+                            x_pos = first_gap_x
+
+                            # 1. Cross the gap
                             gap_safety_limit = x_pos + (max_scan_distance // 2)
                             while (
                                 x_pos < scan_limit
                                 and x_pos < proj_len
-                                and vertical_projection[x_pos] == 0
+                                and vertical_projection[x_pos] <= gap_noise_floor
                             ):
                                 if x_pos >= gap_safety_limit:
                                     break
                                 x_pos += 1
-                            # 2. Consume the punctuation blob. Punctuation shouldn't be wider than ~50% of line height.
+
+                            # 2. Consume blob
                             blob_start = x_pos
                             blob_safety_limit = blob_start + max(1, int(img_h * 0.5))
                             while (
                                 x_pos < scan_limit
                                 and x_pos < proj_len
-                                and vertical_projection[x_pos] > 0
+                                and vertical_projection[x_pos] > gap_noise_floor
                             ):
                                 if x_pos >= blob_safety_limit:
-                                    # Eating too much (likely the next word), revert to first gap.
-                                    x_pos = first_zero_x
+                                    x_pos = first_gap_x  # Revert
                                     break
                                 x_pos += 1
                             new_right = min(x_pos, scan_limit)
                         else:
-                            new_right = first_zero_x
-                    elif not found_zero:
-                        # No clear gap found, cut at thinnest point (minimum density)
-                        new_right = best_x
+                            new_right = first_gap_x
 
-            if direction == "rtl" or direction == "both":  # Scan left logic
+                    elif not found_gap:
+                        # Fallback: No clear gap found.
+                        # ROBUSTNESS CHECK: Is the "thinnest" point actually thin?
+                        if min_density < safety_density_limit:
+                            new_right = best_x
+                        else:
+                            # The thinnest point is still very dark (ink).
+                            # Don't cut through a letter. Keep original guess or limit.
+                            new_right = right
+
+            if direction == "rtl" or direction == "both":  # Scan left
                 if left > 0:
                     scan_limit = max(0, left - max_scan_distance)
                     search_range = range(left, scan_limit, -1)
 
                     best_x = left
                     min_density = float("inf")
-                    found_zero = False
+                    found_gap = False
 
                     for x in search_range:
                         density = vertical_projection[x]
-                        if density == 0:
+
+                        if density <= gap_noise_floor:
                             new_left = x
-                            found_zero = True
+                            found_gap = True
                             break
+
                         if density < min_density:
                             min_density = density
                             best_x = x
 
-                    if not found_zero:
-                        new_left = best_x
+                    if not found_gap:
+                        # ROBUSTNESS CHECK
+                        if min_density < safety_density_limit:
+                            new_left = best_x
+                        else:
+                            # Refuse to cut through dense ink
+                            new_left = left
 
-            # --- Directional de-overlapping (strict stitching) ---
+            # --- Anchor to text: don't shrink past allowed fraction of initial width ---
+            new_right = max(new_right, min_right)
+            new_left = min(new_left, max_left)
+
+            # --- Directional de-overlapping ---
             if direction == "ltr":
                 if new_left < last_corrected_right_edge:
                     new_left = last_corrected_right_edge
-                # Ensure valid width
                 if new_right <= new_left:
                     new_right = new_left + 1
                 last_corrected_right_edge = new_right
             else:  # rtl
                 if new_right > next_corrected_left_edge:
                     new_right = next_corrected_left_edge
-                # Ensure valid width
                 if new_left >= new_right:
                     new_left = new_right - 1
                 next_corrected_left_edge = new_left
@@ -1634,31 +1680,36 @@ class HybridWordSegmenter:
         line_image: np.ndarray,
     ) -> Dict[str, List]:
         """
-        Refines boxes using a more robust bidirectional scan and averaging.
-        Includes ADAPTIVE NOISE REMOVAL to filter specks based on font size.
+        Refines boxes using a robust bidirectional scan.
+        DIFFERENCE FROM MAIN SEGMENTER: Uses aggressive smoothing and horizontal
+        smearing to force-merge characters, prioritizing word separation over
+        character detail.
         """
         if line_image is None:
             return line_data
 
-        # Early return if 1 or fewer words
         if line_data and line_data.get("text"):
             words = line_data["text"][0].split()
             if len(words) <= 1:
                 img_h, img_w = line_image.shape[:2]
                 return self.convert_line_to_word_level(line_data, img_w, img_h)
 
-        # --- PRE-PROCESSING: Local adaptive binarization (fallback sees noisy/gradient images) ---
+        # --- PRE-PROCESSING: The "Bulldozer" Approach ---
         gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
         img_h, img_w = gray.shape[:2]
 
-        # Local adaptive threshold handles gradients (e.g. left bright, right shadowed);
-        # global Otsu fails on such images. Use safe block size (odd, fit to image).
-        block_size = min(25, min(img_h, img_w))
+        # 1. Gaussian Blur: Suppress high-frequency speckle noise that confuses the main segmenter
+        # We accept slight edge blurring for the sake of noise reduction.
+        blurred_gray = cv2.GaussianBlur(gray, (5, 5), 0)
+
+        # 2. Aggressive Thresholding
+        # We use a larger block size here to be less sensitive to local texture variations
+        block_size = max(25, int(img_h * 0.5))
         if block_size % 2 == 0:
-            block_size = max(3, block_size - 1)
-        block_size = max(3, block_size)
+            block_size += 1
+
         binary = cv2.adaptiveThreshold(
-            gray,
+            blurred_gray,
             255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV,
@@ -1666,61 +1717,21 @@ class HybridWordSegmenter:
             10,
         )
 
-        # [NEW STEP 1] Morphological Opening
-        # Physically erodes small protrusions and dust (2x2 pixels or smaller)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        binary_clean = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+        # 3. Horizontal Smearing (The critical difference)
+        # We intentionally smear mostly horizontally to bridge gaps inside noisy letters.
+        # Kernel width: ~15-20% of line height.
+        smear_w = max(3, int(img_h * 0.20))
+        smear_h = max(1, int(img_h * 0.05))
+        kernel_smear = cv2.getStructuringElement(cv2.MORPH_RECT, (smear_w, smear_h))
 
-        # [NEW STEP 2] Adaptive Component Filtering
-        # Instead of hardcoded pixels, we filter relative to the line's text size.
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            binary_clean, 8, cv2.CV_32S
-        )
+        # Apply Morphological Closing
+        binary_smeared = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_smear)
 
-        # Get heights of all components (excluding background)
-        heights = stats[1:, cv2.CC_STAT_HEIGHT]
+        # Calculate projection on the SMEARED image
+        vertical_projection = np.sum(binary_smeared, axis=0)
 
-        if len(heights) > 0:
-            # Calculate Median Height of "significant" parts (ignore tiny noise for the median calculation)
-            # We assume valid text is at least 20% of the image height
-            significant_heights = heights[heights > img_h * 0.2]
-            if len(significant_heights) > 0:
-                median_h = np.median(significant_heights)
-            else:
-                median_h = np.median(heights)
-
-            # Define Thresholds based on Text Size
-            # 1. Main Threshold: Keep parts taller than 30% of median letter height
-            min_height_thresh = median_h * 0.30
-
-            clean_binary = np.zeros_like(binary)
-            for i in range(1, num_labels):
-                h = stats[i, cv2.CC_STAT_HEIGHT]
-                w = stats[i, cv2.CC_STAT_WIDTH]
-                area = stats[i, cv2.CC_STAT_AREA]
-
-                # Logic: Keep the component IF:
-                # A. It is tall enough to be a letter part (h > threshold)
-                # B. OR it is a "Dot" (Period / i-dot):
-                #    - Height is small (< threshold)
-                #    - Width is ALSO small (roughly square, prevents flat dash/scratch noise)
-                #    - Area is reasonable (> 2px)
-
-                is_tall_enough = h > min_height_thresh
-                is_dot = (
-                    (h <= min_height_thresh) and (w <= min_height_thresh) and (area > 2)
-                )
-
-                if is_tall_enough or is_dot:
-                    clean_binary[labels == i] = 255
-
-            # Use the adaptively cleaned image for projection
-            vertical_projection = np.sum(clean_binary, axis=0)
-        else:
-            # Fallback if no components found (unlikely)
-            vertical_projection = np.sum(binary, axis=0)
-
-        # --- Rest of logic remains the same ---
+        # --- Setup for Scan ---
+        # Detect blobs to estimate character width for scan limiting
         char_blobs = []
         in_blob = False
         blob_start = 0
@@ -1737,7 +1748,6 @@ class HybridWordSegmenter:
         if not char_blobs:
             return self.convert_line_to_word_level(line_data, img_w, img_h)
 
-        # [PREVIOUS FIX] Bounded Scan Distance
         total_chars = len("".join(words))
         if total_chars > 0:
             geom_avg_char_width = img_w / total_chars
@@ -1747,16 +1757,15 @@ class HybridWordSegmenter:
         blob_avg_char_width = np.mean([end - start for start, end in char_blobs])
         safe_avg_char_width = min(blob_avg_char_width, geom_avg_char_width * 1.5)
 
-        # Allow searching at least 50% of the image height in either direction
-        max_scan_distance = max(int(safe_avg_char_width * 2.0), int(img_h * 0.5))
-
-        # [PREVIOUS FIX] Safety Floor
+        # Scan distance parameters
+        max_scan_distance = max(int(safe_avg_char_width * 2.5), int(img_h * 0.6))
         min_safe_box_width = max(4, int(safe_avg_char_width * 0.5))
 
-        # Pass projection so convert_line_to_word_level can anchor to wide gaps (justified text)
-        estimated_data = self.convert_line_to_word_level(
-            line_data, img_w, img_h, vertical_projection=vertical_projection
-        )
+        # --- Standard Logic Continues ---
+        # Use proportional estimation only (no vertical_projection) so initial boxes
+        # are driven by text/character spacing. Image-based gap anchoring on noisy
+        # images can produce tiny slices; refinement will still run but is bounded.
+        estimated_data = self.convert_line_to_word_level(line_data, img_w, img_h)
         if not estimated_data["text"]:
             return estimated_data
 
@@ -1773,13 +1782,12 @@ class HybridWordSegmenter:
                 }
             )
 
-        # Words that end with punctuation: don't cut in the gap before the punctuation
         trailing_punctuation = [
             _word_ends_with_punctuation(estimated_data["text"][j])
             for j in range(len(estimated_data["text"]))
         ]
 
-        # --- STEP 1 & 2: Perform bidirectional refinement passes ---
+        # Run passes (ensure _run_single_pass uses the robust gap logic)
         ltr_boxes = self._run_single_pass(
             initial_boxes,
             vertical_projection,
@@ -1787,7 +1795,7 @@ class HybridWordSegmenter:
             img_w,
             img_h,
             "ltr",
-            trailing_punctuation=trailing_punctuation,
+            trailing_punctuation,
         )
         rtl_boxes = self._run_single_pass(
             initial_boxes,
@@ -1796,19 +1804,17 @@ class HybridWordSegmenter:
             img_w,
             img_h,
             "rtl",
-            trailing_punctuation=trailing_punctuation,
+            trailing_punctuation,
         )
 
-        # --- STEP 3: Combine results using best edge from each pass ---
+        # [Re-use stitching logic from previous code...]
         combined_boxes = [box.copy() for box in initial_boxes]
         for i in range(len(combined_boxes)):
             final_left = ltr_boxes[i]["left"]
             rtl_right = rtl_boxes[i]["left"] + rtl_boxes[i]["width"]
-
             combined_boxes[i]["left"] = final_left
             combined_boxes[i]["width"] = max(min_safe_box_width, rtl_right - final_left)
 
-        # --- STEP 4: Contiguous stitching to eliminate gaps ---
         for i in range(len(combined_boxes) - 1):
             if combined_boxes[i + 1]["left"] <= combined_boxes[i]["left"]:
                 combined_boxes[i + 1]["left"] = (
@@ -1821,11 +1827,12 @@ class HybridWordSegmenter:
             gap_width = nxt["left"] - curr["left"]
             curr["width"] = max(min_safe_box_width, gap_width)
 
-        # Convert back to output dict
         final_output = {k: [] for k in estimated_data.keys()}
         for box in combined_boxes:
-            if box["width"] >= min_safe_box_width:
-                for key in final_output.keys():
-                    final_output[key].append(box[key])
+            # Always keep one box per word; enforce minimum width 1 for valid geometry
+            box_width = max(1, box["width"])
+            box["width"] = box_width
+            for key in final_output.keys():
+                final_output[key].append(box[key])
 
         return final_output

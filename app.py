@@ -204,6 +204,7 @@ from tools.file_conversion import (
     combine_review_pdf_files,
     get_document_file_names,
     get_input_file_names,
+    is_pdf,
     prepare_image_or_pdf,
 )
 from tools.file_redaction import choose_and_run_redactor
@@ -335,6 +336,345 @@ FULL_COMPREHEND_ENTITY_LIST.extend(custom_entities)
 FULL_LLM_ENTITY_LIST.extend(custom_entities)
 
 sys.excepthook = silent_exception_handler
+
+
+def _summarisation_upload_to_paths(file_upload):
+    """Normalise Gradio file input to a list of file paths (str, list, or dict with 'name')."""
+    if not file_upload:
+        return []
+    paths = []
+    if isinstance(file_upload, str):
+        paths.append(file_upload)
+    elif isinstance(file_upload, list):
+        for item in file_upload:
+            if isinstance(item, str):
+                paths.append(item)
+            elif isinstance(item, dict):
+                paths.append(item.get("name") or item.get("path") or "")
+            elif hasattr(item, "name"):
+                paths.append(item.name)
+            elif hasattr(item, "path"):
+                paths.append(item.path)
+    elif isinstance(file_upload, dict):
+        paths.append(file_upload.get("name") or file_upload.get("path") or "")
+    elif hasattr(file_upload, "name"):
+        paths.append(file_upload.name)
+    elif hasattr(file_upload, "path"):
+        paths.append(file_upload.path)
+    return [p for p in paths if p and str(p).strip()]
+
+
+def _upload_contains_pdf(file_upload):
+    """Return True if the summarisation upload contains any PDF file."""
+    paths = _summarisation_upload_to_paths(file_upload)
+    return any(is_pdf(p) for p in paths)
+
+
+def _file_name_from_pdf_path(full_file_name):
+    """Derive a safe file_name prefix from a PDF path (for summary output naming)."""
+    if not full_file_name or not str(full_file_name).strip():
+        return "document"
+    basename = os.path.basename(full_file_name)
+    name_without_ext, _ = os.path.splitext(basename)
+    filename_prefix = (name_without_ext or "document")[:20]
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        filename_prefix = filename_prefix.replace(char, "_")
+    return filename_prefix if filename_prefix else "document"
+
+
+def maybe_extract_then_summarise(
+    all_page_line_level_ocr_results_df_base,
+    output_folder,
+    summarisation_inference_method,
+    summarisation_api_key,
+    summarisation_temperature,
+    doc_full_file_name_textbox,
+    summarisation_context,
+    aws_access_key_textbox,
+    aws_secret_key_textbox,
+    summarisation_hf_api_key_hidden,
+    summarisation_azure_endpoint_hidden,
+    summarisation_format,
+    summarisation_additional_instructions,
+    summarisation_max_pages_per_group,
+    in_summarisation_ocr_files,
+    # prepare + redactor state (same order as used in document_redact_btn / prepare chain)
+    text_extract_method_radio,
+    all_page_line_level_ocr_results_with_words_df_base,
+    latest_file_completed_num,
+    redaction_output_summary_textbox,
+    first_loop_state,
+    annotate_max_pages,
+    all_image_annotations_state,
+    prepare_for_review_bool_false,
+    in_fully_redacted_list_state,
+    input_folder_textbox,
+    prepare_images_bool_false,
+    page_sizes,
+    pdf_doc_state,
+    page_min,
+    page_max,
+    prepared_pdf_state,
+    images_pdf_state,
+    in_redact_entities,
+    in_redact_comprehend_entities,
+    in_redact_llm_entities,
+    in_allow_list_state,
+    in_deny_list_state,
+    output_file_list_state,
+    log_files_output_list_state,
+    actual_time_taken_number,
+    handwrite_signature_checkbox,
+    textract_metadata_textbox,
+    all_decision_process_table_state,
+    current_loop_page_number,
+    page_break_return,
+    pii_identification_method_drop,
+    comprehend_query_number,
+    max_fuzzy_spelling_mistakes_num,
+    match_fuzzy_whole_phrase_bool,
+    review_file_df,
+    document_cropboxes,
+    textract_output_found_checkbox,
+    only_extract_text_radio,
+    duplication_file_path_outputs_list_state,
+    latest_review_file_path,
+    textract_query_number,
+    latest_ocr_file_path,
+    all_page_line_level_ocr_results,
+    all_page_line_level_ocr_results_with_words,
+    local_ocr_method_radio,
+    chosen_language_drop,
+    input_review_files,
+    custom_llm_instructions_textbox,
+    inference_server_vlm_model_textbox,
+    efficient_ocr_checkbox,
+    efficient_ocr_min_words_number,
+    llm_model_name_textbox,
+    llm_total_input_tokens_number,
+    llm_total_output_tokens_number,
+    vlm_model_name_textbox,
+    vlm_total_input_tokens_number,
+    vlm_total_output_tokens_number,
+):
+    """
+    If the summarisation upload contains a PDF, run text extraction (prepare + redactor
+    with text_extraction_only=True) then summarise; otherwise call summarise_document_wrapper
+    with existing behaviour (CSV or state dataframe).
+    Returns the same 7 outputs as summarise_document_wrapper.
+    """
+    paths = _summarisation_upload_to_paths(in_summarisation_ocr_files)
+    if not _upload_contains_pdf(in_summarisation_ocr_files):
+        return summarise_document_wrapper(
+            all_page_line_level_ocr_results_df_base,
+            output_folder,
+            summarisation_inference_method,
+            summarisation_api_key,
+            summarisation_temperature,
+            doc_full_file_name_textbox,
+            summarisation_context,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            summarisation_hf_api_key_hidden,
+            summarisation_azure_endpoint_hidden,
+            summarisation_format,
+            summarisation_additional_instructions,
+            summarisation_max_pages_per_group,
+            in_summarisation_ocr_files,
+        )
+
+    pdf_path = next((p for p in paths if is_pdf(p)), None)
+    if not pdf_path:
+        return summarise_document_wrapper(
+            all_page_line_level_ocr_results_df_base,
+            output_folder,
+            summarisation_inference_method,
+            summarisation_api_key,
+            summarisation_temperature,
+            doc_full_file_name_textbox,
+            summarisation_context,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            summarisation_hf_api_key_hidden,
+            summarisation_azure_endpoint_hidden,
+            summarisation_format,
+            summarisation_additional_instructions,
+            summarisation_max_pages_per_group,
+            in_summarisation_ocr_files,
+        )
+
+    doc_names = get_document_file_names([pdf_path])
+    doc_file_name_no_extension = (
+        doc_names[0]
+        if doc_names[0]
+        else os.path.splitext(os.path.basename(pdf_path))[0]
+    )
+    full_file_name = doc_names[2] if len(doc_names) > 2 and doc_names[2] else pdf_path
+    summary_file_name = _file_name_from_pdf_path(full_file_name)
+
+    check_for_existing_textract_file(
+        doc_file_name_no_extension, output_folder, handwrite_signature_checkbox
+    )
+    check_for_relevant_ocr_output_with_words(
+        doc_file_name_no_extension, text_extract_method_radio, output_folder
+    )
+
+    prepare_result = prepare_image_or_pdf(
+        [pdf_path],
+        text_extract_method_radio,
+        (
+            all_page_line_level_ocr_results_df_base
+            if all_page_line_level_ocr_results_df_base is not None
+            else pd.DataFrame()
+        ),
+        (
+            all_page_line_level_ocr_results_with_words_df_base
+            if all_page_line_level_ocr_results_with_words_df_base is not None
+            else pd.DataFrame()
+        ),
+        latest_file_completed_num,
+        redaction_output_summary_textbox or [],
+        first_loop_state,
+        annotate_max_pages or 1,
+        all_image_annotations_state or [],
+        prepare_for_review_bool_false,
+        (
+            in_fully_redacted_list_state
+            if in_fully_redacted_list_state is not None
+            else []
+        ),
+        output_folder,
+        input_folder_textbox,
+        prepare_images_bool_false if prepare_images_bool_false is not None else True,
+        page_sizes or [],
+        pdf_doc_state if pdf_doc_state is not None else [],
+        page_min or 0,
+        page_max or 0,
+    )
+
+    prepared_pdf_paths = prepare_result[1]
+    pdf_image_paths = prepare_result[2]
+    review_file_from_prepare = prepare_result[7]
+    document_cropboxes_from_prepare = prepare_result[8]
+    page_sizes_from_prepare = prepare_result[9]
+    textract_found_after_prepare = prepare_result[10]
+    ocr_df_base_from_prepare = prepare_result[12]
+    prepare_result[13]
+    ocr_with_words_df_from_prepare = prepare_result[14]
+    pdf_doc_from_prepare = prepare_result[5]
+
+    redactor_result = choose_and_run_redactor(
+        [pdf_path],
+        prepared_pdf_paths,
+        pdf_image_paths,
+        in_redact_entities or [],
+        in_redact_comprehend_entities or [],
+        in_redact_llm_entities or [],
+        text_extract_method_radio,
+        in_allow_list_state or [],
+        in_deny_list_state or [],
+        (
+            in_fully_redacted_list_state
+            if in_fully_redacted_list_state is not None
+            else []
+        ),
+        latest_file_completed_num or 0,
+        redaction_output_summary_textbox or [],
+        output_file_list_state or [],
+        log_files_output_list_state or [],
+        first_loop_state,
+        page_min or 0,
+        page_max or 0,
+        actual_time_taken_number or 0.0,
+        handwrite_signature_checkbox or [],
+        textract_metadata_textbox or "",
+        all_image_annotations_state or [],
+        ocr_df_base_from_prepare,
+        (
+            all_decision_process_table_state
+            if all_decision_process_table_state is not None
+            else pd.DataFrame()
+        ),
+        pdf_doc_from_prepare,
+        current_loop_page_number or 0,
+        page_break_return or False,
+        pii_identification_method_drop or "Local",
+        comprehend_query_number or 0,
+        (
+            max_fuzzy_spelling_mistakes_num
+            if max_fuzzy_spelling_mistakes_num is not None
+            else 1
+        ),
+        (
+            match_fuzzy_whole_phrase_bool
+            if match_fuzzy_whole_phrase_bool is not None
+            else True
+        ),
+        aws_access_key_textbox or "",
+        aws_secret_key_textbox or "",
+        annotate_max_pages or 1,
+        review_file_from_prepare,
+        output_folder,
+        document_cropboxes_from_prepare,
+        page_sizes_from_prepare,
+        textract_found_after_prepare,
+        True,
+        duplication_file_path_outputs_list_state or [],
+        latest_review_file_path or "",
+        input_folder_textbox or "",
+        textract_query_number or 0,
+        latest_ocr_file_path or "",
+        all_page_line_level_ocr_results or [],
+        all_page_line_level_ocr_results_with_words or [],
+        ocr_with_words_df_from_prepare,
+        local_ocr_method_radio or "",
+        chosen_language_drop or "",
+        input_review_files or [],
+        custom_llm_instructions_textbox or "",
+        inference_server_vlm_model_textbox or "",
+        efficient_ocr_checkbox if efficient_ocr_checkbox is not None else False,
+        efficient_ocr_min_words_number,
+        llm_model_name_textbox or "",
+        llm_total_input_tokens_number or 0,
+        llm_total_output_tokens_number or 0,
+        vlm_model_name_textbox or "",
+        vlm_total_input_tokens_number or 0,
+        vlm_total_output_tokens_number or 0,
+    )
+
+    ocr_df_for_summary = redactor_result[12]
+    if ocr_df_for_summary is None or (
+        isinstance(ocr_df_for_summary, pd.DataFrame) and ocr_df_for_summary.empty
+    ):
+        return (
+            [],
+            "No OCR text extracted from PDF. Cannot summarise.",
+            llm_model_name_textbox or "",
+            llm_total_input_tokens_number or 0,
+            llm_total_output_tokens_number or 0,
+            "",
+            0.0,
+        )
+
+    return summarise_document_wrapper(
+        ocr_df_for_summary,
+        output_folder,
+        summarisation_inference_method,
+        summarisation_api_key,
+        summarisation_temperature,
+        summary_file_name,
+        summarisation_context,
+        aws_access_key_textbox,
+        aws_secret_key_textbox,
+        summarisation_hf_api_key_hidden,
+        summarisation_azure_endpoint_hidden,
+        summarisation_format,
+        summarisation_additional_instructions,
+        summarisation_max_pages_per_group,
+        None,
+    )
+
 
 ###
 # Load in FastAPI app
@@ -3285,10 +3625,10 @@ with blocks:
             )
 
             in_summarisation_ocr_files = gr.File(
-                label="Upload one or multiple 'ocr_output.csv' files to summarise",
+                label="Upload PDF or OCR CSV files to summarise",
                 file_count="multiple",
                 height=FILE_INPUT_HEIGHT,
-                file_types=[".csv"],
+                file_types=[".csv", ".pdf"],
             )
 
             with gr.Accordion("Summarisation Settings", open=True):
@@ -4195,6 +4535,10 @@ with blocks:
             all_page_line_level_ocr_results_with_words,
             input_review_files,
             latest_file_completed_num,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
         ],
     ).success(
         fn=enforce_cost_codes,
@@ -7846,7 +8190,7 @@ with blocks:
             cost_code_dataframe_base,
         ],
     ).success(
-        fn=summarise_document_wrapper,
+        fn=maybe_extract_then_summarise,
         inputs=[
             all_page_line_level_ocr_results_df_base,
             output_folder_textbox,
@@ -7855,14 +8199,71 @@ with blocks:
             summarisation_temperature,
             doc_full_file_name_textbox,
             summarisation_context,
-            aws_access_key_textbox,  # Use existing component from Settings tab
-            aws_secret_key_textbox,  # Use existing component from Settings tab
-            summarisation_hf_api_key_hidden,  # Not exposed in Settings, use empty
-            summarisation_azure_endpoint_hidden,  # Use config default
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            summarisation_hf_api_key_hidden,
+            summarisation_azure_endpoint_hidden,
             summarisation_format,
             summarisation_additional_instructions,
             summarisation_max_pages_per_group,
             in_summarisation_ocr_files,
+            text_extract_method_radio,
+            all_page_line_level_ocr_results_with_words_df_base,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            first_loop_state,
+            annotate_max_pages,
+            all_image_annotations_state,
+            prepare_for_review_bool_false,
+            in_fully_redacted_list_state,
+            input_folder_textbox,
+            prepare_images_bool_false,
+            page_sizes,
+            pdf_doc_state,
+            page_min,
+            page_max,
+            prepared_pdf_state,
+            images_pdf_state,
+            in_redact_entities,
+            in_redact_comprehend_entities,
+            in_redact_llm_entities,
+            in_allow_list_state,
+            in_deny_list_state,
+            output_file_list_state,
+            log_files_output_list_state,
+            actual_time_taken_number,
+            handwrite_signature_checkbox,
+            textract_metadata_textbox,
+            all_decision_process_table_state,
+            current_loop_page_number,
+            page_break_return,
+            pii_identification_method_drop,
+            comprehend_query_number,
+            max_fuzzy_spelling_mistakes_num,
+            match_fuzzy_whole_phrase_bool,
+            review_file_df,
+            document_cropboxes,
+            textract_output_found_checkbox,
+            only_extract_text_radio,
+            duplication_file_path_outputs_list_state,
+            latest_review_file_path,
+            textract_query_number,
+            latest_ocr_file_path,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            local_ocr_method_radio,
+            chosen_language_drop,
+            input_review_files,
+            custom_llm_instructions_textbox,
+            inference_server_vlm_model_textbox,
+            efficient_ocr_checkbox,
+            efficient_ocr_min_words_number,
+            llm_model_name_textbox,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
+            vlm_model_name_textbox,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
         ],
         outputs=[
             summarisation_output_files,

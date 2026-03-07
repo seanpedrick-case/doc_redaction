@@ -1077,17 +1077,33 @@ def _parse_review_pdf_page_suffix(
     return False, None, None
 
 
+def _get_review_pdf_combined_output_base(file_path: str) -> str:
+    """
+    From a review PDF path, get the base for the combined output filename:
+    everything up to and including '_redactions_for_review', excluding any
+    text after that (e.g. " (1)", " (2)", "_2_4").
+    E.g. 'file_redactions_for_review (1).pdf' -> 'file_redactions_for_review'
+         'file_FINAL_redactions_for_review.pdf' -> 'file_FINAL_redactions_for_review'
+    """
+    basename = os.path.basename(file_path)
+    name_without_ext = os.path.splitext(basename)[0]
+    suffix = "_redactions_for_review"
+    if suffix in name_without_ext:
+        idx = name_without_ext.index(suffix) + len(suffix)
+        return name_without_ext[:idx]
+    return name_without_ext
+
+
 def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
     """
-    Combine redaction comments from multiple '_redactions_for_review' PDFs from the
-    same base document into one PDF.
+    Combine redaction comments from multiple '_redactions_for_review' PDFs into one PDF.
 
-    Validates that all files share the same base name (before '_redactions_for_review')
-    and the same page count, then merges all redaction annotations into a single
-    output file. If any input has no page-range suffix, output is
-    base_name_redactions_for_review_combined.pdf. If all inputs have page suffixes
-    (e.g. _2_4, _5_7), output is base_name_redactions_for_review_{min}_{max}.pdf
-    (e.g. _2_7).
+    Only validates that all files have the same number of pages. File names may
+    differ (e.g. file_redactions_for_review (1).pdf, file_redactions_for_review (2).pdf,
+    or file_FINAL_redactions_for_review.pdf). The output filename is derived from
+    the first input file: the name up to and including 'redactions_for_review' is
+    taken (anything after that is dropped), then '_combined' is appended, e.g.
+    file_redactions_for_review_combined.pdf.
 
     Args:
         file_list: List of file paths or Gradio FileData-like objects with .name.
@@ -1095,7 +1111,7 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
 
     Returns:
         List containing the path to the combined PDF for use as gr.File output.
-        On validation error, returns empty list (caller may show error via message).
+        On validation error, raises ValueError (e.g. page count mismatch).
     """
     if not file_list:
         return []
@@ -1113,31 +1129,11 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
     if not paths:
         return []
 
-    base_name = _get_base_name_from_review_pdf_path(paths[0])
+    output_base = _get_review_pdf_combined_output_base(paths[0])
     first_doc = pymupdf.open(paths[0])
     page_count = len(first_doc)
 
-    # Determine output filename: _combined if any input has no page suffix, else _min_max
-    page_ranges = [_parse_review_pdf_page_suffix(pa) for pa in paths]
-    any_without_suffix = any(not has_s for has_s, _s, _e in page_ranges)
-    if any_without_suffix:
-        output_suffix = "_redactions_for_review_combined"
-    else:
-        starts = [s for _h, s, _e in page_ranges if s is not None]
-        ends = [e for _h, _s, e in page_ranges if e is not None]
-        if starts and ends:
-            output_suffix = f"_redactions_for_review_{min(starts)}_{max(ends)}"
-        else:
-            output_suffix = "_redactions_for_review_combined"
-
     for p in paths[1:]:
-        other_base = _get_base_name_from_review_pdf_path(p)
-        if other_base != base_name:
-            first_doc.close()
-            raise ValueError(
-                f"All files must come from the same base document. "
-                f"Expected base name '{base_name}' but found '{other_base}' in {os.path.basename(p)}."
-            )
         other_doc = pymupdf.open(p)
         if len(other_doc) != page_count:
             other_doc.close()
@@ -1179,7 +1175,7 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
                 new_annot.update(opacity=0.5, cross_out=False)
         other_doc.close()
 
-    out_path = os.path.join(output_folder, base_name + output_suffix + ".pdf")
+    out_path = os.path.join(output_folder, output_base + "_combined.pdf")
     first_doc.save(out_path, clean=True)
     first_doc.close()
     return [out_path]

@@ -4553,6 +4553,9 @@ def redact_image_pdf(
                 # and inject [PERSON] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
                 if (
                     text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                    or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    or pii_identification_method == AWS_PII_OPTION
+                    or pii_identification_method == AWS_LLM_PII_OPTION
                     and "CUSTOM_VLM_PERSON" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
@@ -4671,6 +4674,9 @@ def redact_image_pdf(
                 # and inject [SIGNATURE] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
                 if (
                     text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                    or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    or pii_identification_method == AWS_PII_OPTION
+                    or pii_identification_method == AWS_LLM_PII_OPTION
                     and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
