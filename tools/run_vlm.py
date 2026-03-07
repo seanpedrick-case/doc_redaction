@@ -1113,7 +1113,7 @@ def extract_text_from_image_vlm(
     return buffer, input_tokens, output_tokens
 
 
-full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': 'identified text'}, ...].
+full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': 'identified text', 'confidence': 'confidence score 0-1'}, ...].
 
 IMPORTANT: Extract each horizontal line of text separately. Do NOT combine multiple lines into paragraphs. Each line that appears on a separate horizontal row in the image should be a separate entry.
 
@@ -1124,6 +1124,7 @@ Rules:
 - Do NOT combine lines that appear on different horizontal rows
 - Each bounding box should tightly fit around a single horizontal line of text
 - Empty lines should be skipped
+- 'confidence' should be a confidence score from 0-1
 
 # Only return valid JSON, no additional text or explanation."""
 
