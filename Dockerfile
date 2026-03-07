@@ -34,9 +34,9 @@ ENV INSTALL_VLM=${INSTALL_VLM}
 
 # Optionally install VLM if the INSTALL_VLM environment variable is set to True. Use index-url https://download.pytorch.org/whl/cu129 for GPU version of PyTorch.
 RUN if [ "$INSTALL_VLM" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu; \
+    pip install --verbose --no-cache-dir --target=/install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu; \
     pip install --verbose --no-cache-dir --target=/install torchvision --index-url https://download.pytorch.org/whl/cpu; \
-    pip install --verbose --no-cache-dir --target=/install transformers<=4.57.2 accelerate<=1.11.0 bitsandbytes<=0.48.1 sentencepiece==0.2.1; \
+    pip install --verbose --no-cache-dir --target=/install transformers<=5.30.0 accelerate<=1.13.0 bitsandbytes<=0.49.2 sentencepiece==0.2.1; \
 fi
 
 # ===================================================================

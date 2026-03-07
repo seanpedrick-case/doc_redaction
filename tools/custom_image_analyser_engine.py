@@ -2047,9 +2047,25 @@ def _inference_server_ocr_predict(
             return {"rec_texts": [], "rec_scores": []}
 
         if extracted_text.strip():
-            # Clean the text
-            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
-            cleaned_text = cleaned_text.strip()
+            # Try to parse VLM/LLM response for {"text": "...", "confidence": ...} or "conf"
+            parsed = _extract_last_text_dict_from_vlm_response(extracted_text)
+            if parsed is not None and isinstance(parsed.get("text"), str):
+                text_content = parsed.get("text")
+                # Prefer "confidence", fallback to "conf" (VLM may use either)
+                confidence = parsed.get("confidence", parsed.get("conf"))
+                try:
+                    score = float(confidence) if confidence is not None else 1.0
+                    # Normalise: if > 1 assume percentage (0–100), else 0–1
+                    if score > 1.0:
+                        score = score / 100.0
+                    score = max(0.0, min(1.0, score))
+                except (TypeError, ValueError):
+                    score = 1.0
+                cleaned_text = re.sub(r"[\r\n]+", " ", text_content).strip()
+            else:
+                # No parseable dict: use raw text and default confidence
+                cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text).strip()
+                score = 1.0
 
             # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
@@ -2061,11 +2077,10 @@ def _inference_server_ocr_predict(
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
-            # Create PaddleOCR-compatible result
+            # Create PaddleOCR-compatible result; use VLM/LLM confidence when available
             result = {
                 "rec_texts": words,
-                "rec_scores": [1.0]
-                * len(words),  # High confidence for inference-server results
+                "rec_scores": [score] * len(words),
             }
 
             return result
@@ -3172,9 +3187,8 @@ def _vlm_page_ocr_predict(
                 or line_item.get("bbox", [])
                 or line_item.get("bb", [])
             )
-            confidence = line_item.get(
-                "confidence", 100
-            )  # Default to 100 if not provided
+            # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
+            confidence = line_item.get("confidence", line_item.get("conf", 100))
 
             # Attempt to fix malformed bounding boxes (e.g., string instead of array)
             fixed_bbox = _fix_malformed_bbox(bbox)
@@ -3244,9 +3258,11 @@ def _vlm_page_ocr_predict(
             width = int(round(x2 - x1))
             height = int(round(y2 - y1))
 
-            # Ensure confidence is in valid range (0-100)
+            # Ensure confidence is in valid range (0-100). VLM may return 0-1; scale to 0-100.
             try:
                 confidence = float(confidence)
+                if 0 <= confidence <= 1:
+                    confidence = confidence * 100
                 confidence = max(0, min(100, confidence))  # Clamp to 0-100
             except (ValueError, TypeError):
                 confidence = 100  # Default if invalid
@@ -3749,9 +3765,8 @@ def _inference_server_page_ocr_predict(
                 or line_item.get("bbox", [])
                 or line_item.get("bb", [])
             )
-            confidence = line_item.get(
-                "confidence", 100
-            )  # Default to 100 if not provided
+            # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
+            confidence = line_item.get("confidence", line_item.get("conf", 100))
 
             # Attempt to fix malformed bounding boxes (e.g., string instead of array)
             fixed_bbox = _fix_malformed_bbox(bbox)
@@ -3819,9 +3834,11 @@ def _inference_server_page_ocr_predict(
             width = int(round(x2 - x1))
             height = int(round(y2 - y1))
 
-            # Ensure confidence is in valid range (0-100)
+            # Ensure confidence is in valid range (0-100). VLM may return 0-1; scale to 0-100.
             try:
                 confidence = float(confidence)
+                if 0 <= confidence <= 1:
+                    confidence = confidence * 100
                 confidence = max(0, min(100, confidence))  # Clamp to 0-100
             except (ValueError, TypeError):
                 confidence = 50  # Default if invalid
@@ -4000,7 +4017,8 @@ def _parse_vlm_page_ocr_response(
             or line_item.get("bbox", [])
             or line_item.get("bb", [])
         )
-        confidence = line_item.get("confidence", 100)
+        # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
+        confidence = line_item.get("confidence", line_item.get("conf", 100))
 
         fixed_bbox = _fix_malformed_bbox(bbox)
         if fixed_bbox is not None:
@@ -4049,6 +4067,8 @@ def _parse_vlm_page_ocr_response(
 
         try:
             confidence = float(confidence)
+            if 0 <= confidence <= 1:
+                confidence = confidence * 100
             confidence = max(0, min(100, confidence))
         except (ValueError, TypeError):
             confidence = 100
@@ -5281,9 +5301,9 @@ class CustomImageAnalyzerEngine:
             # Second pass: convert coordinates using relative coordinate approach
             # Use default "Paddle" if rec_models is not available or doesn't match length
             if len(rec_models) != len(rec_texts):
-                print(
-                    f"Warning: rec_models length ({len(rec_models)}) doesn't match rec_texts length ({len(rec_texts)}). Using default 'Paddle' for all."
-                )
+                # print(
+                #     f"Warning: rec_models length ({len(rec_models)}) doesn't match rec_texts length ({len(rec_texts)}). Using default 'Paddle' for all."
+                # )
                 rec_models = ["Paddle"] * len(rec_texts)
                 # Update page_result to keep it consistent
                 page_result["rec_models"] = rec_models
@@ -5438,7 +5458,7 @@ class CustomImageAnalyzerEngine:
             image_width = actual_width
             image_height = actual_height
 
-        print("segmenting line-level OCR results to word-level...")
+        # print("Segmenting line-level OCR results to word-level...")
 
         segmenter = AdaptiveSegmenter(output_folder=self.output_folder)
 
@@ -7335,10 +7355,12 @@ class CustomImageAnalyzerEngine:
             if not entity.startswith("CUSTOM_VLM_")
         ]
 
-        # Validate: if no standard entities and no custom instructions, raise error
+        # If only CUSTOM_VLM_* entities (and no custom instructions), skip LLM analysis and return blank
         if not filtered_llm_entities and (
             not custom_llm_instructions or not custom_llm_instructions.strip()
         ):
+            if pii_identification_method == AWS_LLM_PII_OPTION:
+                return (list(), 0, "", 0, 0)
             raise ValueError(
                 "No standard entities selected for LLM PII detection and no custom instructions provided. "
                 "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions."
