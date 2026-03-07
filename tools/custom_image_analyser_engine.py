@@ -3172,9 +3172,8 @@ def _vlm_page_ocr_predict(
                 or line_item.get("bbox", [])
                 or line_item.get("bb", [])
             )
-            confidence = line_item.get(
-                "confidence", 100
-            )  # Default to 100 if not provided
+            # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
+            confidence = line_item.get("confidence", line_item.get("conf", 100))
 
             # Attempt to fix malformed bounding boxes (e.g., string instead of array)
             fixed_bbox = _fix_malformed_bbox(bbox)
@@ -3244,9 +3243,11 @@ def _vlm_page_ocr_predict(
             width = int(round(x2 - x1))
             height = int(round(y2 - y1))
 
-            # Ensure confidence is in valid range (0-100)
+            # Ensure confidence is in valid range (0-100). VLM may return 0-1; scale to 0-100.
             try:
                 confidence = float(confidence)
+                if 0 <= confidence <= 1:
+                    confidence = confidence * 100
                 confidence = max(0, min(100, confidence))  # Clamp to 0-100
             except (ValueError, TypeError):
                 confidence = 100  # Default if invalid
@@ -3749,9 +3750,8 @@ def _inference_server_page_ocr_predict(
                 or line_item.get("bbox", [])
                 or line_item.get("bb", [])
             )
-            confidence = line_item.get(
-                "confidence", 100
-            )  # Default to 100 if not provided
+            # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
+            confidence = line_item.get("confidence", line_item.get("conf", 100))
 
             # Attempt to fix malformed bounding boxes (e.g., string instead of array)
             fixed_bbox = _fix_malformed_bbox(bbox)
@@ -3819,9 +3819,11 @@ def _inference_server_page_ocr_predict(
             width = int(round(x2 - x1))
             height = int(round(y2 - y1))
 
-            # Ensure confidence is in valid range (0-100)
+            # Ensure confidence is in valid range (0-100). VLM may return 0-1; scale to 0-100.
             try:
                 confidence = float(confidence)
+                if 0 <= confidence <= 1:
+                    confidence = confidence * 100
                 confidence = max(0, min(100, confidence))  # Clamp to 0-100
             except (ValueError, TypeError):
                 confidence = 50  # Default if invalid
@@ -4000,7 +4002,8 @@ def _parse_vlm_page_ocr_response(
             or line_item.get("bbox", [])
             or line_item.get("bb", [])
         )
-        confidence = line_item.get("confidence", 100)
+        # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
+        confidence = line_item.get("confidence", line_item.get("conf", 100))
 
         fixed_bbox = _fix_malformed_bbox(bbox)
         if fixed_bbox is not None:
@@ -4049,6 +4052,8 @@ def _parse_vlm_page_ocr_response(
 
         try:
             confidence = float(confidence)
+            if 0 <= confidence <= 1:
+                confidence = confidence * 100
             confidence = max(0, min(100, confidence))
         except (ValueError, TypeError):
             confidence = 100
