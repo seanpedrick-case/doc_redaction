@@ -4573,9 +4573,9 @@ def redact_image_pdf(
                         model_choice = (
                             CLOUD_VLM_MODEL_CHOICE if CLOUD_VLM_MODEL_CHOICE else None
                         )
-                        normalised_coords_range = None
-                        if model_choice and "qwen" in model_choice.lower():
-                            normalised_coords_range = 999
+                        normalised_coords_range = (
+                            999  # Full-page prompt uses 0-999 for all Bedrock models
+                        )
 
                         people_ocr_result = _bedrock_page_ocr_predict(
                             image,
@@ -4694,9 +4694,9 @@ def redact_image_pdf(
                         model_choice = (
                             CLOUD_VLM_MODEL_CHOICE if CLOUD_VLM_MODEL_CHOICE else None
                         )
-                        normalised_coords_range = None
-                        if model_choice and "qwen" in model_choice.lower():
-                            normalised_coords_range = 999
+                        normalised_coords_range = (
+                            999  # Full-page prompt uses 0-999 for all Bedrock models
+                        )
 
                         sig_ocr_result = _bedrock_page_ocr_predict(
                             image,
@@ -5273,9 +5273,9 @@ def redact_image_pdf(
 
                         # Use Bedrock VLM for people detection
                         model_choice = CLOUD_VLM_MODEL_CHOICE
-                        normalised_coords_range = None
-                        if model_choice and "qwen" in model_choice.lower():
-                            normalised_coords_range = 999
+                        normalised_coords_range = (
+                            999  # Full-page prompt uses 0-999 for all Bedrock models
+                        )
 
                         people_ocr_result = _bedrock_page_ocr_predict(
                             image,
@@ -5388,9 +5388,9 @@ def redact_image_pdf(
 
                         # Use Bedrock VLM for signature detection
                         model_choice = CLOUD_VLM_MODEL_CHOICE
-                        normalised_coords_range = None
-                        if model_choice and "qwen" in model_choice.lower():
-                            normalised_coords_range = 999
+                        normalised_coords_range = (
+                            999  # Full-page prompt uses 0-999 for all Bedrock models
+                        )
 
                         sig_ocr_result = _bedrock_page_ocr_predict(
                             image,
@@ -5749,7 +5749,7 @@ def redact_image_pdf(
                     )
                     model_choice = CLOUD_VLM_MODEL_CHOICE
                     normalised_coords_range = (
-                        999 if model_choice and "qwen" in model_choice.lower() else None
+                        999  # Full-page prompt uses 0-999 for all Bedrock models
                     )
                     people_ocr_result = _bedrock_page_ocr_predict(
                         image,
@@ -5848,7 +5848,7 @@ def redact_image_pdf(
                     )
                     model_choice = CLOUD_VLM_MODEL_CHOICE
                     normalised_coords_range = (
-                        999 if model_choice and "qwen" in model_choice.lower() else None
+                        999  # Full-page prompt uses 0-999 for all Bedrock models
                     )
                     sig_ocr_result = _bedrock_page_ocr_predict(
                         image,
@@ -6173,9 +6173,7 @@ def redact_image_pdf(
 
                             # Use Bedrock VLM for people detection
                             model_choice = CLOUD_VLM_MODEL_CHOICE
-                            normalised_coords_range = None
-                            if model_choice and "qwen" in model_choice.lower():
-                                normalised_coords_range = 999
+                            normalised_coords_range = 999  # Full-page prompt uses 0-999 for all Bedrock models
 
                             people_ocr_result = _bedrock_page_ocr_predict(
                                 image,
@@ -6294,9 +6292,7 @@ def redact_image_pdf(
 
                             # Use Bedrock VLM for signature detection
                             model_choice = CLOUD_VLM_MODEL_CHOICE
-                            normalised_coords_range = None
-                            if model_choice and "qwen" in model_choice.lower():
-                                normalised_coords_range = 999
+                            normalised_coords_range = 999  # Full-page prompt uses 0-999 for all Bedrock models
 
                             sig_ocr_result = _bedrock_page_ocr_predict(
                                 image,

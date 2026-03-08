@@ -46,6 +46,7 @@ from tools.config import (
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+    MAX_NEW_TOKENS,
     MAX_SPACES_GPU_RUN_TIME,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
@@ -762,7 +763,7 @@ def _prepare_image_for_vlm(
     #     # Skip resizing for AWS Bedrock VLM OCR
     #     return image
 
-    # Override VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR. This is a multiple of 32*32 for Qwen3-VL.
+    # Override VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR (multiple of 32*32 for model compatibility).
     if ocr_method and "bedrock" in ocr_method.lower():
         max_image_size = 33554432  # 32*32*32*1024 = 33554432
         # print("Overriding VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR to 33554432")
@@ -2173,7 +2174,7 @@ def _bedrock_vlm_ocr_predict(
                     prompt=prompt,
                     model_choice=model_choice,
                     bedrock_runtime=bedrock_runtime,
-                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    max_new_tokens=MAX_NEW_TOKENS,
                     temperature=model_default_temperature,
                     top_p=model_default_top_p,
                 )
@@ -2196,24 +2197,95 @@ def _bedrock_vlm_ocr_predict(
             return {"rec_texts": [], "rec_scores": []}
 
         if extracted_text.strip():
-            # Clean the text
+            # Try to parse VLM JSON response [{'bbox': [...], 'text': '...', 'conf': 0-1}, ...]
+            lines_data = None
+            text = extracted_text.strip()
+            try:
+                text = _fix_malformed_bbox_in_json_string(text)
+            except Exception:
+                pass
+
+            try:
+                lines_data = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+
+            if lines_data is None:
+                json_match = re.search(r"```(?:json)?\s*(\[.*?\])", text, re.DOTALL)
+                if json_match:
+                    try:
+                        lines_data = json.loads(json_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None and "[" in text:
+                start_idx = text.find("[")
+                bracket_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(text)):
+                    if text[i] == "[":
+                        bracket_count += 1
+                    elif text[i] == "]":
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i
+                            break
+                if end_idx > start_idx:
+                    try:
+                        lines_data = json.loads(text[start_idx : end_idx + 1])
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None:
+                try:
+                    python_data = ast.literal_eval(text)
+                    if isinstance(python_data, list):
+                        lines_data = python_data
+                except Exception:
+                    pass
+
+            if isinstance(lines_data, list) and len(lines_data) > 0:
+                rec_texts = []
+                rec_scores = []
+                for line_item in lines_data:
+                    if not isinstance(line_item, dict):
+                        continue
+                    line_text = line_item.get("text_content") or line_item.get(
+                        "text", ""
+                    )
+                    if line_text is None:
+                        line_text = ""
+                    line_text = str(line_text).strip()
+                    if not line_text:
+                        continue
+                    conf = line_item.get("confidence", line_item.get("conf"))
+                    try:
+                        score = float(conf) if conf is not None else 1.0
+                        if score > 1.0:
+                            score = score / 100.0
+                        score = max(0.0, min(1.0, score))
+                    except (TypeError, ValueError):
+                        score = 1.0
+                    rec_texts.append(line_text)
+                    rec_scores.append(score)
+                if rec_texts:
+                    return {"rec_texts": rec_texts, "rec_scores": rec_scores}
+
+            # Fallback: treat response as plain text (e.g. different prompt)
             cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
             cleaned_text = cleaned_text.strip()
 
-            # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than 30 words, assume something went wrong and skip it
             if len(words) > 30:
                 print(
                     f"Bedrock VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
-            # Create PaddleOCR-compatible result
             result = {
                 "rec_texts": words,
-                "rec_scores": [1.0] * len(words),  # High confidence for Bedrock results
+                "rec_scores": [1.0] * len(words),
             }
 
             return result
@@ -2300,7 +2372,7 @@ def _gemini_vlm_ocr_predict(
                     client=client,
                     config=config,
                     model_choice=model_choice,
-                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    max_new_tokens=MAX_NEW_TOKENS,
                     temperature=model_default_temperature,
                 )
                 # If we get here, the API call succeeded
@@ -2322,24 +2394,95 @@ def _gemini_vlm_ocr_predict(
             return {"rec_texts": [], "rec_scores": []}
 
         if extracted_text.strip():
-            # Clean the text
+            # Try to parse VLM JSON response [{'bbox': [...], 'text': '...', 'conf': 0-1}, ...]
+            lines_data = None
+            text = extracted_text.strip()
+            try:
+                text = _fix_malformed_bbox_in_json_string(text)
+            except Exception:
+                pass
+
+            try:
+                lines_data = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+
+            if lines_data is None:
+                json_match = re.search(r"```(?:json)?\s*(\[.*?\])", text, re.DOTALL)
+                if json_match:
+                    try:
+                        lines_data = json.loads(json_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None and "[" in text:
+                start_idx = text.find("[")
+                bracket_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(text)):
+                    if text[i] == "[":
+                        bracket_count += 1
+                    elif text[i] == "]":
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i
+                            break
+                if end_idx > start_idx:
+                    try:
+                        lines_data = json.loads(text[start_idx : end_idx + 1])
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None:
+                try:
+                    python_data = ast.literal_eval(text)
+                    if isinstance(python_data, list):
+                        lines_data = python_data
+                except Exception:
+                    pass
+
+            if isinstance(lines_data, list) and len(lines_data) > 0:
+                rec_texts = []
+                rec_scores = []
+                for line_item in lines_data:
+                    if not isinstance(line_item, dict):
+                        continue
+                    line_text = line_item.get("text_content") or line_item.get(
+                        "text", ""
+                    )
+                    if line_text is None:
+                        line_text = ""
+                    line_text = str(line_text).strip()
+                    if not line_text:
+                        continue
+                    conf = line_item.get("confidence", line_item.get("conf"))
+                    try:
+                        score = float(conf) if conf is not None else 1.0
+                        if score > 1.0:
+                            score = score / 100.0
+                        score = max(0.0, min(1.0, score))
+                    except (TypeError, ValueError):
+                        score = 1.0
+                    rec_texts.append(line_text)
+                    rec_scores.append(score)
+                if rec_texts:
+                    return {"rec_texts": rec_texts, "rec_scores": rec_scores}
+
+            # Fallback: treat response as plain text (e.g. different prompt)
             cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
             cleaned_text = cleaned_text.strip()
 
-            # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than 30 words, assume something went wrong and skip it
             if len(words) > 30:
                 print(
                     f"Gemini VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
-            # Create PaddleOCR-compatible result
             result = {
                 "rec_texts": words,
-                "rec_scores": [1.0] * len(words),  # High confidence for Gemini results
+                "rec_scores": [1.0] * len(words),
             }
 
             return result
@@ -2423,7 +2566,7 @@ def _azure_openai_vlm_ocr_predict(
                     prompt=prompt,
                     client=client,
                     model_choice=model_choice,
-                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    max_new_tokens=MAX_NEW_TOKENS,
                     temperature=model_default_temperature,
                 )
                 # If we get here, the API call succeeded
@@ -2445,25 +2588,95 @@ def _azure_openai_vlm_ocr_predict(
             return {"rec_texts": [], "rec_scores": []}
 
         if extracted_text.strip():
-            # Clean the text
+            # Try to parse VLM JSON response [{'bbox': [...], 'text': '...', 'conf': 0-1}, ...]
+            lines_data = None
+            text = extracted_text.strip()
+            try:
+                text = _fix_malformed_bbox_in_json_string(text)
+            except Exception:
+                pass
+
+            try:
+                lines_data = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+
+            if lines_data is None:
+                json_match = re.search(r"```(?:json)?\s*(\[.*?\])", text, re.DOTALL)
+                if json_match:
+                    try:
+                        lines_data = json.loads(json_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None and "[" in text:
+                start_idx = text.find("[")
+                bracket_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(text)):
+                    if text[i] == "[":
+                        bracket_count += 1
+                    elif text[i] == "]":
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i
+                            break
+                if end_idx > start_idx:
+                    try:
+                        lines_data = json.loads(text[start_idx : end_idx + 1])
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None:
+                try:
+                    python_data = ast.literal_eval(text)
+                    if isinstance(python_data, list):
+                        lines_data = python_data
+                except Exception:
+                    pass
+
+            if isinstance(lines_data, list) and len(lines_data) > 0:
+                rec_texts = []
+                rec_scores = []
+                for line_item in lines_data:
+                    if not isinstance(line_item, dict):
+                        continue
+                    line_text = line_item.get("text_content") or line_item.get(
+                        "text", ""
+                    )
+                    if line_text is None:
+                        line_text = ""
+                    line_text = str(line_text).strip()
+                    if not line_text:
+                        continue
+                    conf = line_item.get("confidence", line_item.get("conf"))
+                    try:
+                        score = float(conf) if conf is not None else 1.0
+                        if score > 1.0:
+                            score = score / 100.0
+                        score = max(0.0, min(1.0, score))
+                    except (TypeError, ValueError):
+                        score = 1.0
+                    rec_texts.append(line_text)
+                    rec_scores.append(score)
+                if rec_texts:
+                    return {"rec_texts": rec_texts, "rec_scores": rec_scores}
+
+            # Fallback: treat response as plain text (e.g. different prompt)
             cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
             cleaned_text = cleaned_text.strip()
 
-            # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than 30 words, assume something went wrong and skip it
             if len(words) > 30:
                 print(
                     f"Azure/OpenAI VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
-            # Create PaddleOCR-compatible result
             result = {
                 "rec_texts": words,
-                "rec_scores": [1.0]
-                * len(words),  # High confidence for Azure/OpenAI results
+                "rec_scores": [1.0] * len(words),
             }
 
             return result
@@ -2760,7 +2973,7 @@ def _vlm_page_ocr_predict(
         image: PIL Image to process (full page)
         image_name: Name of the image for debugging
         normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
-            from 0 to this value (e.g., 999, default for Qwen3-VL). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
+            from 0 to this value (e.g., 999 as used in the full-page VLM prompt). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
         output_folder: The folder where output images will be saved
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
@@ -3323,7 +3536,7 @@ def _inference_server_page_ocr_predict(
         image: PIL Image to process (full page)
         image_name: Name of the image for debugging
         normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
-            from 0 to this value (e.g., 999, default for Qwen3-VL). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
+            from 0 to this value (e.g., 999 as used in the full-page VLM prompt). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
         output_folder: The folder where output images will be saved
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
@@ -3807,11 +4020,8 @@ def _inference_server_page_ocr_predict(
                 continue
 
             # If coordinates are normalized (0 to normalised_coords_range), rescale directly to processed image dimensions
-            # This matches the Qwen 3-VL approach: direct normalization to image size using /999 * dimension
             if normalised_coords_range is not None and normalised_coords_range > 0:
-                # Direct normalization: match ocr.ipynb approach exactly
-                # Formula: (coord / normalised_coords_range) * image_dimension
-                # Note: Qwen 3-VL uses 999, but we allow configurable range
+                # Formula: (coord / normalised_coords_range) * image_dimension (e.g. 999 from full-page VLM prompt)
                 x1 = (x1 / float(normalised_coords_range)) * processed_width
                 y1 = (y1 / float(normalised_coords_range)) * processed_height
                 x2 = (x2 / float(normalised_coords_range)) * processed_width
@@ -4102,7 +4312,7 @@ def _bedrock_page_ocr_predict(
         image: PIL Image to process (full page)
         image_name: Name of the image for debugging
         normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
-            from 0 to this value (e.g., 999 for Qwen3-VL models). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
+            from 0 to this value (e.g., 999 as used in the full-page VLM prompt). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
         output_folder: The folder where output images will be saved
         detect_people_only: If True, only detect people in images
         detect_signatures_only: If True, only detect signatures in images
@@ -4293,8 +4503,8 @@ def _bedrock_page_ocr_predict(
             top_p=model_default_top_p,
         )
 
-        # Save prompt and response to file
-        if extracted_text and isinstance(extracted_text, str) and output_folder:
+        # Save prompt and response to file (including when response is empty, e.g. no faces/signatures)
+        if extracted_text is not None and output_folder:
             try:
                 # Extract page number from image_name if present
                 page_number = None
@@ -4317,9 +4527,14 @@ def _bedrock_page_ocr_predict(
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
+                response_str = (
+                    extracted_text
+                    if isinstance(extracted_text, str)
+                    else str(extracted_text or "")
+                )
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
-                    response_text=extracted_text,
+                    response_text=response_str,
                     output_folder=output_folder,
                     model_choice=model_choice or "unknown",
                     image_name=image_name,
@@ -4553,8 +4768,8 @@ def _gemini_page_ocr_predict(
             temperature=model_default_temperature,
         )
 
-        # Save prompt and response to file
-        if extracted_text and isinstance(extracted_text, str) and output_folder:
+        # Save prompt and response to file (including when response is empty, e.g. no faces/signatures)
+        if extracted_text is not None and output_folder:
             try:
                 # Extract page number from image_name if present
                 page_number = None
@@ -4577,9 +4792,14 @@ def _gemini_page_ocr_predict(
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
+                response_str = (
+                    extracted_text
+                    if isinstance(extracted_text, str)
+                    else str(extracted_text or "")
+                )
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
-                    response_text=extracted_text,
+                    response_text=response_str,
                     output_folder=output_folder,
                     model_choice=model_choice or "unknown",
                     image_name=image_name,
@@ -4790,8 +5010,8 @@ def _azure_openai_page_ocr_predict(
             )
         )
 
-        # Save prompt and response to file
-        if extracted_text and isinstance(extracted_text, str) and output_folder:
+        # Save prompt and response to file (including when response is empty, e.g. no faces/signatures)
+        if extracted_text is not None and output_folder:
             try:
                 # Extract page number from image_name if present
                 page_number = None
@@ -4814,9 +5034,14 @@ def _azure_openai_page_ocr_predict(
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
+                response_str = (
+                    extracted_text
+                    if isinstance(extracted_text, str)
+                    else str(extracted_text or "")
+                )
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
-                    response_text=extracted_text,
+                    response_text=response_str,
                     output_folder=output_folder,
                     model_choice=model_choice or "unknown",
                     image_name=image_name,
@@ -6755,11 +6980,8 @@ class CustomImageAnalyzerEngine:
                 vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
             )
 
-            # Qwen 3-VL models on Bedrock return normalized coordinates (0-999 range)
-            # Other Bedrock models typically return absolute pixel coordinates
-            normalised_coords_range = None
-            if model_choice and "qwen" in model_choice.lower():
-                normalised_coords_range = 999
+            # Full-page VLM prompt instructs all models to use 0-999 coordinates; convert for any model_choice
+            normalised_coords_range = 999
 
             ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
                 _bedrock_page_ocr_predict(
@@ -6793,7 +7015,7 @@ class CustomImageAnalyzerEngine:
                 _gemini_page_ocr_predict(
                     gemini_image,
                     image_name=image_name,
-                    normalised_coords_range=None,  # Gemini typically returns absolute coordinates
+                    normalised_coords_range=999,  # Full-page prompt uses 0-999 coordinates
                     output_folder=self.output_folder,
                     model_choice=model_choice,
                     client=gemini_client,
@@ -6822,7 +7044,7 @@ class CustomImageAnalyzerEngine:
                 _azure_openai_page_ocr_predict(
                     azure_image,
                     image_name=image_name,
-                    normalised_coords_range=None,  # Azure/OpenAI typically returns absolute coordinates
+                    normalised_coords_range=999,  # Full-page prompt uses 0-999 coordinates
                     output_folder=self.output_folder,
                     model_choice=model_choice,
                     client=azure_openai_client,
