@@ -30,6 +30,7 @@ from tools.config import (
     LOAD_TRUNCATED_IMAGES,
     MAX_IMAGE_PIXELS,
     MAX_SIMULTANEOUS_FILES,
+    MAX_WORKERS,
     OUTPUT_FOLDER,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_TEXT_EXTRACT_OPTION,
@@ -240,9 +241,10 @@ def convert_pdf_to_images(
     page_max: int = 0,
     create_images: bool = True,
     image_dpi: float = image_dpi,
-    num_threads: int = 8,
+    num_threads: Optional[int] = None,
     input_folder: str = INPUT_FOLDER,
     progress: Progress = Progress(track_tqdm=True),
+    page_numbers: Optional[List[int]] = None,
 ):
     """
     Converts a PDF document into a series of images, processing each page concurrently.
@@ -254,41 +256,52 @@ def convert_pdf_to_images(
         page_max (int, optional): The ending page number (exclusive, 0-indexed) for conversion. If 0, uses the last page of the document. Defaults to 0.
         create_images (bool, optional): If True, images are created and saved to disk. Defaults to True.
         image_dpi (float, optional): The DPI (dots per inch) to use for converting PDF pages to images. Defaults to the global `image_dpi`.
-        num_threads (int, optional): The number of threads to use for concurrent page processing. Defaults to 8.
+        num_threads (int, optional): The number of threads to use for concurrent page processing. Defaults to MAX_WORKERS from config/env.
         input_folder (str, optional): The base input folder, used for determining output paths. Defaults to `INPUT_FOLDER`.
+        page_numbers (list, optional): If provided, only these 0-indexed page numbers are converted; page_min/page_max are ignored.
 
     Returns:
         list: A list of tuples, where each tuple contains (page_num, image_path, width, height) for successfully processed pages.
               For failed pages, it returns (page_num, placeholder_path, pd.NA, pd.NA).
     """
+    if num_threads is None:
+        num_threads = MAX_WORKERS
 
     # If preparing for review, just load the first page (not currently used)
     if prepare_for_review is True:
         page_count = pdfinfo_from_path(pdf_path)["Pages"]  # 1
         page_min = 0
         page_max = page_count
+        page_numbers = None
     else:
         page_count = pdfinfo_from_path(pdf_path)["Pages"]
 
-    print(f"Creating images. Number of pages in PDF: {page_count}")
+    if page_numbers is not None:
+        pages_to_convert = sorted(
+            set(int(p) for p in page_numbers if 0 <= p < page_count)
+        )
+        total_pages = len(pages_to_convert)
+        if total_pages == 0:
+            return [], [], [], []
+        print(f"Creating images for {total_pages} page(s) (EFFICIENT_OCR).")
+    else:
+        print(f"Creating images. Number of pages in PDF: {page_count}")
+        # Handle special cases for page range
+        if page_min == 0:
+            page_min = 0
+        else:
+            page_min = page_min - 1
+        if page_max == 0:
+            page_max = page_count
+        pages_to_convert = list(range(page_min, page_max))
+        total_pages = len(pages_to_convert)
+
     progress(0.1, desc="Creating images")
 
-    # Handle special cases for page range
-    # If page_min is 0, use the first page (0-indexed)
-    if page_min == 0:
-        page_min = 0  # First page is 0-indexed
-    else:
-        page_min = page_min - 1
-
-    # If page_max is 0, use the last page of the document
-    if page_max == 0:
-        page_max = page_count
-
     results = list()
-    total_pages = page_max - page_min
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = list()
-        for page_num in range(page_min, page_max):
+        for page_num in pages_to_convert:
             futures.append(
                 executor.submit(
                     process_single_page_for_image_conversion,
@@ -414,6 +427,49 @@ def process_file_for_image_creation(
     return img_path, image_sizes_width, image_sizes_height, all_img_details
 
 
+def _process_one_input_file(
+    file: Any,
+    source_document_only: bool,
+    source_document_extensions: tuple,
+) -> Tuple[str, str, str, bool, bool, int]:
+    """
+    Process a single file for get_input_file_names; safe to run in a thread.
+    Returns (file_path_without_ext, file_extension, file_path, acceptable, is_source, page_count).
+    """
+    file_path = file if isinstance(file, str) else file.name
+    file_path_without_ext = get_file_name_without_type(file_path)
+    file_path_without_ext_lower = (file_path_without_ext or "").lower()
+    file_extension = os.path.splitext(file_path)[1].lower()
+    is_excluded_name = (
+        "review_file" in file_path_without_ext_lower
+        or "ocr_output" in file_path_without_ext_lower
+        or "ocr_results_with_words" in file_path_without_ext_lower
+    )
+    acceptable = (
+        file_extension
+        in (".jpg", ".jpeg", ".png", ".pdf", ".xlsx", ".csv", ".parquet", ".docx")
+        and not is_excluded_name
+    )
+    if file_extension == ".pdf":
+        try:
+            pdf_document = pymupdf.open(file_path)
+            page_count = pdf_document.page_count
+            pdf_document.close()
+        except Exception:
+            page_count = 1
+    else:
+        page_count = 1
+    is_source = not source_document_only or file_extension in source_document_extensions
+    return (
+        file_path_without_ext,
+        file_extension,
+        file_path,
+        acceptable,
+        is_source,
+        page_count,
+    )
+
+
 def get_input_file_names(
     file_input: List[str],
     source_document_only: bool = False,
@@ -426,13 +482,10 @@ def get_input_file_names(
     for outputs like review CSVs or OCR CSVs. This keeps doc_full_file_name_textbox
     referring to the document being redacted (PDF or image).
     """
-
     all_relevant_files = list()
     file_name_with_extension = ""
     full_file_name = ""
     total_pdf_page_count = 0
-
-    # Only treat these as "source document" for full_file_name when source_document_only
     source_document_extensions = (".pdf", ".jpg", ".jpeg", ".png", ".docx")
 
     if isinstance(file_input, dict):
@@ -443,61 +496,42 @@ def get_input_file_names(
     else:
         file_input_list = file_input
 
-    for file in file_input_list:
-        if isinstance(file, str):
-            file_path = file
-        else:
-            file_path = file.name
-
-        file_path_without_ext = get_file_name_without_type(file_path)
-        file_path_without_ext_lower = (file_path_without_ext or "").lower()
-
-        file_extension = os.path.splitext(file_path)[1].lower()
-
-        # Exclude review/OCR output files (case-insensitive)
-        is_excluded_name = (
-            "review_file" in file_path_without_ext_lower
-            or "ocr_output" in file_path_without_ext_lower
-            or "ocr_results_with_words" in file_path_without_ext_lower
+    if not file_input_list:
+        return (
+            ", ".join(all_relevant_files),
+            file_name_with_extension,
+            full_file_name,
+            all_relevant_files,
+            total_pdf_page_count,
         )
 
-        # Check if the file is in acceptable types
-        if (
-            file_extension
-            in [
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".pdf",
-                ".xlsx",
-                ".csv",
-                ".parquet",
-                ".docx",
-            ]
-        ) and not is_excluded_name:
+    max_workers = min(MAX_WORKERS, len(file_input_list))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(
+            executor.map(
+                lambda f: _process_one_input_file(
+                    f, source_document_only, source_document_extensions
+                ),
+                file_input_list,
+            )
+        )
+
+    for (
+        file_path_without_ext,
+        file_extension,
+        file_path,
+        acceptable,
+        is_source,
+        page_count,
+    ) in results:
+        total_pdf_page_count += page_count
+        if acceptable:
             all_relevant_files.append(file_path_without_ext)
             file_name_with_extension = file_path_without_ext + file_extension
-            # Only set full_file_name for source documents (PDF/image/docx) when
-            # source_document_only, so doc_full_file_name_textbox never refers to a CSV
-            if not source_document_only or file_extension in source_document_extensions:
+            if is_source:
                 full_file_name = file_path
 
-        # If PDF, get number of pages
-        if file_extension in [".pdf"]:
-            # Open the PDF file
-            pdf_document = pymupdf.open(file_path)
-            # Get the number of pages
-            page_count = pdf_document.page_count
-
-            # Close the document
-            pdf_document.close()
-        else:
-            page_count = 1
-
-        total_pdf_page_count += page_count
-
     all_relevant_files_str = ", ".join(all_relevant_files)
-
     return (
         all_relevant_files_str,
         file_name_with_extension,
@@ -703,6 +737,64 @@ def create_page_size_objects(
         page_sizes.append(out_page_image_sizes)
 
     return page_sizes, original_cropboxes
+
+
+def prepare_images_for_pages(
+    file_path: str,
+    pages_1based: List[int],
+    input_folder: str,
+    pymupdf_doc: Document,
+    page_sizes: List[dict],
+    progress: Progress = Progress(track_tqdm=True),
+) -> Tuple[List[str], List[dict]]:
+    """
+    Create images only for the given pages (e.g. EFFICIENT_OCR pages that need OCR).
+    Updates page_sizes in place and returns a full-length pdf_image_file_paths list
+    (real paths only for the requested pages, empty string for others).
+
+    Args:
+        file_path: Path to the PDF.
+        pages_1based: 1-based page numbers to convert to images.
+        input_folder: Folder used for image output paths.
+        pymupdf_doc: Open PyMuPDF document (used for page count).
+        page_sizes: List of page size dicts (one per page), updated in place.
+        progress: Progress callback.
+
+    Returns:
+        (pdf_image_file_paths, page_sizes) where pdf_image_file_paths has length
+        len(pymupdf_doc) with real path at index (p-1) for each p in pages_1based.
+    """
+    if not pages_1based:
+        return [""] * len(pymupdf_doc), page_sizes
+
+    page_numbers_0based = [p - 1 for p in pages_1based if 1 <= p <= len(pymupdf_doc)]
+    if not page_numbers_0based:
+        return [""] * len(pymupdf_doc), page_sizes
+
+    _, _, _, results = convert_pdf_to_images(
+        file_path,
+        prepare_for_review=False,
+        create_images=True,
+        input_folder=input_folder,
+        progress=progress,
+        page_numbers=page_numbers_0based,
+    )
+
+    num_pages = len(pymupdf_doc)
+    pdf_image_file_paths = [""] * num_pages
+    for page_num, img_path, width, height in results:
+        if (
+            0 <= page_num < num_pages
+            and img_path
+            and "placeholder" not in str(img_path)
+        ):
+            pdf_image_file_paths[page_num] = img_path
+            page_sizes[page_num]["image_path"] = img_path
+            if pd.notna(width) and pd.notna(height):
+                page_sizes[page_num]["image_width"] = width
+                page_sizes[page_num]["image_height"] = height
+
+    return pdf_image_file_paths, page_sizes
 
 
 def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
@@ -1912,33 +2004,32 @@ def join_values_within_threshold(df1: pd.DataFrame, df2: pd.DataFrame):
     final_df = final_df.drop(columns=["key"])
 
 
+def _pick_one_item_per_image(image: str, items: List[dict]) -> dict:
+    """Choose one item per image (prefer non-empty boxes); safe to run in a thread."""
+    non_empty_boxes = [item for item in items if item.get("boxes")]
+    return non_empty_boxes[0] if non_empty_boxes else items[0]
+
+
 def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
     """
     Remove items from the annotator object where the same page exists twice.
     """
-    # Group items by 'image'
     image_groups = defaultdict(list)
     for item in data:
         image_groups[item["image"]].append(item)
 
-    # Process each group to prioritize items with non-empty boxes
-    result = list()
-    for image, items in image_groups.items():
-        # Filter items with non-empty boxes
-        non_empty_boxes = [item for item in items if item.get("boxes")]
+    if not image_groups:
+        return []
 
-        # Remove 'text' elements from boxes (deprecated)
-        # for item in non_empty_boxes:
-        #    if 'boxes' in item:
-        #        item['boxes'] = [{k: v for k, v in box.items() if k != 'text'} for box in item['boxes']]
-
-        if non_empty_boxes:
-            # Keep the first entry with non-empty boxes
-            result.append(non_empty_boxes[0])
-        else:
-            # If all items have empty or missing boxes, keep the first item
-            result.append(items[0])
-
+    groups_list = list(image_groups.items())
+    max_workers = min(MAX_WORKERS, len(groups_list))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        result = list(
+            executor.map(
+                lambda pair: _pick_one_item_per_image(pair[0], pair[1]),
+                groups_list,
+            )
+        )
     return result
 
 
@@ -2162,11 +2253,51 @@ def divide_coordinates_by_page_sizes(
     cols_to_drop = ["image_width", "image_height", "mediabox_width", "mediabox_height"]
     final_df = final_df.drop(columns=cols_to_drop, errors="ignore")
 
-    # If ymin and xmin are less than 0, or xmax and ymax are greater than 1, set them to 0 or 1 respectively
-    final_df[ymin] = final_df[ymin].apply(lambda x: 0 if x < 0 else x)
-    final_df[xmin] = final_df[xmin].apply(lambda x: 0 if x < 0 else x)
-    final_df[xmax] = final_df[xmax].apply(lambda x: 1 if x > 1 else x)
-    final_df[ymax] = final_df[ymax].apply(lambda x: 1 if x > 1 else x)
+    # If coordinates fall outside [0, 1], clamp to bounds while preserving box dimensions
+    # so that thin boxes (e.g. OCR word with ymax slightly > page height) don't get
+    # stretched to the full page (e.g. ymax=1 while ymin stays small).
+    ymin_vals = pd.to_numeric(final_df[ymin], errors="coerce")
+    ymax_vals = pd.to_numeric(final_df[ymax], errors="coerce")
+    xmin_vals = pd.to_numeric(final_df[xmin], errors="coerce")
+    xmax_vals = pd.to_numeric(final_df[xmax], errors="coerce")
+    final_df[ymin] = ymin_vals.clip(lower=0)
+    final_df[xmin] = xmin_vals.clip(lower=0)
+    final_df[xmax] = xmax_vals.clip(upper=1)
+    final_df[ymax] = ymax_vals.clip(upper=1)
+    # Preserve height: if ymax was clamped to 1, keep box height so thin boxes don't span to page bottom
+    ymax_gt_1 = ymax_vals > 1
+    if ymax_gt_1.any():
+        preserved_ymax = (
+            final_df.loc[ymax_gt_1, ymin] + (ymax_vals - ymin_vals).loc[ymax_gt_1]
+        ).clip(upper=1)
+        final_df.loc[ymax_gt_1, ymax] = preserved_ymax
+    # Preserve width: if xmax was clamped to 1, keep box width
+    xmax_gt_1 = xmax_vals > 1
+    if xmax_gt_1.any():
+        preserved_xmax = (
+            final_df.loc[xmax_gt_1, xmin] + (xmax_vals - xmin_vals).loc[xmax_gt_1]
+        ).clip(upper=1)
+        final_df.loc[xmax_gt_1, xmax] = preserved_xmax
+    # If ymin was clamped from below 0, preserve height by shifting ymax down
+    ymin_lt_0 = ymin_vals < 0
+    if ymin_lt_0.any():
+        preserved_ymin = (
+            final_df.loc[ymin_lt_0, ymax] - (ymax_vals - ymin_vals).loc[ymin_lt_0]
+        ).clip(lower=0)
+        final_df.loc[ymin_lt_0, ymin] = preserved_ymin
+    # If xmin was clamped from below 0, preserve width
+    xmin_lt_0 = xmin_vals < 0
+    if xmin_lt_0.any():
+        preserved_xmin = (
+            final_df.loc[xmin_lt_0, xmax] - (xmax_vals - xmin_vals).loc[xmin_lt_0]
+        ).clip(lower=0)
+        final_df.loc[xmin_lt_0, xmin] = preserved_xmin
+
+    # Round to match coordinate precision used earlier in this function
+    final_df[ymin] = final_df[ymin].round(6)
+    final_df[ymax] = final_df[ymax].round(6)
+    final_df[xmin] = final_df[xmin].round(6)
+    final_df[xmax] = final_df[xmax].round(6)
 
     return final_df
 
@@ -2585,41 +2716,48 @@ def create_annotation_dicts_from_annotation_df(
         return list(image_dict.values())  # Return based on page_sizes only
 
     # 3. Group the DataFrame by image and update the dictionary
-    # Drop rows where essential coordinates might be NA (adjust if NA is meaningful)
     coord_cols = ["xmin", "ymin", "xmax", "ymax"]
     valid_box_df = all_image_annotations_df.dropna(
         subset=[col for col in coord_cols if col in available_cols]
-    ).copy()  # Use .copy() to avoid SettingWithCopyWarning if modifying later
+    ).copy()
 
-    # Check if any valid boxes remain after dropping NAs
     if valid_box_df.empty:
         print(
             "Warning: No valid annotation rows found in DataFrame after dropping NA coordinates."
         )
         return list(image_dict.values())
 
-    # Process groups
-    try:
+    # Ensure every image path in the dataframe has an entry (e.g. EFFICIENT_OCR text-path
+    # pages may use a different path in annotations than in page_sizes, so boxes would be dropped).
+    for image_path in valid_box_df["image"].unique():
+        if image_path and image_path not in image_dict:
+            image_dict[image_path] = {"image": image_path, "boxes": []}
+
+    # Build list of (image_path, group) for all images in the dataframe
+    group_items = [
+        (image_path, group)
         for image_path, group in valid_box_df.groupby(
             "image", observed=True, sort=False
-        ):
-            # Check if this image path exists in our target dictionary (from page_sizes)
-            if image_path in image_dict:
-                # Convert the relevant columns of the group to a list of dicts
-                # Using only columns that are actually available
-                boxes = group[available_cols].to_dict(orient="records")
-                # Update the 'boxes' list in the dictionary
-                image_dict[image_path]["boxes"] = boxes
-            # Else: Image found in DataFrame but not required by page_sizes; ignore it.
-    except KeyError:
-        # This shouldn't happen due to the 'image' column check above, but handle defensively
-        print("Error: Issue grouping DataFrame by 'image'.")
-        return list(image_dict.values())
+        )
+    ]
 
-    # 4. Convert the dictionary values back into the final list format
-    result = list(image_dict.values())
+    if group_items:
+        max_workers = min(MAX_WORKERS, len(group_items))
 
-    return result
+        def _boxes_for_group(item):
+            _image_path, _group = item
+            boxes = _group[available_cols].to_dict(orient="records")
+            return (_image_path, boxes)
+
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for image_path, boxes in executor.map(_boxes_for_group, group_items):
+                    image_dict[image_path]["boxes"] = boxes
+        except KeyError:
+            print("Error: Issue grouping DataFrame by 'image'.")
+            return list(image_dict.values())
+
+    return list(image_dict.values())
 
 
 def convert_annotation_json_to_review_df(

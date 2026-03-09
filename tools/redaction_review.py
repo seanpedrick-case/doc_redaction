@@ -1,5 +1,6 @@
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -25,6 +26,7 @@ from tools.config import (
     CUSTOM_BOX_COLOUR,
     INPUT_FOLDER,
     MAX_IMAGE_PIXELS,
+    MAX_WORKERS,
     OUTPUT_FOLDER,
     RETURN_PDF_FOR_REVIEW,
 )
@@ -814,6 +816,30 @@ def get_and_merge_current_page_annotations(
             ]
         )
 
+    # Ensure no box spans to the very bottom (ymax == 1); cap ymax to just below 1
+    # so that unmerged boxes (e.g. from OCR with line shared across page) don't get ymax=1.
+    if (
+        not updated_df.empty
+        and "ymax" in updated_df.columns
+        and "ymin" in updated_df.columns
+    ):
+        ymax_cap = 1.0 - 1e-6
+        ymax_vals = pd.to_numeric(updated_df["ymax"], errors="coerce")
+        need_cap = ymax_vals >= 1.0
+        if need_cap.any():
+            updated_df = updated_df.copy()
+            updated_df.loc[need_cap, "ymax"] = ymax_vals.loc[need_cap].clip(
+                upper=ymax_cap
+            )
+            # Keep box valid: ymax must remain > ymin
+            ymin_vals = pd.to_numeric(updated_df.loc[need_cap, "ymin"], errors="coerce")
+            invalid = updated_df.loc[need_cap, "ymax"].values <= ymin_vals.values
+            if invalid.any():
+                idx = updated_df.index[need_cap][invalid]
+                updated_df.loc[idx, "ymax"] = (
+                    pd.to_numeric(updated_df.loc[idx, "ymin"], errors="coerce") + 1e-6
+                )
+
     return updated_df
 
 
@@ -1072,21 +1098,32 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     final_annotations_list = list()
     box_cols = ["label", "color", "xmin", "ymin", "xmax", "ymax", "text", "id"]
 
-    # Now, when we group, we use `sort=False`. This tells groupby to respect the
-    # DataFrame's current order, which we have just manually set. This is slightly
-    # more efficient than letting it sort again.
-    for image_path, group in merged_df.groupby("image", sort=False, observed=False):
+    # Process each (image_path, group) in parallel; preserve order via index.
+    group_items = [
+        (i, image_path, group)
+        for i, (image_path, group) in enumerate(
+            merged_df.groupby("image", sort=False, observed=False)
+        )
+    ]
 
-        # Check if the group has actual annotations.
-        if pd.isna(group.iloc[0].get("id")):
-            boxes = list()
+    def _process_one_group(item):
+        _i, _image_path, _group = item
+        if pd.isna(_group.iloc[0].get("id")):
+            _boxes = list()
         else:
-            valid_box_cols = [col for col in box_cols if col in group.columns]
-            # We should also sort the boxes within a page for consistency (e.g., left-to-right)
-            sorted_group = group.sort_values(by=["ymin", "xmin"])
-            boxes = sorted_group[valid_box_cols].to_dict("records")
+            _valid_box_cols = [col for col in box_cols if col in _group.columns]
+            _sorted_group = _group.sort_values(by=["ymin", "xmin"])
+            _boxes = _sorted_group[_valid_box_cols].to_dict("records")
+        return (_i, {"image": _image_path, "boxes": _boxes})
 
-        final_annotations_list.append({"image": image_path, "boxes": boxes})
+    if group_items:
+        n_groups = len(group_items)
+        max_workers = min(MAX_WORKERS, n_groups)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            ordered_results = sorted(
+                executor.map(_process_one_group, group_items), key=lambda x: x[0]
+            )
+        final_annotations_list = [r[1] for r in ordered_results]
 
     progress(1.0, desc="Completed annotation processing")
 
@@ -1168,24 +1205,26 @@ def replace_annotator_object_img_np_array_with_page_sizes_image_path(
     page_image_annotator_object: AnnotatedImageData,
     page_sizes: List[dict],
     page: int,
+    page_sizes_df: pd.DataFrame = None,
 ):
     """
     Check if the image value in an AnnotatedImageData dict is a placeholder or np.array. If either of these, replace the value with the file path of the image that is hopefully already loaded into the app related to this page.
     """
-
     page_zero_index = page - 1
 
     if (
         isinstance(all_image_annotations[page_zero_index]["image"], np.ndarray)
-        or "placeholder_image" in all_image_annotations[page_zero_index]["image"]
-        or isinstance(page_image_annotator_object["image"], np.ndarray)
+        or "placeholder_image"
+        in str(all_image_annotations[page_zero_index].get("image", ""))
+        or isinstance(page_image_annotator_object.get("image"), np.ndarray)
     ):
-        page_sizes_df = pd.DataFrame(page_sizes)
-        page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
-            pd.to_numeric, errors="coerce"
-        )
+        if page_sizes_df is None or page_sizes_df.empty:
+            page_sizes_df = pd.DataFrame(page_sizes)
+            page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
+                pd.to_numeric, errors="coerce"
+            )
 
-        # Check for matching pages
+        # Check for matching pages (single .loc)
         matching_paths = page_sizes_df.loc[
             page_sizes_df["page"] == page, "image_path"
         ].unique()
@@ -1208,11 +1247,17 @@ def replace_placeholder_image_with_real_image(
     input_folder: str,
 ):
     """If image path is still not valid, load in a new image an overwrite it. Then replace all items in the image annotation object for all pages based on the updated information."""
-
     if page_num_reported <= 0:
         page_num_reported = 1
 
     page_num_reported_zero_indexed = page_num_reported - 1
+
+    # Compute mask once to avoid repeated boolean indexing over the full DataFrame
+    if "page" not in page_sizes_df.columns:
+        page_mask = pd.Series(False, index=page_sizes_df.index)
+    else:
+        page_col = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+        page_mask = page_col == page_num_reported
 
     if not os.path.exists(current_image_path):
 
@@ -1224,47 +1269,26 @@ def replace_placeholder_image_with_real_image(
             )
         )
 
-        # Overwrite page_sizes values
-        page_sizes_df.loc[page_sizes_df["page"] == page_num_reported, "image_width"] = (
-            width
-        )
-        page_sizes_df.loc[
-            page_sizes_df["page"] == page_num_reported, "image_height"
-        ] = height
-        page_sizes_df.loc[page_sizes_df["page"] == page_num_reported, "image_path"] = (
-            replaced_image_path
-        )
+        page_sizes_df.loc[page_mask, "image_width"] = width
+        page_sizes_df.loc[page_mask, "image_height"] = height
+        page_sizes_df.loc[page_mask, "image_path"] = replaced_image_path
 
     else:
-        if (
-            not page_sizes_df.loc[
-                page_sizes_df["page"] == page_num_reported, "image_width"
-            ]
-            .isnull()
-            .all()
-        ):
-            width = page_sizes_df.loc[
-                page_sizes_df["page"] == page_num_reported, "image_width"
-            ].max()
-            height = page_sizes_df.loc[
-                page_sizes_df["page"] == page_num_reported, "image_height"
-            ].max()
+        if page_mask.any():
+            width_vals = page_sizes_df.loc[page_mask, "image_width"]
+            if not width_vals.isnull().all():
+                width = width_vals.max()
+                height = page_sizes_df.loc[page_mask, "image_height"].max()
+            else:
+                image = Image.open(current_image_path)
+                width = image.width
+                height = image.height
+                page_sizes_df.loc[page_mask, "image_width"] = width
+                page_sizes_df.loc[page_mask, "image_height"] = height
         else:
-            image = Image.open(current_image_path)
-            width = image.width
-            height = image.height
+            width = height = None
 
-            page_sizes_df.loc[
-                page_sizes_df["page"] == page_num_reported, "image_width"
-            ] = width
-            page_sizes_df.loc[
-                page_sizes_df["page"] == page_num_reported, "image_height"
-            ] = height
-
-        page_sizes_df.loc[page_sizes_df["page"] == page_num_reported, "image_path"] = (
-            current_image_path
-        )
-
+        page_sizes_df.loc[page_mask, "image_path"] = current_image_path
         replaced_image_path = current_image_path
 
     return replaced_image_path, page_sizes_df
@@ -1433,6 +1457,7 @@ def update_annotator_object_and_filter_df(
                 page_object_to_update,
                 page_sizes,
                 page_num_reported,
+                page_sizes_df=page_sizes_df,
             )
         )
 
@@ -1464,12 +1489,12 @@ def update_annotator_object_and_filter_df(
 
                 # Update review_df's image path for this page
                 if "page" in review_df.columns and "image" in review_df.columns:
-                    # Ensure review_df page column is numeric for filtering
-                    review_df["page"] = (
-                        pd.to_numeric(review_df["page"], errors="coerce")
-                        .fillna(-1)
-                        .astype(int)
-                    )
+                    if not pd.api.types.is_numeric_dtype(review_df["page"]):
+                        review_df["page"] = (
+                            pd.to_numeric(review_df["page"], errors="coerce")
+                            .fillna(-1)
+                            .astype(int)
+                        )
                     review_df.loc[review_df["page"] == page_num_reported, "image"] = (
                         replaced_image_path
                     )
@@ -1501,22 +1526,20 @@ def update_annotator_object_and_filter_df(
         )
 
         if not current_page_annotations_df.empty and not page_sizes_df.empty:
-            # Multiply coordinates *only* for this page's DataFrame
+            # Multiply coordinates *only* for this page's DataFrame (reuse single filter)
             try:
-                # Need the specific page's size for multiplication
                 page_size_row = page_sizes_df[
                     page_sizes_df["page"] == page_num_reported
                 ]
                 if not page_size_row.empty:
                     current_page_annotations_df = multiply_coordinates_by_page_sizes(
                         current_page_annotations_df,
-                        page_size_row,  # Pass only the row for the current page
+                        page_size_row,
                         xmin="xmin",
                         xmax="xmax",
                         ymin="ymin",
                         ymax="ymax",
                     )
-
             except Exception as e:
                 print(
                     f"Warning: Error during coordinate multiplication for page {page_num_reported}: {e}. Using original coordinates."
@@ -1705,6 +1728,44 @@ def update_all_page_annotation_object_based_on_previous_page(
     return all_image_annotations, current_page, current_page
 
 
+def _load_one_page_image_for_redact(
+    i: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_to_image_path: Dict[int, str],
+    input_folder: str,
+    file_name_with_ext: str,
+) -> Tuple[int, object, bool]:
+    """
+    Load (and optionally save) the image for page i. Safe to run in a thread.
+    Returns (page_index, image, should_close). Caller must close image if should_close.
+    """
+    image_loc = all_image_annotations[i]["image"]
+    should_close = False
+    image = None
+    if isinstance(image_loc, np.ndarray):
+        image = Image.fromarray(image_loc.astype("uint8"))
+        should_close = True
+    elif isinstance(image_loc, Image.Image):
+        image = image_loc
+    elif isinstance(image_loc, str):
+        path = image_loc
+        if not os.path.exists(path):
+            path = page_to_image_path.get(i + 1, path)
+        try:
+            image = Image.open(path)
+            should_close = True
+        except Exception:
+            image = None
+    if image is not None and hasattr(image, "save"):
+        expected_path = os.path.join(input_folder, f"{file_name_with_ext}_{i}.png")
+        if not os.path.exists(expected_path):
+            try:
+                image.save(expected_path)
+            except Exception:
+                pass
+    return (i, image, should_close)
+
+
 def apply_redactions_to_review_df_and_files(
     page_image_annotator_object: AnnotatedImageData,
     file_paths: List[str],
@@ -1842,6 +1903,50 @@ def apply_redactions_to_review_df_and_files(
                     file_extension = os.path.splitext(file_path)[1].lower()
                     break
 
+        # Build page_sizes_df and lookups once per file (reused for PDF redaction and review CSV)
+        page_sizes_df = pd.DataFrame(page_sizes) if page_sizes else pd.DataFrame()
+        page_to_image_path = {}
+        page_to_image_dimensions = {}
+        if not page_sizes_df.empty:
+            if "page" in page_sizes_df.columns:
+                page_sizes_df = page_sizes_df.copy()
+                page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
+                    pd.to_numeric, errors="coerce"
+                )
+            if "image_width" in page_sizes_df.columns:
+                page_sizes_df[["image_width"]] = page_sizes_df[["image_width"]].apply(
+                    pd.to_numeric, errors="coerce"
+                )
+            if "image_height" in page_sizes_df.columns:
+                page_sizes_df[["image_height"]] = page_sizes_df[["image_height"]].apply(
+                    pd.to_numeric, errors="coerce"
+                )
+            if (
+                "image_path" in page_sizes_df.columns
+                and "page" in page_sizes_df.columns
+            ):
+                sub = page_sizes_df[["page", "image_path"]].drop_duplicates("page")
+                for p, path in zip(sub["page"], sub["image_path"]):
+                    if pd.notna(p):
+                        page_to_image_path[int(p)] = path
+            if (
+                "page" in page_sizes_df.columns
+                and "image_width" in page_sizes_df.columns
+                and "image_height" in page_sizes_df.columns
+            ):
+                sub = page_sizes_df[
+                    ["page", "image_width", "image_height"]
+                ].drop_duplicates("page")
+                for _, row in sub.iterrows():
+                    p = row["page"]
+                    if pd.notna(p):
+                        w, h = row["image_width"], row["image_height"]
+                        if pd.notna(w) and pd.notna(h):
+                            page_to_image_dimensions[int(p)] = {
+                                "image_width": float(w),
+                                "image_height": float(h),
+                            }
+
         if save_pdf is True:
             # If working with image docs
             if (is_pdf(file_path) is False) & (file_extension != ".csv"):
@@ -1929,17 +2034,43 @@ def apply_redactions_to_review_df_and_files(
                 output_files.append(orig_pdf_file_path)
 
                 number_of_pages = pdf_doc.page_count
-                original_cropboxes = list()
 
                 # Create review PDF document if RETURN_PDF_FOR_REVIEW is True
                 review_pdf_doc = None
                 if RETURN_PDF_FOR_REVIEW:
                     review_pdf_doc = pymupdf.open(file_path)
 
-                page_sizes_df = pd.DataFrame(page_sizes)
-                page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
-                    pd.to_numeric, errors="coerce"
-                )
+                # page_sizes_df and page_to_image_path / page_to_image_dimensions
+                # already built once per file above
+
+                # Pre-load all page images in parallel (I/O + PIL); PyMuPDF is not
+                # thread-safe so PDF modification stays in the main loop below.
+                max_workers = min(MAX_WORKERS, number_of_pages)
+                preloaded_images = [None] * number_of_pages  # (image, should_close)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            _load_one_page_image_for_redact,
+                            i,
+                            all_image_annotations,
+                            page_to_image_path,
+                            input_folder,
+                            file_name_with_ext,
+                        ): i
+                        for i in range(number_of_pages)
+                    }
+                    for fut in progress.tqdm(
+                        as_completed(futures),
+                        total=number_of_pages,
+                        desc="Loading page images",
+                        unit="pages",
+                    ):
+                        try:
+                            i, image, should_close = fut.result()
+                            preloaded_images[i] = (image, should_close)
+                        except Exception:
+                            idx = futures[fut]
+                            preloaded_images[idx] = (None, False)
 
                 for i in progress.tqdm(
                     range(0, number_of_pages),
@@ -1947,57 +2078,50 @@ def apply_redactions_to_review_df_and_files(
                     unit="pages",
                 ):
 
-                    image_loc = all_image_annotations[i]["image"]
-
-                    # Load in image object
-                    if isinstance(image_loc, np.ndarray):
-                        image = Image.fromarray(image_loc.astype("uint8"))
-                    elif isinstance(image_loc, Image.Image):
-                        image = image_loc
-                    elif isinstance(image_loc, str):
-                        if not os.path.exists(image_loc):
-                            # page_sizes uses 1-based page numbers; loop index i is 0-based
-                            path_series = page_sizes_df.loc[
-                                page_sizes_df["page"] == (i + 1), "image_path"
-                            ]
-                            if not path_series.empty:
-                                image_loc = path_series.iloc[0]
-                        try:
-                            image = Image.open(image_loc)
-                        except Exception:
-                            image = None
+                    image, image_should_close = preloaded_images[i]
+                    if image is None:
+                        image_should_close = False
 
                     pymupdf_page = pdf_doc.load_page(i)
-                    original_cropboxes.append(pymupdf_page.cropbox)
+                    current_cropbox = pymupdf_page.cropbox
                     pymupdf_page.set_cropbox(pymupdf_page.mediabox)
 
-                    # Remove existing redaction annotations from the page before adding new ones
-                    for annot in pymupdf_page.annots():
-                        # The type of a redaction annotation is 8
-                        if annot.type[0] == pymupdf.PDF_ANNOT_REDACT:
-                            pymupdf_page.delete_annot(annot)
+                    # Remove existing redaction annotations (collect first to avoid iterator issues)
+                    annots_to_remove = [
+                        a
+                        for a in pymupdf_page.annots()
+                        if a.type[0] == pymupdf.PDF_ANNOT_REDACT
+                    ]
+                    for annot in annots_to_remove:
+                        pymupdf_page.delete_annot(annot)
+
+                    # Precomputed dimensions for this page (avoids .loc in redact_page_with_pymupdf)
+                    dims = page_to_image_dimensions.get(i + 1)
 
                     # Handle review PDF page if needed
                     if RETURN_PDF_FOR_REVIEW and review_pdf_doc:
                         review_pymupdf_page = review_pdf_doc.load_page(i)
                         review_pymupdf_page.set_cropbox(review_pymupdf_page.mediabox)
 
-                        # Remove existing redaction annotations from the page before adding new ones
-                        for annot in review_pymupdf_page.annots():
-                            # The type of a redaction annotation is 8
-                            if annot.type[0] == pymupdf.PDF_ANNOT_REDACT:
-                                review_pymupdf_page.delete_annot(annot)
+                        review_annots_to_remove = [
+                            a
+                            for a in review_pymupdf_page.annots()
+                            if a.type[0] == pymupdf.PDF_ANNOT_REDACT
+                        ]
+                        for annot in review_annots_to_remove:
+                            review_pymupdf_page.delete_annot(annot)
 
                         # Apply redactions to review page (with annotations visible)
                         review_pymupdf_page = redact_page_with_pymupdf(
                             page=review_pymupdf_page,
                             page_annotations=all_image_annotations[i],
                             image=image,
-                            original_cropbox=original_cropboxes[-1],
+                            original_cropbox=current_cropbox,
                             page_sizes_df=page_sizes_df,
                             return_pdf_for_review=True,
                             return_pdf_end_of_redaction=False,
                             input_folder=input_folder,
+                            image_dimensions_override=dims,
                         )
 
                     # Apply redactions to final page (with text removed)
@@ -2005,12 +2129,22 @@ def apply_redactions_to_review_df_and_files(
                         page=pymupdf_page,
                         page_annotations=all_image_annotations[i],
                         image=image,
-                        original_cropbox=original_cropboxes[-1],
+                        original_cropbox=current_cropbox,
                         page_sizes_df=page_sizes_df,
                         return_pdf_for_review=False,
                         return_pdf_end_of_redaction=False,
                         input_folder=input_folder,
+                        image_dimensions_override=dims,
                     )
+
+                    # Close image if we opened/created it this iteration to prevent file
+                    # handle and memory growth (avoids slowdown/crash over many pages)
+                    if image_should_close and image is not None:
+                        try:
+                            image.close()
+                        except Exception:
+                            pass
+                    image = None
             else:
                 print("File type not recognised.")
 
@@ -2053,10 +2187,7 @@ def apply_redactions_to_review_df_and_files(
                 all_image_annotations, review_file_state.copy(), page_sizes=page_sizes
             )
 
-            page_sizes_df = pd.DataFrame(page_sizes)
-            page_sizes_df.loc[:, "page"] = pd.to_numeric(
-                page_sizes_df["page"], errors="coerce"
-            )
+            # page_sizes_df already built once per file above
             review_df = divide_coordinates_by_page_sizes(review_df, page_sizes_df)
 
             review_df = review_df[
@@ -2707,6 +2838,30 @@ def update_selected_review_df_row_colour(
     return review_df, previous_id, previous_colour
 
 
+def _update_one_page_boxes_color(
+    page_idx: int,
+    image_obj: dict,
+    selection_set: set,
+    colour: tuple,
+) -> Tuple[int, dict]:
+    """Process one page's boxes for color update; safe to run in a thread."""
+    out = {
+        "image": image_obj.get("image"),
+        "boxes": [
+            {
+                **box,
+                "color": (
+                    colour
+                    if (page_idx, box["label"]) in selection_set
+                    else box["color"]
+                ),
+            }
+            for box in image_obj.get("boxes", [])
+        ],
+    }
+    return (page_idx, out)
+
+
 def update_boxes_color(
     images: list, redaction_row_selection: pd.DataFrame, colour: tuple = (0, 255, 0)
 ):
@@ -2721,18 +2876,24 @@ def update_boxes_color(
     Returns:
     - Updated list with modified colors.
     """
-    # Convert DataFrame to a set for fast lookup
     selection_set = set(
         zip(redaction_row_selection["page"], redaction_row_selection["label"])
     )
+    if not images:
+        return images
 
-    for page_idx, image_obj in enumerate(images):
-        if "boxes" in image_obj:
-            for box in image_obj["boxes"]:
-                if (page_idx, box["label"]) in selection_set:
-                    box["color"] = colour  # Update color
-
-    return images
+    max_workers = min(MAX_WORKERS, len(images))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(
+            executor.map(
+                lambda i_obj: _update_one_page_boxes_color(
+                    i_obj[0], i_obj[1], selection_set, colour
+                ),
+                [(idx, img) for idx, img in enumerate(images)],
+            )
+        )
+    ordered = sorted(results, key=lambda x: x[0])
+    return [out for _, out in ordered]
 
 
 def update_other_annotator_number_from_current(page_number_first_counter: int):
@@ -2805,6 +2966,68 @@ def convert_pymupdf_coords_to_adobe(
     return x1, adobe_y1, x2, adobe_y2
 
 
+def _build_one_redact_element(
+    row_dict: dict, pdf_page_height: float, date_str: str
+) -> Element:
+    """Build a single redact XML element from a row; safe to run in a thread."""
+    redact_annot = Element("redact")
+    redact_annot.set("opacity", "0.500000")
+    redact_annot.set("interior-color", "#000000")
+    redact_annot.set("date", date_str)
+    redact_annot.set("name", str(uuid.uuid4()))
+    page_python_format = int(row_dict["page"]) - 1
+    redact_annot.set("page", str(page_python_format))
+    redact_annot.set("mimetype", "Form")
+
+    x1_pdf = row_dict["xmin"]
+    y1_pdf = row_dict["ymin"]
+    x2_pdf = row_dict["xmax"]
+    y2_pdf = row_dict["ymax"]
+    adobe_x1, adobe_y1, adobe_x2, adobe_y2 = convert_pymupdf_coords_to_adobe(
+        x1_pdf, y1_pdf, x2_pdf, y2_pdf, pdf_page_height
+    )
+    redact_annot.set(
+        "rect", f"{adobe_x1:.6f},{adobe_y1:.6f},{adobe_x2:.6f},{adobe_y2:.6f}"
+    )
+    redact_annot.set("subject", str(row_dict["label"]))
+    redact_annot.set("title", str(row_dict.get("label", "Unknown")))
+
+    contents_richtext = SubElement(redact_annot, "contents-richtext")
+    body_attrs = {
+        "xmlns": "http://www.w3.org/1999/xhtml",
+        "{http://www.xfa.org/schema/xfa-data/1.0/}APIVersion": "Acrobat:25.1.0",
+        "{http://www.xfa.org/schema/xfa-data/1.0/}spec": "2.0.2",
+    }
+    body = SubElement(contents_richtext, "body", attrib=body_attrs)
+    p_element = SubElement(body, "p", dir="ltr")
+    span_attrs = {
+        "dir": "ltr",
+        "style": "font-size:10.0pt;text-align:left;color:#000000;font-weight:normal;font-style:normal",
+    }
+    span_element = SubElement(p_element, "span", attrib=span_attrs)
+    span_element.text = str(row_dict.get("text", "")).strip()
+
+    pdf_ops_for_black_fill_and_outline = [
+        "1 w",
+        "0 g",
+        "0 G",
+        "1 0 0 1 0 0 cm",
+        f"{adobe_x1:.2f} {adobe_y1:.2f} m",
+        f"{adobe_x2:.2f} {adobe_y1:.2f} l",
+        f"{adobe_x2:.2f} {adobe_y2:.2f} l",
+        f"{adobe_x1:.2f} {adobe_y2:.2f} l",
+        "h",
+        "B",
+    ]
+    data_content_string = "\n".join(pdf_ops_for_black_fill_and_outline) + "\n"
+    data_element = SubElement(redact_annot, "data")
+    data_element.set("MODE", "filtered")
+    data_element.set("encoding", "ascii")
+    data_element.set("length", str(len(data_content_string.encode("ascii"))))
+    data_element.text = data_content_string
+    return redact_annot
+
+
 def create_xfdf(
     review_file_df: pd.DataFrame,
     pdf_path: str,
@@ -2852,11 +3075,11 @@ def create_xfdf(
                 ymax="ymax",
             )
 
-    for _, row in review_file_df.iterrows():
-        page_num_reported = int(row["page"])
-        page_python_format = page_num_reported - 1
+    # Sequential pass: load each unique page once, set cropbox, store height (PyMuPDF is not thread-safe).
+    page_heights = {}
+    for page_num_reported in review_file_df["page"].astype(int).unique():
+        page_python_format = int(page_num_reported) - 1  # to 0-based
         pymupdf_page = pymupdf_doc.load_page(page_python_format)
-
         if document_cropboxes and page_python_format < len(document_cropboxes):
             from tools.secure_regex_utils import safe_extract_numbers
 
@@ -2864,82 +3087,39 @@ def create_xfdf(
             if match and len(match) == 4:
                 rect_values = list(map(float, match))
                 pymupdf_page.set_cropbox(Rect(*rect_values))
+        page_heights[page_python_format] = pymupdf_page.mediabox.height
 
-        pdf_page_height = pymupdf_page.mediabox.height
-        redact_annot = SubElement(annots, "redact")
-        redact_annot.set("opacity", "0.500000")
-        redact_annot.set("interior-color", "#000000")
+    now = datetime.now(timezone(timedelta(hours=1)))
+    date_str = (
+        now.strftime("D:%Y%m%d%H%M%S")
+        + now.strftime("%z")[:3]
+        + "'"
+        + now.strftime("%z")[3:]
+        + "'"
+    )
 
-        now = datetime.now(
-            timezone(timedelta(hours=1))
-        )  # Consider making tz configurable or UTC
-        date_str = (
-            now.strftime("D:%Y%m%d%H%M%S")
-            + now.strftime("%z")[:3]
-            + "'"
-            + now.strftime("%z")[3:]
-            + "'"
-        )
-        redact_annot.set("date", date_str)
-
-        annot_id = str(uuid.uuid4())
-        redact_annot.set("name", annot_id)
-        redact_annot.set("page", str(page_python_format))
-        redact_annot.set("mimetype", "Form")
-
-        x1_pdf, y1_pdf, x2_pdf, y2_pdf = (
-            row["xmin"],
-            row["ymin"],
-            row["xmax"],
-            row["ymax"],
-        )
-        adobe_x1, adobe_y1, adobe_x2, adobe_y2 = convert_pymupdf_coords_to_adobe(
-            x1_pdf, y1_pdf, x2_pdf, y2_pdf, pdf_page_height
-        )
-        redact_annot.set(
-            "rect", f"{adobe_x1:.6f},{adobe_y1:.6f},{adobe_x2:.6f},{adobe_y2:.6f}"
+    # Build redact elements in parallel (no PyMuPDF in workers).
+    rows_with_heights = []
+    for idx, row in review_file_df.iterrows():
+        page_python_format = int(row["page"]) - 1
+        rows_with_heights.append(
+            (idx, row.to_dict(), page_heights.get(page_python_format, 0.0))
         )
 
-        redact_annot.set(
-            "subject", str(row["label"])
-        )  # Changed from row['text'] to row['label']
-        redact_annot.set(
-            "title", str(row.get("label", "Unknown"))
-        )  # Fallback for title
-
-        contents_richtext = SubElement(redact_annot, "contents-richtext")
-        body_attrs = {
-            "xmlns": "http://www.w3.org/1999/xhtml",
-            "{http://www.xfa.org/schema/xfa-data/1.0/}APIVersion": "Acrobat:25.1.0",
-            "{http://www.xfa.org/schema/xfa-data/1.0/}spec": "2.0.2",
-        }
-        body = SubElement(contents_richtext, "body", attrib=body_attrs)
-        p_element = SubElement(body, "p", dir="ltr")
-        span_attrs = {
-            "dir": "ltr",
-            "style": "font-size:10.0pt;text-align:left;color:#000000;font-weight:normal;font-style:normal",
-        }
-        span_element = SubElement(p_element, "span", attrib=span_attrs)
-        span_element.text = str(row["text"]).strip()  # Added .strip()
-
-        pdf_ops_for_black_fill_and_outline = [
-            "1 w",  # 1. Set line width to 1 point for the stroke
-            "0 g",  # 2. Set NON-STROKING (fill) color to black
-            "0 G",  # 3. Set STROKING (outline) color to black
-            "1 0 0 1 0 0 cm",  # 4. CTM (using absolute page coordinates)
-            f"{adobe_x1:.2f} {adobe_y1:.2f} m",  # 5. Path definition: move to start
-            f"{adobe_x2:.2f} {adobe_y1:.2f} l",  # line
-            f"{adobe_x2:.2f} {adobe_y2:.2f} l",  # line
-            f"{adobe_x1:.2f} {adobe_y2:.2f} l",  # line
-            "h",  # 6. Close the path (creates the last line back to start)
-            "B",  # 7. Fill AND Stroke the path using non-zero winding rule
-        ]
-        data_content_string = "\n".join(pdf_ops_for_black_fill_and_outline) + "\n"
-        data_element = SubElement(redact_annot, "data")
-        data_element.set("MODE", "filtered")
-        data_element.set("encoding", "ascii")
-        data_element.set("length", str(len(data_content_string.encode("ascii"))))
-        data_element.text = data_content_string
+    if rows_with_heights:
+        max_workers = min(MAX_WORKERS, len(rows_with_heights))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(
+                executor.map(
+                    lambda item: (
+                        item[0],
+                        _build_one_redact_element(item[1], item[2], date_str),
+                    ),
+                    rows_with_heights,
+                )
+            )
+        for _, elem in sorted(results, key=lambda x: x[0]):
+            annots.append(elem)
 
     rough_string = tostring(xfdf_root, encoding="unicode", method="xml")
     reparsed = defused_minidom.parseString(rough_string)

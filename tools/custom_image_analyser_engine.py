@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -48,6 +49,7 @@ from tools.config import (
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_NEW_TOKENS,
     MAX_SPACES_GPU_RUN_TIME,
+    MAX_WORKERS,
     MERGE_BOUNDING_BOXES,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
@@ -2844,6 +2846,9 @@ def _bedrock_vlm_ocr_predict(
                                 "rec_scores": [score] * len(words),
                             }
                         )
+                # Reject parsed result with empty text or zero confidence (e.g. {"text": "", "conf": 0.0})
+                if not text_content or score <= 0.0:
+                    return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
             # Try to parse VLM JSON response [{'bbox': [...], 'text': '...', 'conf': 0-1}, ...]
             lines_data = None
@@ -9704,6 +9709,97 @@ class CustomImageAnalyzerEngine:
         )
 
     @staticmethod
+    def _map_one_ocr_result_to_bboxes(
+        redaction_relevant_ocr_result: OCRResult,
+        text_analyzer_results: List[RecognizerResult],
+        ocr_results_with_words_child_info: Dict[str, Dict],
+        allow_list: List[str],
+    ) -> List[CustomImageRecognizerResult]:
+        """Map one OCR result to bounding boxes; safe to run in a thread."""
+        bboxes = []
+        line_text = ocr_results_with_words_child_info["text"]
+        line_length = len(line_text)
+        redaction_text = redaction_relevant_ocr_result.text
+
+        for redaction_result in text_analyzer_results:
+            if allow_list:
+                allow_list_normalized = [
+                    item.strip().lower() for item in allow_list if item
+                ]
+                redaction_text_normalized = redaction_text.strip().lower()
+                is_in_allow_list = redaction_text_normalized in allow_list_normalized
+            else:
+                is_in_allow_list = False
+
+            if not is_in_allow_list:
+                start_in_line = max(0, redaction_result.start)
+                end_in_line = min(line_length, redaction_result.end)
+                matched_text = line_text[start_in_line:end_in_line]
+                matched_text.split()
+
+                matching_word_boxes = []
+                current_position = 0
+                for word_info in ocr_results_with_words_child_info.get("words", []):
+                    word_text = word_info["text"]
+                    word_length = len(word_text)
+                    word_start = current_position
+                    word_end = current_position + word_length
+                    current_position += word_length + 1
+                    if word_start < end_in_line and word_end > start_in_line:
+                        matching_word_boxes.append(word_info["bounding_box"])
+
+                if matching_word_boxes:
+                    left = min(box[0] for box in matching_word_boxes)
+                    top = min(box[1] for box in matching_word_boxes)
+                    right = max(box[2] for box in matching_word_boxes)
+                    bottom = max(box[3] for box in matching_word_boxes)
+                    bboxes.append(
+                        CustomImageRecognizerResult(
+                            entity_type=redaction_result.entity_type,
+                            start=start_in_line,
+                            end=end_in_line,
+                            score=round(redaction_result.score, 2),
+                            left=left,
+                            top=top,
+                            width=right - left,
+                            height=bottom - top,
+                            text=matched_text,
+                        )
+                    )
+                else:
+                    line_left = redaction_relevant_ocr_result.left
+                    line_top = redaction_relevant_ocr_result.top
+                    line_width = redaction_relevant_ocr_result.width
+                    line_height = redaction_relevant_ocr_result.height
+                    if line_length > 0:
+                        text_proportion = len(matched_text) / line_length
+                        char_width_estimate = line_width / line_length
+                        estimated_left_offset = start_in_line * char_width_estimate
+                        left = line_left + estimated_left_offset
+                        top = line_top
+                        width = text_proportion * line_width
+                        height = line_height
+                    else:
+                        left = line_left
+                        top = line_top
+                        width = line_width
+                        height = line_height
+                    bboxes.append(
+                        CustomImageRecognizerResult(
+                            entity_type=redaction_result.entity_type,
+                            start=start_in_line,
+                            end=end_in_line,
+                            score=round(redaction_result.score, 2),
+                            left=left,
+                            top=top,
+                            width=width,
+                            height=height,
+                            text=matched_text,
+                        )
+                    )
+        return bboxes
+
+    @staticmethod
     def map_analyzer_results_to_bounding_boxes(
         text_analyzer_results: List[RecognizerResult],
         redaction_relevant_ocr_results: List[OCRResult],
@@ -9711,123 +9807,24 @@ class CustomImageAnalyzerEngine:
         allow_list: List[str],
         ocr_results_with_words_child_info: Dict[str, Dict],
     ) -> List[CustomImageRecognizerResult]:
-        redaction_bboxes = list()
+        if not redaction_relevant_ocr_results:
+            return []
 
-        for redaction_relevant_ocr_result in redaction_relevant_ocr_results:
-
-            line_text = ocr_results_with_words_child_info["text"]
-            line_length = len(line_text)
-            redaction_text = redaction_relevant_ocr_result.text
-
-            for redaction_result in text_analyzer_results:
-                # Check if the redaction text is not in the allow list (case-insensitive)
-                # Normalize for case-insensitive matching
-                if allow_list:
-                    allow_list_normalized = [
-                        item.strip().lower() for item in allow_list if item
-                    ]
-                    redaction_text_normalized = redaction_text.strip().lower()
-                    is_in_allow_list = (
-                        redaction_text_normalized in allow_list_normalized
-                    )
-                else:
-                    is_in_allow_list = False
-
-                if not is_in_allow_list:
-
-                    # Adjust start and end to be within line bounds
-                    start_in_line = max(0, redaction_result.start)
-                    end_in_line = min(line_length, redaction_result.end)
-
-                    # Get the matched text from this line
-                    matched_text = line_text[start_in_line:end_in_line]
-                    matched_text.split()
-
-                    # Find the corresponding words in the OCR results
-                    matching_word_boxes = list()
-
-                    current_position = 0
-
-                    for word_info in ocr_results_with_words_child_info.get("words", []):
-                        word_text = word_info["text"]
-                        word_length = len(word_text)
-
-                        word_start = current_position
-                        word_end = current_position + word_length
-
-                        # Update current position for the next word
-                        current_position += (
-                            word_length + 1
-                        )  # +1 for the space after the word
-
-                        # Include words that overlap the PII range (not only fully contained).
-                        # This fixes cases where PII strips a suffix (e.g. "Hyde" from "Hyde's"):
-                        # the word "Hyde's" was excluded by the strict containment check, leading
-                        # to a too-small proportional fallback box (e.g. only covering "Hyd").
-                        if word_start < end_in_line and word_end > start_in_line:
-                            matching_word_boxes.append(word_info["bounding_box"])
-
-                    if matching_word_boxes:
-                        # Calculate the combined bounding box for all matching words
-                        left = min(box[0] for box in matching_word_boxes)
-                        top = min(box[1] for box in matching_word_boxes)
-                        right = max(box[2] for box in matching_word_boxes)
-                        bottom = max(box[3] for box in matching_word_boxes)
-
-                        redaction_bboxes.append(
-                            CustomImageRecognizerResult(
-                                entity_type=redaction_result.entity_type,
-                                start=start_in_line,
-                                end=end_in_line,
-                                score=round(redaction_result.score, 2),
-                                left=left,
-                                top=top,
-                                width=right - left,
-                                height=bottom - top,
-                                text=matched_text,
-                            )
-                        )
-                    else:
-                        # Fallback: Use line-level bounding box when word-level boxes aren't available
-                        # This happens when OCR only provides line-level results (e.g., VLM OCR)
-                        # Calculate proportional bounding box based on character positions
-                        line_left = redaction_relevant_ocr_result.left
-                        line_top = redaction_relevant_ocr_result.top
-                        line_width = redaction_relevant_ocr_result.width
-                        line_height = redaction_relevant_ocr_result.height
-
-                        # Calculate proportional width based on text length
-                        if line_length > 0:
-                            text_proportion = len(matched_text) / line_length
-                            # Estimate left offset based on start position
-                            char_width_estimate = line_width / line_length
-                            estimated_left_offset = start_in_line * char_width_estimate
-
-                            left = line_left + estimated_left_offset
-                            top = line_top
-                            width = text_proportion * line_width
-                            height = line_height
-                        else:
-                            # If line_length is 0, use the full line box
-                            left = line_left
-                            top = line_top
-                            width = line_width
-                            height = line_height
-
-                        redaction_bboxes.append(
-                            CustomImageRecognizerResult(
-                                entity_type=redaction_result.entity_type,
-                                start=start_in_line,
-                                end=end_in_line,
-                                score=round(redaction_result.score, 2),
-                                left=left,
-                                top=top,
-                                width=width,
-                                height=height,
-                                text=matched_text,
-                            )
-                        )
-
+        n = len(redaction_relevant_ocr_results)
+        max_workers = min(MAX_WORKERS, n)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(
+                executor.map(
+                    lambda ocr_result: CustomImageAnalyzerEngine._map_one_ocr_result_to_bboxes(
+                        ocr_result,
+                        text_analyzer_results,
+                        ocr_results_with_words_child_info,
+                        allow_list,
+                    ),
+                    redaction_relevant_ocr_results,
+                )
+            )
+        redaction_bboxes = [bbox for bbox_list in results for bbox in bbox_list]
         return redaction_bboxes
 
     @staticmethod

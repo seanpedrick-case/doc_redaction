@@ -319,13 +319,19 @@ def handle_main_redaction_method_selection(redaction_method, pii_method):
     raw = list(handle_redaction_method_selection(redaction_method, pii_method))
     is_redact_all_pii = redaction_method == "Redact all PII"
     is_redact_selected_terms = redaction_method == "Redact selected terms"
+    is_extract_text_only = (
+        isinstance(redaction_method, str)
+        and redaction_method.strip() == "Extract text only"
+    )
     show_pii_method = (
         is_redact_all_pii or is_redact_selected_terms
     ) and SHOW_PII_IDENTIFICATION_OPTIONS
     show_selected_terms_lists = is_redact_selected_terms
     # Map to main app outputs: pii_drop, local_entities, comprehend_entities, llm_entities,
     # custom_llm_instructions_textbox (no value change), list_accordion, checkbox, num,
-    # then entity/terms accordions. raw[3] is llm_accordion visibility (unused here); raw[4] is llm_entities.
+    # then entity/terms accordions, then only_extract_text_radio.
+    # raw[3] is llm_accordion visibility (unused here); raw[4] is llm_entities.
+    # When "Extract text only" is selected, force "Only extract text (no redaction)" checkbox to True.
     results = [
         raw[0],  # pii_identification_method_drop
         raw[1],  # in_redact_entities
@@ -339,6 +345,7 @@ def handle_main_redaction_method_selection(redaction_method, pii_method):
         raw[7],  # max_fuzzy_spelling_mistakes_num
         gr.update(visible=show_pii_method),  # entity_types_to_redact_accordion
         gr.update(visible=show_selected_terms_lists),  # terms_accordion
+        gr.update(value=is_extract_text_only),  # only_extract_text_radio
     ]
     return results
 

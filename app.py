@@ -383,6 +383,57 @@ def _file_name_from_pdf_path(full_file_name):
     return filename_prefix if filename_prefix else "document"
 
 
+def prepare_image_or_pdf_with_efficient_ocr(
+    file_paths,
+    text_extract_method,
+    all_page_line_level_ocr_results_df_base,
+    all_page_line_level_ocr_results_with_words_df_base,
+    latest_file_completed_num,
+    out_message,
+    first_loop_state,
+    number_of_pages,
+    all_annotations_object,
+    prepare_for_review,
+    in_fully_redacted_list,
+    output_folder,
+    input_folder,
+    efficient_ocr,
+    prepare_images_bool_false,
+    page_sizes,
+    pymupdf_doc,
+    page_min,
+    page_max,
+):
+    """When EFFICIENT_OCR is enabled, skip loading all images; they are created later only for pages that need OCR."""
+    prepare_images = (
+        False
+        if efficient_ocr
+        else (
+            prepare_images_bool_false if prepare_images_bool_false is not None else True
+        )
+    )
+    return prepare_image_or_pdf(
+        file_paths,
+        text_extract_method,
+        all_page_line_level_ocr_results_df_base,
+        all_page_line_level_ocr_results_with_words_df_base,
+        latest_file_completed_num,
+        out_message,
+        first_loop_state,
+        number_of_pages,
+        all_annotations_object,
+        prepare_for_review,
+        in_fully_redacted_list,
+        output_folder,
+        input_folder,
+        prepare_images,
+        page_sizes,
+        pymupdf_doc,
+        page_min,
+        page_max,
+    )
+
+
 def maybe_extract_then_summarise(
     all_page_line_level_ocr_results_df_base,
     output_folder,
@@ -438,6 +489,7 @@ def maybe_extract_then_summarise(
     document_cropboxes,
     textract_output_found_checkbox,
     only_extract_text_radio,
+    redaction_method_radio,
     duplication_file_path_outputs_list_state,
     latest_review_file_path,
     textract_query_number,
@@ -625,6 +677,7 @@ def maybe_extract_then_summarise(
         page_sizes_from_prepare,
         textract_found_after_prepare,
         True,  # text_extraction_only: summarisation route never runs PII detection
+        redaction_method_radio,  # not used for summarisation (we pass True above) but required by signature
         duplication_file_path_outputs_list_state or [],
         latest_review_file_path or "",
         input_folder_textbox or "",
@@ -1461,6 +1514,7 @@ with blocks:
     successful_textract_api_call_number = gr.State(value=0)
     no_redaction_method_drop = gr.State(value=NO_REDACTION_PII_OPTION)
     textract_only_method_drop = gr.State(value=TEXTRACT_TEXT_EXTRACT_OPTION)
+    extract_text_only_tab_redaction_override = gr.State(value="Extract text only")
 
     load_s3_whole_document_textract_logs_bool = gr.State(
         value=LOAD_PREVIOUS_TEXTRACT_JOBS_S3
@@ -4171,6 +4225,7 @@ with blocks:
             max_fuzzy_spelling_mistakes_num,
             entity_types_to_redact_accordion,
             terms_accordion,
+            only_extract_text_radio,
         ],
     )
 
@@ -4217,7 +4272,7 @@ with blocks:
             total_pdf_page_count,
         ],
     ).success(
-        fn=prepare_image_or_pdf,
+        fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
             in_doc_files,
             text_extract_method_radio,
@@ -4232,6 +4287,7 @@ with blocks:
             in_fully_redacted_list_state,
             output_folder_textbox,
             input_folder_textbox,
+            efficient_ocr_checkbox,
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
@@ -4286,7 +4342,7 @@ with blocks:
             total_pdf_page_count,
         ],
     ).success(
-        fn=prepare_image_or_pdf,
+        fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
             walkthrough_file_input,
             text_extract_method_radio,
@@ -4301,6 +4357,7 @@ with blocks:
             in_fully_redacted_list_state,
             output_folder_textbox,
             input_folder_textbox,
+            efficient_ocr_checkbox,
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
@@ -4425,6 +4482,7 @@ with blocks:
             page_sizes,
             textract_output_found_checkbox,
             only_extract_text_radio,
+            redaction_method_radio,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
@@ -4610,6 +4668,7 @@ with blocks:
             page_sizes,
             textract_output_found_checkbox,
             only_extract_text_radio,
+            redaction_method_radio,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
@@ -4818,6 +4877,7 @@ with blocks:
             page_sizes,
             textract_output_found_checkbox,
             only_extract_text_radio,
+            redaction_method_radio,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
@@ -5330,7 +5390,7 @@ with blocks:
         ],
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
-        fn=prepare_image_or_pdf,
+        fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
             in_doc_files,
             text_extract_method_radio,
@@ -5345,6 +5405,7 @@ with blocks:
             in_fully_redacted_list_state,
             output_folder_textbox,
             input_folder_textbox,
+            efficient_ocr_checkbox,
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
@@ -5454,6 +5515,7 @@ with blocks:
             page_sizes,
             textract_output_found_checkbox,
             only_extract_text_radio,
+            extract_text_only_tab_redaction_override,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
@@ -5589,7 +5651,7 @@ with blocks:
             total_pdf_page_count,
         ],
     ).success(
-        fn=prepare_image_or_pdf,
+        fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
             input_pdf_for_review,
             text_extract_method_radio,
@@ -5604,6 +5666,7 @@ with blocks:
             in_fully_redacted_list_state,
             output_folder_textbox,
             input_folder_textbox,
+            efficient_ocr_checkbox,
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
@@ -5665,7 +5728,7 @@ with blocks:
     # Upload previous review CSV files for modifying redactions
     # upload_review_files_btn.click(
     input_review_files.upload(
-        fn=prepare_image_or_pdf,
+        fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
             input_review_files,
             text_extract_method_radio,
@@ -5680,6 +5743,7 @@ with blocks:
             in_fully_redacted_list_state,
             output_folder_textbox,
             input_folder_textbox,
+            efficient_ocr_checkbox,
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
@@ -7532,7 +7596,7 @@ with blocks:
             total_pdf_page_count,
         ],
     ).success(
-        fn=prepare_image_or_pdf,
+        fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
             input_pdf_for_review,
             text_extract_method_radio,
@@ -7547,6 +7611,7 @@ with blocks:
             in_fully_redacted_list_state,
             output_folder_textbox,
             input_folder_textbox,
+            efficient_ocr_checkbox,
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
@@ -7605,7 +7670,7 @@ with blocks:
             total_pdf_page_count,
         ],
     ).success(
-        fn=prepare_image_or_pdf,
+        fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
             adobe_review_files_out,
             text_extract_method_radio,
@@ -7620,6 +7685,7 @@ with blocks:
             in_fully_redacted_list_state,
             output_folder_textbox,
             input_folder_textbox,
+            efficient_ocr_checkbox,
             prepare_images_bool_false,
             page_sizes,
             pdf_doc_state,
@@ -8266,6 +8332,7 @@ with blocks:
             document_cropboxes,
             textract_output_found_checkbox,
             only_extract_text_radio,
+            redaction_method_radio,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             textract_query_number,

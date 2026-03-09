@@ -650,15 +650,20 @@ EFFICIENT_OCR = convert_string_to_boolean(
 )
 # Minimum number of extractable words on a page to use text-only route; below this use OCR.
 EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "20"))
+# Default max workers for parallel processing app-wide. Overridable by specific env vars below.
+MAX_WORKERS = max(
+    1,
+    int(get_or_create_env_var("MAX_WORKERS", "8")),
+)
 # Max threads for OCR first pass in redact_image_pdf (1 = sequential). Enables parallel Textract/Tesseract/VLM.
 OCR_FIRST_PASS_MAX_WORKERS = max(
     1,
-    int(get_or_create_env_var("OCR_FIRST_PASS_MAX_WORKERS", "3")),
+    int(get_or_create_env_var("OCR_FIRST_PASS_MAX_WORKERS", str(MAX_WORKERS))),
 )
 # Max threads for page-group summarisation in summarise_document (1 = sequential). Use 1 for local models.
 SUMMARY_PAGE_GROUP_MAX_WORKERS = max(
     1,
-    int(get_or_create_env_var("SUMMARY_PAGE_GROUP_MAX_WORKERS", "1")),
+    int(get_or_create_env_var("SUMMARY_PAGE_GROUP_MAX_WORKERS", str(MAX_WORKERS))),
 )
 
 SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
