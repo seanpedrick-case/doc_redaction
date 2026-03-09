@@ -645,14 +645,18 @@ def call_llm_for_entity_detection(
         entity for entity in entities_to_detect if not entity.startswith("CUSTOM_VLM_")
     ]
 
-    # Validate that we have either entities or custom instructions
+    # No standard entities and no custom instructions
     if not filtered_entities and (
         not custom_instructions or not custom_instructions.strip()
     ):
-        raise ValueError(
-            "No standard entities selected and no custom instructions provided. "
-            "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions for LLM-based PII detection."
-        )
+        # Nothing selected at all → error
+        if not entities_to_detect:
+            raise ValueError(
+                "No standard entities selected and no custom instructions provided. "
+                "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions for LLM-based PII detection."
+            )
+        # Only CUSTOM_VLM_* entities selected (handled separately via VLM) → return blank
+        return []
 
     # Determine model source from model_choice if using model_name_map
     model_source = None

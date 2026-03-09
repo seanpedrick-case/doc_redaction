@@ -725,11 +725,10 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
         for line_key, line_data in ocr_result["results"].items():
 
             line_number = int(line_data["line"])
-            if "conf" not in line_data:
-                line_data["conf"] = 100.0
+            # Support both "confidence" (Textract/json_to_ocrresult) and "conf" (other OCR)
+            line_conf = line_data.get("confidence", line_data.get("conf", 100.0))
             for word in line_data["words"]:
-                if "conf" not in word:
-                    word["conf"] = 100.0
+                word_conf = word.get("confidence", word.get("conf", 100.0))
                 rows.append(
                     {
                         "page": page_number,
@@ -739,13 +738,13 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
                         "word_y0": word["bounding_box"][1],
                         "word_x1": word["bounding_box"][2],
                         "word_y1": word["bounding_box"][3],
-                        "word_conf": word["conf"],
+                        "word_conf": word_conf,
                         "line_text": "",  # line_data['text'], # This data is too large to include
                         "line_x0": line_data["bounding_box"][0],
                         "line_y0": line_data["bounding_box"][1],
                         "line_x1": line_data["bounding_box"][2],
                         "line_y1": line_data["bounding_box"][3],
-                        "line_conf": line_data["conf"],
+                        "line_conf": line_conf,
                     }
                 )
 

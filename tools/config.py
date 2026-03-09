@@ -372,6 +372,11 @@ MAX_IMAGE_PIXELS = get_or_create_env_var(
     "MAX_IMAGE_PIXELS", ""
 )  # Changed to None if blank in file_conversion.py
 
+# Whether to merge nearby bounding boxes (reconstruction + grouping + horizontal merge)
+MERGE_BOUNDING_BOXES = convert_string_to_boolean(
+    get_or_create_env_var("MERGE_BOUNDING_BOXES", "True")
+)
+
 MAX_SPACES_GPU_RUN_TIME = int(
     get_or_create_env_var("MAX_SPACES_GPU_RUN_TIME", "60")
 )  # Maximum number of seconds to run the GPU on Spaces
@@ -916,7 +921,7 @@ HYBRID_OCR_MAX_NEW_TOKENS = int(
 
 MAX_INPUT_TOKEN_LENGTH = int(
     get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "8192")
-)  # Maximum number of tokens to input to the VLM
+)  # VLM only: maximum input/context tokens for vision-language models. Controls tokenizer cap, model max_position_embeddings (KV cache), and effective max_pixels (image size) so image+text fit. Set lower (e.g. 4096) to reduce VRAM. Separate from LLM_CONTEXT_LENGTH.
 
 VLM_MAX_IMAGE_SIZE = int(
     get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "819200")
@@ -1174,6 +1179,17 @@ HYBRID_OCR_PADDING = int(
     get_or_create_env_var("HYBRID_OCR_PADDING", "5")
 )  # The padding (in pixels) to add to the text when passing it to PaddleOCR for re-extraction using the hybrid OCR method.
 
+# Hybrid Textract + Bedrock VLM: when active and AWS Textract is selected, lines with low average confidence are re-analyzed with Bedrock VLM and replaced.
+HYBRID_TEXTRACT_BEDROCK_VLM = convert_string_to_boolean(
+    get_or_create_env_var("HYBRID_TEXTRACT_BEDROCK_VLM", "False")
+)
+HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD = int(
+    get_or_create_env_var("HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD", "97")
+)  # Line average confidence below this (0-100) triggers Bedrock VLM re-extraction.
+HYBRID_TEXTRACT_BEDROCK_VLM_PADDING = int(
+    get_or_create_env_var("HYBRID_TEXTRACT_BEDROCK_VLM_PADDING", "5")
+)  # Padding (pixels) around line crop when calling Bedrock VLM.
+
 TESSERACT_WORD_LEVEL_OCR = convert_string_to_boolean(
     get_or_create_env_var("TESSERACT_WORD_LEVEL_OCR", "True")
 )  # Whether to use Tesseract word-level OCR.
@@ -1201,6 +1217,10 @@ PADDLE_DET_DB_UNCLIP_RATIO = float(
 SAVE_EXAMPLE_HYBRID_IMAGES = convert_string_to_boolean(
     get_or_create_env_var("SAVE_EXAMPLE_HYBRID_IMAGES", "False")
 )  # Whether to save example images of Tesseract vs PaddleOCR re-extraction in hybrid OCR mode.
+
+SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES", "False")
+)  # When True, save example crop images and a log of prompt/response for each Textract+Bedrock VLM hybrid inference attempt.
 
 SAVE_PAGE_OCR_VISUALISATIONS = convert_string_to_boolean(
     get_or_create_env_var("SAVE_PAGE_OCR_VISUALISATIONS", "False")
@@ -1746,7 +1766,9 @@ LLM_RESET = convert_string_to_boolean(get_or_create_env_var("LLM_RESET", "False"
 LLM_STREAM = convert_string_to_boolean(get_or_create_env_var("LLM_STREAM", "True"))
 LLM_THREADS = int(get_or_create_env_var("LLM_THREADS", "-1"))
 LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "2048"))
-LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "32768"))
+LLM_CONTEXT_LENGTH = int(
+    get_or_create_env_var("LLM_CONTEXT_LENGTH", "32768")
+)  # LLM only: maximum context length for text LLMs (e.g. llama.cpp). Separate from MAX_INPUT_TOKEN_LENGTH (VLM).
 LLM_SAMPLE = convert_string_to_boolean(get_or_create_env_var("LLM_SAMPLE", "True"))
 LLM_STOP_STRINGS = _get_env_list(
     get_or_create_env_var("LLM_STOP_STRINGS", r"['\n\n\n\n\n\n']")

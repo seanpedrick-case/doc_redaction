@@ -56,6 +56,9 @@ from tools.config import (
     EFFICIENT_OCR,
     EFFICIENT_OCR_MIN_WORDS,
     GEMINI_VLM_TEXT_EXTRACT_OPTION,
+    HYBRID_TEXTRACT_BEDROCK_VLM,
+    HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD,
+    HYBRID_TEXTRACT_BEDROCK_VLM_PADDING,
     IMAGES_DPI,
     INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES,
     INFERENCE_SERVER_API_URL,
@@ -69,6 +72,7 @@ from tools.config import (
     MAX_IMAGE_PIXELS,
     MAX_SIMULTANEOUS_FILES,
     MAX_TIME_VALUE,
+    MERGE_BOUNDING_BOXES,
     NO_REDACTION_PII_OPTION,
     OCR_FIRST_PASS_MAX_WORKERS,
     OUTPUT_FOLDER,
@@ -92,6 +96,7 @@ from tools.custom_image_analyser_engine import (
     OCRResult,
     _bedrock_page_ocr_predict,
     _inference_server_page_ocr_predict,
+    _process_textract_page_with_hybrid_bedrock_vlm,
     _vlm_page_ocr_predict,
     combine_ocr_results,
     recreate_page_line_level_ocr_results_with_page,
@@ -1045,7 +1050,10 @@ def choose_and_run_redactor(
         comprehend_client = ""
 
     # Try to connect to AWS Bedrock Runtime Client if using LLM-based PII detection
-    if pii_identification_method == AWS_LLM_PII_OPTION:
+    if pii_identification_method == AWS_LLM_PII_OPTION or (
+        text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+        and HYBRID_TEXTRACT_BEDROCK_VLM
+    ):
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Bedrock via existing SSO connection")
             bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
@@ -3700,7 +3708,7 @@ def merge_img_bboxes(
                         entity_type,
                         0,
                         0,
-                        float(word.get("conf", 0.0)),
+                        float(word.get("conf", word.get("confidence", 0.0))),
                         int(x0),
                         int(y0),
                         int(width),
@@ -3713,123 +3721,138 @@ def merge_img_bboxes(
             f"Warning: Error while adding VLM [PERSON]/[SIGNATURE] boxes in merge_img_bboxes: {e}"
         )
 
-    # Reconstruct bounding boxes for substrings of interest
-    reconstructed_bboxes = list()
-    for bbox in bboxes:
-        bbox_box = (bbox.left, bbox.top, bbox.left + bbox.width, bbox.top + bbox.height)
-        for line_key, line_info in combined_results.items():
-            line_box = line_info["bounding_box"]
-            # Use actual line text (not the key, which is e.g. "text_line_1") for substring matching
-            actual_line_text = line_info.get("text", "")
-            if bounding_boxes_overlap(bbox_box, line_box):
-                if actual_line_text and bbox.text in actual_line_text:
-                    start_char = actual_line_text.index(bbox.text)
-                    end_char = start_char + len(bbox.text)
+    # Reconstruct and merge bounding boxes only if MERGE_BOUNDING_BOXES is enabled
+    if MERGE_BOUNDING_BOXES:
+        # Reconstruct bounding boxes for substrings of interest
+        reconstructed_bboxes = list()
+        for bbox in bboxes:
+            bbox_box = (
+                bbox.left,
+                bbox.top,
+                bbox.left + bbox.width,
+                bbox.top + bbox.height,
+            )
+            for line_key, line_info in combined_results.items():
+                line_box = line_info["bounding_box"]
+                # Use actual line text (not the key, which is e.g. "text_line_1") for substring matching
+                actual_line_text = line_info.get("text", "")
+                if bounding_boxes_overlap(bbox_box, line_box):
+                    if actual_line_text and bbox.text in actual_line_text:
+                        start_char = actual_line_text.index(bbox.text)
+                        end_char = start_char + len(bbox.text)
 
-                    relevant_words = list()
-                    current_char = 0
-                    for word in line_info["words"]:
-                        word_end = current_char + len(word["text"])
-                        if (
-                            current_char <= start_char < word_end
-                            or current_char < end_char <= word_end
-                            or (start_char <= current_char and word_end <= end_char)
-                        ):
-                            relevant_words.append(word)
-                        if word_end >= end_char:
+                        relevant_words = list()
+                        current_char = 0
+                        for word in line_info["words"]:
+                            word_end = current_char + len(word["text"])
+                            if (
+                                current_char <= start_char < word_end
+                                or current_char < end_char <= word_end
+                                or (start_char <= current_char and word_end <= end_char)
+                            ):
+                                relevant_words.append(word)
+                            if word_end >= end_char:
+                                break
+                            current_char = word_end
+                            if not word["text"].endswith(" "):
+                                current_char += 1  # +1 for space if the word doesn't already end with a space
+
+                        if relevant_words:
+                            left = min(
+                                word["bounding_box"][0] for word in relevant_words
+                            )
+                            top = min(
+                                word["bounding_box"][1] for word in relevant_words
+                            )
+                            right = max(
+                                word["bounding_box"][2] for word in relevant_words
+                            )
+                            bottom = max(
+                                word["bounding_box"][3] for word in relevant_words
+                            )
+
+                            combined_text = " ".join(
+                                word["text"] for word in relevant_words
+                            )
+
+                            reconstructed_bbox = CustomImageRecognizerResult(
+                                bbox.entity_type,
+                                bbox.start,
+                                bbox.end,
+                                bbox.score,
+                                left,
+                                top,
+                                right - left,  # width
+                                bottom - top,  # height,
+                                combined_text,
+                            )
+                            # reconstructed_bboxes.append(bbox)  # Add original bbox
+                            reconstructed_bboxes.append(
+                                reconstructed_bbox
+                            )  # Add merged bbox
                             break
-                        current_char = word_end
-                        if not word["text"].endswith(" "):
-                            current_char += 1  # +1 for space if the word doesn't already end with a space
-
-                    if relevant_words:
-                        left = min(word["bounding_box"][0] for word in relevant_words)
-                        top = min(word["bounding_box"][1] for word in relevant_words)
-                        right = max(word["bounding_box"][2] for word in relevant_words)
-                        bottom = max(word["bounding_box"][3] for word in relevant_words)
-
-                        combined_text = " ".join(
-                            word["text"] for word in relevant_words
-                        )
-
-                        reconstructed_bbox = CustomImageRecognizerResult(
-                            bbox.entity_type,
-                            bbox.start,
-                            bbox.end,
-                            bbox.score,
-                            left,
-                            top,
-                            right - left,  # width
-                            bottom - top,  # height,
-                            combined_text,
-                        )
-                        # reconstructed_bboxes.append(bbox)  # Add original bbox
-                        reconstructed_bboxes.append(
-                            reconstructed_bbox
-                        )  # Add merged bbox
-                        break
-        else:
-            reconstructed_bboxes.append(bbox)
-
-    # Group reconstructed bboxes by approximate vertical proximity
-    for box in reconstructed_bboxes:
-        grouped_bboxes[round(box.top / vertical_threshold)].append(box)
-
-    # Merge within each group
-    for _, group in grouped_bboxes.items():
-        group.sort(key=lambda box: box.left)
-
-        merged_box = group[0]
-        for next_box in group[1:]:
-            if (
-                next_box.left - (merged_box.left + merged_box.width)
-                <= horizontal_threshold
-            ):
-                if next_box.text != merged_box.text:
-                    new_text = merged_box.text + " " + next_box.text
-                else:
-                    new_text = merged_box.text
-
-                if merged_box.entity_type != next_box.entity_type:
-                    new_entity_type = (
-                        merged_box.entity_type + " - " + next_box.entity_type
-                    )
-                else:
-                    new_entity_type = merged_box.entity_type
-
-                new_left = min(merged_box.left, next_box.left)
-                new_top = min(merged_box.top, next_box.top)
-                new_width = (
-                    max(
-                        merged_box.left + merged_box.width,
-                        next_box.left + next_box.width,
-                    )
-                    - new_left
-                )
-                new_height = (
-                    max(
-                        merged_box.top + merged_box.height,
-                        next_box.top + next_box.height,
-                    )
-                    - new_top
-                )
-
-                merged_box = CustomImageRecognizerResult(
-                    new_entity_type,
-                    merged_box.start,
-                    merged_box.end,
-                    merged_box.score,
-                    new_left,
-                    new_top,
-                    new_width,
-                    new_height,
-                    new_text,
-                )
             else:
-                merged_bboxes.append(merged_box)
-                merged_box = next_box
+                reconstructed_bboxes.append(bbox)
 
-        merged_bboxes.append(merged_box)
+        # Group reconstructed bboxes by approximate vertical proximity
+        for box in reconstructed_bboxes:
+            grouped_bboxes[round(box.top / vertical_threshold)].append(box)
+
+        # Merge within each group
+        for _, group in grouped_bboxes.items():
+            group.sort(key=lambda box: box.left)
+
+            merged_box = group[0]
+            for next_box in group[1:]:
+                if (
+                    next_box.left - (merged_box.left + merged_box.width)
+                    <= horizontal_threshold
+                ):
+                    if next_box.text != merged_box.text:
+                        new_text = merged_box.text + " " + next_box.text
+                    else:
+                        new_text = merged_box.text
+
+                    if merged_box.entity_type != next_box.entity_type:
+                        new_entity_type = (
+                            merged_box.entity_type + " - " + next_box.entity_type
+                        )
+                    else:
+                        new_entity_type = merged_box.entity_type
+
+                    new_left = min(merged_box.left, next_box.left)
+                    new_top = min(merged_box.top, next_box.top)
+                    new_width = (
+                        max(
+                            merged_box.left + merged_box.width,
+                            next_box.left + next_box.width,
+                        )
+                        - new_left
+                    )
+                    new_height = (
+                        max(
+                            merged_box.top + merged_box.height,
+                            next_box.top + next_box.height,
+                        )
+                        - new_top
+                    )
+
+                    merged_box = CustomImageRecognizerResult(
+                        new_entity_type,
+                        merged_box.start,
+                        merged_box.end,
+                        merged_box.score,
+                        new_left,
+                        new_top,
+                        new_width,
+                        new_height,
+                        new_text,
+                    )
+                else:
+                    merged_bboxes.append(merged_box)
+                    merged_box = next_box
+
+            merged_bboxes.append(merged_box)
 
     all_bboxes.extend(original_bboxes)
     all_bboxes.extend(merged_bboxes)
@@ -5248,6 +5271,38 @@ def redact_image_pdf(
                     reported_page_number,
                 )
 
+                # Hybrid Textract + Bedrock VLM: re-run low-confidence lines with Bedrock VLM
+                if (
+                    HYBRID_TEXTRACT_BEDROCK_VLM
+                    and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    and image is not None
+                    and bedrock_runtime is not None
+                    and CLOUD_VLM_MODEL_CHOICE
+                ):
+                    print(
+                        f"Hybrid Textract + Bedrock VLM: re-running low-confidence lines for page {reported_page_number} (threshold={HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD}, padding={HYBRID_TEXTRACT_BEDROCK_VLM_PADDING})"
+                    )
+                    image_name_seq = (
+                        os.path.basename(image_path)
+                        if isinstance(image_path, str)
+                        else f"{file_name}_{reported_page_number}.png"
+                    )
+                    page_line_level_ocr_results_with_words = (
+                        _process_textract_page_with_hybrid_bedrock_vlm(
+                            page_line_level_ocr_results,
+                            page_line_level_ocr_results_with_words,
+                            image,
+                            textract_page_width,
+                            textract_page_height,
+                            HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD,
+                            HYBRID_TEXTRACT_BEDROCK_VLM_PADDING,
+                            bedrock_runtime,
+                            CLOUD_VLM_MODEL_CHOICE,
+                            output_folder,
+                            image_name_seq,
+                        )
+                    )
+
                 if all_page_line_level_ocr_results_with_words is None:
                     all_page_line_level_ocr_results_with_words = list()
 
@@ -5572,6 +5627,7 @@ def redact_image_pdf(
                             text_extraction_method=text_extraction_method,
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
+                            textract_hybrid_bedrock_used=HYBRID_TEXTRACT_BEDROCK_VLM,
                         )
                         # If config is enabled and a new visualization file was added, add it to out_file_paths
                         if (
@@ -5724,6 +5780,38 @@ def redact_image_pdf(
             page_height = job["page_height"]
             original_cropbox = job["original_cropbox"]
             pymupdf_page = ocr_pymupdf_pages_textract[page_no]
+
+            # Hybrid Textract + Bedrock VLM: re-run low-confidence lines with Bedrock VLM
+            if (
+                HYBRID_TEXTRACT_BEDROCK_VLM
+                and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                and image is not None
+                and CLOUD_VLM_MODEL_CHOICE
+                and bedrock_runtime is not None
+            ):
+                print(
+                    f"Hybrid Textract + Bedrock VLM: re-running low-confidence lines for page {reported_page_number} (threshold={HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD}, padding={HYBRID_TEXTRACT_BEDROCK_VLM_PADDING})"
+                )
+                image_name_par = (
+                    os.path.basename(image_path)
+                    if isinstance(image_path, str)
+                    else f"{file_name}_{reported_page_number}.png"
+                )
+                page_line_level_ocr_results_with_words = (
+                    _process_textract_page_with_hybrid_bedrock_vlm(
+                        page_line_level_ocr_results,
+                        page_line_level_ocr_results_with_words,
+                        image,
+                        page_width,
+                        page_height,
+                        HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD,
+                        HYBRID_TEXTRACT_BEDROCK_VLM_PADDING,
+                        bedrock_runtime,
+                        CLOUD_VLM_MODEL_CHOICE,
+                        output_folder,
+                        image_name_par,
+                    )
+                )
 
             all_page_line_level_ocr_results_with_words.append(
                 page_line_level_ocr_results_with_words
@@ -5989,6 +6077,7 @@ def redact_image_pdf(
                             text_extraction_method=text_extraction_method,
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
+                            textract_hybrid_bedrock_used=HYBRID_TEXTRACT_BEDROCK_VLM,
                         )
                         if (
                             INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES
@@ -8186,6 +8275,7 @@ def visualise_ocr_words_bounding_boxes(
     add_legend: bool = True,
     chosen_local_ocr_model: str = None,
     log_files_output_paths: List[str] = list(),
+    textract_hybrid_bedrock_used: bool = False,
 ) -> None:
     """
     Visualizes OCR bounding boxes with confidence-based colors and a legend.
@@ -8200,13 +8290,21 @@ def visualise_ocr_words_bounding_boxes(
         visualisation_folder: Subfolder name for visualizations (auto-determined if not provided)
         add_legend: Whether to add a legend to the visualization
         log_files_output_paths: List of file paths used for saving redaction process logging results.
+        textract_hybrid_bedrock_used: When True and Textract is the method, use hybrid Textract+Bedrock
+            folder and label for the saved visualization.
     """
     # Determine visualization folder based on text extraction method
     # Initialize base_model_name with a default value
     base_model_name = "OCR"  # Default fallback value
 
     if visualisation_folder is None:
-        if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+        if (
+            text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+            and textract_hybrid_bedrock_used
+        ):
+            base_model_name = "Textract + Bedrock VLM (hybrid)"
+            visualisation_folder = "hybrid_textract_bedrock_visualisations"
+        elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
             base_model_name = "Textract"
             visualisation_folder = "textract_visualisations"
         elif (
@@ -8384,24 +8482,32 @@ def visualise_ocr_words_bounding_boxes(
             if x2 <= x1 or y2 <= y1:
                 continue
 
-            # Check if word was replaced by a different model
+            # Check if word was replaced by a different model (e.g. Bedrock VLM in hybrid Textract route)
             model = word_data.get("model", None)
             is_replaced = model and model.lower() != base_model_name.lower()
 
-            # Determine bounding box color: grey for replaced words
+            # Determine bounding box color: grey for replaced words, otherwise by confidence
             box_color = (0, 0, 255)  # Default to red
-            for min_conf, max_conf, conf_color, _ in confidence_ranges:
-                if min_conf <= conf <= max_conf:
-                    box_color = conf_color
-                    break
+            if is_replaced:
+                box_color = (128, 128, 128)  # Grey for model-replaced words
+            else:
+                for min_conf, max_conf, conf_color, _ in confidence_ranges:
+                    if min_conf <= conf <= max_conf:
+                        box_color = conf_color
+                        break
             cv2.rectangle(image_cv, (x1, y1), (x2, y2), box_color, 1)
 
     # Show model replacement in legend when using a model that can have VLM/inference-server replacements
-    show_model_replacement_legend = chosen_local_ocr_model in (
-        "hybrid-paddle-inference-server",
-        "hybrid-paddle-vlm",
-        "hybrid-vlm",
-        "inference-server",
+    # or when hybrid Textract + Bedrock VLM was used (some lines/words may be from Bedrock VLM)
+    show_model_replacement_legend = (
+        textract_hybrid_bedrock_used
+        or chosen_local_ocr_model
+        in (
+            "hybrid-paddle-inference-server",
+            "hybrid-paddle-vlm",
+            "hybrid-vlm",
+            "inference-server",
+        )
     )
     # Add legend
     if add_legend:
@@ -8496,7 +8602,7 @@ def visualise_ocr_words_bounding_boxes(
                 model = word_data.get("model", None)
                 is_replaced = model and model.lower() != base_model_name.lower()
 
-                # Text color always based on confidence
+                # Text color always by confidence (replaced words still show confidence; box stays grey)
                 text_color = (0, 0, 180)  # Default to dark red
                 for min_conf, max_conf, conf_color, _ in text_confidence_ranges:
                     if min_conf <= conf <= max_conf:
@@ -8570,7 +8676,7 @@ def visualise_ocr_words_bounding_boxes(
                     model = word_data.get("model", None)
                     is_replaced = model and model.lower() != base_model_name.lower()
 
-                    # Text color based on confidence
+                    # Text color always by confidence (replaced words still show confidence; box stays grey)
                     text_color = (0, 0, 180)  # Default to dark red
                     for min_conf, max_conf, conf_color, _ in text_confidence_ranges:
                         if min_conf <= conf <= max_conf:
