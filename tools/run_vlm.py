@@ -9,6 +9,7 @@ from PIL import Image
 from tools.config import (
     DEFAULT_LANGUAGE_FULL_NAME,
     LOAD_PADDLE_AT_STARTUP,
+    MAX_INPUT_TOKEN_LENGTH,
     MAX_NEW_TOKENS,
     MAX_SPACES_GPU_RUN_TIME,
     PADDLE_DET_DB_UNCLIP_RATIO,
@@ -33,7 +34,7 @@ from tools.config import (
 )
 from tools.helper_functions import get_system_font_path
 
-text_read_default_prompt = f"""Read all the text in the centre line of the image, and return the text in the dictionary format {{"text":"text content", "confidence":"confidence score from 0-1"}}. Ignore text partially visible in the margins of the image. Ensure that spaces between words and upper/lower cases are preserved. The language of the document is {DEFAULT_LANGUAGE_FULL_NAME}, only return responses in {DEFAULT_LANGUAGE_FULL_NAME}, or return an empty string "". Never return text in another language. If you can't read the text, return an empty string ""."""
+text_read_default_prompt = f"""Read all the text in the centre line of the image, and return the text in the dictionary format {{"text":"text content", "confidence":"confidence score from 0-1"}}. Ignore cut words in the top or bottom margins of the image. Ensure that spaces between words and upper/lower cases are preserved. The language of the document is {DEFAULT_LANGUAGE_FULL_NAME}, only return responses in {DEFAULT_LANGUAGE_FULL_NAME}, or return an empty string "". Never return text in another language. If you can't read the text, return an empty string ""."""
 
 if LOAD_PADDLE_AT_STARTUP is True:
     # Set PaddleOCR environment variables BEFORE importing PaddleOCR
@@ -146,6 +147,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     import torch
     from huggingface_hub import snapshot_download
     from transformers import (
+        AutoConfig,
         AutoModelForCausalLM,
         AutoProcessor,
         BitsAndBytesConfig,
@@ -155,6 +157,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     )
 
     from tools.config import (
+        MAX_INPUT_TOKEN_LENGTH,
         MAX_NEW_TOKENS,
         MODEL_CACHE_PATH,
         OVERRIDE_VLM_REPO_ID,
@@ -242,6 +245,22 @@ if SHOW_VLM_MODEL_OPTIONS is True:
                 print("Falling back to loading models without quantization")
                 quantization_config = None
 
+    def _get_vlm_config_capped_length(model_id):
+        """Load model config with max_position_embeddings capped to MAX_INPUT_TOKEN_LENGTH to reduce VRAM (KV cache)."""
+        config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+        cap = MAX_INPUT_TOKEN_LENGTH
+        if getattr(config, "max_position_embeddings", None) is not None:
+            if config.max_position_embeddings > cap:
+                config.max_position_embeddings = cap
+        if getattr(config, "text_config", None) is not None:
+            tc = config.text_config
+            if (
+                getattr(tc, "max_position_embeddings", None) is not None
+                and tc.max_position_embeddings > cap
+            ):
+                tc.max_position_embeddings = cap
+        return config
+
     # print(f"Loading vision model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
 
     # Load only the selected model based on configuration
@@ -252,6 +271,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
         load_kwargs = {
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -307,6 +327,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -323,6 +344,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             MODEL_ID = OVERRIDE_VLM_REPO_ID
         load_kwargs = {
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -348,6 +370,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         load_kwargs = {
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -379,6 +402,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -409,6 +433,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -440,6 +465,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -473,6 +499,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
 
         if quantization_config is not None:
@@ -507,6 +534,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
 
         if quantization_config is not None:
@@ -545,6 +573,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -577,6 +606,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -608,6 +638,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -642,6 +673,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -676,6 +708,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -710,6 +743,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -746,6 +780,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -782,6 +817,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             "attn_implementation": attn_implementation,
             "device_map": "auto",
             "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
         }
         if quantization_config is not None:
             load_kwargs["quantization_config"] = quantization_config
@@ -831,6 +867,33 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         model_default_presence_penalty = VLM_DEFAULT_PRESENCE_PENALTY
     if VLM_SEED is not None:
         model_default_seed = VLM_SEED
+
+    # Cap processor tokenizer to config max context length so all tokenization respects MAX_INPUT_TOKEN_LENGTH
+    if processor is not None:
+        tokenizer = getattr(processor, "tokenizer", None)
+        if tokenizer is not None and hasattr(tokenizer, "model_max_length"):
+            current_max = tokenizer.model_max_length
+            if current_max is None or current_max == float("inf"):
+                tokenizer.model_max_length = MAX_INPUT_TOKEN_LENGTH
+            elif current_max > MAX_INPUT_TOKEN_LENGTH:
+                tokenizer.model_max_length = MAX_INPUT_TOKEN_LENGTH
+    # Log effective VLM context cap so env (e.g. MAX_INPUT_TOKEN_LENGTH=4096) can be verified
+    _ref_ctx = 32768
+    _reserve = 1024
+    _eff_max = min(
+        VLM_MAX_IMAGE_SIZE,
+        (VLM_MAX_IMAGE_SIZE * max(0, MAX_INPUT_TOKEN_LENGTH - _reserve) // _ref_ctx)
+        // 1024
+        * 1024,
+    )
+    _abs_min = 65536
+    effective_max_pixels_at_load = max(_abs_min, _eff_max)
+    effective_min_pixels_at_load = min(VLM_MIN_IMAGE_SIZE, effective_max_pixels_at_load)
+    print(
+        f"VLM context cap: MAX_INPUT_TOKEN_LENGTH={MAX_INPUT_TOKEN_LENGTH}, "
+        f"effective max_pixels={effective_max_pixels_at_load}, min_pixels={effective_min_pixels_at_load} "
+        f"(VLM_MAX_IMAGE_SIZE={VLM_MAX_IMAGE_SIZE}, VLM_MIN_IMAGE_SIZE={VLM_MIN_IMAGE_SIZE})"
+    )
 
     # Store at module level for USE_TRANSFORMERS_VLM_MODEL_AS_LLM (no global needed at module level)
     _loaded_vlm_model = model
@@ -1013,13 +1076,34 @@ def extract_text_from_image_vlm(
     if VLM_DISABLE_QWEN3_5_THINKING:
         prompt_full = prompt_full + "<think></think>"
 
+    # Cap max_pixels so image tokens + text fit within MAX_INPUT_TOKEN_LENGTH (image token count scales with resolution).
+    # Reserve ~1k tokens for prompt; allow max_pixels below VLM_MIN_IMAGE_SIZE when context is small to avoid VRAM spike.
+    _ref_context = 32768
+    _reserve_text = 1024
+    _effective_max_pixels = min(
+        VLM_MAX_IMAGE_SIZE,
+        (
+            VLM_MAX_IMAGE_SIZE
+            * max(0, MAX_INPUT_TOKEN_LENGTH - _reserve_text)
+            // _ref_context
+        )
+        // 1024
+        * 1024,
+    )
+    _absolute_min_pixels = 65536  # 256*256 so image remains usable
+    effective_max_pixels = max(_absolute_min_pixels, _effective_max_pixels)
+    # Don't force upscaling above our cap: min_pixels must not exceed max_pixels
+    effective_min_pixels = min(VLM_MIN_IMAGE_SIZE, effective_max_pixels)
+
     inputs = processor(
         text=[prompt_full],
         images=[image],
         return_tensors="pt",
         padding=True,
-        min_pixels=VLM_MIN_IMAGE_SIZE,
-        max_pixels=VLM_MAX_IMAGE_SIZE,
+        min_pixels=effective_min_pixels,
+        max_pixels=effective_max_pixels,
+        truncation=True,
+        max_length=MAX_INPUT_TOKEN_LENGTH,
     ).to(device)
 
     streamer = TextIteratorStreamer(

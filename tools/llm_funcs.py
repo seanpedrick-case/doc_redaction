@@ -1941,7 +1941,6 @@ def call_aws_bedrock(
 
     inference_config = {
         "maxTokens": max_tokens,
-        "topP": 0.999,
         "temperature": temperature,
     }
 

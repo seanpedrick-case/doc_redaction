@@ -462,11 +462,14 @@ def maybe_extract_then_summarise(
     If the summarisation upload contains a PDF, run text extraction (prepare + redactor
     with text_extraction_only=True) then summarise; otherwise call summarise_document_wrapper
     with existing behaviour (CSV or state dataframe).
-    Returns the same 7 outputs as summarise_document_wrapper.
+    Returns 7 summarisation outputs; when a PDF was processed via the redactor, also returns
+    5 redaction outputs (output_file, output_file_list_state, log_files_output,
+    log_files_output_list_state, redaction_output_summary_textbox) so they update the same
+    components as the document redaction tab.
     """
     paths = _summarisation_upload_to_paths(in_summarisation_ocr_files)
     if not _upload_contains_pdf(in_summarisation_ocr_files):
-        return summarise_document_wrapper(
+        out = summarise_document_wrapper(
             all_page_line_level_ocr_results_df_base,
             output_folder,
             summarisation_inference_method,
@@ -483,10 +486,11 @@ def maybe_extract_then_summarise(
             summarisation_max_pages_per_group,
             in_summarisation_ocr_files,
         )
+        return (*out, gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
 
     pdf_path = next((p for p in paths if is_pdf(p)), None)
     if not pdf_path:
-        return summarise_document_wrapper(
+        out = summarise_document_wrapper(
             all_page_line_level_ocr_results_df_base,
             output_folder,
             summarisation_inference_method,
@@ -503,6 +507,7 @@ def maybe_extract_then_summarise(
             summarisation_max_pages_per_group,
             in_summarisation_ocr_files,
         )
+        return (*out, gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
 
     doc_names = get_document_file_names([pdf_path])
     doc_file_name_no_extension = (
@@ -619,7 +624,7 @@ def maybe_extract_then_summarise(
         document_cropboxes_from_prepare,
         page_sizes_from_prepare,
         textract_found_after_prepare,
-        True,
+        True,  # text_extraction_only: summarisation route never runs PII detection
         duplication_file_path_outputs_list_state or [],
         latest_review_file_path or "",
         input_folder_textbox or "",
@@ -644,6 +649,9 @@ def maybe_extract_then_summarise(
     )
 
     ocr_df_for_summary = redactor_result[12]
+    out_file_paths = redactor_result[1]
+    log_files_output_paths = redactor_result[4]
+    redaction_summary = redactor_result[0]
     if ocr_df_for_summary is None or (
         isinstance(ocr_df_for_summary, pd.DataFrame) and ocr_df_for_summary.empty
     ):
@@ -655,9 +663,14 @@ def maybe_extract_then_summarise(
             llm_total_output_tokens_number or 0,
             "",
             0.0,
+            out_file_paths,
+            out_file_paths,
+            log_files_output_paths,
+            log_files_output_paths,
+            redaction_summary,
         )
 
-    return summarise_document_wrapper(
+    summarise_out = summarise_document_wrapper(
         ocr_df_for_summary,
         output_folder,
         summarisation_inference_method,
@@ -673,6 +686,14 @@ def maybe_extract_then_summarise(
         summarisation_additional_instructions,
         summarisation_max_pages_per_group,
         None,
+    )
+    return (
+        *summarise_out,
+        out_file_paths,
+        out_file_paths,
+        log_files_output_paths,
+        log_files_output_paths,
+        redaction_summary,
     )
 
 
@@ -8273,6 +8294,11 @@ with blocks:
             llm_total_output_tokens_number,
             summarisation_display,
             actual_time_taken_number,
+            output_file,
+            output_file_list_state,
+            log_files_output,
+            log_files_output_list_state,
+            redaction_output_summary_textbox,
         ],
         show_progress=True,
         show_progress_on=[summarisation_status],

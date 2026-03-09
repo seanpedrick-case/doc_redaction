@@ -854,7 +854,7 @@ def restructure_textract_output(textract_output: dict, page_sizes_df: pd.DataFra
     # Convert pages dictionary to a sorted list
     structured_output = {
         "DocumentMetadata": document_metadata,  # Store metadata separately
-        "pages": [pages_dict[page] for page in sorted(pages_dict.questions())],
+        "pages": [pages_dict[page] for page in sorted(pages_dict.keys())],
     }
 
     return structured_output

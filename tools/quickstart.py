@@ -197,6 +197,13 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
         and redaction_method.strip() == "Extract text only"
     )
 
+    # When switching from "Extract text only", the PII dropdown may still be
+    # NO_REDACTION_PII_OPTION; use DEFAULT_PII_DETECTION_MODEL so exactly one
+    # entity dropdown is visible and the UI doesn’t show all three or none.
+    pii_method_for_visibility = pii_method
+    if is_redact_all_pii_or_selected_terms and pii_method == NO_REDACTION_PII_OPTION:
+        pii_method_for_visibility = DEFAULT_PII_DETECTION_MODEL
+
     # Show PII detection settings if "Redact all PII" OR "Redact selected terms" is selected
     # Both options need PII detection method to determine what to redact
     show_pii_method = (
@@ -204,17 +211,26 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
     ) and SHOW_PII_IDENTIFICATION_OPTIONS
 
     # Determine visibility of entity dropdowns based on PII method
-    show_local_entities_init = show_pii_method and (pii_method == LOCAL_PII_OPTION)
-    show_comprehend_entities_init = show_pii_method and (pii_method == AWS_PII_OPTION)
+    show_local_entities_init = show_pii_method and (
+        pii_method_for_visibility == LOCAL_PII_OPTION
+    )
+    show_comprehend_entities_init = show_pii_method and (
+        pii_method_for_visibility == AWS_PII_OPTION
+    )
     is_llm_method_init = show_pii_method and (
-        pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
-        or pii_method == INFERENCE_SERVER_PII_OPTION
-        or pii_method == AWS_LLM_PII_OPTION
+        pii_method_for_visibility == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+        or pii_method_for_visibility == INFERENCE_SERVER_PII_OPTION
+        or pii_method_for_visibility == AWS_LLM_PII_OPTION
     )
 
     # For "Extract text only", hide all components
     # For "Redact all PII", show PII detection components
     # For "Redact selected terms", show both PII detection components AND deny/allow/fully redacted list components
+
+    # When we overrode pii_method for visibility, also update the PII dropdown value
+    pii_drop_value = None
+    if is_redact_all_pii_or_selected_terms and pii_method == NO_REDACTION_PII_OPTION:
+        pii_drop_value = DEFAULT_PII_DETECTION_MODEL
 
     # Set entity values based on redaction method
     if is_redact_selected_terms:
@@ -226,8 +242,10 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
             visible=show_comprehend_entities_init, value=["CUSTOM"]
         )
         llm_entities_update = gr.Dropdown(visible=is_llm_method_init, value=["CUSTOM"])
-        walkthrough_pii_identification_method_drop_update = gr.update(
-            visible=show_pii_method
+        walkthrough_pii_identification_method_drop_update = (
+            gr.update(visible=show_pii_method, value=pii_drop_value)
+            if pii_drop_value is not None
+            else gr.update(visible=show_pii_method)
         )
 
     elif is_redact_all_pii:
@@ -243,7 +261,7 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
             if isinstance(CHOSEN_COMPREHEND_ENTITIES, list)
             else ["CUSTOM"]
         )
-        llm_entities_update = (
+        llm_entities_val = (
             CHOSEN_LLM_ENTITIES if isinstance(CHOSEN_LLM_ENTITIES, list) else ["CUSTOM"]
         )
         local_entities_update = gr.Dropdown(
@@ -252,8 +270,13 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
         comprehend_entities_update = gr.Dropdown(
             visible=show_comprehend_entities_init, value=comprehend_entities_val
         )
-        walkthrough_pii_identification_method_drop_update = gr.update(
-            visible=show_pii_method
+        llm_entities_update = gr.Dropdown(
+            visible=is_llm_method_init, value=llm_entities_val
+        )
+        walkthrough_pii_identification_method_drop_update = (
+            gr.update(visible=show_pii_method, value=pii_drop_value)
+            if pii_drop_value is not None
+            else gr.update(visible=show_pii_method)
         )
     elif is_extract_text_only:
         # For "Extract text only", just update visibility without changing value
@@ -284,18 +307,39 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
 
 # Update visibility of PII-related components and accordions when general redaction method is selected
 def handle_main_redaction_method_selection(redaction_method, pii_method):
-    """Wrapper that applies handle_redaction_method_selection and updates accordion visibility."""
-    results = list(handle_redaction_method_selection(redaction_method, pii_method))
+    """Wrapper that applies handle_redaction_method_selection and updates accordion visibility.
+
+    handle_redaction_method_selection returns (for walkthrough): pii_drop, local_entities,
+    comprehend_entities, llm_accordion_visible, llm_entities, list_accordion, checkbox, num.
+    The main app expects: pii_drop, local_entities, comprehend_entities, llm_entities,
+    custom_llm_instructions_textbox, list_accordion, checkbox, num, entity_accordion, terms_accordion.
+    So we remap: use inner[4] for in_redact_llm_entities and insert gr.update() for
+    custom_llm_instructions_textbox (avoid applying the Dropdown value ["CUSTOM"] to the textbox).
+    """
+    raw = list(handle_redaction_method_selection(redaction_method, pii_method))
     is_redact_all_pii = redaction_method == "Redact all PII"
     is_redact_selected_terms = redaction_method == "Redact selected terms"
     show_pii_method = (
         is_redact_all_pii or is_redact_selected_terms
     ) and SHOW_PII_IDENTIFICATION_OPTIONS
     show_selected_terms_lists = is_redact_selected_terms
-    results.append(
-        gr.update(visible=show_pii_method)
-    )  # entity_types_to_redact_accordion
-    results.append(gr.update(visible=show_selected_terms_lists))  # terms_accordion
+    # Map to main app outputs: pii_drop, local_entities, comprehend_entities, llm_entities,
+    # custom_llm_instructions_textbox (no value change), list_accordion, checkbox, num,
+    # then entity/terms accordions. raw[3] is llm_accordion visibility (unused here); raw[4] is llm_entities.
+    results = [
+        raw[0],  # pii_identification_method_drop
+        raw[1],  # in_redact_entities
+        raw[2],  # in_redact_comprehend_entities
+        raw[
+            4
+        ],  # in_redact_llm_entities (was wrongly going to textbox as str(["CUSTOM"]) -> "['CUSTOM']")
+        gr.update(),  # custom_llm_instructions_textbox - leave value unchanged
+        raw[5],  # walkthrough_list_accordion
+        raw[6],  # redact_duplicate_pages_checkbox
+        raw[7],  # max_fuzzy_spelling_mistakes_num
+        gr.update(visible=show_pii_method),  # entity_types_to_redact_accordion
+        gr.update(visible=show_selected_terms_lists),  # terms_accordion
+    ]
     return results
 
 
