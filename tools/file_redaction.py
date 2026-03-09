@@ -5287,21 +5287,40 @@ def redact_image_pdf(
                         if isinstance(image_path, str)
                         else f"{file_name}_{reported_page_number}.png"
                     )
-                    page_line_level_ocr_results_with_words = (
-                        _process_textract_page_with_hybrid_bedrock_vlm(
-                            page_line_level_ocr_results,
-                            page_line_level_ocr_results_with_words,
-                            image,
-                            textract_page_width,
-                            textract_page_height,
-                            HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD,
-                            HYBRID_TEXTRACT_BEDROCK_VLM_PADDING,
-                            bedrock_runtime,
-                            CLOUD_VLM_MODEL_CHOICE,
-                            output_folder,
-                            image_name_seq,
-                        )
+                    hybrid_result = _process_textract_page_with_hybrid_bedrock_vlm(
+                        page_line_level_ocr_results,
+                        page_line_level_ocr_results_with_words,
+                        image,
+                        textract_page_width,
+                        textract_page_height,
+                        HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD,
+                        HYBRID_TEXTRACT_BEDROCK_VLM_PADDING,
+                        bedrock_runtime,
+                        CLOUD_VLM_MODEL_CHOICE,
+                        output_folder,
+                        image_name_seq,
                     )
+                    if isinstance(hybrid_result, tuple) and len(hybrid_result) == 4:
+                        (
+                            page_line_level_ocr_results_with_words,
+                            hybrid_vlm_input_tokens,
+                            hybrid_vlm_output_tokens,
+                            hybrid_vlm_model_name,
+                        ) = hybrid_result
+                    else:
+                        page_line_level_ocr_results_with_words = (
+                            hybrid_result[0]
+                            if isinstance(hybrid_result, tuple)
+                            else hybrid_result
+                        )
+                        hybrid_vlm_input_tokens = 0
+                        hybrid_vlm_output_tokens = 0
+                        hybrid_vlm_model_name = ""
+                    if isinstance(hybrid_result, tuple) and len(hybrid_result) == 4:
+                        vlm_total_input_tokens += hybrid_vlm_input_tokens
+                        vlm_total_output_tokens += hybrid_vlm_output_tokens
+                        if hybrid_vlm_model_name and not vlm_model_name:
+                            vlm_model_name = hybrid_vlm_model_name
 
                 if all_page_line_level_ocr_results_with_words is None:
                     all_page_line_level_ocr_results_with_words = list()
@@ -5797,21 +5816,40 @@ def redact_image_pdf(
                     if isinstance(image_path, str)
                     else f"{file_name}_{reported_page_number}.png"
                 )
-                page_line_level_ocr_results_with_words = (
-                    _process_textract_page_with_hybrid_bedrock_vlm(
-                        page_line_level_ocr_results,
-                        page_line_level_ocr_results_with_words,
-                        image,
-                        page_width,
-                        page_height,
-                        HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD,
-                        HYBRID_TEXTRACT_BEDROCK_VLM_PADDING,
-                        bedrock_runtime,
-                        CLOUD_VLM_MODEL_CHOICE,
-                        output_folder,
-                        image_name_par,
-                    )
+                hybrid_result_par = _process_textract_page_with_hybrid_bedrock_vlm(
+                    page_line_level_ocr_results,
+                    page_line_level_ocr_results_with_words,
+                    image,
+                    page_width,
+                    page_height,
+                    HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD,
+                    HYBRID_TEXTRACT_BEDROCK_VLM_PADDING,
+                    bedrock_runtime,
+                    CLOUD_VLM_MODEL_CHOICE,
+                    output_folder,
+                    image_name_par,
                 )
+                if isinstance(hybrid_result_par, tuple) and len(hybrid_result_par) == 4:
+                    (
+                        page_line_level_ocr_results_with_words,
+                        hybrid_vlm_input_tokens_par,
+                        hybrid_vlm_output_tokens_par,
+                        hybrid_vlm_model_name_par,
+                    ) = hybrid_result_par
+                else:
+                    page_line_level_ocr_results_with_words = (
+                        hybrid_result_par[0]
+                        if isinstance(hybrid_result_par, tuple)
+                        else hybrid_result_par
+                    )
+                    hybrid_vlm_input_tokens_par = 0
+                    hybrid_vlm_output_tokens_par = 0
+                    hybrid_vlm_model_name_par = ""
+                if isinstance(hybrid_result_par, tuple) and len(hybrid_result_par) == 4:
+                    vlm_total_input_tokens += hybrid_vlm_input_tokens_par
+                    vlm_total_output_tokens += hybrid_vlm_output_tokens_par
+                    if hybrid_vlm_model_name_par and not vlm_model_name:
+                        vlm_model_name = hybrid_vlm_model_name_par
 
             all_page_line_level_ocr_results_with_words.append(
                 page_line_level_ocr_results_with_words

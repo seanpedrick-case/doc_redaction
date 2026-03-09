@@ -2147,29 +2147,34 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
     model_choice: str,
     output_folder: str,
     image_name: str,
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], int, int, str]:
     """
     For a single page's Textract results, re-run Bedrock VLM on lines whose
     line-level confidence is below the threshold. Uses the actual line-level
     page OCR object (page_line_level_ocr_results) for confidence and bbox;
     the ocr results with words object is updated only at the end when mapping
     back corrected text/confidence/words for successfully re-OCR'd lines.
+
+    Returns:
+        Tuple of (page_line_level_ocr_results_with_words, vlm_input_tokens,
+        vlm_output_tokens, vlm_model_name) for usage logging.
     """
+    _empty_return = (page_line_level_ocr_results_with_words, 0, 0, model_choice or "")
     if image is None or not page_line_level_ocr_results_with_words:
         print("Image is None or no page line level OCR results with words found")
-        return page_line_level_ocr_results_with_words
+        return _empty_return
     results = page_line_level_ocr_results_with_words.get("results") or {}
     if not results:
         print("No results found")
-        return page_line_level_ocr_results_with_words
+        return _empty_return
     if bedrock_runtime is None or not model_choice:
         print("Bedrock runtime is None or model choice is not set")
         print(f"Bedrock runtime: {bedrock_runtime}")
         print(f"Model choice: {model_choice}")
-        return page_line_level_ocr_results_with_words
+        return _empty_return
     line_level_results = page_line_level_ocr_results.get("results") or []
     if not line_level_results:
-        return page_line_level_ocr_results_with_words
+        return _empty_return
 
     # Build line-level items from the actual line-level OCR (OCRResult list)
     # Match by result.line -> key "text_line_{line}" in the with_words dict
@@ -2240,6 +2245,9 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
             save_examples = False
 
     # Collect successful VLM updates (key -> new text, confidence, words)
+    # Accumulate VLM token usage for usage logs
+    hybrid_vlm_input_tokens = 0
+    hybrid_vlm_output_tokens = 0
     updates = []
     for key, line_conf, bbox in line_level_items:
         if line_conf > confidence_threshold:
@@ -2290,6 +2298,8 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
                 except Exception as save_err:
                     print(f"Could not save hybrid example for {key}: {save_err}")
             continue
+        hybrid_vlm_input_tokens += vlm_result.get("vlm_input_tokens", 0)
+        hybrid_vlm_output_tokens += vlm_result.get("vlm_output_tokens", 0)
         rec_texts = vlm_result.get("rec_texts", [])
         rec_scores = vlm_result.get("rec_scores", [])
         if not rec_texts or not rec_scores:
@@ -2518,7 +2528,12 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
             f"  Hybrid Textract + Bedrock VLM: no lines on page {page_no} met the low-confidence criteria (threshold={confidence_threshold:.0f}); no Bedrock VLM inference run for this page."
         )
 
-    return page_line_level_ocr_results_with_words
+    return (
+        page_line_level_ocr_results_with_words,
+        hybrid_vlm_input_tokens,
+        hybrid_vlm_output_tokens,
+        model_choice or "",
+    )
 
 
 def _inference_server_ocr_predict(
@@ -2718,11 +2733,15 @@ def _bedrock_vlm_ocr_predict(
         (and optionally 'prompt', 'raw_response' when return_prompt_and_response is True).
     """
     extracted_text = None
+    vlm_input_tokens_used = 0
+    vlm_output_tokens_used = 0
 
     def _add_prompt_response(d: Dict[str, Any]) -> Dict[str, Any]:
         if return_prompt_and_response:
             d["prompt"] = prompt
             d["raw_response"] = extracted_text
+        d["vlm_input_tokens"] = vlm_input_tokens_used
+        d["vlm_output_tokens"] = vlm_output_tokens_used
         return d
 
     try:
@@ -2783,6 +2802,8 @@ def _bedrock_vlm_ocr_predict(
                         top_p=model_default_top_p,
                     )
                 )
+                vlm_input_tokens_used = _vlm_input_tokens
+                vlm_output_tokens_used = _vlm_output_tokens
                 # If we get here, the API call succeeded
                 break
             except Exception as api_error:

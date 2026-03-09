@@ -8462,6 +8462,7 @@ with blocks:
         fn=merge_csv_files,
         inputs=multiple_review_files_in_out,
         outputs=multiple_review_files_in_out,
+        api_name="combine_review_csvs",
     )
 
     # Combine multiple review PDFs (merge redaction comments into one file)
@@ -8469,6 +8470,7 @@ with blocks:
         fn=combine_review_pdf_files,
         inputs=[combine_review_pdfs_in_out, output_folder_textbox],
         outputs=combine_review_pdfs_in_out,
+        api_name="combine_review_pdfs",
     )
 
     # Need to momentarilly change the root directory of the file explorer to another non-sensitive folder when the button is clicked to get it to update (workaround))
@@ -9059,12 +9061,24 @@ with blocks:
                 )
                 exit(1)
 
+            # For combine_review_pdfs and summarise, input_file can be a list (comma-separated paths in env)
+            if DIRECT_MODE_TASK == "combine_review_pdfs":
+                direct_mode_input_file = [
+                    p.strip() for p in DIRECT_MODE_INPUT_FILE.split(",") if p.strip()
+                ]
+            elif DIRECT_MODE_TASK == "summarise":
+                direct_mode_input_file = [
+                    p.strip() for p in DIRECT_MODE_INPUT_FILE.split(",") if p.strip()
+                ]
+            else:
+                direct_mode_input_file = DIRECT_MODE_INPUT_FILE
+
             # Prepare direct mode arguments based on environment variables
             direct_mode_args = {
                 # Task Selection
                 "task": DIRECT_MODE_TASK,
                 # General Arguments (apply to all file types)
-                "input_file": DIRECT_MODE_INPUT_FILE,
+                "input_file": direct_mode_input_file,
                 "output_dir": DIRECT_MODE_OUTPUT_DIR,
                 "input_dir": INPUT_FOLDER,
                 "language": DIRECT_MODE_LANGUAGE,
@@ -9178,8 +9192,16 @@ with blocks:
 
             if DIRECT_MODE_TASK == "summarise":
                 print(
-                    "Summarisation: use summarisation_inference_method, summarisation_format, "
-                    "summarisation_context, summarisation_additional_instructions in direct_mode_args."
+                    "Summarisation: supports PDF (extract text via ocr_method then summarise) or OCR CSV(s). "
+                    "Use DIRECT_MODE_INPUT_FILE for a single path or comma-separated paths for multiple CSVs. "
+                    "Options: summarisation_inference_method, summarisation_format, "
+                    "summarisation_context, summarisation_additional_instructions; ocr_method applies when input is PDF."
+                )
+
+            if DIRECT_MODE_TASK == "combine_review_pdfs":
+                print(
+                    "Combine review PDFs: merge redaction comments from multiple '_redactions_for_review' PDFs. "
+                    "Set DIRECT_MODE_INPUT_FILE to comma-separated paths (at least 2)."
                 )
 
             # Combine extraction options

@@ -2128,10 +2128,10 @@ DIRECT_MODE_DEFAULT_USER = get_or_create_env_var(
 )  # Default username for cli/direct mode requests
 DIRECT_MODE_TASK = get_or_create_env_var(
     "DIRECT_MODE_TASK", "redact"
-)  # 'redact' or 'deduplicate'
+)  # 'redact', 'deduplicate', 'summarise', 'textract', or 'combine_review_pdfs'
 DIRECT_MODE_INPUT_FILE = get_or_create_env_var(
     "DIRECT_MODE_INPUT_FILE", ""
-)  # Path to input file
+)  # Path to input file; for combine_review_pdfs use comma-separated paths (at least 2)
 DIRECT_MODE_OUTPUT_DIR = get_or_create_env_var(
     "DIRECT_MODE_OUTPUT_DIR", OUTPUT_FOLDER
 )  # Output directory

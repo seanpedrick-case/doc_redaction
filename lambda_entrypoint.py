@@ -296,6 +296,12 @@ def lambda_handler(event, context):
     # This dictionary should mirror the one in your app.py's "direct mode"
     # If we loaded a .env file, use environment variables as defaults
 
+    # Note: For task "combine_review_pdfs" the CLI expects multiple input file paths.
+    # Lambda currently passes a single file (the S3-triggered object). To support
+    # combine_review_pdfs here, the event would need to supply multiple keys or
+    # arguments["input_files"] (list of S3 URIs) and download each before calling cli_main.
+    # For task "summarise", PDF input is supported: the CLI extracts text via ocr_method
+    # then summarises (same as direct mode and CLI --task summarise --input_file file.pdf).
     cli_args = {
         # Task Selection
         "task": arguments.get("task", os.getenv("DIRECT_MODE_TASK", "redact")),

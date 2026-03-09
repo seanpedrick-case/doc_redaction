@@ -411,6 +411,9 @@ python cli_redact.py --task textract --textract_action list
 
 # Document summarisation
 
+# Summarise from a PDF with AWS Bedrock
+python cli_redact.py --task summarise --input_file example_data/example_data/Partnership-Agreement-Toolkit_0_0.pdf --summarisation_inference_method "LLM (AWS Bedrock)"
+
 ## Summarise document(s) from OCR output CSV(s) using AWS Bedrock:
 python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv --summarisation_inference_method "LLM (AWS Bedrock)"
 
@@ -423,6 +426,11 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
 ## Summarise multiple OCR CSV files:
 python cli_redact.py --task summarise --input_file example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv example_data/example_outputs/example_of_emails_sent_to_a_professor_before_applying_ocr_output_textract.csv --summarisation_inference_method "LLM (AWS Bedrock)"
 
+# Combine review PDFs
+
+## Merge redaction comments from multiple '_redactions_for_review' PDFs into one file:
+python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf path/to/review2.pdf --output_dir output/
+
 """,
     )
 
@@ -430,9 +438,15 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
     task_group = parser.add_argument_group("Task Selection")
     task_group.add_argument(
         "--task",
-        choices=["redact", "deduplicate", "textract", "summarise"],
+        choices=[
+            "redact",
+            "deduplicate",
+            "textract",
+            "summarise",
+            "combine_review_pdfs",
+        ],
         default="redact",
-        help="Task to perform: redact (PII redaction/anonymisation), deduplicate (find duplicate content), textract (AWS Textract batch operations), or summarise (LLM-based document summarisation from OCR CSV files).",
+        help="Task to perform: redact (PII redaction/anonymisation), deduplicate (find duplicate content), textract (AWS Textract batch operations), summarise (LLM-based document summarisation from OCR CSV files), or combine_review_pdfs (merge redaction comments from multiple '_redactions_for_review' PDFs into one file).",
     )
 
     # --- General Arguments (apply to all file types) ---
@@ -1059,7 +1073,7 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
         extraction_options.append("Extract layout")
     args.handwrite_signature_extraction = extraction_options
 
-    if args.task in ["redact", "deduplicate", "summarise"]:
+    if args.task in ["redact", "deduplicate", "summarise", "combine_review_pdfs"]:
         if args.input_file:
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
@@ -1122,7 +1136,10 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
     # --- Route to the Correct Workflow Based on Task and File Type ---
 
     # Validate input_file requirement for tasks that need it
-    if args.task in ["redact", "deduplicate", "summarise"] and not args.input_file:
+    if (
+        args.task in ["redact", "deduplicate", "summarise", "combine_review_pdfs"]
+        and not args.input_file
+    ):
         print(f"Error: --input_file is required for '{args.task}' task.")
         return
 
@@ -2015,6 +2032,7 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
         print("--- Document Summarisation ---")
         try:
             from tools.cli_usage_logger import log_redaction_usage
+            from tools.file_conversion import is_pdf
             from tools.summaries import (
                 concise_summary_format_prompt,
                 detailed_summary_format_prompt,
@@ -2031,26 +2049,179 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
                 args.summarisation_format, detailed_summary_format_prompt
             )
 
-            # Load OCR CSV file(s)
-            ocr_df = load_csv_files_to_dataframe(args.input_file)
-            if ocr_df is None or ocr_df.empty:
-                print(
-                    "Error: No valid OCR data (page, line, text columns) in input file(s)."
-                )
-                return
+            # Normalise input to list of paths
+            input_paths = (
+                [args.input_file]
+                if isinstance(args.input_file, str)
+                else list(args.input_file or [])
+            )
+            input_paths = [p for p in input_paths if p and str(p).strip()]
 
-            # Derive file_name from first input file (same logic as GUI wrapper)
-            first_path = args.input_file[0] if args.input_file else ""
-            if first_path:
-                basename = os.path.basename(first_path)
+            # If any input is a PDF, extract text first then summarise (same as app.py)
+            summarise_from_pdf = any(is_pdf(p) for p in input_paths)
+            if summarise_from_pdf:
+                pdf_path = next((p for p in input_paths if is_pdf(p)), None)
+                if not pdf_path:
+                    print("Error: No PDF path found in input files.")
+                    return
+                print(
+                    f"Detected PDF input. Extracting text with '{args.ocr_method}' then summarising..."
+                )
+                from tools.file_conversion import prepare_image_or_pdf
+                from tools.file_redaction import choose_and_run_redactor
+
+                prepare_images = args.ocr_method in ["Local OCR", "AWS Textract"]
+                (
+                    _prep_summary,
+                    prepared_pdf_paths,
+                    image_file_paths,
+                    _,
+                    _,
+                    pdf_doc,
+                    image_annotations,
+                    _,
+                    original_cropboxes,
+                    page_sizes,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                ) = prepare_image_or_pdf(
+                    file_paths=[pdf_path],
+                    text_extract_method=args.ocr_method,
+                    all_line_level_ocr_results_df=pd.DataFrame(),
+                    all_page_line_level_ocr_results_with_words_df=pd.DataFrame(),
+                    first_loop_state=True,
+                    prepare_for_review=False,
+                    output_folder=args.output_dir,
+                    input_folder=args.input_dir,
+                    prepare_images=prepare_images,
+                    page_min=args.page_min,
+                    page_max=args.page_max,
+                )
+                print(f"  {_prep_summary}")
+
+                (
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    ocr_df,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                ) = choose_and_run_redactor(
+                    file_paths=[pdf_path],
+                    prepared_pdf_file_paths=prepared_pdf_paths,
+                    pdf_image_file_paths=image_file_paths,
+                    chosen_redact_entities=args.local_redact_entities or [],
+                    chosen_redact_comprehend_entities=args.aws_redact_entities or [],
+                    chosen_llm_entities=args.llm_redact_entities or [],
+                    text_extraction_method=args.ocr_method,
+                    in_allow_list=args.allow_list_file,
+                    in_deny_list=args.deny_list_file,
+                    redact_whole_page_list=args.redact_whole_page_file,
+                    first_loop_state=True,
+                    page_min=args.page_min,
+                    page_max=args.page_max,
+                    handwrite_signature_checkbox=args.handwrite_signature_extraction
+                    or [],
+                    max_fuzzy_spelling_mistakes_num=getattr(
+                        args, "fuzzy_mistakes", DEFAULT_FUZZY_SPELLING_MISTAKES_NUM
+                    ),
+                    match_fuzzy_whole_phrase_bool=getattr(
+                        args, "match_fuzzy_whole_phrase_bool", True
+                    ),
+                    pymupdf_doc=pdf_doc,
+                    annotations_all_pages=image_annotations,
+                    page_sizes=page_sizes,
+                    document_cropboxes=original_cropboxes,
+                    pii_identification_method=args.pii_detector or "Local",
+                    aws_access_key_textbox=args.aws_access_key or "",
+                    aws_secret_key_textbox=args.aws_secret_key or "",
+                    language=args.language,
+                    output_folder=args.output_dir,
+                    input_folder=args.input_dir,
+                    custom_llm_instructions=args.custom_llm_instructions or "",
+                    inference_server_vlm_model=(
+                        getattr(args, "inference_server_vlm_model", None)
+                        or DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                    ),
+                    efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
+                    efficient_ocr_min_words=(
+                        getattr(args, "efficient_ocr_min_words", None)
+                        or EFFICIENT_OCR_MIN_WORDS
+                    ),
+                    ocr_first_pass_max_workers=(
+                        getattr(args, "ocr_first_pass_max_workers", None)
+                        or OCR_FIRST_PASS_MAX_WORKERS
+                    ),
+                    text_extraction_only=True,
+                )
+
+                if ocr_df is None or (
+                    isinstance(ocr_df, pd.DataFrame) and ocr_df.empty
+                ):
+                    print("Error: No OCR text extracted from PDF. Cannot summarise.")
+                    return
+
+                # Derive file_name from PDF path (same as app.py _file_name_from_pdf_path)
+                basename = os.path.basename(pdf_path)
                 file_name = os.path.splitext(basename)[0][:20]
                 invalid_chars = '<>:"/\\|?*'
                 for char in invalid_chars:
                     file_name = file_name.replace(char, "_")
-                if not file_name:
-                    file_name = "document"
+                file_name = file_name if file_name else "document"
             else:
-                file_name = "document"
+                # CSV path: load OCR CSV file(s)
+                ocr_df = load_csv_files_to_dataframe(input_paths)
+                if ocr_df is None or ocr_df.empty:
+                    print(
+                        "Error: No valid OCR data (page, line, text columns) in input file(s)."
+                    )
+                    return
+
+                first_path = input_paths[0] if input_paths else ""
+                if first_path:
+                    basename = os.path.basename(first_path)
+                    file_name = os.path.splitext(basename)[0][:20]
+                    invalid_chars = '<>:"/\\|?*'
+                    for char in invalid_chars:
+                        file_name = file_name.replace(char, "_")
+                    file_name = file_name if file_name else "document"
+                else:
+                    file_name = "document"
 
             (
                 output_files,
@@ -2095,9 +2266,10 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
             # Usage logging (same fields as GUI summarisation success callback)
             if usage_logger:
                 try:
+                    first_input = input_paths[0] if input_paths else ""
                     doc_file_name = (
-                        os.path.basename(args.input_file[0])
-                        if args.display_file_names_in_logs and args.input_file
+                        os.path.basename(first_input)
+                        if args.display_file_names_in_logs and first_input
                         else "document"
                     )
                     data_file_name = ""
@@ -2142,9 +2314,39 @@ python cli_redact.py --task summarise --input_file example_data/example_outputs/
 
             traceback.print_exc()
 
+    elif args.task == "combine_review_pdfs":
+        print("--- Combine review PDFs ---")
+        try:
+            from tools.file_conversion import combine_review_pdf_files
+
+            paths = (
+                [args.input_file]
+                if isinstance(args.input_file, str)
+                else list(args.input_file)
+            )
+            if len(paths) < 2:
+                print("Error: combine_review_pdfs requires at least 2 input PDF files.")
+                return
+            out_dir = args.output_dir
+            os.makedirs(out_dir, exist_ok=True)
+            result = combine_review_pdf_files(paths, output_folder=out_dir)
+            if result:
+                print(f"Combined PDF saved to: {result[0]}")
+            else:
+                print("No output produced (empty file list or no valid paths).")
+        except ValueError as e:
+            print(f"Error: {e}")
+        except Exception as e:
+            print(f"\nAn error occurred while combining review PDFs: {e}")
+            import traceback
+
+            traceback.print_exc()
+
     else:
         print(f"Error: Invalid task '{args.task}'.")
-        print("Valid options: 'redact', 'deduplicate', 'textract', or 'summarise'")
+        print(
+            "Valid options: 'redact', 'deduplicate', 'textract', 'summarise', or 'combine_review_pdfs'"
+        )
 
 
 if __name__ == "__main__":

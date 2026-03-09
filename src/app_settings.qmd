@@ -97,6 +97,10 @@ Settings related to image processing within the application.
     * **Description:** Sets the maximum number of pixels for an image that the application will process. Leave blank for no limit. This can help prevent issues with very large images.
     * **Default Value:** `''`
 
+* **`MERGE_BOUNDING_BOXES`**
+    * **Description:** When enabled (`'True'`), merges nearby bounding boxes (reconstruction, grouping, and horizontal merge). Affects OCR/Textract result processing.
+    * **Default Value:** `'True'`
+
 * **`MAX_SPACES_GPU_RUN_TIME`**
     * **Description:** Maximum number of seconds to run the GPU on Hugging Face Spaces. Used to limit long-running VLM/OCR jobs when deployed on Spaces.
     * **Default Value:** `60`
@@ -347,6 +351,22 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Maximum number of threads for page-group summarisation in document summarisation. Set to `1` for sequential processing (recommended for local LLM models); use a value greater than `1` to summarise multiple page groups in parallel (typically for API-based models). Can be overridden via CLI `--summary_page_group_max_workers` or direct-mode/Lambda env.
     * **Default Value:** `1`
 
+### Hybrid Textract + Bedrock VLM
+
+When AWS Textract is selected for text extraction, these options allow lines with low confidence to be re-extracted using Bedrock VLM and the result to replace the Textract output for those lines.
+
+* **`HYBRID_TEXTRACT_BEDROCK_VLM`**
+    * **Description:** When set to `'True'` and AWS Textract is selected, lines whose average confidence is below `HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD` are re-analyzed with Bedrock VLM and the extracted text replaces the Textract result for those lines.
+    * **Default Value:** `'False'`
+
+* **`HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD`**
+    * **Description:** Line average confidence (0–100) below this value triggers Bedrock VLM re-extraction when `HYBRID_TEXTRACT_BEDROCK_VLM` is enabled.
+    * **Default Value:** `97`
+
+* **`HYBRID_TEXTRACT_BEDROCK_VLM_PADDING`**
+    * **Description:** Padding in pixels around the line crop when calling Bedrock VLM for re-extraction.
+    * **Default Value:** `5`
+
 * **`SHOW_BEDROCK_VLM_MODELS`**, **`SHOW_GEMINI_VLM_MODELS`**, **`SHOW_AZURE_OPENAI_VLM_MODELS`**
     * **Description:** Controls whether AWS Bedrock, Google Gemini, or Azure/OpenAI VLM text extraction options are shown in the UI.
     * **Default Value:** `"False"` for all.
@@ -441,6 +461,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Default Value:** `''`
 
 ### Local OCR (Tesseract & PaddleOCR)
+
+* **`SHOW_OCR_GUI_OPTIONS`**
+    * **Description:** If set to `"True"`, OCR-related options (e.g. local OCR model, Paddle options) are shown in the UI.
+    * **Default Value:** `"True"`
 
 * **`CHOSEN_LOCAL_OCR_MODEL`**
     * **Description:** Choose the engine for local OCR: `"tesseract"`, `"paddle"`, `"hybrid-paddle"`, `"hybrid-vlm"`, `"hybrid-paddle-vlm"`, `"hybrid-paddle-inference-server"`, `"vlm"`, or `"inference-server"`.
@@ -618,6 +642,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
 * **`VLM_MAX_DPI`**
     * **Description:** Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.
     * **Default Value:** `300.0`
+
+* **`VLM_DISABLE_QWEN3_5_THINKING`**
+    * **Description:** If set to `"True"`, disables Qwen3.5 "thinking" mode for VLM OCR.
+    * **Default Value:** `"False"`
 
 * **`MAX_NEW_TOKENS`**
     * **Description:** Maximum number of tokens to generate for VLM responses.
